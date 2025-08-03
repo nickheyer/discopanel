@@ -1,0 +1,48 @@
+# DiscoPanel Configuration File
+# Copy this file to config.yaml and modify as needed
+
+server:
+  port: "8080"
+  host: "0.0.0.0"
+  read_timeout: 15  # seconds
+  write_timeout: 15 # seconds
+  idle_timeout: 60  # seconds
+
+database:
+  path: "./discopanel.db"
+  max_connections: 25
+  max_idle_conns: 5
+  conn_max_lifetime: 300 # seconds
+
+docker:
+  host: "unix:///var/run/docker.sock"
+  version: "1.41"
+  network_name: "discopanel-network"
+  network_subnet: "172.20.0.0/16"
+  registry_url: ""
+
+storage:
+  data_dir: "./data"
+  backup_dir: "./backups"
+  temp_dir: "./tmp"
+  max_upload_size: 524288000 # 500MB in bytes
+
+minecraft:
+  default_memory: "1G"
+  default_max_memory: "2G"
+  default_port: 25565
+  rcon_port_start: 25575
+  images:
+    vanilla: "itzg/minecraft-server:latest"
+    forge: "itzg/minecraft-server:latest"
+    fabric: "itzg/minecraft-server:latest"
+    paper: "itzg/minecraft-server:latest"
+    spigot: "itzg/minecraft-server:latest"
+    bukkit: "itzg/minecraft-server:latest"
+    neoforge: "itzg/minecraft-server:latest"
+
+proxy:
+  enabled: false
+  base_url: ""
+  port_range_min: 25565
+  port_range_max: 25665

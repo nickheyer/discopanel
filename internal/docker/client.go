@@ -12,17 +12,30 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
-	"github.com/nickheyer/discopanel/internal/models"
+	models "github.com/nickheyer/discopanel/internal/db"
 )
+
+type ClientConfig struct {
+	APIVersion    string
+	NetworkName   string
+	NetworkSubnet string
+	RegistryURL   string
+}
 
 type Client struct {
 	docker *client.Client
+	config ClientConfig
 }
 
-func NewClient(host string) (*Client, error) {
+func NewClient(host string, config ...ClientConfig) (*Client, error) {
 	opts := []client.Opt{
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
+	}
+
+	// Apply API version if provided
+	if len(config) > 0 && config[0].APIVersion != "" {
+		opts = append(opts, client.WithVersion(config[0].APIVersion))
 	}
 
 	if host != "" && host != "unix:///var/run/docker.sock" {
@@ -34,7 +47,18 @@ func NewClient(host string) (*Client, error) {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
 	}
 
-	return &Client{docker: docker}, nil
+	c := &Client{docker: docker}
+	if len(config) > 0 {
+		c.config = config[0]
+	} else {
+		// Set defaults
+		c.config = ClientConfig{
+			NetworkName:   "discopanel-network",
+			NetworkSubnet: "172.20.0.0/16",
+		}
+	}
+
+	return c, nil
 }
 
 func (c *Client) Close() error {
@@ -53,26 +77,57 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server) (st
 		return "", fmt.Errorf("failed to pull image: %w", err)
 	}
 
+	// Build environment variables based on mod loader
+	env := []string{
+		"EULA=TRUE",
+		fmt.Sprintf("VERSION=%s", server.MCVersion),
+		fmt.Sprintf("MEMORY=%dM", server.Memory),
+		fmt.Sprintf("MAX_MEMORY=%dM", server.Memory),
+		fmt.Sprintf("JVM_OPTS=-Xms%dM -Xmx%dM", server.Memory, server.Memory),
+		fmt.Sprintf("MAX_PLAYERS=%d", server.MaxPlayers),
+		fmt.Sprintf("SERVER_NAME=%s", server.Name),
+		"ENABLE_RCON=true",
+		fmt.Sprintf("RCON_PASSWORD=discopanel_%s", server.ID[:8]),
+		fmt.Sprintf("RCON_PORT=%d", 25575),
+	}
+
+	// Add mod loader specific environment variables
+	switch server.ModLoader {
+	case models.ModLoaderVanilla:
+		env = append(env, "TYPE=VANILLA")
+	case models.ModLoaderForge:
+		env = append(env, "TYPE=FORGE")
+	case models.ModLoaderFabric:
+		env = append(env, "TYPE=FABRIC")
+	case models.ModLoaderNeoForge:
+		env = append(env, "TYPE=NEOFORGE")
+	case models.ModLoaderPaper:
+		env = append(env, "TYPE=PAPER")
+	case models.ModLoaderSpigot:
+		env = append(env, "TYPE=SPIGOT")
+	default:
+		env = append(env, "TYPE=VANILLA")
+	}
+
 	// Container configuration
 	config := &container.Config{
 		Image: imageName,
-		Env: []string{
-			"EULA=TRUE",
-			fmt.Sprintf("TYPE=%s", strings.ToUpper(string(server.ModLoader))),
-			fmt.Sprintf("VERSION=%s", server.MCVersion),
-			fmt.Sprintf("MEMORY=%dM", server.Memory),
-			fmt.Sprintf("MAX_PLAYERS=%d", server.MaxPlayers),
-			fmt.Sprintf("SERVER_NAME=%s", server.Name),
-		},
+		Env:   env,
 		ExposedPorts: nat.PortSet{
 			"25565/tcp": struct{}{},
+			"25575/tcp": struct{}{}, // RCON port
 		},
 		Labels: map[string]string{
-			"discopanel.server.id":   server.ID,
-			"discopanel.server.name": server.Name,
-			"discopanel.managed":     "true",
+			"discopanel.server.id":      server.ID,
+			"discopanel.server.name":    server.Name,
+			"discopanel.server.loader":  string(server.ModLoader),
+			"discopanel.server.version": server.MCVersion,
+			"discopanel.managed":        "true",
 		},
 	}
+
+	// Calculate RCON port based on base port + 10
+	rconPort := server.Port + 10
 
 	// Host configuration
 	hostConfig := &container.HostConfig{
@@ -81,6 +136,12 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server) (st
 				{
 					HostIP:   "0.0.0.0",
 					HostPort: fmt.Sprintf("%d", server.Port),
+				},
+			},
+			"25575/tcp": []nat.PortBinding{
+				{
+					HostIP:   "127.0.0.1", // Only bind RCON to localhost for security
+					HostPort: fmt.Sprintf("%d", rconPort),
 				},
 			},
 		},
@@ -95,12 +156,25 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server) (st
 			Name: "unless-stopped",
 		},
 		Resources: container.Resources{
-			Memory: int64(server.Memory) * 1024 * 1024, // Convert MB to bytes
+			Memory:     int64(server.Memory) * 1024 * 1024, // Convert MB to bytes
+			MemorySwap: int64(server.Memory) * 1024 * 1024, // Prevent swap usage
+		},
+		LogConfig: container.LogConfig{
+			Type: "json-file",
+			Config: map[string]string{
+				"max-size": "10m",
+				"max-file": "3",
+			},
 		},
 	}
 
-	// Network configuration
+	// Network configuration - use custom network if available
 	networkConfig := &network.NetworkingConfig{}
+	if c.config.NetworkName != "" {
+		networkConfig.EndpointsConfig = map[string]*network.EndpointSettings{
+			c.config.NetworkName: {},
+		}
+	}
 
 	// Create container
 	resp, err := c.docker.ContainerCreate(
@@ -215,9 +289,47 @@ func getJavaVersion(mcVersion string) string {
 }
 
 func getDockerImage(loader models.ModLoader, mcVersion, javaVersion string) string {
-	_ = loader
-	_ = mcVersion
-	// Using itzg/minecraft-server as the base image
-	// It supports various mod loaders and Minecraft versions
+	// itzg/minecraft-server supports all mod loaders through environment variables
+	// We use Java version specific tags for better compatibility
 	return "itzg/minecraft-server:java" + javaVersion
+}
+
+// EnsureNetwork creates the Docker network if it doesn't exist
+func (c *Client) EnsureNetwork() error {
+	ctx := context.Background()
+
+	// List existing networks
+	networks, err := c.docker.NetworkList(ctx, network.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list networks: %w", err)
+	}
+
+	// Check if network already exists
+	for _, net := range networks {
+		if net.Name == c.config.NetworkName {
+			return nil // Network already exists
+		}
+	}
+
+	// Create network with subnet configuration
+	ipamConfig := &network.IPAMConfig{}
+	if c.config.NetworkSubnet != "" {
+		ipamConfig.Subnet = c.config.NetworkSubnet
+	}
+
+	_, err = c.docker.NetworkCreate(ctx, c.config.NetworkName, network.CreateOptions{
+		Driver: "bridge",
+		IPAM: &network.IPAM{
+			Config: []network.IPAMConfig{*ipamConfig},
+		},
+		Labels: map[string]string{
+			"discopanel.managed": "true",
+		},
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to create network: %w", err)
+	}
+
+	return nil
 }

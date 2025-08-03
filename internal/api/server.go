@@ -7,25 +7,26 @@ import (
 	"path/filepath"
 
 	"github.com/gorilla/mux"
+	"github.com/nickheyer/discopanel/internal/config"
+	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/storage"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
 type Server struct {
-	store   storage.Store
-	docker  *docker.Client
-	dataDir string
-	log     *logger.Logger
-	router  *mux.Router
+	store  *storage.Store
+	docker *docker.Client
+	config *config.Config
+	log    *logger.Logger
+	router *mux.Router
 }
 
-func NewServer(store storage.Store, docker *docker.Client, dataDir string, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
 	s := &Server{
-		store:   store,
-		docker:  docker,
-		dataDir: dataDir,
-		log:     log,
+		store:  store,
+		docker: docker,
+		config: cfg,
+		log:    log,
 	}
 
 	s.setupRoutes()
@@ -41,6 +42,10 @@ func (s *Server) setupRoutes() {
 
 	// API routes
 	api := r.PathPrefix("/api/v1").Subrouter()
+
+	// Minecraft version and mod loader endpoints
+	api.HandleFunc("/minecraft/versions", s.handleGetMinecraftVersions).Methods("GET")
+	api.HandleFunc("/minecraft/modloaders", s.handleGetModLoaders).Methods("GET")
 
 	// Server management
 	api.HandleFunc("/servers", s.handleListServers).Methods("GET")
@@ -74,10 +79,10 @@ func (s *Server) setupRoutes() {
 	// Serve SvelteKit build output
 	// The SvelteKit app should be built and output to web/build
 	webRoot := filepath.Join("web", "build")
-	
+
 	// Serve static files from the SvelteKit build
 	fileServer := http.FileServer(http.Dir(webRoot))
-	
+
 	// Handle all non-API routes by serving the SvelteKit app
 	r.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if the requested file exists

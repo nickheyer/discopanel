@@ -9,7 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/nickheyer/discopanel/internal/models"
+	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 )
 
 func (s *Server) handleListMods(w http.ResponseWriter, r *http.Request) {
@@ -46,22 +47,26 @@ func (s *Server) handleUploadMod(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Validate file extension
-	ext := filepath.Ext(header.Filename)
-	if ext != ".jar" {
-		s.respondError(w, http.StatusBadRequest, "Invalid file type, only .jar files allowed")
-		return
-	}
-
-	// Get server to find data path
+	// Get server to find data path and mod loader
 	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, "Server not found")
 		return
 	}
 
-	// Create mods directory
-	modsDir := filepath.Join(server.DataPath, "mods")
+	// Validate file is appropriate for this mod loader
+	if !minecraft.IsValidModFile(header.Filename, server.ModLoader) {
+		s.respondError(w, http.StatusBadRequest, "Invalid file type for this mod loader")
+		return
+	}
+
+	// Get the correct mods directory based on mod loader
+	modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
+	if modsDir == "" {
+		s.respondError(w, http.StatusBadRequest, "This server type does not support mods")
+		return
+	}
+
 	if err := os.MkdirAll(modsDir, 0755); err != nil {
 		s.log.Error("Failed to create mods directory: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to create mods directory")
@@ -162,13 +167,13 @@ func (s *Server) handleUpdateMod(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Enabled != nil {
 		mod.Enabled = *req.Enabled
-		
+
 		// If disabling, move file out of mods directory
 		server, err := s.store.GetServer(ctx, mod.ServerID)
 		if err == nil {
 			modsDir := filepath.Join(server.DataPath, "mods")
 			disabledDir := filepath.Join(server.DataPath, "mods_disabled")
-			
+
 			if !mod.Enabled {
 				// Move to disabled directory
 				os.MkdirAll(disabledDir, 0755)
@@ -212,7 +217,7 @@ func (s *Server) handleDeleteMod(w http.ResponseWriter, r *http.Request) {
 		if err := os.Remove(modPath); err != nil {
 			s.log.Error("Failed to delete mod file: %v", err)
 		}
-		
+
 		// Also check disabled directory
 		disabledPath := filepath.Join(server.DataPath, "mods_disabled", mod.FileName)
 		os.Remove(disabledPath)

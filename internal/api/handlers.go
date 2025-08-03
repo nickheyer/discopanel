@@ -10,9 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/nickheyer/discopanel/internal/models"
+	models "github.com/nickheyer/discopanel/internal/db"
 )
-
 
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -48,6 +47,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		Port        int              `json:"port"`
 		MaxPlayers  int              `json:"max_players"`
 		Memory      int              `json:"memory"`
+		AutoStart   bool             `json:"auto_start"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -84,7 +84,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		Port:        req.Port,
 		MaxPlayers:  req.MaxPlayers,
 		Memory:      req.Memory,
-		DataPath:    filepath.Join(s.dataDir, "servers", req.Name),
+		DataPath:    filepath.Join(s.config.Storage.DataDir, "servers", req.Name),
 		JavaVersion: getJavaVersionForMC(req.MCVersion),
 	}
 
@@ -119,11 +119,34 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("Failed to create container: %v", err)
 		// Don't fail the whole operation, just log the error
 		server.Status = models.StatusError
+		if err := s.store.UpdateServer(ctx, server); err != nil {
+			s.log.Error("Failed to update server with container ID: %v", err)
+		}
 	} else {
 		server.ContainerID = containerID
+
 		// Update server with container ID
 		if err := s.store.UpdateServer(ctx, server); err != nil {
 			s.log.Error("Failed to update server with container ID: %v", err)
+		}
+
+		// Auto-start the container if requested
+		if req.AutoStart {
+			if err := s.docker.StartContainer(ctx, containerID); err != nil {
+				s.log.Error("Failed to start container: %v", err)
+				server.Status = models.StatusError
+			} else {
+				server.Status = models.StatusStarting
+				// Update last started time
+				now := time.Now()
+				server.LastStarted = &now
+			}
+			// Update status in database
+			if err := s.store.UpdateServer(ctx, server); err != nil {
+				s.log.Error("Failed to update server status: %v", err)
+			}
+		} else {
+			s.log.Info("Skipped container auto-start because auto-start was disabled for this instance")
 		}
 	}
 

@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	models "github.com/nickheyer/discopanel/internal/db"
 )
@@ -219,9 +221,9 @@ func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (mo
 	switch inspect.State.Status {
 	case "running":
 		return models.StatusRunning, nil
-	case "created", "restarting":
+	case "restarting":
 		return models.StatusStarting, nil
-	case "paused", "removing", "exited", "dead":
+	case "created", "paused", "removing", "exited", "dead":
 		return models.StatusStopped, nil
 	default:
 		return models.StatusError, nil
@@ -242,12 +244,58 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 	}
 	defer reader.Close()
 
-	logs, err := io.ReadAll(reader)
+	// Docker multiplexes stdout and stderr, we need to demultiplex
+	var buf bytes.Buffer
+	_, err = stdcopy.StdCopy(&buf, &buf, reader)
 	if err != nil {
 		return "", err
 	}
 
-	return string(logs), nil
+	return buf.String(), nil
+}
+
+// ExecCommand executes a command inside the container and returns the output
+func (c *Client) ExecCommand(ctx context.Context, containerID string, command string) (string, error) {
+	// Create exec configuration
+	execConfig := container.ExecOptions{
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty:          false,
+		Cmd:          []string{"rcon-cli", command},
+	}
+
+	// Create exec instance
+	execResp, err := c.docker.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return "", fmt.Errorf("failed to create exec: %w", err)
+	}
+
+	// Attach to exec instance
+	attachResp, err := c.docker.ContainerExecAttach(ctx, execResp.ID, container.ExecStartOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to attach to exec: %w", err)
+	}
+	defer attachResp.Close()
+
+	// Read output using stdcopy to demultiplex the stream
+	var outputBuf bytes.Buffer
+	_, err = stdcopy.StdCopy(&outputBuf, &outputBuf, attachResp.Reader)
+	if err != nil {
+		return "", fmt.Errorf("failed to read exec output: %w", err)
+	}
+
+	// Check exec exit code
+	inspectResp, err := c.docker.ContainerExecInspect(ctx, execResp.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect exec: %w", err)
+	}
+
+	if inspectResp.ExitCode != 0 {
+		return "", fmt.Errorf("command failed with exit code %d: %s", inspectResp.ExitCode, outputBuf.String())
+	}
+
+	return outputBuf.String(), nil
 }
 
 func (c *Client) pullImage(ctx context.Context, imageName string) error {

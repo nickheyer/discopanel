@@ -2,9 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/gorilla/mux"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 )
 
 func (s *Server) handleGetServerConfig(w http.ResponseWriter, r *http.Request) {
@@ -12,13 +16,31 @@ func (s *Server) handleGetServerConfig(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	serverID := vars["id"]
 
-	config, err := s.store.GetServerConfig(ctx, serverID)
+	// Get server info for data path
+	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
-		s.respondError(w, http.StatusNotFound, "Server config not found")
+		s.respondError(w, http.StatusNotFound, "Server not found")
 		return
 	}
 
-	s.respondJSON(w, http.StatusOK, config)
+	// Check if server.properties exists
+	propertiesPath := filepath.Join(server.DataPath, "server.properties")
+	if _, err := os.Stat(propertiesPath); os.IsNotExist(err) {
+		// Return default properties if file doesn't exist yet
+		properties := minecraft.GetDefaultServerProperties()
+		s.respondJSON(w, http.StatusOK, properties)
+		return
+	}
+
+	// Load actual server.properties
+	properties, err := minecraft.LoadServerProperties(server.DataPath)
+	if err != nil {
+		s.log.Error("Failed to load server.properties: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to load server configuration")
+		return
+	}
+
+	s.respondJSON(w, http.StatusOK, properties)
 }
 
 func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request) {
@@ -26,75 +48,66 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 	vars := mux.Vars(r)
 	serverID := vars["id"]
 
-	// Get existing config
-	config, err := s.store.GetServerConfig(ctx, serverID)
+	// Get server info for data path
+	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
-		s.respondError(w, http.StatusNotFound, "Server config not found")
+		s.respondError(w, http.StatusNotFound, "Server not found")
 		return
 	}
 
-	// Decode request body
-	var req map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// Load current properties or use defaults
+	var properties minecraft.ServerProperties
+	propertiesPath := filepath.Join(server.DataPath, "server.properties")
+	if _, err := os.Stat(propertiesPath); os.IsNotExist(err) {
+		// Use defaults if file doesn't exist
+		properties = minecraft.GetDefaultServerProperties()
+	} else {
+		// Load existing properties
+		properties, err = minecraft.LoadServerProperties(server.DataPath)
+		if err != nil {
+			s.log.Error("Failed to load server.properties: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to load server configuration")
+			return
+		}
+	}
+
+	// Decode request body - expecting key-value pairs matching server.properties keys
+	var updates map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		s.respondError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	// Update fields
-	if v, ok := req["difficulty"].(string); ok {
-		config.Difficulty = v
-	}
-	if v, ok := req["gamemode"].(string); ok {
-		config.Gamemode = v
-	}
-	if v, ok := req["level_name"].(string); ok {
-		config.LevelName = v
-	}
-	if v, ok := req["level_seed"].(string); ok {
-		config.LevelSeed = v
-	}
-	if v, ok := req["max_players"].(float64); ok {
-		config.MaxPlayers = int(v)
-	}
-	if v, ok := req["view_distance"].(float64); ok {
-		config.ViewDistance = int(v)
-	}
-	if v, ok := req["online_mode"].(bool); ok {
-		config.OnlineMode = v
-	}
-	if v, ok := req["pvp"].(bool); ok {
-		config.PVP = v
-	}
-	if v, ok := req["allow_nether"].(bool); ok {
-		config.AllowNether = v
-	}
-	if v, ok := req["allow_flight"].(bool); ok {
-		config.AllowFlight = v
-	}
-	if v, ok := req["spawn_animals"].(bool); ok {
-		config.SpawnAnimals = v
-	}
-	if v, ok := req["spawn_monsters"].(bool); ok {
-		config.SpawnMonsters = v
-	}
-	if v, ok := req["spawn_npcs"].(bool); ok {
-		config.SpawnNPCs = v
-	}
-	if v, ok := req["generate_structures"].(bool); ok {
-		config.GenerateStructures = v
-	}
-	if v, ok := req["motd"].(string); ok {
-		config.MOTD = v
+	// Update properties with new values
+	for key, value := range updates {
+		switch v := value.(type) {
+		case string:
+			properties[key] = v
+		case float64:
+			properties.SetInt(key, int(v))
+		case bool:
+			properties.SetBool(key, v)
+		default:
+			// Convert to string representation
+			properties[key] = fmt.Sprintf("%v", value)
+		}
 	}
 
-	// Save updated config
-	if err := s.store.UpdateServerConfig(ctx, config); err != nil {
-		s.log.Error("Failed to update server config: %v", err)
-		s.respondError(w, http.StatusInternalServerError, "Failed to update config")
+	// Ensure data directory exists
+	if err := os.MkdirAll(server.DataPath, 0755); err != nil {
+		s.log.Error("Failed to create server data directory: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to create server directory")
 		return
 	}
 
-	// TODO: Apply config to running server if needed
+	// Save updated properties
+	if err := minecraft.SaveServerProperties(server.DataPath, properties); err != nil {
+		s.log.Error("Failed to save server.properties: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to save server configuration")
+		return
+	}
 
-	s.respondJSON(w, http.StatusOK, config)
+	// If server is running, we could send RCON commands to reload config
+	// For now, just return the updated properties
+	s.respondJSON(w, http.StatusOK, properties)
 }

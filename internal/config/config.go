@@ -114,7 +114,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.idle_timeout", 60)
 
 	// Database defaults
-	v.SetDefault("database.path", "./discopanel.db")
+	v.SetDefault("database.path", "./data/discopanel.db")
 	v.SetDefault("database.max_connections", 25)
 	v.SetDefault("database.max_idle_conns", 5)
 	v.SetDefault("database.conn_max_lifetime", 300)

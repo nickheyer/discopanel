@@ -171,8 +171,8 @@ func (s *Server) handleUpdateMod(w http.ResponseWriter, r *http.Request) {
 		// If disabling, move file out of mods directory
 		server, err := s.store.GetServer(ctx, mod.ServerID)
 		if err == nil {
-			modsDir := filepath.Join(server.DataPath, "mods")
-			disabledDir := filepath.Join(server.DataPath, "mods_disabled")
+			modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
+			disabledDir := modsDir + "_disabled"
 
 			if !mod.Enabled {
 				// Move to disabled directory
@@ -212,14 +212,16 @@ func (s *Server) handleDeleteMod(w http.ResponseWriter, r *http.Request) {
 	// Get server to find file path
 	server, err := s.store.GetServer(ctx, mod.ServerID)
 	if err == nil {
-		// Delete mod file
-		modPath := filepath.Join(server.DataPath, "mods", mod.FileName)
+		modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
+		
+		// Delete mod file from active directory
+		modPath := filepath.Join(modsDir, mod.FileName)
 		if err := os.Remove(modPath); err != nil {
 			s.log.Error("Failed to delete mod file: %v", err)
 		}
 
 		// Also check disabled directory
-		disabledPath := filepath.Join(server.DataPath, "mods_disabled", mod.FileName)
+		disabledPath := filepath.Join(modsDir+"_disabled", mod.FileName)
 		os.Remove(disabledPath)
 	}
 

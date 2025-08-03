@@ -57,6 +57,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/servers/{id}/stop", s.handleStopServer).Methods("POST")
 	api.HandleFunc("/servers/{id}/restart", s.handleRestartServer).Methods("POST")
 	api.HandleFunc("/servers/{id}/logs", s.handleGetServerLogs).Methods("GET")
+	api.HandleFunc("/servers/{id}/command", s.handleSendCommand).Methods("POST")
 
 	// Server configuration
 	api.HandleFunc("/servers/{id}/config", s.handleGetServerConfig).Methods("GET")

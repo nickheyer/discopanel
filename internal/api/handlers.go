@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 )
 
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
@@ -376,14 +377,6 @@ func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {
 
 // Helper function to determine Java version
 func getJavaVersionForMC(mcVersion string) string {
-	// This is a simplified version - you might want to expand this
-	// based on the actual Minecraft version requirements
-	parts := []rune(mcVersion)
-	if len(parts) >= 4 && parts[2] == '.' {
-		minor, _ := strconv.Atoi(string(parts[3:]))
-		if minor >= 17 {
-			return "17"
-		}
-	}
-	return "8"
+	// Use the more comprehensive function from minecraft package
+	return minecraft.GetJavaVersionForMinecraft(mcVersion)
 }

@@ -1,5 +1,19 @@
-export type ModLoader = 'vanilla' | 'forge' | 'fabric' | 'neoforge' | 'paper' | 'spigot';
+export type ModLoader = 'vanilla' | 'forge' | 'fabric' | 'neoforge' | 'paper' | 'spigot' | 
+  'bukkit' | 'pufferfish' | 'quilt' | 'magma' | 'magma_maintained' | 'ketting' | 
+  'mohist' | 'youer' | 'banner' | 'catserver' | 'arclight' | 'spongevanilla' | 
+  'limbo' | 'nanolimbo' | 'crucible' | 'glowstone' | 'custom' | 
+  'auto_curseforge' | 'curseforge' | 'ftba' | 'modrinth';
 export type ServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
+
+export interface DockerImageInfo {
+  tag: string;
+  javaVersion: number;
+  linux: string;
+  jvmType: string;
+  archs: string[];
+  deprecated: boolean;
+  note: string;
+}
 
 export interface Server {
   id: string;
@@ -17,6 +31,7 @@ export interface Server {
   updated_at: string;
   last_started: string | null;
   java_version: string;
+  docker_image: string;
   data_path: string;
 }
 
@@ -28,6 +43,7 @@ export interface CreateServerRequest {
   port: number;
   max_players: number;
   memory: number;
+  docker_image?: string;
   auto_start: boolean;
 }
 
@@ -99,3 +115,21 @@ export interface UploadResponse {
 }
 
 export type ServerProperties = Record<string, string>;
+
+export interface ConfigProperty {
+  key: string;
+  label: string;
+  value: any;
+  default: any;
+  type: string;
+  description: string;
+  required: boolean;
+  system: boolean;
+  env_var: string;
+  options?: string[];
+}
+
+export interface ConfigCategory {
+  name: string;
+  properties: ConfigProperty[];
+}

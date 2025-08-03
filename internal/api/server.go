@@ -46,6 +46,7 @@ func (s *Server) setupRoutes() {
 	// Minecraft version and mod loader endpoints
 	api.HandleFunc("/minecraft/versions", s.handleGetMinecraftVersions).Methods("GET")
 	api.HandleFunc("/minecraft/modloaders", s.handleGetModLoaders).Methods("GET")
+	api.HandleFunc("/minecraft/docker-images", s.handleGetDockerImages).Methods("GET")
 
 	// Server management
 	api.HandleFunc("/servers", s.handleListServers).Methods("GET")
@@ -126,7 +127,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) respondJSON(w http.ResponseWriter, status int, data interface{}) {
+func (s *Server) respondJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)

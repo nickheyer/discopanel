@@ -94,13 +94,8 @@ func (s *Store) CreateServer(ctx context.Context, server *Server) error {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
 
-	// Create default server config
-	config := &ServerConfig{
-		ID:       server.ID + "-config",
-		ServerID: server.ID,
-	}
-
-	return s.db.WithContext(ctx).Create(config).Error
+	// Create and sync server config
+	return s.SyncServerConfigWithServer(ctx, server)
 }
 
 func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
@@ -122,7 +117,11 @@ func (s *Store) ListServers(ctx context.Context) ([]*Server, error) {
 }
 
 func (s *Store) UpdateServer(ctx context.Context, server *Server) error {
-	return s.db.WithContext(ctx).Save(server).Error
+	if err := s.db.WithContext(ctx).Save(server).Error; err != nil {
+		return err
+	}
+	// Sync config with updated server settings
+	return s.SyncServerConfigWithServer(ctx, server)
 }
 
 func (s *Store) DeleteServer(ctx context.Context, id string) error {
@@ -170,6 +169,78 @@ func (s *Store) GetServerConfig(ctx context.Context, serverID string) (*ServerCo
 
 func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) error {
 	return s.db.WithContext(ctx).Save(config).Error
+}
+
+func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
+	return s.db.WithContext(ctx).Save(config).Error
+}
+
+// ClearEphemeralConfigFields clears all ephemeral configuration fields
+func (s *Store) ClearEphemeralConfigFields(ctx context.Context, serverID string) error {
+	config, err := s.GetServerConfig(ctx, serverID)
+	if err != nil {
+		return err
+	}
+
+	// Clear ephemeral fields
+	config.CFForceReinstallModloader = nil
+
+	return s.SaveServerConfig(ctx, config)
+}
+
+// SyncServerConfigWithServer updates system fields in ServerConfig based on Server settings
+func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) error {
+	// Get or create config
+	config, err := s.GetServerConfig(ctx, server.ID)
+	if err != nil {
+		if err.Error() == "server config not found" {
+			config = s.CreateDefaultServerConfig(server.ID)
+		} else {
+			return err
+		}
+	}
+
+	// Helper functions
+	stringPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+
+	// Update system fields
+	// Set memory as the max, with init at 1/4 of max for better JVM performance
+	maxMemory := fmt.Sprintf("%dM", server.Memory)
+	initMemory := fmt.Sprintf("%dM", server.Memory/4)
+	if server.Memory/4 < 512 {
+		initMemory = "512M" // Minimum 512MB initial
+	}
+
+	config.Memory = stringPtr(maxMemory)      // This is used by the container as -Xmx
+	config.InitMemory = stringPtr(initMemory) // -Xms
+	config.MaxMemory = stringPtr(maxMemory)   // -Xmx
+	config.Type = stringPtr(string(server.ModLoader))
+	config.Version = stringPtr(server.MCVersion)
+	config.ServerPort = intPtr(server.Port)
+
+	return s.SaveServerConfig(ctx, config)
+}
+
+func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
+	// Helper functions to create pointers
+	boolPtr := func(b bool) *bool { return &b }
+	stringPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+
+	return &ServerConfig{
+		ID:           serverID + "-config",
+		ServerID:     serverID,
+		EULA:         stringPtr("TRUE"),
+		EnableRCON:   boolPtr(true),
+		RCONPassword: stringPtr(fmt.Sprintf("discopanel_%s", serverID[:8])),
+		Memory:       stringPtr("2G"),
+		Version:      stringPtr("LATEST"),
+		Type:         stringPtr("VANILLA"),
+		Difficulty:   stringPtr("easy"),
+		Mode:         stringPtr("survival"),
+		MaxPlayers:   intPtr(20),
+	}
 }
 
 // Mod operations

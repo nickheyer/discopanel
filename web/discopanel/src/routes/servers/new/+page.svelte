@@ -13,12 +13,13 @@
 	import { serversStore } from '$lib/stores/servers';
 	import { toast } from 'svelte-sonner';
 	import { ArrowLeft, Loader2 } from '@lucide/svelte';
-	import type { CreateServerRequest, ModLoader, MinecraftVersion, ModLoaderInfo } from '$lib/api/types';
+	import type { CreateServerRequest, ModLoader, MinecraftVersion, ModLoaderInfo, DockerImageInfo } from '$lib/api/types';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
 	let minecraftVersions = $state<string[]>([]);
 	let modLoaders = $state<ModLoaderInfo[]>([]);
+	let dockerImages = $state<DockerImageInfo[]>([]);
 	let latestVersion = $state('');
 
 	let formData = $state<CreateServerRequest>({
@@ -29,25 +30,28 @@
 		port: 25565,
 		max_players: 20,
 		memory: 2048,
+		docker_image: '',
 		auto_start: false
 	});
 
 	onMount(async () => {
 		try {
-			const [versionsData, loadersData] = await Promise.all([
+			const [versionsData, loadersData, imagesData] = await Promise.all([
 				api.getMinecraftVersions(),
-				api.getModLoaders()
+				api.getModLoaders(),
+				api.getDockerImages()
 			]);
 			
 			minecraftVersions = versionsData.versions;
 			latestVersion = versionsData.latest;
 			modLoaders = loadersData.modloaders;
+			dockerImages = imagesData.images;
 			
 			if (!formData.mc_version && latestVersion) {
 				formData.mc_version = latestVersion;
 			}
 		} catch (error) {
-			toast.error('Failed to load Minecraft versions');
+			toast.error('Failed to load server configuration options');
 			console.error(error);
 		} finally {
 			loadingVersions = false;
@@ -102,6 +106,23 @@
 			setRecommendedMemory();
 		}
 	});
+
+	function getDockerImageDisplayName(tagOrImage: string | DockerImageInfo): string {
+		const image = typeof tagOrImage === 'string' 
+			? dockerImages.find(img => img.tag === tagOrImage)
+			: tagOrImage;
+		
+		if (!image) return tagOrImage as string;
+		
+		let displayName = `Java ${image.javaVersion} (${image.tag})`;
+		if (image.linux !== 'Ubuntu') {
+			displayName = `Java ${image.javaVersion} ${image.linux} (${image.tag})`;
+		}
+		if (image.jvmType !== 'Hotspot') {
+			displayName = `Java ${image.javaVersion} ${image.jvmType} (${image.tag})`;
+		}
+		return displayName;
+	}
 </script>
 
 <div class="flex-1 space-y-4 p-8 pt-6">
@@ -251,6 +272,31 @@
 						</div>
 						<p class="text-sm text-muted-foreground">
 							Recommended: {getRecommendedMemory()} MB for {formData.mod_loader}
+						</p>
+					</div>
+
+					<Separator />
+
+					<div class="space-y-2">
+						<Label for="docker_image">Docker Image (Advanced)</Label>
+						<Select type="single" value={formData.docker_image} onValueChange={(v: string | undefined) => formData.docker_image = v ?? ''} disabled={loading || loadingVersions}>
+							<SelectTrigger id="docker_image">
+								<span>{formData.docker_image ? getDockerImageDisplayName(formData.docker_image) : 'Auto-select (Recommended)'}</span>
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="">Auto-select (Recommended)</SelectItem>
+								{#each dockerImages.filter(img => !img.deprecated) as image}
+									<SelectItem value={image.tag}>
+										{getDockerImageDisplayName(image)}
+										{#if image.note}
+											<span class="text-xs text-muted-foreground ml-2">({image.note})</span>
+										{/if}
+									</SelectItem>
+								{/each}
+							</SelectContent>
+						</Select>
+						<p class="text-sm text-muted-foreground">
+							Leave as auto-select unless you have specific requirements
 						</p>
 					</div>
 

@@ -21,50 +21,242 @@ type ModLoaderInfo struct {
 // GetModLoaderInfo returns information about a specific mod loader
 func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 	switch loader {
+	// Vanilla
+	case models.ModLoaderVanilla:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Vanilla",
+			ModsDirectory:   "",
+			ConfigDirectory: "",
+			FileExtensions:  []string{},
+		}
+
+	// Forge-based
 	case models.ModLoaderForge:
 		return ModLoaderInfo{
-			Name:            "forge",
+			Name:            string(loader),
 			DisplayName:     "Minecraft Forge",
-			ModsDirectory:   "mods",
-			ConfigDirectory: "config",
-			FileExtensions:  []string{".jar"},
-		}
-	case models.ModLoaderFabric:
-		return ModLoaderInfo{
-			Name:            "fabric",
-			DisplayName:     "Fabric",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
 		}
 	case models.ModLoaderNeoForge:
 		return ModLoaderInfo{
-			Name:            "neoforge",
+			Name:            string(loader),
 			DisplayName:     "NeoForge",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
 		}
-	case models.ModLoaderPaper:
+
+	// Fabric-based
+	case models.ModLoaderFabric:
 		return ModLoaderInfo{
-			Name:            "paper",
-			DisplayName:     "Paper",
+			Name:            string(loader),
+			DisplayName:     "Fabric",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderQuilt:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Quilt",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+
+	// Bukkit-based
+	case models.ModLoaderBukkit:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Bukkit",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
 		}
 	case models.ModLoaderSpigot:
 		return ModLoaderInfo{
-			Name:            "spigot",
+			Name:            string(loader),
 			DisplayName:     "Spigot",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
 		}
+	case models.ModLoaderPaper:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Paper",
+			ModsDirectory:   "plugins",
+			ConfigDirectory: "plugins",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderPufferfish:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Pufferfish",
+			ModsDirectory:   "plugins",
+			ConfigDirectory: "plugins",
+			FileExtensions:  []string{".jar"},
+		}
+
+	// Hybrids (Forge + Bukkit)
+	case models.ModLoaderMagma:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Magma",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderMagmaMaintained:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Magma Maintained",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderKetting:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Ketting",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderMohist:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Mohist",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderYouer:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Youer",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderBanner:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Banner",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderCatserver:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Catserver",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderArclight:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Arclight",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+
+	// Sponge
+	case models.ModLoaderSpongeVanilla:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "SpongeVanilla",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+
+	// Others
+	case models.ModLoaderLimbo:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Limbo",
+			ModsDirectory:   "",
+			ConfigDirectory: "",
+			FileExtensions:  []string{},
+		}
+	case models.ModLoaderNanoLimbo:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "NanoLimbo",
+			ModsDirectory:   "",
+			ConfigDirectory: "",
+			FileExtensions:  []string{},
+		}
+	case models.ModLoaderCrucible:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Crucible",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderGlowstone:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Glowstone",
+			ModsDirectory:   "plugins",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderCustom:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Custom",
+			ModsDirectory:   "",
+			ConfigDirectory: "",
+			FileExtensions:  []string{".jar"},
+		}
+
+	// Modpack Platforms
+	case models.ModLoaderAutoCurseForge:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Auto CurseForge",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderCurseForge:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "CurseForge",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderFTBA:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Feed The Beast",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderModrinth:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Modrinth",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
+			FileExtensions:  []string{".jar"},
+		}
+
 	default:
 		return ModLoaderInfo{
-			Name:            "vanilla",
-			DisplayName:     "Vanilla",
+			Name:            string(loader),
+			DisplayName:     string(loader),
 			ModsDirectory:   "",
 			ConfigDirectory: "",
 			FileExtensions:  []string{},
@@ -109,12 +301,48 @@ func IsValidModFile(filename string, loader models.ModLoader) bool {
 // GetAllModLoaders returns information about all available mod loaders
 func GetAllModLoaders() []ModLoaderInfo {
 	loaders := []models.ModLoader{
+		// Vanilla
 		models.ModLoaderVanilla,
+
+		// Forge-based
 		models.ModLoaderForge,
-		models.ModLoaderFabric,
 		models.ModLoaderNeoForge,
-		models.ModLoaderPaper,
+
+		// Fabric-based
+		models.ModLoaderFabric,
+		models.ModLoaderQuilt,
+
+		// Bukkit-based
+		models.ModLoaderBukkit,
 		models.ModLoaderSpigot,
+		models.ModLoaderPaper,
+		models.ModLoaderPufferfish,
+
+		// Hybrids (Forge + Bukkit)
+		models.ModLoaderMagma,
+		models.ModLoaderMagmaMaintained,
+		models.ModLoaderKetting,
+		models.ModLoaderMohist,
+		models.ModLoaderYouer,
+		models.ModLoaderBanner,
+		models.ModLoaderCatserver,
+		models.ModLoaderArclight,
+
+		// Sponge
+		models.ModLoaderSpongeVanilla,
+
+		// Others
+		models.ModLoaderLimbo,
+		models.ModLoaderNanoLimbo,
+		models.ModLoaderCrucible,
+		models.ModLoaderGlowstone,
+		models.ModLoaderCustom,
+
+		// Modpack Platforms
+		models.ModLoaderAutoCurseForge,
+		models.ModLoaderCurseForge,
+		models.ModLoaderFTBA,
+		models.ModLoaderModrinth,
 	}
 
 	infos := make([]ModLoaderInfo, len(loaders))

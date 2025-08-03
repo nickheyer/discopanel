@@ -13,6 +13,7 @@
 	import { Play, Square, RotateCw, Terminal, Settings, Package, HardDrive, Activity, Loader2, Copy, ExternalLink, Trash2 } from '@lucide/svelte';
 	import type { Server } from '$lib/api/types';
 	import ServerConsole from '$lib/components/server-console.svelte';
+	import ServerConfiguration from '$lib/components/server-configuration.svelte';
 
 	let server = $state<Server | null>(null);
 	let loading = $state(true);
@@ -147,7 +148,7 @@
 						{/if}
 						Start
 					</Button>
-				{:else if server.status === 'running'}
+				{:else if server.status === 'running' || server.status === 'starting'}
 					<Button variant="destructive" onclick={() => handleServerAction('stop')} disabled={actionLoading}>
 						{#if actionLoading}
 							<Loader2 class="h-4 w-4 mr-2 animate-spin" />
@@ -156,19 +157,21 @@
 						{/if}
 						Stop
 					</Button>
-					<Button variant="outline" onclick={() => handleServerAction('restart')} disabled={actionLoading}>
-						{#if actionLoading}
-							<Loader2 class="h-4 w-4 mr-2 animate-spin" />
-						{:else}
-							<RotateCw class="h-4 w-4 mr-2" />
-						{/if}
-						Restart
-					</Button>
+					{#if server.status === 'running'}
+						<Button variant="outline" onclick={() => handleServerAction('restart')} disabled={actionLoading}>
+							{#if actionLoading}
+								<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+							{:else}
+								<RotateCw class="h-4 w-4 mr-2" />
+							{/if}
+							Restart
+						</Button>
+					{/if}
 				{/if}
 				<Button 
 					variant="outline" 
 					onclick={() => handleDeleteServer()}
-					disabled={actionLoading || server.status !== 'stopped'}
+					disabled={actionLoading}
 				>
 					<Trash2 class="h-4 w-4 mr-2" />
 					Delete
@@ -300,19 +303,8 @@
 				<ServerConsole {server} />
 			</TabsContent>
 
-			<TabsContent value="configuration">
-				<Card>
-					<CardHeader>
-						<CardTitle>Server Configuration</CardTitle>
-						<CardDescription>Manage server.properties and other settings</CardDescription>
-					</CardHeader>
-					<CardContent>
-						<div class="flex items-center justify-center py-8 text-muted-foreground">
-							<Settings class="h-8 w-8 mr-2" />
-							<span>Configuration feature coming soon</span>
-						</div>
-					</CardContent>
-				</Card>
+			<TabsContent value="configuration" class="h-[600px]">
+				<ServerConfiguration {server} />
 			</TabsContent>
 
 			<TabsContent value="mods">

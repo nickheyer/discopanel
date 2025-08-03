@@ -48,6 +48,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		Port        int              `json:"port"`
 		MaxPlayers  int              `json:"max_players"`
 		Memory      int              `json:"memory"`
+		DockerImage string           `json:"docker_image"`
 		AutoStart   bool             `json:"auto_start"`
 	}
 
@@ -87,6 +88,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		Memory:      req.Memory,
 		DataPath:    filepath.Join(s.config.Storage.DataDir, "servers", req.Name),
 		JavaVersion: getJavaVersionForMC(req.MCVersion),
+		DockerImage: req.DockerImage,
 	}
 
 	// Set defaults
@@ -114,8 +116,15 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get the server config that was created by CreateServer
+	serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+	if err != nil {
+		s.log.Error("Failed to get server config: %v", err)
+		serverConfig = s.store.CreateDefaultServerConfig(server.ID)
+	}
+
 	// Create Docker container
-	containerID, err := s.docker.CreateContainer(ctx, server)
+	containerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
 	if err != nil {
 		s.log.Error("Failed to create container: %v", err)
 		// Don't fail the whole operation, just log the error
@@ -141,6 +150,10 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 				// Update last started time
 				now := time.Now()
 				server.LastStarted = &now
+				// Clear ephemeral configuration fields after starting the server
+				if err := s.store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
+					s.log.Error("Failed to clear ephemeral config fields: %v", err)
+				}
 			}
 			// Update status in database
 			if err := s.store.UpdateServer(ctx, server); err != nil {
@@ -288,6 +301,11 @@ func (s *Server) handleStartServer(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.store.UpdateServer(ctx, server); err != nil {
 		s.log.Error("Failed to update server status: %v", err)
+	}
+
+	// Clear ephemeral configuration fields after starting the server
+	if err := s.store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
+		s.log.Error("Failed to clear ephemeral config fields: %v", err)
 	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{"status": "starting"})

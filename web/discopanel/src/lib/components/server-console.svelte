@@ -54,6 +54,11 @@
 	async function fetchLogs() {
 		if (loading) return;
 		
+		// Don't try to fetch logs if server is not running
+		if (server.status !== 'running' && server.status !== 'starting') {
+			return;
+		}
+		
 		try {
 			const response = await api.getServerLogs(server.id, tailLines);
 			logs = response.logs;

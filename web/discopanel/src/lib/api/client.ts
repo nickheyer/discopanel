@@ -7,11 +7,13 @@ import type {
   FileInfo,
   MinecraftVersion,
   ModLoaderInfo,
+  DockerImageInfo,
   ServerLogsResponse,
   ServerStatusResponse,
   UploadResponse,
   ServerProperties,
-  ApiError
+  ApiError,
+  ConfigCategory
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -62,6 +64,10 @@ class ApiClient {
 
   async getModLoaders(): Promise<{ modloaders: ModLoaderInfo[] }> {
     return this.request<{ modloaders: ModLoaderInfo[] }>('/minecraft/modloaders');
+  }
+
+  async getDockerImages(): Promise<{ images: DockerImageInfo[] }> {
+    return this.request<{ images: DockerImageInfo[] }>('/minecraft/docker-images');
   }
 
   // Server Management
@@ -133,12 +139,12 @@ class ApiClient {
   }
 
   // Server Configuration
-  async getServerConfig(id: string): Promise<ServerProperties> {
-    return this.request<ServerProperties>(`/servers/${id}/config`);
+  async getServerConfig(id: string): Promise<ConfigCategory[]> {
+    return this.request<ConfigCategory[]>(`/servers/${id}/config`);
   }
 
-  async updateServerConfig(id: string, properties: ServerProperties): Promise<ServerProperties> {
-    return this.request<ServerProperties>(`/servers/${id}/config`, {
+  async updateServerConfig(id: string, properties: Record<string, any>): Promise<ConfigCategory[]> {
+    return this.request<ConfigCategory[]>(`/servers/${id}/config`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',

@@ -46,7 +46,7 @@ func GetConfigFiles(loader models.ModLoader) []ConfigFile {
 }
 
 // LoadYAMLConfig loads a YAML configuration file
-func LoadYAMLConfig(serverDataPath string, configFile ConfigFile) (map[string]interface{}, error) {
+func LoadYAMLConfig(serverDataPath string, configFile ConfigFile) (map[string]any, error) {
 	configPath := filepath.Join(serverDataPath, string(configFile))
 
 	data, err := os.ReadFile(configPath)
@@ -54,7 +54,7 @@ func LoadYAMLConfig(serverDataPath string, configFile ConfigFile) (map[string]in
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var config map[string]interface{}
+	var config map[string]any
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
@@ -63,7 +63,7 @@ func LoadYAMLConfig(serverDataPath string, configFile ConfigFile) (map[string]in
 }
 
 // SaveYAMLConfig saves a YAML configuration file
-func SaveYAMLConfig(serverDataPath string, configFile ConfigFile, config map[string]interface{}) error {
+func SaveYAMLConfig(serverDataPath string, configFile ConfigFile, config map[string]any) error {
 	configPath := filepath.Join(serverDataPath, string(configFile))
 
 	// Ensure directory exists
@@ -85,8 +85,8 @@ func SaveYAMLConfig(serverDataPath string, configFile ConfigFile, config map[str
 }
 
 // GetAllConfigs returns all configuration files for a server
-func GetAllConfigs(serverDataPath string, loader models.ModLoader) (map[string]interface{}, error) {
-	configs := make(map[string]interface{})
+func GetAllConfigs(serverDataPath string, loader models.ModLoader) (map[string]any, error) {
+	configs := make(map[string]any)
 
 	// Always include server.properties
 	if props, err := LoadServerProperties(serverDataPath); err == nil {

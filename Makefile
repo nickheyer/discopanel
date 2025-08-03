@@ -11,9 +11,12 @@ dev: clean
 	@echo "Starting development environment..."
 	@mkdir -p $(DATA_DIR)
 	@echo "Starting backend server with frontend dev server..."
-	@trap 'kill %1' INT; \
+	@trap 'echo "Stopping all processes..."; kill $$(jobs -p) 2>/dev/null; wait; exit' INT TERM; \
 	cd $(FRONTEND_DIR) && npm run dev & \
-	go run cmd/discopanel/main.go
+	FRONTEND_PID=$$!; \
+	go run cmd/discopanel/main.go & \
+	BACKEND_PID=$$!; \
+	wait $$BACKEND_PID $$FRONTEND_PID
 
 # Production build and run
 prod: build-frontend
@@ -44,6 +47,15 @@ clean:
 		rm -f discopanel.db; \
 	fi
 	@echo "Clean complete!"
+
+# Kill any orphaned dev processes
+kill-dev:
+	@echo "Killing orphaned development processes..."
+	@pkill -f "npm run dev" || true
+	@pkill -f "vite" || true
+	@pkill -f "go run cmd/discopanel/main.go" || true
+	@pkill -f "discopanel" || true
+	@echo "Cleanup complete!"
 
 # Install dependencies
 deps:
@@ -80,6 +92,7 @@ help:
 	@echo "  make dev          - Run in development mode (frontend + backend)"
 	@echo "  make prod         - Build and run in production mode"
 	@echo "  make clean        - Remove data directory and build artifacts"
+	@echo "  make kill-dev     - Kill any orphaned dev processes"
 	@echo "  make deps         - Install all dependencies"
 	@echo "  make test         - Run tests"
 	@echo "  make fmt          - Format code"

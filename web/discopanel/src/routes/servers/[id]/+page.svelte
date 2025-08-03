@@ -3,13 +3,14 @@
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
 	import { serversStore } from '$lib/stores/servers';
+	import { goto } from '$app/navigation';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { Separator } from '$lib/components/ui/separator';
 	import { toast } from 'svelte-sonner';
-	import { Play, Square, RotateCw, Terminal, Settings, Package, HardDrive, Activity, Loader2, Copy, ExternalLink } from '@lucide/svelte';
+	import { Play, Square, RotateCw, Terminal, Settings, Package, HardDrive, Activity, Loader2, Copy, ExternalLink, Trash2 } from '@lucide/svelte';
 	import type { Server } from '$lib/api/types';
 	import ServerConsole from '$lib/components/server-console.svelte';
 
@@ -103,6 +104,26 @@
 			toast.error('Failed to copy to clipboard');
 		}
 	}
+
+	async function handleDeleteServer() {
+		if (!server) return;
+		
+		const confirmed = confirm(`Are you sure you want to delete "${server.name}"?\n\nThis will:\n- Stop and remove the Docker container\n- Delete all server files and data\n- Remove all mods and configurations\n\nThis action cannot be undone!`);
+		
+		if (!confirmed) return;
+		
+		actionLoading = true;
+		try {
+			await api.deleteServer(server.id);
+			serversStore.removeServer(server.id);
+			toast.success('Server deleted successfully');
+			goto('/servers');
+		} catch (error) {
+			toast.error(`Failed to delete server: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		} finally {
+			actionLoading = false;
+		}
+	}
 </script>
 
 {#if loading && !server}
@@ -110,8 +131,8 @@
 		<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 	</div>
 {:else if server}
-	<div class="flex-1 space-y-4 p-8 pt-6">
-		<div class="flex items-center justify-between">
+	<div class="h-[calc(100vh-4rem)] flex flex-col p-8 pt-6">
+		<div class="flex items-center justify-between flex-shrink-0 mb-4">
 			<div>
 				<h2 class="text-3xl font-bold tracking-tight">{server.name}</h2>
 				<p class="text-muted-foreground">{server.description || 'No description'}</p>
@@ -144,10 +165,18 @@
 						Restart
 					</Button>
 				{/if}
+				<Button 
+					variant="outline" 
+					onclick={() => handleDeleteServer()}
+					disabled={actionLoading || server.status !== 'stopped'}
+				>
+					<Trash2 class="h-4 w-4 mr-2" />
+					Delete
+				</Button>
 			</div>
 		</div>
 
-		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4 flex-shrink-0 mb-4">
 			<Card>
 				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 					<CardTitle class="text-sm font-medium">Status</CardTitle>
@@ -209,7 +238,7 @@
 			</Card>
 		</div>
 
-		<Tabs value="overview" class="space-y-4">
+		<Tabs value="overview" class="flex-1 flex flex-col min-h-0">
 			<TabsList>
 				<TabsTrigger value="overview">Overview</TabsTrigger>
 				<TabsTrigger value="console">Console</TabsTrigger>

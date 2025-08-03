@@ -78,7 +78,7 @@
 	function getRecommendedMemory(): number {
 		switch (formData.mod_loader) {
 			case 'vanilla':
-				return 1024;
+				return 2048;
 			case 'paper':
 			case 'spigot':
 				return 2048;
@@ -98,7 +98,7 @@
 
 	$effect(() => {
 		// Auto-adjust memory when mod loader changes
-		if (formData.memory === 2048 || formData.memory === getRecommendedMemory()) {
+		if (formData.memory === getRecommendedMemory()) {
 			setRecommendedMemory();
 		}
 	});

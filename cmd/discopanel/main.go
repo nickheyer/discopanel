@@ -70,6 +70,27 @@ func main() {
 		log.Error("Failed to ensure Docker network: %v", err)
 	}
 
+	// Clean up orphaned containers on startup
+	log.Info("Checking for orphaned containers...")
+	ctx := context.Background()
+	servers, err := store.ListServers(ctx)
+	if err != nil {
+		log.Error("Failed to list servers for cleanup: %v", err)
+	} else {
+		// Build map of tracked container IDs
+		trackedIDs := make(map[string]bool)
+		for _, server := range servers {
+			if server.ContainerID != "" {
+				trackedIDs[server.ContainerID] = true
+			}
+		}
+		
+		// Clean up orphaned containers
+		if err := dockerClient.CleanupOrphanedContainers(ctx, trackedIDs, log); err != nil {
+			log.Error("Failed to cleanup orphaned containers: %v", err)
+		}
+	}
+
 	// Initialize API server with full configuration
 	apiServer := api.NewServer(store, dockerClient, cfg, log)
 

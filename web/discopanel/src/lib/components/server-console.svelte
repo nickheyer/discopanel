@@ -4,7 +4,6 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
-	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
 	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw } from '@lucide/svelte';
@@ -17,6 +16,7 @@
 	let loading = $state(false);
 	let autoScroll = $state(true);
 	let scrollAreaRef = $state<HTMLDivElement | null>(null);
+	let endOfLogsRef = $state<HTMLDivElement | null>(null);
 	let pollingInterval: ReturnType<typeof setInterval>;
 	let tailLines = $state(500);
 
@@ -31,6 +31,25 @@
 			clearInterval(pollingInterval);
 		}
 	});
+	
+	// Stop polling when server is deleted or component is hidden
+	$effect(() => {
+		if (!server) {
+			if (pollingInterval) {
+				clearInterval(pollingInterval);
+			}
+		}
+	});
+
+	// Handle auto-scrolling in a separate effect to avoid scroll-linked positioning issues
+	$effect(() => {
+		if (logs && autoScroll && endOfLogsRef) {
+			// Use a microtask to ensure DOM has updated
+			queueMicrotask(() => {
+				endOfLogsRef?.scrollIntoView({ behavior: 'instant', block: 'end' });
+			});
+		}
+	});
 
 	async function fetchLogs() {
 		if (loading) return;
@@ -38,18 +57,6 @@
 		try {
 			const response = await api.getServerLogs(server.id, tailLines);
 			logs = response.logs;
-			
-			if (autoScroll && scrollAreaRef) {
-				// Scroll to bottom after logs update
-				setTimeout(() => {
-					if (scrollAreaRef) {
-						const scrollContainer = scrollAreaRef.querySelector('[data-scroll-container]');
-						if (scrollContainer) {
-							scrollContainer.scrollTop = scrollContainer.scrollHeight;
-						}
-					}
-				}, 100);
-			}
 		} catch (error) {
 			console.error('Failed to fetch logs:', error);
 		}
@@ -148,7 +155,7 @@
 </script>
 
 <Card class="h-full flex flex-col">
-	<CardHeader class="flex-none">
+	<CardHeader class="flex-shrink-0">
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-2">
 				<Terminal class="h-5 w-5" />
@@ -193,35 +200,36 @@
 		</CardDescription>
 	</CardHeader>
 	
-	<CardContent class="flex-1 flex flex-col p-0">
-		<ScrollArea class="flex-1 p-4" bind:ref={scrollAreaRef}>
-			<div class="font-mono text-sm space-y-1" data-scroll-container>
-				{#if !logs}
-					<div class="text-muted-foreground text-center py-8">
-						No logs available. Start the server to see output.
-					</div>
-				{:else}
-					{#each logs.split('\n').filter(line => line.trim()) as line}
-						{@const parsed = formatLogLine(line)}
-						<div class="flex gap-2 hover:bg-muted/50 px-2 py-0.5 rounded">
-							{#if parsed.timestamp}
-								<span class="text-muted-foreground text-xs min-w-[80px]">
-									{parsed.timestamp}
-								</span>
-							{/if}
-							<span class="text-xs font-bold min-w-[50px] {getLogLevelColor(parsed.level)}">
-								{parsed.level}
-							</span>
-							<span class="text-sm flex-1 break-all">
-								{parsed.message}
-							</span>
+	<CardContent class="flex-1 flex flex-col p-0 min-h-0">
+		<div class="flex-1 overflow-y-auto px-4 pt-4 custom-scrollbar" bind:this={scrollAreaRef}>
+				<div class="font-mono text-sm space-y-1 pb-4">
+					{#if !logs}
+						<div class="text-muted-foreground text-center py-8">
+							No logs available. Start the server to see output.
 						</div>
-					{/each}
-				{/if}
-			</div>
-		</ScrollArea>
+					{:else}
+						{#each logs.split('\n').filter(line => line.trim()) as line}
+							{@const parsed = formatLogLine(line)}
+							<div class="flex gap-2 hover:bg-muted/50 px-2 py-0.5 rounded">
+								{#if parsed.timestamp}
+									<span class="text-muted-foreground text-xs min-w-[80px]">
+										{parsed.timestamp}
+									</span>
+								{/if}
+								<span class="text-xs font-bold min-w-[50px] {getLogLevelColor(parsed.level)}">
+									{parsed.level}
+								</span>
+								<span class="text-sm flex-1 break-all">
+									{parsed.message}
+								</span>
+							</div>
+						{/each}
+					{/if}
+					<div bind:this={endOfLogsRef} aria-hidden="true"></div>
+				</div>
+		</div>
 		
-		<div class="border-t p-4 flex gap-2">
+		<div class="border-t p-4 flex gap-2 flex-shrink-0">
 			<Input
 				type="text"
 				placeholder={server.status === 'running' ? "Enter command..." : "Server must be running to send commands"}
@@ -237,7 +245,7 @@
 			</Button>
 		</div>
 		
-		<div class="px-4 pb-2 flex items-center justify-between text-xs text-muted-foreground">
+		<div class="px-4 pb-2 flex items-center justify-between text-xs text-muted-foreground flex-shrink-0">
 			<div class="flex items-center gap-4">
 				<label class="flex items-center gap-2">
 					<input
@@ -267,3 +275,29 @@
 		</div>
 	</CardContent>
 </Card>
+
+<style>
+	.custom-scrollbar {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+	}
+
+	.custom-scrollbar::-webkit-scrollbar {
+		width: 12px;
+	}
+
+	.custom-scrollbar::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	.custom-scrollbar::-webkit-scrollbar-thumb {
+		background-color: hsl(var(--muted-foreground) / 0.3);
+		border-radius: 6px;
+		border: 3px solid transparent;
+		background-clip: content-box;
+	}
+
+	.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+		background-color: hsl(var(--muted-foreground) / 0.5);
+	}
+</style>

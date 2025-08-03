@@ -251,7 +251,17 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 		return "", err
 	}
 
-	return buf.String(), nil
+	// Filter out RCON spam
+	lines := strings.Split(buf.String(), "\n")
+	var filtered []string
+	for _, line := range lines {
+		if strings.Contains(line, "Thread RCON Client") && (strings.Contains(line, "started") || strings.Contains(line, "shutting down")) {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+
+	return strings.Join(filtered, "\n"), nil
 }
 
 // ExecCommand executes a command inside the container and returns the output

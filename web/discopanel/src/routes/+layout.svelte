@@ -38,8 +38,8 @@
 
 <SidebarProvider>
 	<Sidebar>
-		<SidebarHeader>
-			<div class="flex items-center gap-2 px-2">
+		<SidebarHeader class="pl-0">
+			<div class="flex items-center gap-2 m-auto">
 				<img src="/g1_24x24.png" alt="DiscoPanel Logo" class="h-6 w-6" />
 				<span class="text-lg font-bold">DiscoPanel</span>
 			</div>

@@ -1,16 +1,14 @@
 <script lang="ts">
 	import '../app.css';
-	import favicon from '$lib/assets/favicon.svg';
 	import { ModeWatcher } from "mode-watcher";
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { SidebarProvider, SidebarInset, Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarGroupContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, SidebarFooter, SidebarTrigger } from '$lib/components/ui/sidebar';
-	import { Button } from '$lib/components/ui/button';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Badge } from '$lib/components/ui/badge';
 	import { serversStore, runningServers } from '$lib/stores/servers';
 	import { onMount } from 'svelte';
 	
-	import { Server, Plus, Settings, Package, HardDrive, Terminal, Home, Cpu } from '@lucide/svelte';
+	import { Server, Home } from '@lucide/svelte';
 
 	let { children } = $props();
 	
@@ -34,7 +32,6 @@
 
 <svelte:head>
 	<title>DiscoPanel - Minecraft Server Management</title>
-	<link rel="icon" href={favicon} />
 </svelte:head>
 
 <ModeWatcher />
@@ -43,7 +40,7 @@
 	<Sidebar>
 		<SidebarHeader>
 			<div class="flex items-center gap-2 px-2">
-				<Cpu class="h-6 w-6" />
+				<img src="/g1_24x24.png" alt="DiscoPanel Logo" class="h-6 w-6" />
 				<span class="text-lg font-bold">DiscoPanel</span>
 			</div>
 		</SidebarHeader>
@@ -54,7 +51,7 @@
 				<SidebarGroupContent>
 					<SidebarMenu>
 						<SidebarMenuItem>
-							<SidebarMenuButton isActive={$page.url.pathname === '/'}>
+							<SidebarMenuButton isActive={page.url.pathname === '/'}>
 								{#snippet child({ props })}
 									<a href="/" {...props}>
 										<Home class="h-4 w-4" />
@@ -64,7 +61,7 @@
 							</SidebarMenuButton>
 						</SidebarMenuItem>
 						<SidebarMenuItem>
-							<SidebarMenuButton isActive={$page.url.pathname.startsWith('/servers')}>
+							<SidebarMenuButton isActive={page.url.pathname.startsWith('/servers')}>
 								{#snippet child({ props })}
 									<a href="/servers" {...props}>
 										<Server class="h-4 w-4" />
@@ -88,7 +85,7 @@
 						<SidebarMenu>
 							{#each servers.slice(0, 5) as server}
 								<SidebarMenuItem>
-									<SidebarMenuButton isActive={$page.url.pathname === `/servers/${server.id}`}>
+									<SidebarMenuButton isActive={page.url.pathname === `/servers/${server.id}`}>
 										{#snippet child({ props })}
 											<a href="/servers/{server.id}" {...props}>
 												<div class="flex items-center gap-2 w-full">

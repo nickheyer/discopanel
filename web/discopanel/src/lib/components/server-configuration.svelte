@@ -12,50 +12,82 @@
 	import { Save, RefreshCw, Loader2, Info } from '@lucide/svelte';
 	import type { Server, ConfigProperty, ConfigCategory } from '$lib/api/types';
 
-	let { server }: { server: Server } = $props();
+	let { server, config, onSave, saving: externalSaving = false }: { 
+		server?: Server;
+		config?: ConfigCategory[];
+		onSave?: (updates: Record<string, any>) => Promise<void>;
+		saving?: boolean;
+	} = $props();
 
 	let loading = $state(false);
 	let saving = $state(false);
-	let categories = $state<ConfigCategory[]>([]);
+	let categories = $state<ConfigCategory[]>(config || []);
 	let originalValues = $state<Record<string, any>>({});
 	let currentValues = $state<Record<string, any>>({});
 	let enabledFields = $state<Set<string>>(new Set());
 	let modifiedProperties = $state<Set<string>>(new Set());
+	
+	// Use external saving state if provided, otherwise use internal
+	let isSaving = $derived(externalSaving !== undefined ? externalSaving : saving);
 
 	onMount(() => {
-		loadServerConfig();
+		if (server && !config) {
+			loadServerConfig();
+		} else if (config) {
+			processConfig(config);
+		}
 	});
 
 	async function loadServerConfig() {
 		loading = true;
 		try {
-			const response = await api.getServerConfig(server.id);
+			const response = await api.getServerConfig(server!.id);
 			categories = response;
-			
-			// Build originalValues and currentValues from categories
-			originalValues = {};
-			currentValues = {};
-			enabledFields = new Set();
-			categories.forEach(category => {
-				category.properties.forEach(prop => {
-					// Store the actual value (which might be null/undefined)
-					originalValues[prop.key] = prop.value;
-					currentValues[prop.key] = prop.value;
-					// Track which fields are enabled
-					// System fields are ALWAYS checked but NOT editable
-					// Required fields must be checked
-					// Other fields are checked if they have a value
-					if ((prop.value !== null && prop.value !== undefined) || prop.required || prop.system) {
-						enabledFields.add(prop.key);
-					}
-				});
-			});
+			processConfig(response);
 		} catch (error) {
 			toast.error('Failed to load server configuration');
-			console.error('Failed to load configuration:', error);
+			console.error(error);
 		} finally {
 			loading = false;
 		}
+	}
+
+	function processConfig(configData: ConfigCategory[]) {
+		categories = configData;
+		
+		// Build originalValues and currentValues from categories
+		originalValues = {};
+		currentValues = {};
+		enabledFields = new Set();
+		categories.forEach(category => {
+			category.properties.forEach(prop => {
+				// Skip internal fields
+				if (prop.key === 'id' || prop.key === 'serverId' || prop.key === 'updatedAt') {
+					return;
+				}
+				
+				// Store the actual value (which might be null/undefined)
+				originalValues[prop.key] = prop.value;
+				currentValues[prop.key] = prop.value;
+				
+				// For global settings (when no server), only enable fields that have values
+				// For server configs, enable required/system fields or fields with values
+				if (!server) {
+					// Global settings - only enable if there's a value
+					if (prop.value !== null && prop.value !== undefined) {
+						enabledFields.add(prop.key);
+					}
+				} else {
+					// Server config - enable required/system fields or fields with values
+					if ((prop.value !== null && prop.value !== undefined) || prop.required || prop.system) {
+						enabledFields.add(prop.key);
+					}
+				}
+			});
+		});
+		
+		// Reset modified properties when loading new config
+		modifiedProperties.clear();
 	}
 
 	async function saveServerConfig() {
@@ -64,7 +96,9 @@
 			return;
 		}
 
-		saving = true;
+		if (!onSave) {
+			saving = true;
+		}
 		try {
 			const changes: Record<string, any> = {};
 			// Only send values for enabled fields
@@ -72,36 +106,31 @@
 				changes[key] = currentValues[key];
 			});
 
-			const response = await api.updateServerConfig(server.id, changes);
-			categories = response;
-			
-			// Update values after successful save
-			originalValues = {};
-			currentValues = {};
-			enabledFields.clear();
-			categories.forEach(category => {
-				category.properties.forEach(prop => {
-					originalValues[prop.key] = prop.value;
-					currentValues[prop.key] = prop.value;
-					if ((prop.value !== null && prop.value !== undefined) || prop.required || prop.system) {
-						enabledFields.add(prop.key);
-					}
-				});
-			});
+			if (onSave) {
+				// Custom save handler (for global settings)
+				await onSave(changes);
+			} else if (server) {
+				// Default server config save
+				const response = await api.updateServerConfig(server!.id, changes);
+				categories = response;
+				processConfig(response);
+			}
 			enabledFields = new Set(enabledFields); // Trigger reactivity
 			
 			toast.success('Configuration saved successfully');
 			modifiedProperties.clear();
 			modifiedProperties = new Set(); // Trigger reactivity
 			
-			if (server.status === 'running') {
+			if (server && server?.status === 'running') {
 				toast.info('Restart the server for changes to take effect');
 			}
 		} catch (error) {
 			toast.error('Failed to save configuration');
 			console.error('Failed to save configuration:', error);
 		} finally {
-			saving = false;
+			if (!onSave) {
+				saving = false;
+			}
 		}
 	}
 
@@ -204,7 +233,7 @@
 					variant="outline"
 					size="sm"
 					onclick={resetChanges}
-					disabled={loading || server.status === 'running' || modifiedProperties.size === 0}
+					disabled={loading || (server && server?.status === 'running') || modifiedProperties.size === 0}
 				>
 					<RefreshCw class="h-4 w-4 mr-2" />
 					Reset
@@ -212,9 +241,9 @@
 				<Button
 					size="sm"
 					onclick={saveServerConfig}
-					disabled={loading || saving || server.status === 'running' || modifiedProperties.size === 0}
+					disabled={loading || isSaving || (server && server?.status === 'running') || modifiedProperties.size === 0}
 				>
-					{#if saving}
+					{#if isSaving}
 						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
 					{:else}
 						<Save class="h-4 w-4 mr-2" />
@@ -239,17 +268,21 @@
 			{:else}
 				<div class="space-y-6 overflow-y-auto pr-4">
 					{#each categories as category}
-						<div class="space-y-4">
-							<h3 class="text-lg font-semibold text-foreground/90 border-b pb-2">{category.name}</h3>
-							<div class="grid gap-4 md:grid-cols-2">
-								{#each category.properties as prop}
+						{@const filteredProps = !server ? 
+							category.properties.filter(p => !p.system) : 
+							category.properties}
+						{#if filteredProps.length > 0}
+							<div class="space-y-4">
+								<h3 class="text-lg font-semibold text-foreground/90 border-b pb-2">{category.name}</h3>
+								<div class="grid gap-4 md:grid-cols-2">
+									{#each filteredProps as prop}
 									{@const inputType = getInputType(prop.type)}
 									<div class="relative p-4 rounded-lg border bg-card hover:bg-accent/5 transition-colors">
 										<div class="flex gap-3">
 											<Checkbox
 												checked={enabledFields.has(prop.key)}
 												onCheckedChange={(checked) => toggleFieldEnabled(prop.key, checked)}
-												disabled={prop.required || prop.system || server.status === 'running'}
+												disabled={prop.required || prop.system || server?.status === 'running'}
 												class="mt-1"
 											/>
 											<div class="flex-1 space-y-2">
@@ -280,7 +313,7 @@
 													id={prop.key}
 													checked={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? prop.default ?? false) : (prop.default ?? false)}
 													onCheckedChange={(checked) => handlePropertyChange(prop.key, checked)}
-													disabled={prop.system || !enabledFields.has(prop.key) || server.status === 'running'}
+													disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
 													class=""
 												/>
 												<span class="text-sm text-muted-foreground">
@@ -295,7 +328,7 @@
 												type="single"
 												value={String(currentValues[prop.key] ?? prop.default ?? '')}
 												onValueChange={(value) => handlePropertyChange(prop.key, value || undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server.status === 'running'}
+												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
 											>
 												<SelectTrigger class="h-9">
 													<span>
@@ -318,7 +351,7 @@
 												value={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? '') : ''}
 												placeholder={prop.default !== undefined ? String(prop.default) : ''}
 												oninput={(e) => handlePropertyChange(prop.key, e.currentTarget.value ? parseInt(e.currentTarget.value) : undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server.status === 'running'}
+												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
 												class="h-9"
 											/>
 										{:else if inputType === 'password'}
@@ -328,7 +361,7 @@
 												value={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? '') : ''}
 												placeholder={prop.default !== undefined ? String(prop.default) : ''}
 												oninput={(e) => handlePropertyChange(prop.key, e.currentTarget.value || undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server.status === 'running'}
+												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
 												class="h-9"
 											/>
 										{:else}
@@ -338,7 +371,7 @@
 												value={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? '') : ''}
 												placeholder={prop.default !== undefined ? String(prop.default) : ''}
 												oninput={(e) => handlePropertyChange(prop.key, e.currentTarget.value || undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server.status === 'running'}
+												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
 												class="h-9"
 											/>
 										{/if}
@@ -354,11 +387,12 @@
 								{/each}
 							</div>
 						</div>
+						{/if}
 					{/each}
 				</div>
 			{/if}
 
-			{#if server.status === 'running'}
+			{#if server?.status === 'running'}
 				<div class="mt-4 p-4 bg-yellow-50 dark:bg-yellow-950 rounded-lg border border-yellow-200 dark:border-yellow-800">
 					<p class="text-sm text-yellow-800 dark:text-yellow-200">
 						⚠️ Server must be stopped to modify configuration. Changes will take effect after restart.

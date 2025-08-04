@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,6 +51,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		Memory      int              `json:"memory"`
 		DockerImage string           `json:"docker_image"`
 		AutoStart   bool             `json:"auto_start"`
+		ModpackID   string           `json:"modpack_id,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -57,6 +59,37 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If modpack is selected, load it and derive settings
+	var modpackURL string
+	if req.ModpackID != "" {
+		modpack, err := s.store.GetIndexedModpack(ctx, req.ModpackID)
+		if err != nil {
+			s.respondError(w, http.StatusBadRequest, "Invalid modpack")
+			return
+		}
+		
+		// Set the modpack URL
+		modpackURL = modpack.WebsiteURL
+		
+		// Override mod loader based on indexer
+		if modpack.Indexer == "fuego" {
+			req.ModLoader = models.ModLoaderAutoCurseForge
+		}
+		
+		// Get MC version from modpack if not explicitly set
+		if req.MCVersion == "" {
+			var gameVersions []string
+			if err := json.Unmarshal([]byte(modpack.GameVersions), &gameVersions); err == nil && len(gameVersions) > 0 {
+				req.MCVersion = gameVersions[0]
+			}
+		}
+		
+		// Set minimum memory for modpacks
+		if req.Memory < 4096 {
+			req.Memory = 4096
+		}
+	}
+	
 	// Validate request
 	if req.Name == "" || req.MCVersion == "" {
 		s.respondError(w, http.StatusBadRequest, "Name and MC version are required")
@@ -75,6 +108,11 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine Java version and Docker image based on MC version
+	if req.DockerImage == "" {
+		req.DockerImage = getDockerImageForMC(req.MCVersion)
+	}
+
 	// Create server object
 	server := &models.Server{
 		ID:          uuid.New().String(),
@@ -87,7 +125,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		MaxPlayers:  req.MaxPlayers,
 		Memory:      req.Memory,
 		DataPath:    filepath.Join(s.config.Storage.DataDir, "servers", req.Name),
-		JavaVersion: getJavaVersionForMC(req.MCVersion),
+		JavaVersion: getJavaVersionFromDockerImage(req.DockerImage),
 		DockerImage: req.DockerImage,
 	}
 
@@ -121,6 +159,16 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.log.Error("Failed to get server config: %v", err)
 		serverConfig = s.store.CreateDefaultServerConfig(server.ID)
+	}
+
+	// If modpack was selected, configure it
+	if modpackURL != "" && server.ModLoader == models.ModLoaderAutoCurseForge {
+		serverConfig.CFPageURL = &modpackURL
+		
+		// Ensure config is updated with proper settings
+		if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
+			s.log.Error("Failed to update server config with modpack URL: %v", err)
+		}
 	}
 
 	// Create Docker container
@@ -393,8 +441,25 @@ func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, map[string]string{"logs": logs})
 }
 
-// Helper function to determine Java version
-func getJavaVersionForMC(mcVersion string) string {
-	// Use the more comprehensive function from minecraft package
-	return minecraft.GetJavaVersionForMinecraft(mcVersion)
+// Helper function to determine Docker image based on MC version
+func getDockerImageForMC(mcVersion string) string {
+	javaVersion := minecraft.GetJavaVersionForMinecraft(mcVersion)
+	switch javaVersion {
+	case "17", "21":
+		return "java17"
+	case "11":
+		return "java11"
+	default:
+		return "java8"
+	}
+}
+
+// Helper function to extract Java version from Docker image
+func getJavaVersionFromDockerImage(dockerImage string) string {
+	if strings.Contains(dockerImage, "java17") || strings.Contains(dockerImage, "java21") {
+		return "17"
+	} else if strings.Contains(dockerImage, "java11") {
+		return "11"
+	}
+	return "8"
 }

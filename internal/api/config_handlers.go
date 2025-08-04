@@ -410,3 +410,107 @@ func getCategoryIndex(key string) int {
 		return -1 // Unknown category
 	}
 }
+
+func (s *Server) handleGetGlobalSettings(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	
+	config, err := s.store.GetGlobalSettings(ctx)
+	if err != nil {
+		s.log.Error("Failed to get global settings: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to get global settings")
+		return
+	}
+
+	// Convert to categorized format
+	categories := buildConfigCategories(config)
+	s.respondJSON(w, http.StatusOK, categories)
+}
+
+func (s *Server) handleUpdateGlobalSettings(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	
+	// Get existing config
+	config, err := s.store.GetGlobalSettings(ctx)
+	if err != nil {
+		s.log.Error("Failed to get global settings: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to get global settings")
+		return
+	}
+
+	// Decode updates
+	var updates map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Update config fields using reflection (same logic as server config update)
+	configValue := reflect.ValueOf(config).Elem()
+	configType := configValue.Type()
+
+	for i := 0; i < configType.NumField(); i++ {
+		field := configType.Field(i)
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "" || jsonTag == "-" {
+			continue
+		}
+
+		if value, exists := updates[jsonTag]; exists {
+			fieldValue := configValue.Field(i)
+			if fieldValue.CanSet() {
+				// Handle nil values
+				if value == nil {
+					fieldValue.Set(reflect.Zero(fieldValue.Type()))
+					continue
+				}
+
+				// Handle pointer types
+				if fieldValue.Kind() == reflect.Ptr {
+					// Get the element type
+					elemType := fieldValue.Type().Elem()
+
+					// Create a new pointer to hold the value
+					newValue := reflect.New(elemType)
+					elem := newValue.Elem()
+
+					switch elemType.Kind() {
+					case reflect.String:
+						if str, ok := value.(string); ok {
+							elem.SetString(str)
+							fieldValue.Set(newValue)
+						}
+					case reflect.Int, reflect.Int32, reflect.Int64:
+						if num, ok := value.(float64); ok {
+							elem.SetInt(int64(num))
+							fieldValue.Set(newValue)
+						}
+					case reflect.Bool:
+						if b, ok := value.(bool); ok {
+							elem.SetBool(b)
+							fieldValue.Set(newValue)
+						}
+					}
+				} else {
+					// Non-pointer fields (ID, ServerID, UpdatedAt)
+					switch fieldValue.Kind() {
+					case reflect.String:
+						if str, ok := value.(string); ok {
+							fieldValue.SetString(str)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Save updated config
+	if err := s.store.UpdateGlobalSettings(ctx, config); err != nil {
+		s.log.Error("Failed to save global settings: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to save global settings")
+		return
+	}
+
+	// Return updated config
+	categories := buildConfigCategories(config)
+	s.respondJSON(w, http.StatusOK, categories)
+}

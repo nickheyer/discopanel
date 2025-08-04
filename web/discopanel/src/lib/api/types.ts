@@ -133,3 +133,62 @@ export interface ConfigCategory {
   name: string;
   properties: ConfigProperty[];
 }
+
+export interface IndexedModpack {
+  id: string;
+  indexer_id: string;
+  indexer: string;
+  name: string;
+  slug: string;
+  summary: string;
+  description: string;
+  logo_url: string;
+  website_url: string;
+  download_count: number;
+  categories: string;
+  game_versions: string;
+  mod_loaders: string;
+  latest_file_id: string;
+  date_created: string;
+  date_modified: string;
+  date_released: string;
+  updated_at: string;
+  indexed_at: string;
+  is_favorited?: boolean;
+}
+
+export interface ModpackFile {
+  id: string;
+  modpack_id: string;
+  display_name: string;
+  file_name: string;
+  file_date: string;
+  file_length: number;
+  release_type: string;
+  download_url: string;
+  game_versions: string;
+  mod_loader: string;
+  server_pack_file_id: string | null;
+}
+
+export interface ModpackSearchParams {
+  q?: string;
+  gameVersion?: string;
+  modLoader?: string;
+  indexer?: string;
+  page?: number;
+}
+
+export interface ModpackSearchResponse {
+  modpacks: IndexedModpack[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ModpackSyncRequest {
+  query: string;
+  gameVersion: string;
+  modLoader: string;
+  indexer?: string;
+}

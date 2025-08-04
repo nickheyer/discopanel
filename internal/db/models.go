@@ -232,3 +232,52 @@ type Mod struct {
 	FileSize    int64     `json:"file_size" gorm:"column:file_size"`
 	Server      *Server   `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
+
+type IndexedModpack struct {
+	ID              string    `json:"id" gorm:"primaryKey"` // Format: "indexer-originalId"
+	IndexerID       string    `json:"indexer_id" gorm:"index;column:indexer_id"` // Original ID from indexer
+	Indexer         string    `json:"indexer" gorm:"index"` // "fuego", "modrinth", etc.
+	Name            string    `json:"name" gorm:"not null;index"`
+	Slug            string    `json:"slug" gorm:"index"`
+	Summary         string    `json:"summary"`
+	Description     string    `json:"description" gorm:"type:text"`
+	LogoURL         string    `json:"logo_url" gorm:"column:logo_url"`
+	WebsiteURL      string    `json:"website_url" gorm:"column:website_url"`
+	DownloadCount   int64     `json:"download_count" gorm:"column:download_count"`
+	Categories      string    `json:"categories"` // JSON array stored as string
+	GameVersions    string    `json:"game_versions"` // JSON array stored as string
+	ModLoaders      string    `json:"mod_loaders"` // JSON array stored as string
+	LatestFileID    string    `json:"latest_file_id" gorm:"column:latest_file_id"`
+	DateCreated     time.Time `json:"date_created" gorm:"column:date_created"`
+	DateModified    time.Time `json:"date_modified" gorm:"column:date_modified"`
+	DateReleased    time.Time `json:"date_released" gorm:"column:date_released"`
+	UpdatedAt       time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	IndexedAt       time.Time `json:"indexed_at" gorm:"autoCreateTime"`
+	// Computed fields for server creation
+	MCVersion       string    `json:"mc_version" gorm:"column:mc_version"` // Primary MC version
+	JavaVersion     string    `json:"java_version" gorm:"column:java_version"` // Required Java version
+	DockerImage     string    `json:"docker_image" gorm:"column:docker_image"` // Recommended Docker image
+	RecommendedRAM  int       `json:"recommended_ram" gorm:"column:recommended_ram"` // Recommended RAM in MB
+}
+
+type IndexedModpackFile struct {
+	ID              string    `json:"id" gorm:"primaryKey"`
+	ModpackID       string    `json:"modpack_id" gorm:"index;column:modpack_id"`
+	DisplayName     string    `json:"display_name" gorm:"column:display_name"`
+	FileName        string    `json:"file_name" gorm:"column:file_name"`
+	FileDate        time.Time `json:"file_date" gorm:"column:file_date"`
+	FileLength      int64     `json:"file_length" gorm:"column:file_length"`
+	ReleaseType     string    `json:"release_type" gorm:"column:release_type"` // "release", "beta", "alpha"
+	DownloadURL     string    `json:"download_url" gorm:"column:download_url"`
+	GameVersions    string    `json:"game_versions"` // JSON array stored as string
+	ModLoader       string    `json:"mod_loader" gorm:"column:mod_loader"`
+	ServerPackFileID *string  `json:"server_pack_file_id" gorm:"column:server_pack_file_id"`
+	Modpack         *IndexedModpack `json:"-" gorm:"foreignKey:ModpackID;constraint:OnDelete:CASCADE"`
+}
+
+type ModpackFavorite struct {
+	ID        string          `json:"id" gorm:"primaryKey"`
+	ModpackID string          `json:"modpack_id" gorm:"index;column:modpack_id"`
+	CreatedAt time.Time       `json:"created_at" gorm:"autoCreateTime"`
+	Modpack   *IndexedModpack `json:"modpack,omitempty" gorm:"foreignKey:ModpackID;constraint:OnDelete:CASCADE"`
+}

@@ -8,7 +8,7 @@
 	import { serversStore, runningServers } from '$lib/stores/servers';
 	import { onMount } from 'svelte';
 	
-	import { Server, Home } from '@lucide/svelte';
+	import { Server, Home, Settings, Package } from '@lucide/svelte';
 
 	let { children } = $props();
 	
@@ -69,6 +69,26 @@
 										{#if runningCount > 0}
 											<Badge variant="secondary" class="ml-auto">{runningCount}</Badge>
 										{/if}
+									</a>
+								{/snippet}
+							</SidebarMenuButton>
+						</SidebarMenuItem>
+						<SidebarMenuItem>
+							<SidebarMenuButton isActive={page.url.pathname.startsWith('/modpacks')}>
+								{#snippet child({ props })}
+									<a href="/modpacks" {...props}>
+										<Package class="h-4 w-4" />
+										<span>Modpacks</span>
+									</a>
+								{/snippet}
+							</SidebarMenuButton>
+						</SidebarMenuItem>
+						<SidebarMenuItem>
+							<SidebarMenuButton isActive={page.url.pathname === '/settings'}>
+								{#snippet child({ props })}
+									<a href="/settings" {...props}>
+										<Settings class="h-4 w-4" />
+										<span>Settings</span>
 									</a>
 								{/snippet}
 							</SidebarMenuButton>

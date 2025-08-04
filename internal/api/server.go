@@ -63,6 +63,20 @@ func (s *Server) setupRoutes() {
 	// Server configuration
 	api.HandleFunc("/servers/{id}/config", s.handleGetServerConfig).Methods("GET")
 	api.HandleFunc("/servers/{id}/config", s.handleUpdateServerConfig).Methods("PUT")
+	
+	// Global settings
+	api.HandleFunc("/settings", s.handleGetGlobalSettings).Methods("GET")
+	api.HandleFunc("/settings", s.handleUpdateGlobalSettings).Methods("PUT")
+	
+	// Indexed modpacks
+	api.HandleFunc("/modpacks", s.handleSearchModpacks).Methods("GET")
+	api.HandleFunc("/modpacks/sync", s.handleSyncModpacks).Methods("POST")
+	api.HandleFunc("/modpacks/favorites", s.handleListFavorites).Methods("GET")
+	api.HandleFunc("/modpacks/{id}", s.handleGetModpack).Methods("GET")
+	api.HandleFunc("/modpacks/{id}/config", s.handleGetModpackConfig).Methods("GET")
+	api.HandleFunc("/modpacks/{id}/favorite", s.handleToggleFavorite).Methods("POST")
+	api.HandleFunc("/modpacks/{id}/files/sync", s.handleSyncModpackFiles).Methods("POST")
+	api.HandleFunc("/modpacks/{id}/files", s.handleGetModpackFiles).Methods("GET")
 
 	// Mod management
 	api.HandleFunc("/servers/{id}/mods", s.handleListMods).Methods("GET")

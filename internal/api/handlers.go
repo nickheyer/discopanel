@@ -2,17 +2,17 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	models "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/internal/docker"
 )
 
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
@@ -67,15 +67,15 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 			s.respondError(w, http.StatusBadRequest, "Invalid modpack")
 			return
 		}
-		
+
 		// Set the modpack URL
 		modpackURL = modpack.WebsiteURL
-		
+
 		// Override mod loader based on indexer
-		if modpack.Indexer == "fuego" {
+		if modpack.Indexer == "fuego" || modpack.Indexer == "manual" {
 			req.ModLoader = models.ModLoaderAutoCurseForge
 		}
-		
+
 		// Get MC version from modpack if not explicitly set
 		if req.MCVersion == "" {
 			var gameVersions []string
@@ -83,13 +83,13 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 				req.MCVersion = gameVersions[0]
 			}
 		}
-		
+
 		// Set minimum memory for modpacks
 		if req.Memory < 4096 {
 			req.Memory = 4096
 		}
 	}
-	
+
 	// Validate request
 	if req.Name == "" || req.MCVersion == "" {
 		s.respondError(w, http.StatusBadRequest, "Name and MC version are required")
@@ -108,9 +108,9 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine Java version and Docker image based on MC version
+	// Determine Docker image based on MC version and mod loader if not specified
 	if req.DockerImage == "" {
-		req.DockerImage = getDockerImageForMC(req.MCVersion)
+		req.DockerImage = docker.GetOptimalDockerTag(req.MCVersion, req.ModLoader, false)
 	}
 
 	// Create server object
@@ -125,7 +125,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		MaxPlayers:  req.MaxPlayers,
 		Memory:      req.Memory,
 		DataPath:    filepath.Join(s.config.Storage.DataDir, "servers", req.Name),
-		JavaVersion: getJavaVersionFromDockerImage(req.DockerImage),
+		JavaVersion: strconv.Itoa(docker.GetRequiredJavaVersion(req.MCVersion, req.ModLoader)),
 		DockerImage: req.DockerImage,
 	}
 
@@ -162,12 +162,39 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If modpack was selected, configure it
-	if modpackURL != "" && server.ModLoader == models.ModLoaderAutoCurseForge {
-		serverConfig.CFPageURL = &modpackURL
-		
+	if req.ModpackID != "" {
+		modpack, _ := s.store.GetIndexedModpack(ctx, req.ModpackID)
+		if modpack != nil && modpack.Indexer == "manual" {
+			// For manual modpacks, copy the zip file to the server directory
+			modpackFile, err := s.store.GetIndexedModpackFiles(ctx, req.ModpackID)
+			if err == nil && len(modpackFile) > 0 {
+				sourcePath := modpackFile[0].DownloadURL // This contains the local path
+				destPath := filepath.Join(server.DataPath, "modpack.zip")
+
+				// Copy the modpack file
+				if sourceFile, err := os.Open(sourcePath); err == nil {
+					defer sourceFile.Close()
+					if destFile, err := os.Create(destPath); err == nil {
+						defer destFile.Close()
+						io.Copy(destFile, sourceFile)
+
+						// Set CF_MODPACK_ZIP for manual modpack installation
+						cfModpackZip := "/data/modpack.zip"
+						serverConfig.CFModpackZip = &cfModpackZip
+
+						// Set a dummy slug for the manual modpack
+						cfSlug := "manual-" + modpack.ID
+						serverConfig.CFSlug = &cfSlug
+					}
+				}
+			}
+		} else if modpackURL != "" && server.ModLoader == models.ModLoaderAutoCurseForge {
+			serverConfig.CFPageURL = &modpackURL
+		}
+
 		// Ensure config is updated with proper settings
 		if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
-			s.log.Error("Failed to update server config with modpack URL: %v", err)
+			s.log.Error("Failed to update server config with modpack settings: %v", err)
 		}
 	}
 
@@ -253,6 +280,10 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		Description string `json:"description"`
 		MaxPlayers  int    `json:"max_players"`
 		Memory      int    `json:"memory"`
+		ModLoader   string `json:"mod_loader"`
+		MCVersion   string `json:"mc_version"`
+		JavaVersion string `json:"java_version"`
+		DockerImage string `json:"docker_image"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -272,6 +303,18 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Memory > 0 {
 		server.Memory = req.Memory
+	}
+	if req.ModLoader != "" {
+		server.ModLoader = models.ModLoader(req.ModLoader)
+	}
+	if req.MCVersion != "" {
+		server.MCVersion = req.MCVersion
+	}
+	if req.JavaVersion != "" {
+		server.JavaVersion = req.JavaVersion
+	}
+	if req.DockerImage != "" {
+		server.DockerImage = req.DockerImage
 	}
 
 	if err := s.store.UpdateServer(ctx, server); err != nil {
@@ -439,27 +482,4 @@ func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{"logs": logs})
-}
-
-// Helper function to determine Docker image based on MC version
-func getDockerImageForMC(mcVersion string) string {
-	javaVersion := minecraft.GetJavaVersionForMinecraft(mcVersion)
-	switch javaVersion {
-	case "17", "21":
-		return "java17"
-	case "11":
-		return "java11"
-	default:
-		return "java8"
-	}
-}
-
-// Helper function to extract Java version from Docker image
-func getJavaVersionFromDockerImage(dockerImage string) string {
-	if strings.Contains(dockerImage, "java17") || strings.Contains(dockerImage, "java21") {
-		return "17"
-	} else if strings.Contains(dockerImage, "java11") {
-		return "11"
-	}
-	return "8"
 }

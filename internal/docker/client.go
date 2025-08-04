@@ -143,7 +143,7 @@ func GetRequiredJavaVersion(mcVersion string, modLoader models.ModLoader) int {
 	// Parse major.minor version
 	parts := strings.Split(mcVersion, ".")
 	if len(parts) < 2 {
-		return 17 // Default to Java 17
+		return 21 // Default to Java 17
 	}
 
 	// Find matching requirement
@@ -160,7 +160,7 @@ func GetRequiredJavaVersion(mcVersion string, modLoader models.ModLoader) int {
 	// Parse minor version for fallback logic
 	minor, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return 17
+		return 21
 	}
 
 	// Fallback based on minor version

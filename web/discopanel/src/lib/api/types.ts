@@ -48,10 +48,14 @@ export interface CreateServerRequest {
 }
 
 export interface UpdateServerRequest {
-  name: string;
-  description: string;
-  max_players: number;
-  memory: number;
+  name?: string;
+  description?: string;
+  max_players?: number;
+  memory?: number;
+  mod_loader?: string;
+  mc_version?: string;
+  java_version?: string;
+  docker_image?: string;
 }
 
 export interface Mod {

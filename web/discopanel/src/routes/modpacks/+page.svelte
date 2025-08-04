@@ -6,8 +6,9 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
 	import { toast } from 'svelte-sonner';
-	import { Heart, Download, Search, RefreshCw, ExternalLink } from '@lucide/svelte';
+	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload } from '@lucide/svelte';
 	import type { IndexedModpack, ModpackSearchParams, ModpackSearchResponse } from '$lib/api/types';
 	
 	let searchParams = $state<ModpackSearchParams>({
@@ -22,6 +23,9 @@
 	let loading = $state(false);
 	let syncing = $state(false);
 	let showFavorites = $state(false);
+	let indexerStatus = $state<any>(null);
+	let fileInput = $state<HTMLInputElement | null>(null);
+	let uploading = $state(false);
 	
 	// Available game versions and mod loaders
 	const gameVersions = ['1.20.1', '1.19.4', '1.19.2', '1.18.2', '1.17.1', '1.16.5', '1.12.2'];
@@ -32,6 +36,22 @@
 		{ value: 'neoforge', label: 'NeoForge' },
 		{ value: 'quilt', label: 'Quilt' }
 	];
+	
+	onMount(async () => {
+		await checkIndexerStatus();
+		await loadFavorites();
+	});
+	
+	async function checkIndexerStatus() {
+		try {
+			const response = await fetch('/api/v1/modpacks/status');
+			if (response.ok) {
+				indexerStatus = await response.json();
+			}
+		} catch (error) {
+			console.error('Failed to check indexer status:', error);
+		}
+	}
 	
 	async function searchModpacks() {
 		loading = true;
@@ -149,6 +169,45 @@
 		}
 	}
 	
+	async function handleModpackUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const files = input.files;
+		if (!files || files.length === 0) return;
+		
+		const file = files[0];
+		if (!file.name.endsWith('.zip')) {
+			toast.error('Please select a valid modpack ZIP file');
+			return;
+		}
+		
+		uploading = true;
+		try {
+			const formData = new FormData();
+			formData.append('modpack', file);
+			
+			const response = await fetch('/api/v1/modpacks/upload', {
+				method: 'POST',
+				body: formData
+			});
+			
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(error.error || 'Failed to upload modpack');
+			}
+			
+			const result = await response.json();
+			toast.success(`Modpack "${result.name}" uploaded successfully`);
+			
+			// Refresh the modpack list
+			await searchModpacks();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : 'Failed to upload modpack');
+		} finally {
+			uploading = false;
+			input.value = '';
+		}
+	}
+	
 	onMount(async () => {
 		await Promise.all([
 			searchModpacks(),
@@ -179,6 +238,28 @@
 			</Button>
 		</div>
 	</div>
+	
+	{#if indexerStatus?.indexers?.fuego && !indexerStatus.indexers.fuego.apiKeyConfigured}
+		<Alert>
+			<AlertCircle class="h-4 w-4" />
+			<AlertTitle>CurseForge API Key Required</AlertTitle>
+			<AlertDescription>
+				<div class="space-y-2">
+					<p>To search and install CurseForge modpacks, you need to configure a CurseForge API key.</p>
+					<div class="flex items-center gap-2 mt-2">
+						<Button size="sm" href={indexerStatus.indexers.fuego.apiKeyUrl} target="_blank">
+							<ExternalLink class="h-4 w-4 mr-2" />
+							Get API Key
+						</Button>
+						<Button size="sm" variant="outline" href="/settings">
+							<Settings class="h-4 w-4 mr-2" />
+							Configure in Settings
+						</Button>
+					</div>
+				</div>
+			</AlertDescription>
+		</Alert>
+	{/if}
 	
 	{#if !showFavorites}
 		<div class="flex flex-col gap-4">
@@ -218,6 +299,17 @@
 					<RefreshCw class={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
 					Sync
 				</Button>
+				<Button onclick={() => fileInput?.click()} disabled={uploading} variant="outline">
+					<Upload class="h-4 w-4 mr-2" />
+					Upload Modpack
+				</Button>
+				<input
+					bind:this={fileInput}
+					type="file"
+					accept=".zip"
+					onchange={handleModpackUpload}
+					class="hidden"
+				/>
 			</div>
 			{#if searchResults?.total === 0 && !loading}
 				<p class="text-sm text-muted-foreground">
@@ -243,7 +335,7 @@
 							<CardTitle class="line-clamp-1">{modpack.name}</CardTitle>
 							<div class="flex items-center gap-2 mt-1">
 								<Badge variant="secondary" class="text-xs">
-									{modpack.indexer}
+									{modpack.indexer === 'manual' ? 'Manual Upload' : modpack.indexer}
 								</Badge>
 								<span class="text-xs text-muted-foreground">
 									<Download class="h-3 w-3 inline mr-1" />
@@ -285,12 +377,16 @@
 					</div>
 					
 					<div class="flex items-center justify-between mt-4">
-						<a href={modpack.website_url} target="_blank" rel="noopener noreferrer">
-							<Button variant="outline" size="sm">
-								<ExternalLink class="h-3 w-3 mr-1" />
-								View
-							</Button>
-						</a>
+						{#if modpack.website_url}
+							<a href={modpack.website_url} target="_blank" rel="noopener noreferrer">
+								<Button variant="outline" size="sm">
+									<ExternalLink class="h-3 w-3 mr-1" />
+									View
+								</Button>
+							</a>
+						{:else}
+							<div></div>
+						{/if}
 						<Button size="sm" onclick={() => goto(`/servers/new?modpack=${modpack.id}`)}>
 							Use in Server
 						</Button>

@@ -9,7 +9,7 @@
 	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw } from '@lucide/svelte';
 	import type { Server } from '$lib/api/types';
 
-	let { server }: { server: Server } = $props();
+	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
 	let logs = $state('');
 	let command = $state('');
@@ -17,29 +17,42 @@
 	let autoScroll = $state(true);
 	let scrollAreaRef = $state<HTMLDivElement | null>(null);
 	let endOfLogsRef = $state<HTMLDivElement | null>(null);
-	let pollingInterval: ReturnType<typeof setInterval>;
+	let pollingInterval: ReturnType<typeof setInterval> | null = null;
 	let tailLines = $state(500);
 
 	onMount(() => {
-		fetchLogs();
-		// Poll for new logs every 2 seconds
-		pollingInterval = setInterval(fetchLogs, 2000);
+		if (active) {
+			fetchLogs();
+			startPolling();
+		}
 	});
 
 	onDestroy(() => {
+		stopPolling();
+	});
+
+	// Start/stop polling based on active prop
+	$effect(() => {
+		if (active) {
+			fetchLogs();
+			startPolling();
+		} else {
+			stopPolling();
+		}
+	});
+
+	function startPolling() {
+		if (!pollingInterval) {
+			pollingInterval = setInterval(fetchLogs, 2000);
+		}
+	}
+
+	function stopPolling() {
 		if (pollingInterval) {
 			clearInterval(pollingInterval);
+			pollingInterval = null;
 		}
-	});
-	
-	// Stop polling when server is deleted or component is hidden
-	$effect(() => {
-		if (!server) {
-			if (pollingInterval) {
-				clearInterval(pollingInterval);
-			}
-		}
-	});
+	}
 
 	// Handle auto-scrolling in a separate effect to avoid scroll-linked positioning issues
 	$effect(() => {

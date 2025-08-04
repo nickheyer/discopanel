@@ -353,41 +353,6 @@ func GetAllModLoaders() []ModLoaderInfo {
 	return infos
 }
 
-// GetJavaVersionForMinecraft returns the recommended Java version for a Minecraft version
-func GetJavaVersionForMinecraft(mcVersion string) string {
-	// Parse major.minor version
-	parts := strings.Split(mcVersion, ".")
-	if len(parts) < 2 {
-		return "17" // Default to Java 17
-	}
-
-	major := parts[1]
-	if len(major) > 0 {
-		switch major {
-		case "7", "8", "9", "10", "11", "12", "13", "14", "15", "16":
-			return "8"
-		case "17":
-			return "16"
-		case "18", "19":
-			return "17"
-		case "20":
-			return "17"
-		case "21":
-			return "21"
-		default:
-			// For versions 1.21+ use Java 21
-			if majorNum := strings.TrimPrefix(major, "1."); len(majorNum) > 0 {
-				if majorNum >= "21" {
-					return "21"
-				}
-			}
-			return "21" // Latest versions use Java 21
-		}
-	}
-
-	return "17"
-}
-
 // GetStartupFlags returns recommended JVM flags for the server
 func GetStartupFlags(memory int) []string {
 	return []string{

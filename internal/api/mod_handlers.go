@@ -18,11 +18,109 @@ func (s *Server) handleListMods(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	serverID := vars["id"]
 
-	mods, err := s.store.ListServerMods(ctx, serverID)
+	// Get server to find data path and mod loader
+	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
-		s.log.Error("Failed to list mods: %v", err)
-		s.respondError(w, http.StatusInternalServerError, "Failed to list mods")
+		s.respondError(w, http.StatusNotFound, "Server not found")
 		return
+	}
+
+	// Get the mods directory path
+	modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
+	if modsDir == "" {
+		s.respondError(w, http.StatusBadRequest, "This server type does not support mods")
+		return
+	}
+
+	// Check if mods directory exists
+	if _, err := os.Stat(modsDir); os.IsNotExist(err) {
+		// Return empty list if directory doesn't exist
+		s.respondJSON(w, http.StatusOK, []models.Mod{})
+		return
+	}
+
+	// Read mods from directory
+	files, err := os.ReadDir(modsDir)
+	if err != nil {
+		s.log.Error("Failed to read mods directory: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to read mods directory")
+		return
+	}
+
+	// Build list of mods from files
+	mods := []models.Mod{}
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		// Check if this is a valid mod file
+		if !minecraft.IsValidModFile(file.Name(), server.ModLoader) {
+			continue
+		}
+
+		info, err := file.Info()
+		if err != nil {
+			continue
+		}
+
+		// Create mod entry with consistent ID generation
+		mod := models.Mod{
+			ID:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+file.Name())).String(),
+			ServerID:    serverID,
+			Name:        file.Name(),
+			FileName:    file.Name(),
+			Enabled:     true,
+			FileSize:    info.Size(),
+			UploadedAt:  info.ModTime(),
+		}
+
+		// Extract mod name from filename (remove extension)
+		baseName := file.Name()
+		if ext := filepath.Ext(baseName); ext != "" {
+			baseName = baseName[:len(baseName)-len(ext)]
+		}
+		mod.Name = baseName
+
+		mods = append(mods, mod)
+	}
+
+	// Also check disabled mods directory
+	disabledDir := modsDir + "_disabled"
+	if files, err := os.ReadDir(disabledDir); err == nil {
+		for _, file := range files {
+			if file.IsDir() {
+				continue
+			}
+
+			if !minecraft.IsValidModFile(file.Name(), server.ModLoader) {
+				continue
+			}
+
+			info, err := file.Info()
+			if err != nil {
+				continue
+			}
+
+			mod := models.Mod{
+				ID:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+file.Name())).String(),
+				ServerID:    serverID,
+				Name:        file.Name(),
+				FileName:    file.Name(),
+				Enabled:     false,
+				FileSize:    info.Size(),
+				UploadedAt:  info.ModTime(),
+			}
+
+			// Extract mod name from filename
+			baseName := file.Name()
+			if ext := filepath.Ext(baseName); ext != "" {
+				baseName = baseName[:len(baseName)-len(ext)]
+			}
+			mod.Name = baseName
+
+			mods = append(mods, mod)
+		}
 	}
 
 	s.respondJSON(w, http.StatusOK, mods)
@@ -136,10 +234,12 @@ func (s *Server) handleUpdateMod(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	modID := vars["modId"]
+	serverID := vars["id"]
 
-	mod, err := s.store.GetMod(ctx, modID)
+	// Get server to find mod path
+	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
-		s.respondError(w, http.StatusNotFound, "Mod not found")
+		s.respondError(w, http.StatusNotFound, "Server not found")
 		return
 	}
 
@@ -155,47 +255,78 @@ func (s *Server) handleUpdateMod(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update fields
-	if req.Name != "" {
-		mod.Name = req.Name
-	}
-	if req.Version != "" {
-		mod.Version = req.Version
-	}
-	if req.Description != "" {
-		mod.Description = req.Description
-	}
+	// For now, we only support enabling/disabling
 	if req.Enabled != nil {
-		mod.Enabled = *req.Enabled
+		modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
+		disabledDir := modsDir + "_disabled"
 
-		// If disabling, move file out of mods directory
-		server, err := s.store.GetServer(ctx, mod.ServerID)
-		if err == nil {
-			modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
-			disabledDir := modsDir + "_disabled"
+		// Try to find the mod file by checking both directories
+		var modFileName string
+		var currentlyEnabled bool
 
-			if !mod.Enabled {
-				// Move to disabled directory
-				os.MkdirAll(disabledDir, 0755)
-				oldPath := filepath.Join(modsDir, mod.FileName)
-				newPath := filepath.Join(disabledDir, mod.FileName)
-				os.Rename(oldPath, newPath)
+		// First, scan the mods directory
+		if files, err := os.ReadDir(modsDir); err == nil {
+			for _, file := range files {
+				if !file.IsDir() && minecraft.IsValidModFile(file.Name(), server.ModLoader) {
+					// Generate the same ID as in listMods to match
+					fileID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+file.Name())).String()
+					if fileID == modID {
+						modFileName = file.Name()
+						currentlyEnabled = true
+						break
+					}
+				}
+			}
+		}
+
+		// If not found, check disabled directory
+		if modFileName == "" {
+			if files, err := os.ReadDir(disabledDir); err == nil {
+				for _, file := range files {
+					if !file.IsDir() && minecraft.IsValidModFile(file.Name(), server.ModLoader) {
+						fileID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+file.Name())).String()
+						if fileID == modID {
+							modFileName = file.Name()
+							currentlyEnabled = false
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if modFileName == "" {
+			s.respondError(w, http.StatusNotFound, "Mod not found")
+			return
+		}
+
+		// Now move the file if needed
+		if *req.Enabled != currentlyEnabled {
+			if *req.Enabled {
+				// Move from disabled to mods directory
+				oldPath := filepath.Join(disabledDir, modFileName)
+				newPath := filepath.Join(modsDir, modFileName)
+				if err := os.Rename(oldPath, newPath); err != nil {
+					s.log.Error("Failed to enable mod: %v", err)
+					s.respondError(w, http.StatusInternalServerError, "Failed to enable mod")
+					return
+				}
 			} else {
-				// Move back to mods directory
-				oldPath := filepath.Join(disabledDir, mod.FileName)
-				newPath := filepath.Join(modsDir, mod.FileName)
-				os.Rename(oldPath, newPath)
+				// Move from mods to disabled directory
+				os.MkdirAll(disabledDir, 0755)
+				oldPath := filepath.Join(modsDir, modFileName)
+				newPath := filepath.Join(disabledDir, modFileName)
+				if err := os.Rename(oldPath, newPath); err != nil {
+					s.log.Error("Failed to disable mod: %v", err)
+					s.respondError(w, http.StatusInternalServerError, "Failed to disable mod")
+					return
+				}
 			}
 		}
 	}
 
-	if err := s.store.UpdateMod(ctx, mod); err != nil {
-		s.log.Error("Failed to update mod: %v", err)
-		s.respondError(w, http.StatusInternalServerError, "Failed to update mod")
-		return
-	}
-
-	s.respondJSON(w, http.StatusOK, mod)
+	// Return success
+	s.respondJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (s *Server) handleDeleteMod(w http.ResponseWriter, r *http.Request) {

@@ -1,15 +1,24 @@
 package api
 
 import (
+	"archive/zip"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/nickheyer/discopanel/internal/db"
+	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/indexers"
 	"github.com/nickheyer/discopanel/internal/indexers/fuego"
-	"github.com/nickheyer/discopanel/internal/minecraft"
 )
 
 func (s *Server) handleSearchModpacks(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +140,7 @@ func (s *Server) handleSyncModpacks(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		
+
 		// If still no version found, log error
 		if mcVersion == "" {
 			s.log.Error("No valid Minecraft version found in modpack %s game versions: %v", modpack.ID, modpack.GameVersions)
@@ -139,35 +148,42 @@ func (s *Server) handleSyncModpacks(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Determine Java version and Docker image
-		javaVersion := minecraft.GetJavaVersionForMinecraft(mcVersion)
-		dockerImage := "java8"
-		switch javaVersion {
-		case "21":
-			dockerImage = "java21"
-		case "17":
-			dockerImage = "java17"
-		case "11":
-			dockerImage = "java11"
+		// Extract first mod loader for docker tag selection
+		modLoader := models.ModLoaderVanilla
+		if len(modpack.ModLoaders) > 0 {
+			switch modpack.ModLoaders[0] {
+			case "forge":
+				modLoader = models.ModLoaderForge
+			case "fabric":
+				modLoader = models.ModLoaderFabric
+			case "neoforge":
+				modLoader = models.ModLoaderNeoForge
+			case "quilt":
+				modLoader = models.ModLoaderQuilt
+			}
 		}
 
+		javaVersion := strconv.Itoa(docker.GetRequiredJavaVersion(mcVersion, modLoader))
+		dockerImage := docker.GetOptimalDockerTag(mcVersion, modLoader, false)
+
 		dbModpack := &db.IndexedModpack{
-			ID:             modpack.ID,
-			IndexerID:      modpack.IndexerID,
-			Indexer:        modpack.Indexer,
-			Name:           modpack.Name,
-			Slug:           modpack.Slug,
-			Summary:        modpack.Summary,
-			Description:    modpack.Description,
-			LogoURL:        modpack.LogoURL,
-			WebsiteURL:     modpack.WebsiteURL,
-			DownloadCount:  modpack.DownloadCount,
-			Categories:     string(categoriesJSON),
-			GameVersions:   string(gameVersionsJSON),
-			ModLoaders:     string(modLoadersJSON),
-			LatestFileID:   modpack.LatestFileID,
-			DateCreated:    modpack.DateCreated,
-			DateModified:   modpack.DateModified,
-			DateReleased:   modpack.DateReleased,
+			ID:            modpack.ID,
+			IndexerID:     modpack.IndexerID,
+			Indexer:       modpack.Indexer,
+			Name:          modpack.Name,
+			Slug:          modpack.Slug,
+			Summary:       modpack.Summary,
+			Description:   modpack.Description,
+			LogoURL:       modpack.LogoURL,
+			WebsiteURL:    modpack.WebsiteURL,
+			DownloadCount: modpack.DownloadCount,
+			Categories:    string(categoriesJSON),
+			GameVersions:  string(gameVersionsJSON),
+			ModLoaders:    string(modLoadersJSON),
+			LatestFileID:  modpack.LatestFileID,
+			DateCreated:   modpack.DateCreated,
+			DateModified:  modpack.DateModified,
+			DateReleased:  modpack.DateReleased,
 			// Computed fields
 			MCVersion:      mcVersion,
 			JavaVersion:    javaVersion,
@@ -362,14 +378,285 @@ func (s *Server) handleGetModpackConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Return configuration from the modpack's computed fields
+	modLoader := "auto_curseforge" // Default for fuego modpacks
+	if modpack.Indexer == "manual" {
+		// For manual uploads, use the actual mod loader from the modpack
+		var modLoaders []string
+		if err := json.Unmarshal([]byte(modpack.ModLoaders), &modLoaders); err == nil && len(modLoaders) > 0 {
+			// Use first mod loader from the list
+			modLoader = modLoaders[0]
+		}
+	}
+
 	config := map[string]interface{}{
 		"name":         modpack.Name,
 		"description":  modpack.Summary,
-		"mod_loader":   "auto_curseforge", // For fuego modpacks
+		"mod_loader":   modLoader,
 		"mc_version":   modpack.MCVersion,
 		"memory":       modpack.RecommendedRAM,
 		"docker_image": modpack.DockerImage,
+		"modpack_file": modpack.LatestFileID, // For manual modpacks, this is the file ID
 	}
-	
+
 	s.respondJSON(w, http.StatusOK, config)
+}
+
+func (s *Server) handleGetIndexerStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Get global settings to check API key
+	globalSettings, err := s.store.GetGlobalSettings(ctx)
+	if err != nil {
+		s.log.Error("Failed to get global settings: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to get global settings")
+		return
+	}
+
+	apiKeyConfigured := false
+	if globalSettings.CFAPIKey != nil && *globalSettings.CFAPIKey != "" {
+		apiKeyConfigured = true
+	}
+
+	status := map[string]any{
+		"indexers": map[string]any{
+			"fuego": map[string]any{
+				"name":             "CurseForge",
+				"enabled":          apiKeyConfigured,
+				"apiKeyConfigured": apiKeyConfigured,
+				"apiKeyUrl":        "https://console.curseforge.com/#/api-keys",
+			},
+		},
+	}
+
+	s.respondJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleUploadModpack(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Parse multipart form with max 500MB
+	err := r.ParseMultipartForm(500 << 20)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, "Failed to parse form data")
+		return
+	}
+
+	// Get the uploaded file
+	file, header, err := r.FormFile("modpack")
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, "No modpack file provided")
+		return
+	}
+	defer file.Close()
+
+	// Validate file extension
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".zip") {
+		s.respondError(w, http.StatusBadRequest, "Modpack must be a ZIP file")
+		return
+	}
+
+	// Create temporary file
+	tempFile, err := os.CreateTemp("", "modpack-*.zip")
+	if err != nil {
+		s.log.Error("Failed to create temp file: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to process upload")
+		return
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	// Copy uploaded file to temp file
+	if _, err := io.Copy(tempFile, file); err != nil {
+		s.log.Error("Failed to copy uploaded file: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to process upload")
+		return
+	}
+
+	// Reset file pointer to beginning
+	if _, err := tempFile.Seek(0, 0); err != nil {
+		s.log.Error("Failed to seek temp file: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to process upload")
+		return
+	}
+
+	// Open zip file for reading
+	zipReader, err := zip.OpenReader(tempFile.Name())
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid ZIP file")
+		return
+	}
+	defer zipReader.Close()
+
+	// Look for manifest.json to determine modpack type
+	var manifestFile *zip.File
+	for _, f := range zipReader.File {
+		if f.Name == "manifest.json" || strings.HasSuffix(f.Name, "/manifest.json") {
+			manifestFile = f
+			break
+		}
+	}
+
+	if manifestFile == nil {
+		s.respondError(w, http.StatusBadRequest, "No manifest.json found in modpack")
+		return
+	}
+
+	// Read manifest
+	manifestReader, err := manifestFile.Open()
+	if err != nil {
+		s.log.Error("Failed to open manifest: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to read manifest")
+		return
+	}
+	defer manifestReader.Close()
+
+	var manifest struct {
+		Name        string `json:"name"`
+		Version     string `json:"version"`
+		Author      string `json:"author"`
+		Description string `json:"description,omitempty"`
+		Minecraft   struct {
+			Version    string `json:"version"`
+			ModLoaders []struct {
+				ID      string `json:"id"`
+				Primary bool   `json:"primary"`
+			} `json:"modLoaders"`
+		} `json:"minecraft"`
+	}
+
+	if err := json.NewDecoder(manifestReader).Decode(&manifest); err != nil {
+		s.log.Error("Failed to parse manifest: %v", err)
+		s.respondError(w, http.StatusBadRequest, "Invalid manifest.json")
+		return
+	}
+
+	// Generate ID for the uploaded modpack
+	modpackID := uuid.New().String()
+
+	// Determine mod loader from manifest
+	modLoader := ""
+	for _, ml := range manifest.Minecraft.ModLoaders {
+		if strings.Contains(ml.ID, "forge") {
+			modLoader = "forge"
+			break
+		} else if strings.Contains(ml.ID, "fabric") {
+			modLoader = "fabric"
+			break
+		} else if strings.Contains(ml.ID, "neoforge") {
+			modLoader = "neoforge"
+			break
+		} else if strings.Contains(ml.ID, "quilt") {
+			modLoader = "quilt"
+			break
+		}
+	}
+
+	// Get Java version and Docker image
+	// Convert manual modpack mod loader string to enum
+	manualModLoader := models.ModLoaderVanilla
+	switch modLoader {
+	case "forge":
+		manualModLoader = models.ModLoaderForge
+	case "fabric":
+		manualModLoader = models.ModLoaderFabric
+	case "neoforge":
+		manualModLoader = models.ModLoaderNeoForge
+	case "quilt":
+		manualModLoader = models.ModLoaderQuilt
+	}
+
+	javaVersion := strconv.Itoa(docker.GetRequiredJavaVersion(manifest.Minecraft.Version, manualModLoader))
+	dockerImage := docker.GetOptimalDockerTag(manifest.Minecraft.Version, manualModLoader, false)
+
+	// Create database entry
+	gameVersionsJSON, _ := json.Marshal([]string{manifest.Minecraft.Version})
+	modLoadersJSON, _ := json.Marshal([]string{modLoader})
+
+	dbModpack := &db.IndexedModpack{
+		ID:             modpackID,
+		IndexerID:      modpackID,
+		Indexer:        "manual",
+		Name:           manifest.Name,
+		Slug:           strings.ToLower(strings.ReplaceAll(manifest.Name, " ", "-")),
+		Summary:        fmt.Sprintf("Version %s by %s", manifest.Version, manifest.Author),
+		Description:    manifest.Description,
+		LogoURL:        "", // No logo for manual uploads
+		WebsiteURL:     "",
+		DownloadCount:  0,
+		Categories:     "[]",
+		GameVersions:   string(gameVersionsJSON),
+		ModLoaders:     string(modLoadersJSON),
+		LatestFileID:   modpackID,
+		DateCreated:    time.Now(),
+		DateModified:   time.Now(),
+		DateReleased:   time.Now(),
+		MCVersion:      manifest.Minecraft.Version,
+		JavaVersion:    javaVersion,
+		DockerImage:    dockerImage,
+		RecommendedRAM: 6144, // 6GB for modpacks
+	}
+
+	if err := s.store.UpsertIndexedModpack(ctx, dbModpack); err != nil {
+		s.log.Error("Failed to store modpack: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to store modpack")
+		return
+	}
+
+	// Store the ZIP file
+	// Create directory for manual modpacks if it doesn't exist
+	manualDir := filepath.Join("/data", "modpacks", "manual")
+	if err := os.MkdirAll(manualDir, 0755); err != nil {
+		s.log.Error("Failed to create manual modpacks directory: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to store modpack file")
+		return
+	}
+
+	// Copy ZIP to storage
+	destPath := filepath.Join(manualDir, modpackID+".zip")
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		s.log.Error("Failed to create destination file: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to store modpack file")
+		return
+	}
+	defer destFile.Close()
+
+	if _, err := tempFile.Seek(0, 0); err != nil {
+		s.log.Error("Failed to seek temp file: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to store modpack file")
+		return
+	}
+
+	if _, err := io.Copy(destFile, tempFile); err != nil {
+		s.log.Error("Failed to copy modpack to storage: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to store modpack file")
+		return
+	}
+
+	// Create a file entry for the uploaded modpack
+	dbFile := &db.IndexedModpackFile{
+		ID:               modpackID,
+		ModpackID:        modpackID,
+		DisplayName:      header.Filename,
+		FileName:         header.Filename,
+		FileDate:         time.Now(),
+		FileLength:       header.Size,
+		ReleaseType:      "1",      // Release
+		DownloadURL:      destPath, // Store local path
+		GameVersions:     string(gameVersionsJSON),
+		ModLoader:        modLoader,
+		ServerPackFileID: nil,
+	}
+
+	if err := s.store.UpsertIndexedModpackFile(ctx, dbFile); err != nil {
+		s.log.Error("Failed to store modpack file entry: %v", err)
+		// Don't fail the upload, just log the error
+	}
+
+	s.respondJSON(w, http.StatusOK, map[string]any{
+		"id":      modpackID,
+		"name":    manifest.Name,
+		"version": manifest.Version,
+		"author":  manifest.Author,
+	})
 }

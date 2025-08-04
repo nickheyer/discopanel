@@ -11,12 +11,12 @@ import (
 )
 
 type FileInfo struct {
-	Name     string      `json:"name"`
-	Path     string      `json:"path"`
-	IsDir    bool        `json:"is_dir"`
-	Size     int64       `json:"size"`
-	Modified int64       `json:"modified"`
-	Children []FileInfo  `json:"children,omitempty"`
+	Name     string     `json:"name"`
+	Path     string     `json:"path"`
+	IsDir    bool       `json:"is_dir"`
+	Size     int64      `json:"size"`
+	Modified int64      `json:"modified"`
+	Children []FileInfo `json:"children,omitempty"`
 }
 
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +37,9 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 		path = "."
 	}
 
+	// Check if tree view is requested
+	tree := r.URL.Query().Get("tree") == "true"
+
 	// Clean and validate path
 	fullPath := filepath.Join(server.DataPath, path)
 	if !strings.HasPrefix(fullPath, server.DataPath) {
@@ -45,7 +48,13 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// List directory
-	files, err := s.listDirectory(fullPath, server.DataPath)
+	var files []FileInfo
+	if tree {
+		files, err = s.listDirectoryTree(fullPath, server.DataPath, 0, 10) // max depth 10
+	} else {
+		files, err = s.listDirectory(fullPath, server.DataPath)
+	}
+
 	if err != nil {
 		s.log.Error("Failed to list files: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to list files")
@@ -280,13 +289,55 @@ func (s *Server) listDirectory(path, basePath string) ([]FileInfo, error) {
 		}
 
 		relPath, _ := filepath.Rel(basePath, filepath.Join(path, entry.Name()))
-		
+
 		fileInfo := FileInfo{
 			Name:     entry.Name(),
 			Path:     relPath,
 			IsDir:    entry.IsDir(),
 			Size:     info.Size(),
 			Modified: info.ModTime().Unix(),
+		}
+
+		files = append(files, fileInfo)
+	}
+
+	return files, nil
+}
+
+func (s *Server) listDirectoryTree(path, basePath string, depth, maxDepth int) ([]FileInfo, error) {
+	if depth > maxDepth {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+
+	files := make([]FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		relPath, _ := filepath.Rel(basePath, filepath.Join(path, entry.Name()))
+
+		fileInfo := FileInfo{
+			Name:     entry.Name(),
+			Path:     relPath,
+			IsDir:    entry.IsDir(),
+			Size:     info.Size(),
+			Modified: info.ModTime().Unix(),
+		}
+
+		// If it's a directory and we haven't reached max depth, get children
+		if entry.IsDir() && depth < maxDepth {
+			childPath := filepath.Join(path, entry.Name())
+			children, err := s.listDirectoryTree(childPath, basePath, depth+1, maxDepth)
+			if err == nil {
+				fileInfo.Children = children
+			}
 		}
 
 		files = append(files, fileInfo)

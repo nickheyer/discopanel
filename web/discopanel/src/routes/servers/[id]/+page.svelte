@@ -14,11 +14,15 @@
 	import type { Server } from '$lib/api/types';
 	import ServerConsole from '$lib/components/server-console.svelte';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
+	import ServerSettings from '$lib/components/server-settings.svelte';
+	import ServerMods from '$lib/components/server-mods.svelte';
+	import ServerFiles from '$lib/components/server-files.svelte';
 
 	let server = $state<Server | null>(null);
 	let loading = $state(true);
 	let actionLoading = $state(false);
 	let serverId = $derived($page.params.id);
+	let activeTab = $state('overview');
 
 	onMount(() => {
 		loadServer();
@@ -241,7 +245,7 @@
 			</Card>
 		</div>
 
-		<Tabs value="overview" class="flex-1 flex flex-col min-h-0">
+		<Tabs value="overview" class="flex-1 flex flex-col min-h-0" onValueChange={(value) => activeTab = value}>
 			<TabsList>
 				<TabsTrigger value="overview">Overview</TabsTrigger>
 				<TabsTrigger value="console">Console</TabsTrigger>
@@ -251,6 +255,16 @@
 			</TabsList>
 
 			<TabsContent value="overview" class="space-y-4">
+				<Card>
+					<CardHeader>
+						<CardTitle>Server Settings</CardTitle>
+						<CardDescription>Edit your server configuration and restart to apply changes</CardDescription>
+					</CardHeader>
+					<CardContent>
+						<ServerSettings {server} onUpdate={loadServer} />
+					</CardContent>
+				</Card>
+
 				<Card>
 					<CardHeader>
 						<CardTitle>Server Information</CardTitle>
@@ -300,41 +314,19 @@
 			</TabsContent>
 
 			<TabsContent value="console" class="h-[600px]">
-				<ServerConsole {server} />
+				<ServerConsole {server} active={activeTab === 'console'} />
 			</TabsContent>
 
 			<TabsContent value="configuration" class="h-[600px]">
 				<ServerConfiguration {server} />
 			</TabsContent>
 
-			<TabsContent value="mods">
-				<Card>
-					<CardHeader>
-						<CardTitle>Mod Management</CardTitle>
-						<CardDescription>Add, remove, and configure mods</CardDescription>
-					</CardHeader>
-					<CardContent>
-						<div class="flex items-center justify-center py-8 text-muted-foreground">
-							<Package class="h-8 w-8 mr-2" />
-							<span>Mod management feature coming soon</span>
-						</div>
-					</CardContent>
-				</Card>
+			<TabsContent value="mods" class="h-[600px]">
+				<ServerMods {server} active={activeTab === 'mods'} />
 			</TabsContent>
 
-			<TabsContent value="files">
-				<Card>
-					<CardHeader>
-						<CardTitle>File Manager</CardTitle>
-						<CardDescription>Browse and manage server files</CardDescription>
-					</CardHeader>
-					<CardContent>
-						<div class="flex items-center justify-center py-8 text-muted-foreground">
-							<HardDrive class="h-8 w-8 mr-2" />
-							<span>File management feature coming soon</span>
-						</div>
-					</CardContent>
-				</Card>
+			<TabsContent value="files" class="h-[600px]">
+				<ServerFiles {server} active={activeTab === 'files'} />
 			</TabsContent>
 		</Tabs>
 	</div>

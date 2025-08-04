@@ -208,6 +208,7 @@ type ServerConfig struct {
 	CFPageURL               *string `json:"cfPageUrl" env:"CF_PAGE_URL" default:"" desc:"URL to modpack or specific file" input:"text" label:"CurseForge Page URL"`
 	CFSlug                  *string `json:"cfSlug" env:"CF_SLUG" default:"" desc:"Modpack slug identifier" input:"text" label:"CurseForge Slug"`
 	CFFileID                *string `json:"cfFileId" env:"CF_FILE_ID" default:"" desc:"Mod CurseForge numerical ID" input:"text" label:"CurseForge File ID"`
+	CFModpackZip            *string `json:"cfModpackZip" env:"CF_MODPACK_ZIP" default:"" desc:"Container path to unpublished modpack zip" input:"text" label:"CurseForge Modpack Zip"`
 	CFFilenameMatcher       *string `json:"cfFilenameMatcher" env:"CF_FILENAME_MATCHER" default:"" desc:"Substring to match desired filename" input:"text" label:"CurseForge Filename Matcher"`
 	CFExcludeIncludeFile    *string `json:"cfExcludeIncludeFile" env:"CF_EXCLUDE_INCLUDE_FILE" default:"" desc:"JSON file for global/modpack exclusions" input:"text" label:"CurseForge Exclude/Include File"`
 	CFExcludeMods           *string `json:"cfExcludeMods" env:"CF_EXCLUDE_MODS" default:"" desc:"Comma/space delimited list of mod slugs/IDs to exclude" input:"text" label:"CurseForge Exclude Mods"`

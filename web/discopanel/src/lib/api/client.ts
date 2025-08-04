@@ -199,9 +199,12 @@ class ApiClient {
   }
 
   // File Management
-  async listFiles(serverId: string, path: string = ''): Promise<FileInfo[]> {
-    const queryPath = path ? `?path=${encodeURIComponent(path)}` : '';
-    return this.request<FileInfo[]>(`/servers/${serverId}/files${queryPath}`);
+  async listFiles(serverId: string, path: string = '', tree: boolean = false): Promise<FileInfo[]> {
+    const params = new URLSearchParams();
+    if (path) params.append('path', path);
+    if (tree) params.append('tree', 'true');
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.request<FileInfo[]>(`/servers/${serverId}/files${query}`);
   }
 
   async uploadFile(serverId: string, file: File, path: string = ''): Promise<UploadResponse> {

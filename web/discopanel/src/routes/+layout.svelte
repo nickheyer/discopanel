@@ -7,6 +7,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { serversStore, runningServers } from '$lib/stores/servers';
 	import { onMount } from 'svelte';
+	import { Toaster } from '$lib/components/ui/sonner';
 	
 	import { Server, Home, Settings, Package } from '@lucide/svelte';
 
@@ -35,6 +36,7 @@
 </svelte:head>
 
 <ModeWatcher />
+<Toaster position="top-right" expand={true} richColors />
 
 <SidebarProvider>
 	<Sidebar>

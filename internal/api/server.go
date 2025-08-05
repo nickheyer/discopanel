@@ -10,15 +10,17 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
 type Server struct {
-	store  *storage.Store
-	docker *docker.Client
-	config *config.Config
-	log    *logger.Logger
-	router *mux.Router
+	store        *storage.Store
+	docker       *docker.Client
+	config       *config.Config
+	log          *logger.Logger
+	router       *mux.Router
+	proxyManager *proxy.Manager
 }
 
 func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
@@ -35,6 +37,10 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 
 func (s *Server) Router() http.Handler {
 	return s.router
+}
+
+func (s *Server) SetProxyManager(pm *proxy.Manager) {
+	s.proxyManager = pm
 }
 
 func (s *Server) setupRoutes() {
@@ -67,6 +73,12 @@ func (s *Server) setupRoutes() {
 	// Global settings
 	api.HandleFunc("/settings", s.handleGetGlobalSettings).Methods("GET")
 	api.HandleFunc("/settings", s.handleUpdateGlobalSettings).Methods("PUT")
+	
+	// Proxy endpoints
+	api.HandleFunc("/proxy/routes", s.handleGetProxyRoutes).Methods("GET")
+	api.HandleFunc("/proxy/status", s.handleGetProxyStatus).Methods("GET")
+	api.HandleFunc("/servers/{id}/routing", s.handleGetServerRouting).Methods("GET")
+	api.HandleFunc("/servers/{id}/routing", s.handleUpdateServerRouting).Methods("PUT")
 	
 	// Indexed modpacks
 	api.HandleFunc("/modpacks", s.handleSearchModpacks).Methods("GET")

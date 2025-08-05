@@ -69,8 +69,9 @@ type Server struct {
 	MCVersion   string       `json:"mc_version" gorm:"not null;column:mc_version"`
 	ContainerID string       `json:"container_id" gorm:"column:container_id"`
 	Status      ServerStatus `json:"status" gorm:"not null"`
-	Port        int          `json:"port" gorm:"uniqueIndex"`
+	Port        int          `json:"port"`
 	ProxyPort   int          `json:"proxy_port" gorm:"column:proxy_port"`
+	ProxyHostname string     `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex"`
 	MaxPlayers  int          `json:"max_players" gorm:"default:20;column:max_players"`
 	Memory      int          `json:"memory" gorm:"default:2048"` // in MB
 	CreatedAt   time.Time    `json:"created_at" gorm:"autoCreateTime"`

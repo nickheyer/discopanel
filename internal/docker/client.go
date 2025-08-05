@@ -243,17 +243,37 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	// Build environment variables from ServerConfig
 	env := buildEnvFromConfig(serverConfig)
 
+	// Override SERVER_PORT when using proxy - all servers should use 25565 internally
+	if server.ProxyHostname != "" {
+		// Remove any existing SERVER_PORT env var
+		newEnv := []string{}
+		for _, e := range env {
+			if !strings.HasPrefix(e, "SERVER_PORT=") {
+				newEnv = append(newEnv, e)
+			}
+		}
+		// Add SERVER_PORT=25565
+		newEnv = append(newEnv, "SERVER_PORT=25565")
+		env = newEnv
+	}
+
 	// Log the environment variables for debugging
 	for _, e := range env {
 		fmt.Printf("Docker env: %s\n", e)
 	}
 
 	// Container configuration
+	// Determine which port Minecraft will actually use inside the container
+	minecraftPort := server.Port
+	if server.ProxyHostname != "" {
+		minecraftPort = 25565 // Proxy servers always use 25565 internally
+	}
+	
 	config := &container.Config{
 		Image: imageName,
 		Env:   env,
 		ExposedPorts: nat.PortSet{
-			"25565/tcp": struct{}{},
+			nat.Port(fmt.Sprintf("%d/tcp", minecraftPort)): struct{}{},
 			"25575/tcp": struct{}{}, // RCON port
 		},
 		Labels: map[string]string{
@@ -265,25 +285,45 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		},
 	}
 
-	// Calculate RCON port based on base port + 10
-	rconPort := server.Port + 10
+	// For RCON, use a dynamic port allocation or no host binding when using proxy
+	// This prevents conflicts when multiple servers are running
+	var rconPortBinding []nat.PortBinding
+	if server.ProxyHostname == "" {
+		// Only bind RCON to a specific port if not using proxy
+		rconPort := server.Port + 10
+		rconPortBinding = []nat.PortBinding{
+			{
+				HostIP:   "127.0.0.1",
+				HostPort: fmt.Sprintf("%d", rconPort),
+			},
+		}
+	} else {
+		// When using proxy, let Docker assign a random port or don't bind at all
+		// The container can still be accessed via Docker network for RCON
+		rconPortBinding = []nat.PortBinding{}
+	}
 
 	// Host configuration
+	// If server has a proxy hostname configured, don't bind the game port to avoid conflicts
+	portBindings := nat.PortMap{}
+	
+	// Only bind the game port if not using proxy (no proxy_hostname set)
+	if server.ProxyHostname == "" {
+		portBindings[nat.Port(fmt.Sprintf("%d/tcp", minecraftPort))] = []nat.PortBinding{
+			{
+				HostIP:   "0.0.0.0",
+				HostPort: fmt.Sprintf("%d", server.Port),
+			},
+		}
+	}
+	
+	// Set RCON port binding based on proxy configuration
+	if len(rconPortBinding) > 0 {
+		portBindings["25575/tcp"] = rconPortBinding
+	}
+	
 	hostConfig := &container.HostConfig{
-		PortBindings: nat.PortMap{
-			"25565/tcp": []nat.PortBinding{
-				{
-					HostIP:   "0.0.0.0",
-					HostPort: fmt.Sprintf("%d", server.Port),
-				},
-			},
-			"25575/tcp": []nat.PortBinding{
-				{
-					HostIP:   "127.0.0.1", // Only bind RCON to localhost for security
-					HostPort: fmt.Sprintf("%d", rconPort),
-				},
-			},
-		},
+		PortBindings: portBindings,
 		Mounts: []mount.Mount{
 			{
 				Type:   mount.TypeBind,

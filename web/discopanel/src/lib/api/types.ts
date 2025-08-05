@@ -25,6 +25,7 @@ export interface Server {
   status: ServerStatus;
   port: number;
   proxy_port: number;
+  proxy_hostname: string;
   max_players: number;
   memory: number;
   created_at: string;
@@ -45,6 +46,7 @@ export interface CreateServerRequest {
   memory: number;
   docker_image?: string;
   auto_start: boolean;
+  proxy_hostname?: string;
 }
 
 export interface UpdateServerRequest {

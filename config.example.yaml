@@ -31,12 +31,26 @@ storage:
   temp_dir: "./tmp"
   max_upload_size: 524288000  # 500MB in bytes
 
-# Proxy configuration
+# Proxy configuration - ENABLE THIS FOR MINECRAFT ROUTING
 proxy:
-  enabled: false
-  base_url: ""
+  enabled: true
+  base_url: "mc.example.com" # Your domain for Minecraft servers
+  listen_port: 25565 # Port to listen on (can also use 443)
   port_range_min: 25565
   port_range_max: 25665
+
+# Example usage:
+# With proxy enabled and base_url set to "mc.example.com":
+# - Server named "survival" → Connect via: survival.mc.example.com:25565
+# - Server named "creative" → Connect via: creative.mc.example.com:25565
+# - Server named "modded" → Connect via: modded.mc.example.com:25565
+#
+# All servers use the same port (25565) and are routed based on hostname!
+# 
+# DNS Setup Required:
+# Add a wildcard DNS record: *.mc.example.com → Your server's IP
+# Or add individual A records for each server subdomain
+
 
 # Minecraft server global configuration defaults
 minecraft:

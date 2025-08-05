@@ -150,7 +150,8 @@ func (s *Store) DeleteServer(ctx context.Context, id string) error {
 
 func (s *Store) GetServerByPort(ctx context.Context, port int) (*Server, error) {
 	var server Server
-	err := s.db.WithContext(ctx).Where("port = ?", port).First(&server).Error
+	// Only check servers that don't have a proxy hostname (i.e., servers that actually bind to the port)
+	err := s.db.WithContext(ctx).Where("port = ? AND (proxy_hostname IS NULL OR proxy_hostname = '')", port).First(&server).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil

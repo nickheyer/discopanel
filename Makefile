@@ -7,7 +7,7 @@ FRONTEND_DIR := web/discopanel
 BACKEND_BIN := discopanel
 
 # Development mode - runs backend and frontend concurrently
-dev: clean
+dev:
 	@echo "Starting development environment..."
 	@mkdir -p $(DATA_DIR)
 	@echo "Starting backend server with frontend dev server..."

@@ -43,16 +43,17 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var req struct {
-		Name        string           `json:"name"`
-		Description string           `json:"description"`
-		ModLoader   models.ModLoader `json:"mod_loader"`
-		MCVersion   string           `json:"mc_version"`
-		Port        int              `json:"port"`
-		MaxPlayers  int              `json:"max_players"`
-		Memory      int              `json:"memory"`
-		DockerImage string           `json:"docker_image"`
-		AutoStart   bool             `json:"auto_start"`
-		ModpackID   string           `json:"modpack_id,omitempty"`
+		Name          string           `json:"name"`
+		Description   string           `json:"description"`
+		ModLoader     models.ModLoader `json:"mod_loader"`
+		MCVersion     string           `json:"mc_version"`
+		Port          int              `json:"port"`
+		MaxPlayers    int              `json:"max_players"`
+		Memory        int              `json:"memory"`
+		DockerImage   string           `json:"docker_image"`
+		AutoStart     bool             `json:"auto_start"`
+		ModpackID     string           `json:"modpack_id,omitempty"`
+		ProxyHostname string           `json:"proxy_hostname,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -97,16 +98,37 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if port is already in use
-	existing, err := s.store.GetServerByPort(ctx, req.Port)
-	if err != nil {
-		s.log.Error("Failed to check port: %v", err)
-		s.respondError(w, http.StatusInternalServerError, "Failed to check port availability")
-		return
-	}
-	if existing != nil {
-		s.respondError(w, http.StatusBadRequest, "Port already in use")
-		return
+	// Handle port validation based on proxy configuration
+	if s.config.Proxy.Enabled && req.ProxyHostname != "" {
+		// When using proxy with hostname, assign a default port that won't be used for binding
+		if req.Port == 0 {
+			req.Port = 25565 // Default port, won't be bound when using proxy
+		}
+		// Skip port validation for proxy servers
+	} else {
+		// For non-proxy servers, must have a unique port
+		if req.Port == 0 {
+			s.respondError(w, http.StatusBadRequest, "Port is required for non-proxy servers")
+			return
+		}
+		
+		// Check if port is already in use (only checks non-proxy servers due to our updated GetServerByPort)
+		existing, err := s.store.GetServerByPort(ctx, req.Port)
+		if err != nil {
+			s.log.Error("Failed to check port: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to check port availability")
+			return
+		}
+		if existing != nil {
+			s.respondError(w, http.StatusBadRequest, "Port already in use")
+			return
+		}
+		
+		// Also check if this port is used by the proxy
+		if s.config.Proxy.Enabled && req.Port == s.config.Proxy.ListenPort {
+			s.respondError(w, http.StatusBadRequest, "Port is already in use by the proxy server")
+			return
+		}
 	}
 
 	// Determine Docker image based on MC version and mod loader if not specified
@@ -116,18 +138,19 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 
 	// Create server object
 	server := &models.Server{
-		ID:          uuid.New().String(),
-		Name:        req.Name,
-		Description: req.Description,
-		ModLoader:   req.ModLoader,
-		MCVersion:   req.MCVersion,
-		Status:      models.StatusStopped,
-		Port:        req.Port,
-		MaxPlayers:  req.MaxPlayers,
-		Memory:      req.Memory,
-		DataPath:    filepath.Join(s.config.Storage.DataDir, "servers", req.Name),
-		JavaVersion: strconv.Itoa(docker.GetRequiredJavaVersion(req.MCVersion, req.ModLoader)),
-		DockerImage: req.DockerImage,
+		ID:            uuid.New().String(),
+		Name:          req.Name,
+		Description:   req.Description,
+		ModLoader:     req.ModLoader,
+		MCVersion:     req.MCVersion,
+		Status:        models.StatusStopped,
+		Port:          req.Port,
+		ProxyHostname: req.ProxyHostname,
+		MaxPlayers:    req.MaxPlayers,
+		Memory:        req.Memory,
+		DataPath:      filepath.Join(s.config.Storage.DataDir, "servers", req.Name),
+		JavaVersion:   strconv.Itoa(docker.GetRequiredJavaVersion(req.MCVersion, req.ModLoader)),
+		DockerImage:   req.DockerImage,
 	}
 
 	// Set defaults
@@ -139,6 +162,11 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if server.ModLoader == "" {
 		server.ModLoader = models.ModLoaderVanilla
+	}
+
+	// Set ProxyPort to indicate proxy usage when hostname is set
+	if s.config.Proxy.Enabled && server.ProxyHostname != "" {
+		server.ProxyPort = 1 // Non-zero value to indicate proxy is being used
 	}
 
 	// Create data directory
@@ -468,6 +496,14 @@ func (s *Server) handleStartServer(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("Failed to update server status: %v", err)
 	}
 
+	// Update proxy route if enabled
+	if s.proxyManager != nil && s.config.Proxy.Enabled {
+		if err := s.proxyManager.UpdateServerRoute(server); err != nil {
+			s.log.Error("Failed to update proxy route: %v", err)
+			// Not critical, continue
+		}
+	}
+
 	// Clear ephemeral configuration fields after starting the server
 	if err := s.store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
 		s.log.Error("Failed to clear ephemeral config fields: %v", err)
@@ -504,6 +540,14 @@ func (s *Server) handleStopServer(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.store.UpdateServer(ctx, server); err != nil {
 		s.log.Error("Failed to update server status: %v", err)
+	}
+
+	// Remove proxy route if enabled
+	if s.proxyManager != nil && s.config.Proxy.Enabled {
+		if err := s.proxyManager.RemoveServerRoute(server.ID); err != nil {
+			s.log.Error("Failed to remove proxy route: %v", err)
+			// Not critical, continue
+		}
 	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{"status": "stopping"})

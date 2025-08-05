@@ -1,3 +1,4 @@
+import { toast } from 'svelte-sonner';
 import type {
   Server,
   CreateServerRequest,
@@ -31,8 +32,18 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      const error: ApiError = await response.json();
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const error: ApiError = await response.json();
+        errorMessage = error.error || errorMessage;
+      } catch {
+        // If response is not JSON, use default error message
+      }
+      
+      // Show error toast
+      toast.error(errorMessage);
+      
+      throw new Error(errorMessage);
     }
 
     return response.json();
@@ -50,8 +61,18 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      const error: ApiError = await response.json();
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const error: ApiError = await response.json();
+        errorMessage = error.error || errorMessage;
+      } catch {
+        // If response is not JSON, use default error message
+      }
+      
+      // Show error toast
+      toast.error(errorMessage);
+      
+      throw new Error(errorMessage);
     }
 
     return response.blob();
@@ -235,6 +256,29 @@ class ApiClient {
   async deleteFile(serverId: string, path: string): Promise<void> {
     await fetch(`${API_BASE}/servers/${serverId}/files/${path}`, {
       method: 'DELETE',
+    });
+  }
+
+  // Proxy/Routing Management
+  async getProxyStatus(): Promise<any> {
+    return this.request<any>('/proxy/status');
+  }
+
+  async getProxyRoutes(): Promise<any[]> {
+    return this.request<any[]>('/proxy/routes');
+  }
+
+  async getServerRouting(id: string): Promise<any> {
+    return this.request<any>(`/servers/${id}/routing`);
+  }
+
+  async updateServerRouting(id: string, hostname: string): Promise<any> {
+    return this.request<any>(`/servers/${id}/routing`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ proxy_hostname: hostname }),
     });
   }
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -110,8 +111,18 @@ func main() {
 		}
 	}
 
+	// Initialize proxy manager
+	proxyManager := proxy.NewManager(store, &cfg.Proxy, log)
+	
+	// Start proxy if enabled
+	if err := proxyManager.Start(); err != nil {
+		log.Error("Failed to start proxy manager: %v", err)
+	}
+	defer proxyManager.Stop()
+
 	// Initialize API server with full configuration
 	apiServer := api.NewServer(store, dockerClient, cfg, log)
+	apiServer.SetProxyManager(proxyManager)
 
 	// Setup HTTP server
 	srv := &http.Server{

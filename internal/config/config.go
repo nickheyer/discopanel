@@ -50,6 +50,7 @@ type StorageConfig struct {
 type ProxyConfig struct {
 	Enabled      bool   `mapstructure:"enabled"`
 	BaseURL      string `mapstructure:"base_url"`
+	ListenPort   int    `mapstructure:"listen_port"`
 	PortRangeMin int    `mapstructure:"port_range_min"`
 	PortRangeMax int    `mapstructure:"port_range_max"`
 }
@@ -137,6 +138,7 @@ func setDefaults(v *viper.Viper) {
 	// Proxy defaults
 	v.SetDefault("proxy.enabled", false)
 	v.SetDefault("proxy.base_url", "")
+	v.SetDefault("proxy.listen_port", 25565)
 	v.SetDefault("proxy.port_range_min", 25565)
 	v.SetDefault("proxy.port_range_max", 25665)
 

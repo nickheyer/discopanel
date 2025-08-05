@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
 	import { serversStore } from '$lib/stores/servers';
@@ -17,17 +17,34 @@
 	import ServerSettings from '$lib/components/server-settings.svelte';
 	import ServerMods from '$lib/components/server-mods.svelte';
 	import ServerFiles from '$lib/components/server-files.svelte';
+	import ServerRouting from '$lib/components/server-routing.svelte';
 
 	let server = $state<Server | null>(null);
 	let loading = $state(true);
 	let actionLoading = $state(false);
-	let serverId = $derived($page.params.id);
+	let serverId = $derived(page.params.id);
 	let activeTab = $state('overview');
+	let routingInfo = $state<any>(null);
+
+	let interval: number;
 
 	onMount(() => {
-		loadServer();
-		const interval = setInterval(loadServer, 5000); // Poll every 5 seconds
-		return () => clearInterval(interval);
+		return () => {
+			if (interval) clearInterval(interval);
+		};
+	});
+
+	$effect(() => {
+		if (serverId) {
+			// Clear existing interval
+			if (interval) clearInterval(interval);
+			
+			// Load server immediately
+			loadServer();
+			
+			// Set up new interval
+			interval = setInterval(loadServer, 5000); // Poll every 5 seconds
+		}
 	});
 
 	async function loadServer() {
@@ -35,6 +52,13 @@
 			if (!serverId) return;
 			server = await api.getServer(serverId);
 			serversStore.updateServer(server);
+			
+			// Load routing info if proxy is available
+			try {
+				routingInfo = await api.getServerRouting(serverId);
+			} catch (error) {
+				// Not critical if routing info fails
+			}
 		} catch (error) {
 			if (!server) {
 				toast.error('Failed to load server');
@@ -243,11 +267,23 @@
 				</CardHeader>
 				<CardContent class="pt-2">
 					<div class="flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-muted/80 to-muted/40 backdrop-blur-sm border">
-						<span class="font-mono text-base font-bold">localhost:{server.port}</span>
+						<span class="font-mono text-base font-bold">
+							{#if routingInfo?.proxy_enabled && (server.proxy_hostname || routingInfo?.current_route)}
+								{server.proxy_hostname || routingInfo.current_route?.hostname || `localhost:${server.port}`}
+							{:else}
+								localhost:{server.port}
+							{/if}
+						</span>
 						<Button
 							size="icon"
 							variant="ghost"
-							onclick={() => copyToClipboard(`localhost:${server?.port ?? ''}`)}
+							onclick={() => {
+								if (!server) return;
+								const connectionString = routingInfo?.proxy_enabled && (server.proxy_hostname || routingInfo?.current_route)
+									? (server.proxy_hostname || routingInfo.current_route?.hostname || `localhost:${server.port}`)
+									: `localhost:${server.port}`;
+								copyToClipboard(connectionString);
+							}}
 							class="hover:bg-primary/20 hover:text-primary"
 						>
 							<Copy class="h-4 w-4" />
@@ -303,12 +339,13 @@
 		</div>
 
 		<Tabs value="overview" class="flex-1 flex flex-col min-h-0 overflow-hidden" onValueChange={(value) => activeTab = value}>
-			<TabsList class="grid w-full max-w-2xl grid-cols-5 h-14 p-1 bg-muted/50 backdrop-blur-sm flex-shrink-0">
+			<TabsList class="grid w-full max-w-3xl grid-cols-6 h-14 p-1 bg-muted/50 backdrop-blur-sm flex-shrink-0">
 				<TabsTrigger value="overview" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Overview</TabsTrigger>
 				<TabsTrigger value="console" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Console</TabsTrigger>
 				<TabsTrigger value="configuration" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Configuration</TabsTrigger>
 				<TabsTrigger value="mods" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Mods</TabsTrigger>
 				<TabsTrigger value="files" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Files</TabsTrigger>
+				<TabsTrigger value="routing" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Routing</TabsTrigger>
 			</TabsList>
 
 			<div class="flex-1 min-h-0 overflow-hidden relative">
@@ -385,6 +422,10 @@
 
 				<TabsContent value="files" class="absolute inset-0">
 					<ServerFiles {server} active={activeTab === 'files'} />
+				</TabsContent>
+
+				<TabsContent value="routing" class="absolute inset-0 overflow-y-auto p-4">
+					<ServerRouting {server} onUpdate={loadServer} />
 				</TabsContent>
 			</div>
 		</Tabs>

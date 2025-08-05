@@ -24,6 +24,7 @@
 	let modLoaders = $state<ModLoaderInfo[]>([]);
 	let dockerImages = $state<DockerImageInfo[]>([]);
 	let latestVersion = $state('');
+	let proxyEnabled = $state(false);
 	
 	// Modpack selection
 	let showModpackDialog = $state(false);
@@ -31,7 +32,7 @@
 	let favoriteModpacks = $state<IndexedModpack[]>([]);
 	let loadingModpacks = $state(false);
 
-	let formData = $state<CreateServerRequest>({
+	let formData = $state<CreateServerRequest & { proxy_hostname?: string }>({
 		name: '',
 		description: '',
 		mod_loader: 'vanilla',
@@ -40,21 +41,24 @@
 		max_players: 20,
 		memory: 2048,
 		docker_image: '',
-		auto_start: false
+		auto_start: false,
+		proxy_hostname: ''
 	});
 
 	onMount(async () => {
 		try {
-			const [versionsData, loadersData, imagesData] = await Promise.all([
+			const [versionsData, loadersData, imagesData, proxyStatus] = await Promise.all([
 				api.getMinecraftVersions(),
 				api.getModLoaders(),
-				api.getDockerImages()
+				api.getDockerImages(),
+				api.getProxyStatus()
 			]);
 			
 			minecraftVersions = versionsData.versions;
 			latestVersion = versionsData.latest;
 			modLoaders = loadersData.modloaders;
 			dockerImages = imagesData.images;
+			proxyEnabled = proxyStatus.enabled;
 			
 			if (!formData.mc_version && latestVersion) {
 				formData.mc_version = latestVersion;
@@ -152,7 +156,9 @@
 			// Add modpack ID to the request if selected
 			const createRequest = {
 				...formData,
-				modpack_id: selectedModpack?.id || ''
+				modpack_id: selectedModpack?.id || '',
+				// When using proxy with hostname, set port to 0 to indicate proxy usage
+				port: formData.proxy_hostname ? 0 : formData.port
 			};
 			
 			// Create the server
@@ -385,21 +391,85 @@
 					</div>
 				</CardHeader>
 				<CardContent class="space-y-6">
-					<div class="space-y-2">
-						<Label for="port" class="text-sm font-medium">Server Port</Label>
-						<Input
-							id="port"
-							type="number"
-							min="1"
-							max="65535"
-							bind:value={formData.port}
-							disabled={loading}
-							class="h-10"
-						/>
-						<p class="text-xs text-muted-foreground">
-							Default Minecraft port is 25565
-						</p>
-					</div>
+					{#if proxyEnabled}
+						<div class="space-y-4">
+							<div class="space-y-2">
+								<Label class="text-sm font-medium">Connection Method</Label>
+								<div class="grid grid-cols-2 gap-3">
+									<Button
+										type="button"
+										variant={formData.proxy_hostname ? "outline" : "default"}
+										onclick={() => formData.proxy_hostname = ''}
+										class="justify-start h-auto py-3 px-4"
+									>
+										<div class="text-left">
+											<div class="font-medium">Direct Port</div>
+											<div class="text-xs text-muted-foreground mt-0.5">Connect via port number</div>
+										</div>
+									</Button>
+									<Button
+										type="button"
+										variant={formData.proxy_hostname ? "default" : "outline"}
+										onclick={() => formData.proxy_hostname = formData.name.toLowerCase().replace(/\s+/g, '-')}
+										class="justify-start h-auto py-3 px-4"
+									>
+										<div class="text-left">
+											<div class="font-medium">Custom Hostname</div>
+											<div class="text-xs text-muted-foreground mt-0.5">Connect via domain name</div>
+										</div>
+									</Button>
+								</div>
+							</div>
+
+							{#if formData.proxy_hostname}
+								<div class="space-y-2">
+									<Label for="proxy_hostname" class="text-sm font-medium">Server Hostname</Label>
+									<Input
+										id="proxy_hostname"
+										placeholder="survival.example.com"
+										bind:value={formData.proxy_hostname}
+										disabled={loading}
+										class="h-10"
+									/>
+									<p class="text-xs text-muted-foreground">
+										Players will connect using this hostname
+									</p>
+								</div>
+							{:else}
+								<div class="space-y-2">
+									<Label for="port" class="text-sm font-medium">Server Port</Label>
+									<Input
+										id="port"
+										type="number"
+										min="1"
+										max="65535"
+										bind:value={formData.port}
+										disabled={loading}
+										class="h-10"
+									/>
+									<p class="text-xs text-muted-foreground">
+										Default Minecraft port is 25565
+									</p>
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<div class="space-y-2">
+							<Label for="port" class="text-sm font-medium">Server Port</Label>
+							<Input
+								id="port"
+								type="number"
+								min="1"
+								max="65535"
+								bind:value={formData.port}
+								disabled={loading}
+								class="h-10"
+							/>
+							<p class="text-xs text-muted-foreground">
+								Default Minecraft port is 25565
+							</p>
+						</div>
+					{/if}
 
 					<div class="space-y-2">
 						<Label for="max_players" class="text-sm font-medium">Max Players</Label>

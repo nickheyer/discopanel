@@ -55,6 +55,7 @@ type ProxyConfig struct {
 }
 
 type MinecraftConfig struct {
+	ResetGlobal  bool            `mapstructure:"reset_global"`
 	GlobalConfig db.ServerConfig `mapstructure:"global_config"`
 }
 
@@ -138,6 +139,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("proxy.base_url", "")
 	v.SetDefault("proxy.port_range_min", 25565)
 	v.SetDefault("proxy.port_range_max", 25665)
+
+	v.SetDefault("minecraft.reset_global", false)
 }
 
 func validateConfig(cfg *Config) error {

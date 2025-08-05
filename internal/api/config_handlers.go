@@ -21,7 +21,7 @@ type ConfigProperty struct {
 	Type         string   `json:"type"` // text, number, checkbox, select, password
 	Description  string   `json:"description"`
 	Required     bool     `json:"required"`
-	System       bool     `json:"system"` // If true, field is auto-populated and read-only
+	System       bool     `json:"system"`    // If true, field is auto-populated and read-only
 	Ephemeral    bool     `json:"ephemeral"` // If true, field is cleared after server start
 	EnvVar       string   `json:"env_var"`
 	Options      []string `json:"options,omitempty"` // For select type
@@ -166,7 +166,7 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 	// Docker containers have immutable environment variables
 	if server.ContainerID != "" {
 		oldContainerID := server.ContainerID
-		
+
 		// Check if server is running
 		wasRunning := false
 		if server.Status == models.StatusRunning {
@@ -177,18 +177,18 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 				s.respondError(w, http.StatusInternalServerError, "Failed to stop server for configuration update")
 				return
 			}
-			
+
 			// Wait for clean shutdown
 			time.Sleep(2 * time.Second)
 		}
-		
+
 		// Remove old container
 		if err := s.docker.RemoveContainer(ctx, oldContainerID); err != nil {
 			s.log.Error("Failed to remove old container: %v", err)
 			s.respondError(w, http.StatusInternalServerError, "Failed to remove old container")
 			return
 		}
-		
+
 		// Create new container with updated config
 		newContainerID, err := s.docker.CreateContainer(ctx, server, config)
 		if err != nil {
@@ -196,7 +196,7 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 			s.respondError(w, http.StatusInternalServerError, "Failed to create new container with updated configuration")
 			return
 		}
-		
+
 		// Update server with new container ID
 		server.ContainerID = newContainerID
 		if err := s.store.UpdateServer(ctx, server); err != nil {
@@ -204,7 +204,7 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 			s.respondError(w, http.StatusInternalServerError, "Failed to update server")
 			return
 		}
-		
+
 		// Restart if it was running
 		if wasRunning {
 			if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
@@ -219,7 +219,7 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 				}
 			}
 		}
-		
+
 		s.log.Info("Container recreated with updated configuration")
 	}
 
@@ -413,8 +413,8 @@ func getCategoryIndex(key string) int {
 
 func (s *Server) handleGetGlobalSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
-	config, err := s.store.GetGlobalSettings(ctx)
+
+	config, _, err := s.store.GetGlobalSettings(ctx)
 	if err != nil {
 		s.log.Error("Failed to get global settings: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to get global settings")
@@ -428,9 +428,9 @@ func (s *Server) handleGetGlobalSettings(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleUpdateGlobalSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	// Get existing config
-	config, err := s.store.GetGlobalSettings(ctx)
+	config, _, err := s.store.GetGlobalSettings(ctx)
 	if err != nil {
 		s.log.Error("Failed to get global settings: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to get global settings")

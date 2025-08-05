@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	var configPath = flag.String("config", "", "Path to configuration file")
+	var configPath = flag.String("config", "./config.yaml", "Path to configuration file")
 	flag.Parse()
 
 	// Initialize logger
@@ -53,6 +53,26 @@ func main() {
 	}
 	defer store.Close()
 
+	// Initialize global settings with config defaults if they don't exist
+	ctx := context.Background()
+	_, isNew, err := store.GetGlobalSettings(ctx)
+	if err != nil {
+		log.Fatal("Failed to get global settings: %v", err)
+	}
+
+	// Check if global settings are empty (just created) and populate with config defaults
+	if isNew || cfg.Minecraft.ResetGlobal {
+		// Copy the config defaults to global settings
+		globalConfig := config.LoadGlobalServerConfig(cfg)
+		globalConfig.ID = storage.GlobalSettingsID
+		globalConfig.ServerID = storage.GlobalSettingsID
+
+		if err := store.UpdateGlobalSettings(ctx, &globalConfig); err != nil {
+			log.Fatal("Failed to initialize global settings: %v", err)
+		}
+		log.Info("Initialized global settings from config file")
+	}
+
 	// Initialize Docker client with configuration
 	dockerClient, err := docker.NewClient(cfg.Docker.Host, docker.ClientConfig{
 		APIVersion:    cfg.Docker.Version,
@@ -72,7 +92,6 @@ func main() {
 
 	// Clean up orphaned containers on startup
 	log.Info("Checking for orphaned containers...")
-	ctx := context.Background()
 	servers, err := store.ListServers(ctx)
 	if err != nil {
 		log.Error("Failed to list servers for cleanup: %v", err)
@@ -84,7 +103,7 @@ func main() {
 				trackedIDs[server.ContainerID] = true
 			}
 		}
-		
+
 		// Clean up orphaned containers
 		if err := dockerClient.CleanupOrphanedContainers(ctx, trackedIDs, log); err != nil {
 			log.Error("Failed to cleanup orphaned containers: %v", err)

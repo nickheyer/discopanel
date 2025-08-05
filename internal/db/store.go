@@ -226,7 +226,6 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 	return s.SaveServerConfig(ctx, config)
 }
 
-
 func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 	// Helper functions to create pointers
 	boolPtr := func(b bool) *bool { return &b }
@@ -238,7 +237,7 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 	if serverID != "" && len(serverID) >= 8 {
 		rconPassword = fmt.Sprintf("discopanel_%s", serverID[:8])
 	}
-	
+
 	config := &ServerConfig{
 		ID:           serverID + "-config",
 		ServerID:     serverID,
@@ -270,10 +269,10 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 		for i := 0; i < configType.NumField(); i++ {
 			field := configType.Field(i)
 			// Skip these fields as they're server-specific
-			if field.Name == "ID" || field.Name == "ServerID" || field.Name == "UpdatedAt" || 
-			   field.Name == "Server" || field.Name == "RCONPassword" || 
-			   field.Name == "Type" || field.Name == "Version" || field.Name == "Memory" ||
-			   field.Name == "InitMemory" || field.Name == "MaxMemory" || field.Name == "ServerPort" {
+			if field.Name == "ID" || field.Name == "ServerID" || field.Name == "UpdatedAt" ||
+				field.Name == "Server" || field.Name == "RCONPassword" ||
+				field.Name == "Type" || field.Name == "Version" || field.Name == "Memory" ||
+				field.Name == "InitMemory" || field.Name == "MaxMemory" || field.Name == "ServerPort" {
 				continue
 			}
 
@@ -348,34 +347,34 @@ func (s *Store) GetIndexedModpack(ctx context.Context, id string) (*IndexedModpa
 
 func (s *Store) SearchIndexedModpacks(ctx context.Context, query string, gameVersion string, modLoader string, indexer string, offset, limit int) ([]*IndexedModpack, int64, error) {
 	db := s.db.WithContext(ctx).Model(&IndexedModpack{})
-	
+
 	if query != "" {
 		db = db.Where("name LIKE ? OR summary LIKE ?", "%"+query+"%", "%"+query+"%")
 	}
-	
+
 	if gameVersion != "" {
 		db = db.Where("game_versions LIKE ?", "%"+gameVersion+"%")
 	}
-	
+
 	if modLoader != "" {
 		db = db.Where("mod_loaders LIKE ?", "%"+modLoader+"%")
 	}
-	
+
 	if indexer != "" {
 		db = db.Where("indexer = ?", indexer)
 	}
-	
+
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	
+
 	var modpacks []*IndexedModpack
 	err := db.Order("download_count DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&modpacks).Error
-	
+
 	return modpacks, total, err
 }
 
@@ -384,14 +383,14 @@ func (s *Store) ListIndexedModpacks(ctx context.Context, offset, limit int) ([]*
 	if err := s.db.WithContext(ctx).Model(&IndexedModpack{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	
+
 	var modpacks []*IndexedModpack
 	err := s.db.WithContext(ctx).
 		Order("download_count DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&modpacks).Error
-	
+
 	return modpacks, total, err
 }
 
@@ -447,22 +446,23 @@ func (s *Store) ListFavoriteModpacks(ctx context.Context) ([]*IndexedModpack, er
 	if err != nil {
 		return nil, err
 	}
-	
+
 	modpacks := make([]*IndexedModpack, 0, len(favorites))
 	for _, fav := range favorites {
 		if fav.Modpack != nil {
 			modpacks = append(modpacks, fav.Modpack)
 		}
 	}
-	
+
 	return modpacks, nil
 }
 
 // Global Settings operations (using ServerConfig with a special ID)
 const GlobalSettingsID = "global-settings"
 
-func (s *Store) GetGlobalSettings(ctx context.Context) (*ServerConfig, error) {
+func (s *Store) GetGlobalSettings(ctx context.Context) (*ServerConfig, bool, error) {
 	var config ServerConfig
+	isNew := false
 	err := s.db.WithContext(ctx).Where("id = ?", GlobalSettingsID).First(&config).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -472,13 +472,15 @@ func (s *Store) GetGlobalSettings(ctx context.Context) (*ServerConfig, error) {
 				ServerID: GlobalSettingsID,
 			}
 			if err := s.db.WithContext(ctx).Create(&config).Error; err != nil {
-				return nil, err
+				return nil, isNew, err
 			}
-			return &config, nil
+
+			isNew = true
+			return &config, isNew, nil
 		}
-		return nil, err
+		return nil, isNew, err
 	}
-	return &config, nil
+	return &config, isNew, nil
 }
 
 func (s *Store) UpdateGlobalSettings(ctx context.Context, config *ServerConfig) error {

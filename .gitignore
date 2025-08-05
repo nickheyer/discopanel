@@ -5,7 +5,7 @@
 
 data/
 *.db
-
+config.yaml
 
 # User-specific files
 *.rsuser

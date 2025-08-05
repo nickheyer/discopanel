@@ -92,7 +92,7 @@ func (s *Server) handleSyncModpacks(w http.ResponseWriter, r *http.Request) {
 	switch req.Indexer {
 	case "fuego":
 		// Get Fuego API key from global settings
-		globalSettings, err := s.store.GetGlobalSettings(ctx)
+		globalSettings, _, err := s.store.GetGlobalSettings(ctx)
 		if err != nil {
 			s.log.Error("Failed to get global settings: %v", err)
 			s.respondError(w, http.StatusInternalServerError, "Failed to get global settings")
@@ -286,7 +286,7 @@ func (s *Server) handleSyncModpackFiles(w http.ResponseWriter, r *http.Request) 
 	switch modpack.Indexer {
 	case "fuego":
 		// Get Fuego API key from global settings
-		globalSettings, err := s.store.GetGlobalSettings(ctx)
+		globalSettings, _, err := s.store.GetGlobalSettings(ctx)
 		if err != nil {
 			s.log.Error("Failed to get global settings: %v", err)
 			s.respondError(w, http.StatusInternalServerError, "Failed to get global settings")
@@ -405,7 +405,7 @@ func (s *Server) handleGetIndexerStatus(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 
 	// Get global settings to check API key
-	globalSettings, err := s.store.GetGlobalSettings(ctx)
+	globalSettings, _, err := s.store.GetGlobalSettings(ctx)
 	if err != nil {
 		s.log.Error("Failed to get global settings: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to get global settings")

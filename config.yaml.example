@@ -40,7 +40,8 @@ proxy:
 
 # Minecraft server global configuration defaults
 minecraft:
-  global_config:
+  reset_global: false
+  global_config: # Specifying any of these settings will override the global config default when it is first made, or existing if `reset_global` is `true`
     # JVM Configuration
     uid: 1000
     gid: 1000

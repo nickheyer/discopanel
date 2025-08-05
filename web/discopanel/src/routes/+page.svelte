@@ -4,7 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Progress } from '$lib/components/ui/progress';
 	import { serversStore } from '$lib/stores/servers';
-	import { Server, Cpu, MemoryStick, HardDrive, Activity, Plus } from '@lucide/svelte';
+	import { Server, Cpu, MemoryStick, HardDrive, Activity, Plus, LayoutDashboard } from '@lucide/svelte';
 	import type { Server as ServerType } from '$lib/api/types';
 
 	let servers = $state<ServerType[]>([]);
@@ -52,63 +52,86 @@
 	};
 </script>
 
-<div class="flex-1 space-y-4 p-8 pt-6">
-	<div class="flex items-center justify-between space-y-2">
-		<h2 class="text-3xl font-bold tracking-tight">Dashboard</h2>
-		<div class="flex items-center space-x-2">
-			<Button href="/servers/new">
-				<Plus class="h-4 w-4 mr-2" />
+<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-gradient-to-br from-background to-muted/10">
+	<div class="flex items-center justify-between pb-6 border-b-2 border-border/50">
+		<div class="flex items-center gap-4">
+			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+				<LayoutDashboard class="h-8 w-8 text-primary" />
+			</div>
+			<div class="space-y-1">
+				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Dashboard</h2>
+				<p class="text-base text-muted-foreground">Monitor and manage your Minecraft server infrastructure</p>
+			</div>
+		</div>
+		<div class="flex items-center gap-2">
+			<Button href="/servers/new" size="default" class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
+				<Plus class="h-5 w-5 mr-2" />
 				New Server
 			</Button>
 		</div>
 	</div>
 
-	<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-		<Card>
-			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-				<CardTitle class="text-sm font-medium">Total Servers</CardTitle>
-				<Server class="h-4 w-4 text-muted-foreground" />
+	<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+		<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
+				<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Total Servers</CardTitle>
+				<div class="h-12 w-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+					<Server class="h-6 w-6 text-primary" />
+				</div>
 			</CardHeader>
-			<CardContent>
-				<div class="text-2xl font-bold">{stats.total}</div>
-				<p class="text-xs text-muted-foreground">
+			<CardContent class="pt-2">
+				<div class="text-3xl font-bold">{stats.total}</div>
+				<p class="text-sm text-muted-foreground mt-1">
 					{stats.running} running, {stats.stopped} stopped
 				</p>
 			</CardContent>
 		</Card>
 
-		<Card>
-			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-				<CardTitle class="text-sm font-medium">Active Servers</CardTitle>
-				<Activity class="h-4 w-4 text-muted-foreground" />
+		<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
+				<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Active Servers</CardTitle>
+				<div class="h-12 w-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+					<Activity class="h-6 w-6 text-primary" />
+				</div>
 			</CardHeader>
-			<CardContent>
-				<div class="text-2xl font-bold">{stats.running}</div>
-				<Progress value={(stats.running / Math.max(stats.total, 1)) * 100} class="mt-2" />
+			<CardContent class="pt-2">
+				<div class="text-3xl font-bold text-green-600">{stats.running}</div>
+				<Progress value={(stats.running / Math.max(stats.total, 1)) * 100} class="mt-3 h-3" />
 			</CardContent>
 		</Card>
 
-		<Card>
-			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-				<CardTitle class="text-sm font-medium">Memory Usage</CardTitle>
-				<MemoryStick class="h-4 w-4 text-muted-foreground" />
+		<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
+				<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Memory Usage</CardTitle>
+				<div class="h-12 w-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+					<MemoryStick class="h-6 w-6 text-primary" />
+				</div>
 			</CardHeader>
-			<CardContent>
-				<div class="text-2xl font-bold">{stats.usedMemory} MB</div>
-				<p class="text-xs text-muted-foreground">
-					of {stats.totalMemory} MB allocated
+			<CardContent class="pt-2">
+				<div class="flex items-baseline gap-2">
+					<span class="text-3xl font-bold">{(stats.usedMemory / 1024).toFixed(1)}</span>
+					<span class="text-sm text-muted-foreground font-medium">GB</span>
+				</div>
+				<p class="text-sm text-muted-foreground mt-1">
+					of {(stats.totalMemory / 1024).toFixed(1)} GB allocated
 				</p>
 			</CardContent>
 		</Card>
 
-		<Card>
-			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-				<CardTitle class="text-sm font-medium">CPU Load</CardTitle>
-				<Cpu class="h-4 w-4 text-muted-foreground" />
+		<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
+				<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">CPU Load</CardTitle>
+				<div class="h-12 w-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+					<Cpu class="h-6 w-6 text-primary" />
+				</div>
 			</CardHeader>
-			<CardContent>
-				<div class="text-2xl font-bold">N/A</div>
-				<p class="text-xs text-muted-foreground">
+			<CardContent class="pt-2">
+				<div class="text-3xl font-bold text-muted-foreground">N/A</div>
+				<p class="text-sm text-muted-foreground mt-1">
 					System monitoring coming soon
 				</p>
 			</CardContent>

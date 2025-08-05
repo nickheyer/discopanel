@@ -136,128 +136,186 @@
 		<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 	</div>
 {:else if server}
-	<div class="h-[calc(100vh-4rem)] flex flex-col p-8 pt-6">
-		<div class="flex items-center justify-between flex-shrink-0 mb-4">
-			<div>
-				<h2 class="text-3xl font-bold tracking-tight">{server.name}</h2>
-				<p class="text-muted-foreground">{server.description || 'No description'}</p>
+	<div class="h-full flex flex-col p-8 pt-6 bg-gradient-to-br from-background to-muted/20">
+		<div class="flex items-center justify-between flex-shrink-0 mb-8 pb-6 border-b-2 border-border/50">
+			<div class="flex items-center gap-4">
+				<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+					<Package class="h-8 w-8 text-primary" />
+				</div>
+				<div class="space-y-1">
+					<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">{server.name}</h2>
+					<p class="text-base text-muted-foreground">{server.description || 'No description provided'}</p>
+				</div>
 			</div>
-			<div class="flex items-center space-x-2">
+			<div class="flex items-center gap-2">
 				{#if server.status === 'stopped'}
-					<Button onclick={() => handleServerAction('start')} disabled={actionLoading}>
+					<Button 
+						onclick={() => handleServerAction('start')} 
+						disabled={actionLoading}
+						size="default"
+						class="bg-green-600 hover:bg-green-700 text-white shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
+					>
 						{#if actionLoading}
-							<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+							<Loader2 class="h-5 w-5 mr-2 animate-spin" />
 						{:else}
-							<Play class="h-4 w-4 mr-2" />
+							<Play class="h-5 w-5 mr-2" />
 						{/if}
-						Start
+						Start Server
 					</Button>
 				{:else if server.status === 'running' || server.status === 'starting'}
-					<Button variant="destructive" onclick={() => handleServerAction('stop')} disabled={actionLoading}>
+					<Button 
+						variant="destructive" 
+						onclick={() => handleServerAction('stop')} 
+						disabled={actionLoading}
+						size="default"
+						class="shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
+					>
 						{#if actionLoading}
-							<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+							<Loader2 class="h-5 w-5 mr-2 animate-spin" />
 						{:else}
-							<Square class="h-4 w-4 mr-2" />
+							<Square class="h-5 w-5 mr-2" />
 						{/if}
-						Stop
+						Stop Server
 					</Button>
 					{#if server.status === 'running'}
-						<Button variant="outline" onclick={() => handleServerAction('restart')} disabled={actionLoading}>
+						<Button 
+							variant="outline" 
+							onclick={() => handleServerAction('restart')} 
+							disabled={actionLoading}
+							size="default"
+							class="border-2 shadow-md hover:shadow-lg transition-all hover:scale-[1.02]"
+						>
 							{#if actionLoading}
-								<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+								<Loader2 class="h-5 w-5 mr-2 animate-spin" />
 							{:else}
-								<RotateCw class="h-4 w-4 mr-2" />
+								<RotateCw class="h-5 w-5 mr-2" />
 							{/if}
 							Restart
 						</Button>
 					{/if}
 				{/if}
+				<div class="ml-4 h-10 w-px bg-border/50"></div>
 				<Button 
-					variant="outline" 
+					variant="ghost" 
 					onclick={() => handleDeleteServer()}
 					disabled={actionLoading}
+					size="default"
+					class="text-destructive hover:text-white hover:bg-destructive transition-all"
 				>
-					<Trash2 class="h-4 w-4 mr-2" />
-					Delete
+					<Trash2 class="h-5 w-5 mr-2" />
+					Delete Server
 				</Button>
 			</div>
 		</div>
 
-		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4 flex-shrink-0 mb-4">
-			<Card>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-					<CardTitle class="text-sm font-medium">Status</CardTitle>
-					<Activity class="h-4 w-4 text-muted-foreground" />
+		<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4 flex-shrink-0 mb-8">
+			<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
+					<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Status</CardTitle>
+					<div class="h-12 w-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+						<Activity class="h-6 w-6 text-primary" />
+					</div>
 				</CardHeader>
-				<CardContent>
-					<div class="flex items-center space-x-2">
-						<div class="h-2 w-2 rounded-full {getStatusColor(server.status).replace('text-', 'bg-')}"></div>
-						<Badge variant={getStatusBadgeVariant(server.status)}>
-							{server.status}
+				<CardContent class="pt-2">
+					<div class="flex items-center gap-3">
+						<div class="relative">
+							<div class="h-3 w-3 rounded-full {getStatusColor(server.status).replace('text-', 'bg-')}">
+								{#if server.status === 'running'}
+									<div class="absolute inset-0 rounded-full {getStatusColor(server.status).replace('text-', 'bg-')} animate-ping"></div>
+								{/if}
+							</div>
+						</div>
+						<Badge variant={getStatusBadgeVariant(server.status)} class="text-sm px-3 py-1 font-semibold shadow-sm">
+							{server.status.toUpperCase()}
 						</Badge>
 					</div>
 				</CardContent>
 			</Card>
 
-			<Card>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-					<CardTitle class="text-sm font-medium">Connection</CardTitle>
-					<ExternalLink class="h-4 w-4 text-muted-foreground" />
+			<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
+					<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Connection</CardTitle>
+					<div class="h-12 w-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+						<ExternalLink class="h-6 w-6 text-primary" />
+					</div>
 				</CardHeader>
-				<CardContent>
-					<div class="flex items-center justify-between">
-						<span class="font-mono text-sm">localhost:{server.port}</span>
+				<CardContent class="pt-2">
+					<div class="flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-muted/80 to-muted/40 backdrop-blur-sm border">
+						<span class="font-mono text-base font-bold">localhost:{server.port}</span>
 						<Button
 							size="icon"
 							variant="ghost"
 							onclick={() => copyToClipboard(`localhost:${server?.port ?? ''}`)}
+							class="hover:bg-primary/20 hover:text-primary"
 						>
-							<Copy class="h-3 w-3" />
+							<Copy class="h-4 w-4" />
 						</Button>
 					</div>
 				</CardContent>
 			</Card>
 
-			<Card>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-					<CardTitle class="text-sm font-medium">Version</CardTitle>
-					<Package class="h-4 w-4 text-muted-foreground" />
+			<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
+					<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Version</CardTitle>
+					<div class="h-12 w-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+						<Package class="h-6 w-6 text-primary" />
+					</div>
 				</CardHeader>
-				<CardContent>
-					<div class="text-sm">
-						<div>{server.mc_version}</div>
-						<div class="text-muted-foreground capitalize">{server.mod_loader}</div>
+				<CardContent class="pt-2">
+					<div class="space-y-2">
+						<div class="text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">{server.mc_version}</div>
+						<Badge variant="secondary" class="capitalize font-semibold px-3 py-1">
+							{server.mod_loader === 'vanilla' ? '⚡ Vanilla' : server.mod_loader === 'forge' ? '🔨 Forge' : server.mod_loader === 'fabric' ? '🧵 Fabric' : server.mod_loader}
+						</Badge>
 					</div>
 				</CardContent>
 			</Card>
 
-			<Card>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-					<CardTitle class="text-sm font-medium">Resources</CardTitle>
-					<HardDrive class="h-4 w-4 text-muted-foreground" />
+			<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
+					<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Resources</CardTitle>
+					<div class="h-12 w-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+						<HardDrive class="h-6 w-6 text-primary" />
+					</div>
 				</CardHeader>
-				<CardContent>
-					<div class="text-sm">
-						<div>{server.memory} MB RAM</div>
-						<div class="text-muted-foreground">{server.max_players} max players</div>
+				<CardContent class="pt-2">
+					<div class="space-y-3">
+						<div>
+							<div class="flex items-baseline gap-2">
+								<span class="text-3xl font-bold">{(server.memory / 1024).toFixed(1)}</span>
+								<span class="text-sm text-muted-foreground font-medium">GB RAM</span>
+							</div>
+							<div class="mt-2 h-3 bg-muted rounded-full overflow-hidden">
+								<div class="h-full bg-gradient-to-r from-primary/60 to-primary/40 rounded-full transition-all duration-500" style="width: {Math.min((server.memory / 8192) * 100, 100)}%"></div>
+							</div>
+						</div>
+						<div class="flex items-center justify-between pt-1">
+							<span class="text-sm text-muted-foreground">Player Slots</span>
+							<Badge variant="outline" class="font-semibold">{server.max_players}</Badge>
+						</div>
 					</div>
 				</CardContent>
 			</Card>
 		</div>
 
-		<Tabs value="overview" class="flex-1 flex flex-col min-h-0" onValueChange={(value) => activeTab = value}>
-			<TabsList>
-				<TabsTrigger value="overview">Overview</TabsTrigger>
-				<TabsTrigger value="console">Console</TabsTrigger>
-				<TabsTrigger value="configuration">Configuration</TabsTrigger>
-				<TabsTrigger value="mods">Mods</TabsTrigger>
-				<TabsTrigger value="files">Files</TabsTrigger>
+		<Tabs value="overview" class="flex-1 flex flex-col min-h-0 overflow-hidden" onValueChange={(value) => activeTab = value}>
+			<TabsList class="grid w-full max-w-2xl grid-cols-5 h-14 p-1 bg-muted/50 backdrop-blur-sm flex-shrink-0">
+				<TabsTrigger value="overview" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Overview</TabsTrigger>
+				<TabsTrigger value="console" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Console</TabsTrigger>
+				<TabsTrigger value="configuration" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Configuration</TabsTrigger>
+				<TabsTrigger value="mods" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Mods</TabsTrigger>
+				<TabsTrigger value="files" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium">Files</TabsTrigger>
 			</TabsList>
 
-			<TabsContent value="overview" class="space-y-4">
-				<Card>
-					<CardHeader>
-						<CardTitle>Server Settings</CardTitle>
+			<div class="flex-1 min-h-0 overflow-hidden relative">
+				<TabsContent value="overview" class="absolute inset-0 overflow-y-auto space-y-4 p-4">
+				<Card class="border-border/50 shadow-sm">
+					<CardHeader class="pb-4">
+						<CardTitle class="text-xl">Server Settings</CardTitle>
 						<CardDescription>Edit your server configuration and restart to apply changes</CardDescription>
 					</CardHeader>
 					<CardContent>
@@ -265,69 +323,70 @@
 					</CardContent>
 				</Card>
 
-				<Card>
-					<CardHeader>
-						<CardTitle>Server Information</CardTitle>
-						<CardDescription>Detailed information about your server</CardDescription>
+				<Card class="border-border/50 shadow-sm">
+					<CardHeader class="pb-4">
+						<CardTitle class="text-xl">Server Information</CardTitle>
+						<CardDescription>Detailed information about your server instance</CardDescription>
 					</CardHeader>
 					<CardContent>
-						<dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-							<div>
-								<dt class="text-sm font-medium text-muted-foreground">Server ID</dt>
-								<dd class="mt-1 text-sm font-mono">{server.id}</dd>
+						<dl class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+							<div class="space-y-1">
+								<dt class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Server ID</dt>
+								<dd class="text-sm font-mono">{server.id}</dd>
 							</div>
-							<div>
-								<dt class="text-sm font-medium text-muted-foreground">Container ID</dt>
-								<dd class="mt-1 text-sm font-mono">{server.container_id || 'Not assigned'}</dd>
+							<div class="space-y-1">
+								<dt class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Container ID</dt>
+								<dd class="text-sm font-mono">{server.container_id || 'Not assigned'}</dd>
 							</div>
-							<div>
-								<dt class="text-sm font-medium text-muted-foreground">Java Version</dt>
-								<dd class="mt-1 text-sm">{server.java_version}</dd>
+							<div class="space-y-1">
+								<dt class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Java Version</dt>
+								<dd class="text-sm">{server.java_version}</dd>
 							</div>
-							<div>
-								<dt class="text-sm font-medium text-muted-foreground">Data Path</dt>
-								<dd class="mt-1 text-sm font-mono break-all">{server.data_path}</dd>
+							<div class="space-y-1">
+								<dt class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Data Path</dt>
+								<dd class="text-sm font-mono break-all">{server.data_path}</dd>
 							</div>
-							<div>
-								<dt class="text-sm font-medium text-muted-foreground">Created</dt>
-								<dd class="mt-1 text-sm">{new Date(server.created_at).toLocaleString()}</dd>
+							<div class="space-y-1">
+								<dt class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Created</dt>
+								<dd class="text-sm">{new Date(server.created_at).toLocaleString()}</dd>
 							</div>
-							<div>
-								<dt class="text-sm font-medium text-muted-foreground">Last Updated</dt>
-								<dd class="mt-1 text-sm">{new Date(server.updated_at).toLocaleString()}</dd>
+							<div class="space-y-1">
+								<dt class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Last Updated</dt>
+								<dd class="text-sm">{new Date(server.updated_at).toLocaleString()}</dd>
 							</div>
 							{#if server.last_started}
-								<div>
-									<dt class="text-sm font-medium text-muted-foreground">Last Started</dt>
-									<dd class="mt-1 text-sm">{new Date(server.last_started).toLocaleString()}</dd>
+								<div class="space-y-1">
+									<dt class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Last Started</dt>
+									<dd class="text-sm">{new Date(server.last_started).toLocaleString()}</dd>
 								</div>
 							{/if}
 							{#if server.proxy_port}
-								<div>
-									<dt class="text-sm font-medium text-muted-foreground">Proxy Port</dt>
-									<dd class="mt-1 text-sm">{server.proxy_port}</dd>
+								<div class="space-y-1">
+									<dt class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Proxy Port</dt>
+									<dd class="text-sm">{server.proxy_port}</dd>
 								</div>
 							{/if}
 						</dl>
 					</CardContent>
 				</Card>
-			</TabsContent>
+				</TabsContent>
 
-			<TabsContent value="console" class="h-[600px]">
-				<ServerConsole {server} active={activeTab === 'console'} />
-			</TabsContent>
+				<TabsContent value="console" class="absolute inset-0">
+					<ServerConsole {server} active={activeTab === 'console'} />
+				</TabsContent>
 
-			<TabsContent value="configuration" class="h-[600px]">
-				<ServerConfiguration {server} />
-			</TabsContent>
+				<TabsContent value="configuration" class="absolute inset-0">
+					<ServerConfiguration {server} />
+				</TabsContent>
 
-			<TabsContent value="mods" class="h-[600px]">
-				<ServerMods {server} active={activeTab === 'mods'} />
-			</TabsContent>
+				<TabsContent value="mods" class="absolute inset-0">
+					<ServerMods {server} active={activeTab === 'mods'} />
+				</TabsContent>
 
-			<TabsContent value="files" class="h-[600px]">
-				<ServerFiles {server} active={activeTab === 'files'} />
-			</TabsContent>
+				<TabsContent value="files" class="absolute inset-0">
+					<ServerFiles {server} active={activeTab === 'files'} />
+				</TabsContent>
+			</div>
 		</Tabs>
 	</div>
 {:else}

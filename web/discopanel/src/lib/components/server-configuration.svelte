@@ -9,8 +9,8 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { toast } from 'svelte-sonner';
-	import { Save, RefreshCw, Loader2, Info } from '@lucide/svelte';
-	import type { Server, ConfigProperty, ConfigCategory } from '$lib/api/types';
+	import { Save, RefreshCw, Loader2, Link, ArrowUp } from '@lucide/svelte';
+	import type { Server, ConfigCategory } from '$lib/api/types';
 
 	let { server, config, onSave, saving: externalSaving = false }: { 
 		server?: Server;
@@ -26,6 +26,7 @@
 	let currentValues = $state<Record<string, any>>({});
 	let enabledFields = $state<Set<string>>(new Set());
 	let modifiedProperties = $state<Set<string>>(new Set());
+	let highlightedField = $state<string | null>(null);
 	
 	// Use external saving state if provided, otherwise use internal
 	let isSaving = $derived(externalSaving !== undefined ? externalSaving : saving);
@@ -36,6 +37,16 @@
 		} else if (config) {
 			processConfig(config);
 		}
+		
+		// Check for hash in URL to scroll to section/field
+		checkUrlHash();
+		
+		// Listen for hash changes
+		window.addEventListener('hashchange', checkUrlHash);
+		
+		return () => {
+			window.removeEventListener('hashchange', checkUrlHash);
+		};
 	});
 
 	async function loadServerConfig() {
@@ -101,9 +112,18 @@
 		}
 		try {
 			const changes: Record<string, any> = {};
-			// Only send values for enabled fields
-			enabledFields.forEach(key => {
-				changes[key] = currentValues[key];
+			
+			// Include all modified properties
+			modifiedProperties.forEach(key => {
+				if (enabledFields.has(key)) {
+					// Field is enabled - send its value (null/undefined means unset)
+					const value = currentValues[key];
+					// Convert undefined to null for consistency
+					changes[key] = value === undefined ? null : value;
+				} else {
+					// Field is disabled - send null to unset it
+					changes[key] = null;
+				}
 			});
 
 			if (onSave) {
@@ -135,7 +155,12 @@
 	}
 
 	function handlePropertyChange(key: string, value: any) {
-		currentValues[key] = value;
+		// Treat empty strings as undefined (unset)
+		if (value === '') {
+			currentValues[key] = undefined;
+		} else {
+			currentValues[key] = value;
+		}
 		
 		// Track modifications
 		updateModifiedProperties();
@@ -190,6 +215,35 @@
 			case 'select':
 			default: return '';
 		}
+	}
+	
+	function checkUrlHash() {
+		const hash = window.location.hash.slice(1); // Remove #
+		if (!hash) return;
+		
+		// Hash can be either section name or field key
+		setTimeout(() => {
+			const element = document.getElementById(hash);
+			if (element) {
+				element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+				
+				// If it's a field, highlight it
+				if (element.hasAttribute('data-field')) {
+					highlightedField = hash;
+					// Remove highlight after 3 seconds
+					setTimeout(() => {
+						highlightedField = null;
+					}, 3000);
+				}
+			}
+		}, 100);
+	}
+	
+	function copyLinkToClipboard(anchor: string) {
+		const url = new URL(window.location.href);
+		url.hash = anchor;
+		navigator.clipboard.writeText(url.toString());
+		toast.success('Link copied to clipboard');
 	}
 
 	function resetChanges() {
@@ -272,12 +326,25 @@
 							category.properties.filter(p => !p.system) : 
 							category.properties}
 						{#if filteredProps.length > 0}
-							<div class="space-y-4">
-								<h3 class="text-lg font-semibold text-foreground/90 border-b pb-2">{category.name}</h3>
+							<div class="space-y-4" id={category.name.toLowerCase().replace(/\s+/g, '-')}>
+								<div class="flex items-center justify-between border-b pb-2 group">
+									<h3 class="text-lg font-semibold text-foreground/90">{category.name}</h3>
+									<Button
+										variant="ghost"
+										size="icon"
+										class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+										onclick={() => copyLinkToClipboard(category.name.toLowerCase().replace(/\s+/g, '-'))}
+									>
+										<Link class="h-3 w-3" />
+									</Button>
+								</div>
 								<div class="grid gap-4 md:grid-cols-2">
 									{#each filteredProps as prop}
 									{@const inputType = getInputType(prop.type)}
-									<div class="relative p-4 rounded-lg border bg-card hover:bg-accent/5 transition-colors">
+									<div 
+										id={prop.key}
+										data-field="true"
+										class="relative p-4 rounded-lg border bg-card hover:bg-accent/5 transition-all duration-300 {highlightedField === prop.key ? 'ring-2 ring-primary ring-offset-2 animate-pulse' : ''}">
 										<div class="flex gap-3">
 											<Checkbox
 												checked={enabledFields.has(prop.key)}
@@ -288,7 +355,8 @@
 											<div class="flex-1 space-y-2">
 												<div class="flex items-start justify-between gap-2">
 													<div class="flex-1">
-														<Label for={prop.key} class="text-sm font-medium">
+														<div class="flex items-center gap-2">
+															<Label for={prop.key} class="text-sm font-medium">
 															{prop.label}
 															{#if prop.required}
 																<span class="text-xs text-red-500 ml-1">*</span>
@@ -300,6 +368,15 @@
 																<span class="text-xs text-orange-500 ml-1">• modified</span>
 															{/if}
 														</Label>
+														<Button
+															variant="ghost"
+															size="icon"
+															class="h-4 w-4 opacity-0 hover:opacity-100 transition-opacity"
+															onclick={() => copyLinkToClipboard(prop.key)}
+														>
+															<Link class="h-3 w-3" />
+														</Button>
+													</div>
 														<div class="text-xs text-muted-foreground font-mono">{prop.env_var}</div>
 														{#if prop.description}
 															<p class="text-xs text-muted-foreground mt-1">{prop.description}</p>

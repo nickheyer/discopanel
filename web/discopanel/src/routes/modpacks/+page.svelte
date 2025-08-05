@@ -8,7 +8,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
 	import { toast } from 'svelte-sonner';
-	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload } from '@lucide/svelte';
+	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload, Package, ArrowLeft } from '@lucide/svelte';
 	import type { IndexedModpack, ModpackSearchParams, ModpackSearchResponse } from '$lib/api/types';
 	
 	let searchParams = $state<ModpackSearchParams>({
@@ -123,15 +123,23 @@
 				);
 			}
 			
-			// Update favorites list
+			// Update favorites list immediately
 			if (result.is_favorited) {
+				// Add to favorites if not already there
+				if (!favorites.find(f => f.id === modpack.id)) {
+					favorites = [...favorites, { ...modpack, is_favorited: true }];
+				}
 				toast.success('Added to favorites');
 			} else {
+				// Remove from favorites
+				favorites = favorites.filter(f => f.id !== modpack.id);
 				toast.success('Removed from favorites');
 			}
 			
-			if (showFavorites) {
-				await loadFavorites();
+			// If viewing favorites, we may need to update the display
+			if (showFavorites && !result.is_favorited) {
+				// Item was removed from favorites while viewing favorites
+				// The reactive displayModpacks will automatically update
 			}
 		} catch (error) {
 			toast.error('Failed to toggle favorite');
@@ -225,16 +233,30 @@
 	let displayModpacks = $derived(showFavorites ? favorites : (searchResults?.modpacks || []));
 </script>
 
-<div class="flex-1 space-y-4 p-8">
-	<div class="flex items-center justify-between">
-		<h2 class="text-3xl font-bold tracking-tight">Modpacks</h2>
+<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-gradient-to-br from-background to-muted/10">
+	<div class="flex items-center justify-between pb-6 border-b-2 border-border/50">
+		<div class="flex items-center gap-4">
+			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+				<Package class="h-8 w-8 text-primary" />
+			</div>
+			<div class="space-y-1">
+				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Modpacks</h2>
+				<p class="text-base text-muted-foreground">Browse and install modpacks for your servers</p>
+			</div>
+		</div>
 		<div class="flex items-center gap-2">
 			<Button
-				variant={showFavorites ? "default" : "outline"}
+				variant={showFavorites ? "outline" : "default"}
 				onclick={() => showFavorites = !showFavorites}
+				class="shadow-md hover:shadow-lg transition-all hover:scale-[1.02]"
 			>
-				<Heart class="h-4 w-4 mr-2" />
-				Favorites ({favorites.length})
+				{#if showFavorites}
+					<ArrowLeft class="h-5 w-5 mr-2" />
+					Go back to modpacks
+				{:else}
+					<Heart class="h-5 w-5 mr-2" />
+					Favorites ({favorites.length})
+				{/if}
 			</Button>
 		</div>
 	</div>
@@ -251,9 +273,9 @@
 							<ExternalLink class="h-4 w-4 mr-2" />
 							Get API Key
 						</Button>
-						<Button size="sm" variant="outline" href="/settings">
+						<Button size="sm" variant="outline" href="/settings#curseforge">
 							<Settings class="h-4 w-4 mr-2" />
-							Configure in Settings
+							Configure API keys in Settings
 						</Button>
 					</div>
 				</div>
@@ -291,16 +313,16 @@
 						{/each}
 					</SelectContent>
 				</Select>
-				<Button onclick={searchModpacks} disabled={loading}>
-					<Search class="h-4 w-4 mr-2" />
+				<Button onclick={searchModpacks} disabled={loading} class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-md hover:shadow-lg transition-all hover:scale-[1.02]">
+					<Search class="h-5 w-5 mr-2" />
 					Search
 				</Button>
-				<Button onclick={syncModpacks} disabled={syncing} variant="outline">
-					<RefreshCw class={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+				<Button onclick={syncModpacks} disabled={syncing} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
+					<RefreshCw class={`h-5 w-5 mr-2 ${syncing ? 'animate-spin' : ''}`} />
 					Sync
 				</Button>
-				<Button onclick={() => fileInput?.click()} disabled={uploading} variant="outline">
-					<Upload class="h-4 w-4 mr-2" />
+				<Button onclick={() => fileInput?.click()} disabled={uploading} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
+					<Upload class="h-5 w-5 mr-2" />
 					Upload Modpack
 				</Button>
 				<input
@@ -321,8 +343,9 @@
 	
 	<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 		{#each displayModpacks as modpack}
-			<Card class="hover:shadow-lg transition-shadow">
-				<CardHeader>
+			<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+				<CardHeader class="relative">
 					<div class="flex items-start gap-4">
 						{#if modpack.logo_url}
 							<img 
@@ -332,9 +355,9 @@
 							/>
 						{/if}
 						<div class="flex-1 min-w-0">
-							<CardTitle class="line-clamp-1">{modpack.name}</CardTitle>
+							<CardTitle class="line-clamp-1 text-xl font-semibold">{modpack.name}</CardTitle>
 							<div class="flex items-center gap-2 mt-1">
-								<Badge variant="secondary" class="text-xs">
+								<Badge variant="secondary" class="text-xs font-semibold">
 									{modpack.indexer === 'manual' ? 'Manual Upload' : modpack.indexer}
 								</Badge>
 								<span class="text-xs text-muted-foreground">
@@ -347,12 +370,13 @@
 							size="icon"
 							variant={modpack.is_favorited ? "default" : "outline"}
 							onclick={() => toggleFavorite(modpack)}
+							class="hover:scale-110 transition-transform"
 						>
 							<Heart class={`h-4 w-4 ${modpack.is_favorited ? 'fill-current' : ''}`} />
 						</Button>
 					</div>
 				</CardHeader>
-				<CardContent>
+				<CardContent class="relative">
 					<CardDescription class="line-clamp-2 mb-4">
 						{modpack.summary}
 					</CardDescription>
@@ -387,7 +411,7 @@
 						{:else}
 							<div></div>
 						{/if}
-						<Button size="sm" onclick={() => goto(`/servers/new?modpack=${modpack.id}`)}>
+						<Button size="sm" onclick={() => goto(`/servers/new?modpack=${modpack.id}`)} class="font-semibold shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
 							Use in Server
 						</Button>
 					</div>

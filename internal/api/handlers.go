@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -291,6 +292,14 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if container recreation is needed
+	needsRecreation := false
+	originalMemory := server.Memory
+	originalModLoader := server.ModLoader
+	originalMCVersion := server.MCVersion
+	originalJavaVersion := server.JavaVersion
+	originalDockerImage := server.DockerImage
+
 	// Update fields
 	if req.Name != "" {
 		server.Name = req.Name
@@ -300,27 +309,92 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MaxPlayers > 0 {
 		server.MaxPlayers = req.MaxPlayers
+		needsRecreation = true
 	}
-	if req.Memory > 0 {
+	if req.Memory > 0 && req.Memory != originalMemory {
 		server.Memory = req.Memory
+		needsRecreation = true
+		// Update the ServerConfig to sync memory settings
+		memoryStr := fmt.Sprintf("%dM", req.Memory)
+		if err := s.store.UpdateServerConfigMemory(ctx, server.ID, memoryStr); err != nil {
+			s.log.Error("Failed to update server config memory: %v", err)
+		}
 	}
-	if req.ModLoader != "" {
+	if req.ModLoader != "" && models.ModLoader(req.ModLoader) != originalModLoader {
 		server.ModLoader = models.ModLoader(req.ModLoader)
+		needsRecreation = true
 	}
-	if req.MCVersion != "" {
+	if req.MCVersion != "" && req.MCVersion != originalMCVersion {
 		server.MCVersion = req.MCVersion
+		needsRecreation = true
 	}
-	if req.JavaVersion != "" {
+	if req.JavaVersion != "" && req.JavaVersion != originalJavaVersion {
 		server.JavaVersion = req.JavaVersion
+		needsRecreation = true
 	}
-	if req.DockerImage != "" {
+	if req.DockerImage != "" && req.DockerImage != originalDockerImage {
 		server.DockerImage = req.DockerImage
+		needsRecreation = true
 	}
 
+	// Save server updates first
 	if err := s.store.UpdateServer(ctx, server); err != nil {
 		s.log.Error("Failed to update server: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to update server")
 		return
+	}
+
+	// If container needs recreation and exists, recreate it
+	if needsRecreation && server.ContainerID != "" {
+		// Check if server was running
+		wasRunning := false
+		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+		if err == nil && status == models.StatusRunning {
+			wasRunning = true
+			// Stop the container
+			if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+				s.log.Error("Failed to stop container for recreation: %v", err)
+			}
+		}
+
+		// Remove old container
+		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
+			s.log.Error("Failed to remove old container: %v", err)
+		}
+
+		// Get server config for container creation
+		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+		if err != nil {
+			s.log.Error("Failed to get server config: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to get server configuration")
+			return
+		}
+
+		// Create new container with updated settings
+		newContainerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+		if err != nil {
+			s.log.Error("Failed to create new container: %v", err)
+			server.Status = models.StatusError
+			server.ContainerID = ""
+		} else {
+			server.ContainerID = newContainerID
+			server.Status = models.StatusStopped
+
+			// Start container if it was running before
+			if wasRunning {
+				if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
+					s.log.Error("Failed to restart container after recreation: %v", err)
+					server.Status = models.StatusError
+				} else {
+					server.Status = models.StatusRunning
+				}
+			}
+		}
+
+		// Update server with new container ID and status
+		if err := s.store.UpdateServer(ctx, server); err != nil {
+			s.log.Error("Failed to update server after container recreation: %v", err)
+		}
 	}
 
 	s.respondJSON(w, http.StatusOK, server)
@@ -436,18 +510,59 @@ func (s *Server) handleStopServer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
-	// First stop
-	s.handleStopServer(w, r)
-	if w.Header().Get("Content-Type") != "" {
-		// If stop failed, return
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	server, err := s.store.GetServer(ctx, id)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Server not found")
 		return
+	}
+
+	if server.ContainerID == "" {
+		s.respondError(w, http.StatusBadRequest, "Server container not created")
+		return
+	}
+
+	// Stop container
+	if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+		s.log.Error("Failed to stop container: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to stop server")
+		return
+	}
+
+	// Update server status to stopping
+	server.Status = models.StatusStopping
+	if err := s.store.UpdateServer(ctx, server); err != nil {
+		s.log.Error("Failed to update server status: %v", err)
 	}
 
 	// Wait a bit for clean shutdown
 	time.Sleep(2 * time.Second)
 
-	// Then start
-	s.handleStartServer(w, r)
+	// Start container
+	if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
+		s.log.Error("Failed to start container: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to restart server")
+		return
+	}
+
+	// Update server status
+	now := time.Now()
+	server.Status = models.StatusStarting
+	server.LastStarted = &now
+
+	if err := s.store.UpdateServer(ctx, server); err != nil {
+		s.log.Error("Failed to update server status: %v", err)
+	}
+
+	// Clear ephemeral configuration fields after starting the server
+	if err := s.store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
+		s.log.Error("Failed to clear ephemeral config fields: %v", err)
+	}
+
+	s.respondJSON(w, http.StatusOK, map[string]string{"status": "restarting"})
 }
 
 func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {

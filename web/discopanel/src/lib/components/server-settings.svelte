@@ -120,64 +120,71 @@
 
 <div class="space-y-6">
 	{#if server.status !== 'stopped'}
-		<Alert>
-			<AlertCircle class="h-4 w-4" />
-			<AlertDescription>
+		<Alert class="border-warning/50 bg-warning/10">
+			<AlertCircle class="h-4 w-4 text-warning" />
+			<AlertDescription class="text-sm">
 				Server must be stopped to modify these settings. Changes will take effect after restart.
 			</AlertDescription>
 		</Alert>
 	{/if}
 
-	<div class="grid gap-4 md:grid-cols-2">
+	<div class="grid gap-6 md:grid-cols-2">
 		<div class="space-y-2">
-			<Label for="name">Server Name</Label>
+			<Label for="name" class="text-sm font-medium">Server Name</Label>
 			<Input
 				id="name"
 				bind:value={formData.name}
 				placeholder="My Server"
+				class="h-10"
 			/>
 		</div>
 
 		<div class="space-y-2">
-			<Label for="description">Description</Label>
+			<Label for="description" class="text-sm font-medium">Description</Label>
 			<Input
 				id="description"
 				bind:value={formData.description}
 				placeholder="A Minecraft server"
+				class="h-10"
 			/>
 		</div>
 
 		<div class="space-y-2">
-			<Label for="memory">Memory (MB)</Label>
+			<Label for="memory" class="text-sm font-medium">Memory (MB)</Label>
 			<Input
 				id="memory"
 				type="number"
 				bind:value={formData.memory}
 				min="512"
 				step="512"
+				class="h-10"
 			/>
+			<p class="text-xs text-muted-foreground">
+				Recommended: {formData.mod_loader === 'forge' || formData.mod_loader === 'neoforge' ? '4096' : formData.mod_loader === 'fabric' ? '3072' : '2048'} MB
+			</p>
 		</div>
 
 		<div class="space-y-2">
-			<Label for="max_players">Max Players</Label>
+			<Label for="max_players" class="text-sm font-medium">Max Players</Label>
 			<Input
 				id="max_players"
 				type="number"
 				bind:value={formData.max_players}
 				min="1"
 				max="100"
+				class="h-10"
 			/>
 		</div>
 
 		<div class="space-y-2">
-			<Label for="mc_version">Minecraft Version</Label>
+			<Label for="mc_version" class="text-sm font-medium">Minecraft Version</Label>
 			<Select
 				type="single"
 				disabled={loadingOptions || server.status !== 'stopped'}
 				value={formData.mc_version}
 				onValueChange={(value: string | undefined) => formData.mc_version = value || ''}
 			>
-				<SelectTrigger id="mc_version">
+				<SelectTrigger id="mc_version" class="h-10">
 					<span>{formData.mc_version || 'Select a version'}</span>
 				</SelectTrigger>
 				<SelectContent>
@@ -191,14 +198,14 @@
 		</div>
 
 		<div class="space-y-2">
-			<Label for="mod_loader">Mod Loader</Label>
+			<Label for="mod_loader" class="text-sm font-medium">Mod Loader</Label>
 			<Select
 				type="single"
 				disabled={loadingOptions || server.status !== 'stopped'}
 				value={formData.mod_loader}
 				onValueChange={(value: string | undefined) => formData.mod_loader = value || ''}
 			>
-				<SelectTrigger id="mod_loader">
+				<SelectTrigger id="mod_loader" class="h-10">
 					<span>{formData.mod_loader || 'Select a mod loader'}</span>
 				</SelectTrigger>
 				<SelectContent>
@@ -214,14 +221,14 @@
 		</div>
 
 		<div class="space-y-2">
-			<Label for="java_version">Java Version</Label>
+			<Label for="java_version" class="text-sm font-medium">Java Version</Label>
 			<Select
 				type="single"
 				disabled={loadingOptions || server.status !== 'stopped'}
 				value={formData.java_version}
 				onValueChange={(value: string | undefined) => formData.java_version = value || ''}
 			>
-				<SelectTrigger id="java_version">
+				<SelectTrigger id="java_version" class="h-10">
 					<span>{formData.java_version || 'Select Java version'}</span>
 				</SelectTrigger>
 				<SelectContent>
@@ -234,14 +241,14 @@
 		</div>
 
 		<div class="space-y-2">
-			<Label for="docker_image">Docker Image</Label>
+			<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
 			<Select
 				type="single"
 				disabled={loadingOptions || server.status !== 'stopped'}
 				value={formData.docker_image}
 				onValueChange={(value: string | undefined) => formData.docker_image = value || ''}
 			>
-				<SelectTrigger id="docker_image">
+				<SelectTrigger id="docker_image" class="h-10">
 					<span>{formData.docker_image || 'Select Docker image'}</span>
 				</SelectTrigger>
 				<SelectContent>
@@ -255,10 +262,12 @@
 		</div>
 	</div>
 
-	<div class="flex justify-end">
+	<div class="flex justify-end pt-2">
 		<Button 
 			onclick={handleSave} 
 			disabled={!isDirty || saving}
+			size="sm"
+			class="min-w-[120px]"
 		>
 			{#if saving}
 				<Loader2 class="h-4 w-4 mr-2 animate-spin" />

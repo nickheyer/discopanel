@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/driver/sqlite"
@@ -177,6 +179,28 @@ func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) er
 
 func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
 	return s.db.WithContext(ctx).Save(config).Error
+}
+
+// UpdateServerConfigMemory updates memory settings in ServerConfig
+func (s *Store) UpdateServerConfigMemory(ctx context.Context, serverID string, memory string) error {
+	config, err := s.GetServerConfig(ctx, serverID)
+	if err != nil {
+		return err
+	}
+
+	// Update memory and max memory (they're the same I THINK)
+	config.Memory = &memory
+	config.MaxMemory = &memory
+
+	// Only update InitMemory if it's not already set
+	if config.InitMemory == nil {
+		memoryValue, _ := strconv.Atoi(strings.TrimSuffix(memory, "M"))
+		initMemoryValue := max(memoryValue/4, 1024) // Minimum 1G
+		initMemoryStr := fmt.Sprintf("%dM", initMemoryValue)
+		config.InitMemory = &initMemoryStr
+	}
+
+	return s.SaveServerConfig(ctx, config)
 }
 
 // ClearEphemeralConfigFields clears all ephemeral configuration fields

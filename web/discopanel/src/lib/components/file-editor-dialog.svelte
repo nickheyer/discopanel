@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
+	import { Dialog as DialogPrimitive } from "bits-ui";
 	import { Button } from '$lib/components/ui/button';
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
@@ -13,24 +14,26 @@
 	import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
 	import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 
-	// Configure Monaco Environment for web workers
-	(self as any).MonacoEnvironment = {
-		getWorker(_: any, label: string) {
-			if (label === 'json') {
-				return new jsonWorker();
+	// Configure Monaco Environment only once globally
+	if (!(self as any).MonacoEnvironment) {
+		(self as any).MonacoEnvironment = {
+			getWorker(_: any, label: string) {
+				if (label === 'json') {
+					return new jsonWorker();
+				}
+				if (label === 'css' || label === 'scss' || label === 'less') {
+					return new cssWorker();
+				}
+				if (label === 'html' || label === 'handlebars' || label === 'razor') {
+					return new htmlWorker();
+				}
+				if (label === 'typescript' || label === 'javascript') {
+					return new tsWorker();
+				}
+				return new editorWorker();
 			}
-			if (label === 'css' || label === 'scss' || label === 'less') {
-				return new cssWorker();
-			}
-			if (label === 'html' || label === 'handlebars' || label === 'razor') {
-				return new htmlWorker();
-			}
-			if (label === 'typescript' || label === 'javascript') {
-				return new tsWorker();
-			}
-			return new editorWorker();
-		}
-	};
+		};
+	}
 
 	interface Props {
 		serverId: string;
@@ -48,9 +51,10 @@
 	let saving = $state(false);
 	let isDirty = $derived(content !== originalContent);
 	let isFullscreen = $state(false);
-	let editorContainer: HTMLDivElement;
-	let editor: monaco.editor.IStandaloneCodeEditor | null = null;
+	let editorContainer = $state<HTMLDivElement>();
+	let editor = $state<monaco.editor.IStandaloneCodeEditor | null>(null);
 	let loadedFilePath = $state<string | null>(null);
+	let resizeObserver = $state<ResizeObserver | null>(null);
 
 	// Load file content when dialog opens
 	$effect(() => {
@@ -71,6 +75,10 @@
 				editor.dispose();
 				editor = null;
 			}
+			if (resizeObserver) {
+				resizeObserver.disconnect();
+				resizeObserver = null;
+			}
 		}
 	});
 
@@ -86,6 +94,9 @@
 		return () => {
 			if (editor) {
 				editor.dispose();
+			}
+			if (resizeObserver) {
+				resizeObserver.disconnect();
 			}
 		};
 	});
@@ -134,27 +145,44 @@
 	function createEditor() {
 		if (!editorContainer) return;
 
+		// Determine if file is large (over 100KB)
+		const isLargeFile = content.length > 100000;
+		
 		editor = monaco.editor.create(editorContainer, {
 			value: content,
 			language: file ? getFileLanguage(file.name) : 'plaintext',
 			theme: 'vs-dark',
 			fontSize: 14,
 			fontFamily: "'JetBrains Mono', 'Monaco', 'Consolas', 'Courier New', monospace",
-			minimap: { enabled: !isFullscreen },
+			minimap: { enabled: !isFullscreen && !isLargeFile },
 			scrollBeyondLastLine: false,
-			wordWrap: 'on',
+			wordWrap: isLargeFile ? 'off' : 'on',
 			lineNumbers: 'on',
 			renderWhitespace: 'selection',
-			bracketPairColorization: { enabled: true },
-			formatOnPaste: true,
-			formatOnType: true,
-			automaticLayout: true,
+			bracketPairColorization: { enabled: !isLargeFile },
+			formatOnPaste: false, // Disable for performance
+			formatOnType: false, // Disable for performance
+			automaticLayout: false, // We'll handle resize manually
 			fixedOverflowWidgets: true,
 			suggest: {
-				showWords: true,
-				showSnippets: true
-			}
+				showWords: !isLargeFile,
+				showSnippets: !isLargeFile
+			},
+			// Additional performance optimizations
+			folding: !isLargeFile,
+			renderLineHighlight: 'line',
+			scrollbar: {
+				useShadows: false // Improves scrolling performance
+			},
+			mouseWheelZoom: false,
+			quickSuggestions: !isLargeFile
 		});
+		
+		// Manual resize handling for better performance
+		resizeObserver = new ResizeObserver(() => {
+			editor?.layout();
+		});
+		resizeObserver.observe(editorContainer);
 
 		// Add save shortcut
 		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -238,39 +266,42 @@
 </script>
 
 <Dialog {open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
-	<DialogContent class={isFullscreen ? "!max-w-[95vw] !w-[95vw] h-[95vh] flex flex-col sm:!max-w-[95vw]" : "!max-w-[90vw] !w-[90vw] h-[85vh] flex flex-col sm:!max-w-[90vw]"}>
+	<DialogContent showCloseButton={false} class={isFullscreen ? "!max-w-[95vw] !w-[95vw] h-[95vh] flex flex-col sm:!max-w-[95vw]" : "!max-w-[90vw] !w-[90vw] h-[85vh] flex flex-col sm:!max-w-[90vw]"}>
+		<div class="absolute right-4 top-4 flex gap-1">
+			<button
+				onclick={toggleFullscreen}
+				title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+				class="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+			>
+				{#if isFullscreen}
+					<Minimize2 class="h-4 w-4" />
+				{:else}
+					<Maximize2 class="h-4 w-4" />
+				{/if}
+			</button>
+			<DialogPrimitive.Close
+				class="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+			>
+				<X class="h-4 w-4" />
+				<span class="sr-only">Close</span>
+			</DialogPrimitive.Close>
+		</div>
 		<DialogHeader class="flex-shrink-0">
-			<div class="flex items-center justify-between">
-				<div>
-					<DialogTitle class="flex items-center gap-2">
-						{#if file}
-							{file.name}
-							{#if isDirty}
-								<span class="text-sm text-muted-foreground">●</span>
-							{/if}
-						{:else}
-							File Editor
-						{/if}
-					</DialogTitle>
-					<DialogDescription>
-						{#if file}
-							{file.path}
-						{/if}
-					</DialogDescription>
-				</div>
-				<Button
-					size="icon"
-					variant="ghost"
-					onclick={toggleFullscreen}
-					title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-				>
-					{#if isFullscreen}
-						<Minimize2 class="h-4 w-4" />
-					{:else}
-						<Maximize2 class="h-4 w-4" />
+			<DialogTitle class="flex items-center gap-2">
+				{#if file}
+					{file.name}
+					{#if isDirty}
+						<span class="text-sm text-muted-foreground">●</span>
 					{/if}
-				</Button>
-			</div>
+				{:else}
+					File Editor
+				{/if}
+			</DialogTitle>
+			<DialogDescription>
+				{#if file}
+					{file.path}
+				{/if}
+			</DialogDescription>
 		</DialogHeader>
 		
 		<div class="flex-1 min-h-0 border rounded-md overflow-hidden bg-background relative">

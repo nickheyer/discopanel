@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/nickheyer/discopanel/internal/db"
 	"github.com/spf13/viper"
 )
 
@@ -12,8 +13,8 @@ type Config struct {
 	Database  DatabaseConfig  `mapstructure:"database"`
 	Docker    DockerConfig    `mapstructure:"docker"`
 	Storage   StorageConfig   `mapstructure:"storage"`
-	Minecraft MinecraftConfig `mapstructure:"minecraft"`
 	Proxy     ProxyConfig     `mapstructure:"proxy"`
+	Minecraft MinecraftConfig `mapstructure:"minecraft"`
 }
 
 type ServerConfig struct {
@@ -46,19 +47,15 @@ type StorageConfig struct {
 	MaxUploadSize int64  `mapstructure:"max_upload_size"`
 }
 
-type MinecraftConfig struct {
-	DefaultMemory    string            `mapstructure:"default_memory"`
-	DefaultMaxMemory string            `mapstructure:"default_max_memory"`
-	DefaultPort      int               `mapstructure:"default_port"`
-	RconPortStart    int               `mapstructure:"rcon_port_start"`
-	Images           map[string]string `mapstructure:"images"`
-}
-
 type ProxyConfig struct {
 	Enabled      bool   `mapstructure:"enabled"`
 	BaseURL      string `mapstructure:"base_url"`
 	PortRangeMin int    `mapstructure:"port_range_min"`
 	PortRangeMax int    `mapstructure:"port_range_max"`
+}
+
+type MinecraftConfig struct {
+	GlobalConfig db.ServerConfig `mapstructure:"global_config"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -136,20 +133,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("storage.temp_dir", "./tmp")
 	v.SetDefault("storage.max_upload_size", 524288000) // 500MB
 
-	// Minecraft defaults
-	v.SetDefault("minecraft.default_memory", "1G")
-	v.SetDefault("minecraft.default_max_memory", "2G")
-	v.SetDefault("minecraft.default_port", 25565)
-	v.SetDefault("minecraft.rcon_port_start", 25575)
-	v.SetDefault("minecraft.images", map[string]string{
-		"vanilla": "itzg/minecraft-server:latest",
-		"forge":   "itzg/minecraft-server:latest",
-		"fabric":  "itzg/minecraft-server:latest",
-		"paper":   "itzg/minecraft-server:latest",
-		"spigot":  "itzg/minecraft-server:latest",
-		"bukkit":  "itzg/minecraft-server:latest",
-	})
-
 	// Proxy defaults
 	v.SetDefault("proxy.enabled", false)
 	v.SetDefault("proxy.base_url", "")
@@ -186,4 +169,9 @@ func validateConfig(cfg *Config) error {
 	}
 
 	return nil
+}
+
+// LoadGlobalServerConfig returns the global ServerConfig defaults from the config file
+func LoadGlobalServerConfig(cfg *Config) db.ServerConfig {
+	return cfg.Minecraft.GlobalConfig
 }

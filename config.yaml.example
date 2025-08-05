@@ -1,19 +1,22 @@
 # DiscoPanel Configuration File
-# Copy this file to config.yaml and modify as needed
+# This file contains all configuration options for DiscoPanel
 
+# Server configuration for the DiscoPanel application itself
 server:
   port: "8080"
   host: "0.0.0.0"
-  read_timeout: 15  # seconds
-  write_timeout: 15 # seconds
-  idle_timeout: 60  # seconds
+  read_timeout: 15
+  write_timeout: 15
+  idle_timeout: 60
 
+# Database configuration
 database:
-  path: "./discopanel.db"
+  path: "./data/discopanel.db"
   max_connections: 25
   max_idle_conns: 5
-  conn_max_lifetime: 300 # seconds
+  conn_max_lifetime: 300
 
+# Docker configuration
 docker:
   host: "unix:///var/run/docker.sock"
   version: "1.41"
@@ -21,28 +24,151 @@ docker:
   network_subnet: "172.20.0.0/16"
   registry_url: ""
 
+# Storage configuration
 storage:
   data_dir: "./data"
   backup_dir: "./backups"
   temp_dir: "./tmp"
-  max_upload_size: 524288000 # 500MB in bytes
+  max_upload_size: 524288000  # 500MB in bytes
 
-minecraft:
-  default_memory: "1G"
-  default_max_memory: "2G"
-  default_port: 25565
-  rcon_port_start: 25575
-  images:
-    vanilla: "itzg/minecraft-server:latest"
-    forge: "itzg/minecraft-server:latest"
-    fabric: "itzg/minecraft-server:latest"
-    paper: "itzg/minecraft-server:latest"
-    spigot: "itzg/minecraft-server:latest"
-    bukkit: "itzg/minecraft-server:latest"
-    neoforge: "itzg/minecraft-server:latest"
-
+# Proxy configuration
 proxy:
   enabled: false
   base_url: ""
   port_range_min: 25565
   port_range_max: 25665
+
+# Minecraft server global configuration defaults
+minecraft:
+  global_config:
+    # JVM Configuration
+    uid: 1000
+    gid: 1000
+    memory: "1G"
+    initMemory: "1G"
+    maxMemory: "1G"
+    tz: "UTC"
+    enableRollingLogs: false
+    enableJmx: false
+    jmxHost: ""
+    useAikarFlags: false
+    useMeowiceFlags: false
+    useMeowiceGraalvmFlags: true
+    jvmOpts: ""
+    jvmXxOpts: ""
+    jvmDdOpts: ""
+    extraArgs: ""
+    logTimestamp: false
+
+    # Server Configuration
+    type: "VANILLA"
+    eula: "TRUE"
+    version: "LATEST"
+    motd: ""
+    difficulty: "easy"
+    icon: ""
+    overrideIcon: false
+    maxPlayers: 20
+    maxWorldSize: 0
+    allowNether: true
+    announcePlayerAchievements: true
+    enableCommandBlock: false
+    forceGamemode: false
+    generateStructures: true
+    hardcore: false
+    snooperEnabled: true
+    maxBuildHeight: 256
+    spawnAnimals: true
+    spawnMonsters: true
+    spawnNpcs: true
+    spawnProtection: 0
+    viewDistance: 0
+    seed: ""
+    mode: "survival"
+    pvp: true
+    levelType: "minecraft:default"
+    generatorSettings: ""
+    level: "world"
+    onlineMode: true
+    allowFlight: false
+    serverName: ""
+    serverPort: 0
+    playerIdleTimeout: 0
+    syncChunkWrites: false
+    enableStatus: false
+    entityBroadcastRangePercentage: 0
+    functionPermissionLevel: 0
+    networkCompressionThreshold: 0
+    opPermissionLevel: 0
+    preventProxyConnections: false
+    useNativeTransport: false
+    simulationDistance: 0
+    execDirectly: false
+    stopServerAnnounceDelay: 0
+    proxy: ""
+    console: true
+    gui: true
+    stopDuration: 60
+    setupOnly: false
+    useFlareFlags: false
+    useSimdFlags: false
+
+    # Custom Resource Pack
+    resourcePack: ""
+    resourcePackSha1: ""
+    resourcePackEnforce: false
+
+    # Whitelist
+    enableWhitelist: false
+    whitelist: ""
+    whitelistFile: ""
+    overrideWhitelist: false
+
+    # RCON
+    enableRcon: true
+    rconPassword: ""  # MUST be changed for security
+    rconPort: 25575
+    broadcastRconToOps: false
+    rconCmdsStartup: ""
+    rconCmdsOnConnect: ""
+    rconCmdsFirstConnect: ""
+    rconCmdsOnDisconnect: ""
+    rconCmdsLastDisconnect: ""
+
+    # Auto-Pause
+    enableAutopause: false
+    autopauseTimeoutEst: 3600
+    autopauseTimeoutInit: 600
+    autopauseTimeoutKn: 120
+    autopausePeriod: 10
+    autopauseKnockInterface: "eth0"
+    debugAutopause: false
+
+    # Auto-Stop
+    enableAutostop: false
+    autostopTimeoutEst: 3600
+    autostopTimeoutInit: 1800
+    autostopPeriod: 10
+    debugAutostop: false
+
+    # Forge Configuration
+    forgeVersion: ""
+    forgeInstaller: ""
+    forgeInstallerUrl: ""
+
+    # CurseForge Configuration
+    cfApiKey: ""
+    cfApiKeyFile: ""
+    cfPageUrl: ""
+    cfSlug: ""
+    cfFileId: ""
+    cfModpackZip: ""
+    cfFilenameMatcher: ""
+    cfExcludeIncludeFile: ""
+    cfExcludeMods: ""
+    cfForceIncludeMods: ""
+    cfForceSynchronize: false
+    cfSetLevelFrom: ""
+    cfParallelDownloads: 4
+    cfOverridesSkipExisting: false
+    cfForceReinstallModloader: false

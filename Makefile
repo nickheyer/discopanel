@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build-frontend
+.PHONY: dev prod clean build-frontend run
 
 # Variables
 DATA_DIR := ./data
@@ -7,7 +7,7 @@ FRONTEND_DIR := web/discopanel
 BACKEND_BIN := discopanel
 
 # Development mode - runs backend and frontend concurrently
-dev:
+run:
 	@echo "Starting development environment..."
 	@mkdir -p $(DATA_DIR)
 	@echo "Starting backend server with frontend dev server..."
@@ -17,6 +17,8 @@ dev:
 	go run cmd/discopanel/main.go & \
 	BACKEND_PID=$$!; \
 	wait $$BACKEND_PID $$FRONTEND_PID
+
+dev: clean run
 
 # Production build and run
 prod: build-frontend

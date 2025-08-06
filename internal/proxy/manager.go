@@ -13,20 +13,20 @@ import (
 
 // Manager handles the lifecycle of the proxy and manages routes
 type Manager struct {
-	proxy        *Proxy
-	store        *db.Store
-	config       *config.ProxyConfig
-	logger       *logger.Logger
-	mu           sync.Mutex
-	networkName  string
+	proxy       *Proxy
+	store       *db.Store
+	config      *config.ProxyConfig
+	logger      *logger.Logger
+	mu          sync.Mutex
+	networkName string
 }
 
 // NewManager creates a new proxy manager
 func NewManager(store *db.Store, cfg *config.ProxyConfig, logger *logger.Logger) *Manager {
 	return &Manager{
-		store:  store,
-		config: cfg,
-		logger: logger,
+		store:       store,
+		config:      cfg,
+		logger:      logger,
 		networkName: "discopanel-network", // TODO: Get from main config
 	}
 }
@@ -68,12 +68,12 @@ func (m *Manager) Start() error {
 				m.logger.Error("Failed to get container IP for server %s: %v", server.Name, err)
 				continue
 			}
-			
+
 			m.proxy.AddRoute(
 				server.ID,
 				server.ProxyHostname,
-				containerIP,   // Use IP address instead of container name
-				25565,         // Internal Minecraft port
+				containerIP, // Use IP address instead of container name
+				25565,       // Internal Minecraft port
 			)
 			m.logger.Info("Added proxy route for server %s: %s -> %s:25565", server.Name, server.ProxyHostname, containerIP)
 		}
@@ -132,7 +132,7 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 			m.logger.Error("Server %s has no container ID", server.Name)
 			return fmt.Errorf("server has no container")
 		}
-		
+
 		routes := m.proxy.GetRoutes()
 		if _, exists := routes[hostname]; exists {
 			m.proxy.UpdateRoute(hostname, containerIP, 25565)
@@ -173,14 +173,14 @@ func (m *Manager) generateHostname(server *db.Server) string {
 	if server.ProxyHostname != "" {
 		return server.ProxyHostname
 	}
-	
+
 	// Otherwise use default pattern
 	if m.config.BaseURL != "" {
 		// Use server name as subdomain
 		return fmt.Sprintf("%s.%s", strings.ToLower(strings.ReplaceAll(server.Name, " ", "-")), m.config.BaseURL)
 	}
 	// Fallback to using server ID
-	return fmt.Sprintf("server-%s.minecraft.local", server.ID)
+	return fmt.Sprintf("server-%s.minecraft.mc", server.ID)
 }
 
 // GetRoutes returns all current proxy routes

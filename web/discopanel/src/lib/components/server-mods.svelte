@@ -22,6 +22,19 @@
 	let fileInput = $state<HTMLInputElement | null>(null);
 
 	let hasLoaded = false;
+	let previousServerId = $state(server.id);
+	
+	// Reset state when server changes
+	$effect(() => {
+		if (server.id !== previousServerId) {
+			previousServerId = server.id;
+			// Reset state variables
+			mods = [];
+			loading = true;
+			uploading = false;
+			hasLoaded = false;
+		}
+	});
 	
 	$effect(() => {
 		if (active && !hasLoaded) {

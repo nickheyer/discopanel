@@ -50,7 +50,8 @@ type StorageConfig struct {
 type ProxyConfig struct {
 	Enabled      bool   `mapstructure:"enabled"`
 	BaseURL      string `mapstructure:"base_url"`
-	ListenPort   int    `mapstructure:"listen_port"`
+	ListenPort   int    `mapstructure:"listen_port"`    // Primary listen port (kept for backward compatibility)
+	ListenPorts  []int  `mapstructure:"listen_ports"`   // Multiple listen ports
 	PortRangeMin int    `mapstructure:"port_range_min"`
 	PortRangeMax int    `mapstructure:"port_range_max"`
 }
@@ -139,6 +140,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("proxy.enabled", false)
 	v.SetDefault("proxy.base_url", "")
 	v.SetDefault("proxy.listen_port", 25565)
+	v.SetDefault("proxy.listen_ports", []int{25565})
 	v.SetDefault("proxy.port_range_min", 25565)
 	v.SetDefault("proxy.port_range_max", 25665)
 
@@ -171,6 +173,25 @@ func validateConfig(cfg *Config) error {
 	// Validate port ranges
 	if cfg.Proxy.PortRangeMin >= cfg.Proxy.PortRangeMax {
 		return fmt.Errorf("proxy port range min must be less than max")
+	}
+
+	// Ensure ListenPorts includes ListenPort for backward compatibility
+	if cfg.Proxy.Enabled {
+		if len(cfg.Proxy.ListenPorts) == 0 {
+			cfg.Proxy.ListenPorts = []int{cfg.Proxy.ListenPort}
+		} else {
+			// Make sure the primary port is in the list
+			hasPort := false
+			for _, port := range cfg.Proxy.ListenPorts {
+				if port == cfg.Proxy.ListenPort {
+					hasPort = true
+					break
+				}
+			}
+			if !hasPort {
+				cfg.Proxy.ListenPorts = append([]int{cfg.Proxy.ListenPort}, cfg.Proxy.ListenPorts...)
+			}
+		}
 	}
 
 	return nil

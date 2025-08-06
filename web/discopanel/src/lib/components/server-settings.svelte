@@ -3,6 +3,8 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import { Switch } from '$lib/components/ui/switch';
+	import { Separator } from '$lib/components/ui/separator';
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
@@ -29,7 +31,9 @@
 		mod_loader: server.mod_loader,
 		mc_version: server.mc_version,
 		java_version: server.java_version,
-		docker_image: server.docker_image
+		docker_image: server.docker_image,
+		detached: !!(server.detached),
+		auto_start: !!(server.auto_start)
 	});
 
 	// Available options
@@ -37,6 +41,31 @@
 	let modLoaders = $state<ModLoaderInfo[]>([]);
 	let dockerImages = $state<DockerImageInfo[]>([]);
 	let loadingOptions = $state(true);
+
+	// Reset state when server changes
+	let previousServerId = $state(server.id);
+	$effect(() => {
+		if (server.id !== previousServerId) {
+			previousServerId = server.id;
+			// Reset form data to match new server
+			formData = {
+				name: server.name,
+				description: server.description || '',
+				max_players: server.max_players,
+				memory: server.memory,
+				mod_loader: server.mod_loader,
+				mc_version: server.mc_version,
+				java_version: server.java_version,
+				docker_image: server.docker_image,
+				detached: !!(server.detached),
+				auto_start: !!(server.auto_start)
+			};
+			saving = false;
+			isDirty = false;
+			// Reload options for new server
+			loadOptions();
+		}
+	});
 
 	// Load available options
 	$effect(() => {
@@ -53,7 +82,9 @@
 			formData.mod_loader !== server.mod_loader ||
 			formData.mc_version !== server.mc_version ||
 			formData.java_version !== server.java_version ||
-			formData.docker_image !== server.docker_image;
+			formData.docker_image !== server.docker_image ||
+			formData.detached !== !!(server.detached) ||
+			formData.auto_start !== !!(server.auto_start);
 	});
 
 	async function loadOptions() {
@@ -260,7 +291,63 @@
 				</SelectContent>
 			</Select>
 		</div>
+
+		<div class="space-y-4">
+			<h4 class="text-sm font-semibold">Lifecycle Management</h4>
+			
+			<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+				<div class="space-y-0.5">
+					<Label for="detached" class="text-sm font-medium cursor-pointer">Detached Mode</Label>
+					<p class="text-xs text-muted-foreground">
+						Server continues running when DiscoPanel stops (not available for proxied servers)
+					</p>
+				</div>
+				<Switch
+					id="detached"
+					checked={formData.detached}
+					disabled={server.proxy_hostname !== ''}
+					onCheckedChange={(checked) => {
+						if (checked && server.proxy_hostname !== '') {
+							toast.error("Cannot detach proxied servers");
+							formData.detached = false;
+							return;
+						}
+						formData.detached = checked;
+						// If detaching, disable auto-start
+						if (checked) {
+							formData.auto_start = false;
+						}
+					}}
+				/>
+			</div>
+
+			<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+				<div class="space-y-0.5">
+					<Label for="auto_start" class="text-sm font-medium cursor-pointer">Auto Start</Label>
+					<p class="text-xs text-muted-foreground">
+						Automatically start when DiscoPanel starts{formData.detached ? ' (disabled for detached servers)' : ''}
+					</p>
+				</div>
+				<Switch
+					id="auto_start"
+					checked={formData.auto_start}
+					disabled={formData.detached}
+					onCheckedChange={(checked) => {
+						if (formData.detached) {
+							toast.error("Cannot enable auto-start for detached servers");
+							formData.auto_start = false;
+							return;
+						}
+						formData.auto_start = checked;
+					}}
+				/>
+			</div>
+		</div>
 	</div>
+
+	<Separator class="my-4" />
+
+
 
 	<div class="flex justify-end pt-2">
 		<Button 

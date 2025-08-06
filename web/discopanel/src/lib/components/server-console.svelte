@@ -41,6 +41,19 @@
 		}
 	});
 
+	// Clear logs and fetch new ones when server changes
+	let previousServerId = $state(server.id);
+	$effect(() => {
+		if (server.id !== previousServerId) {
+			previousServerId = server.id;
+			logs = '';
+			command = '';
+			if (active) {
+				fetchLogs();
+			}
+		}
+	});
+
 	function startPolling() {
 		if (!pollingInterval) {
 			pollingInterval = setInterval(fetchLogs, 2000);

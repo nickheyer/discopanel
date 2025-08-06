@@ -57,6 +57,7 @@ func (s *Server) setupRoutes() {
 	// Server management
 	api.HandleFunc("/servers", s.handleListServers).Methods("GET")
 	api.HandleFunc("/servers", s.handleCreateServer).Methods("POST")
+	api.HandleFunc("/servers/next-port", s.handleGetNextAvailablePort).Methods("GET")
 	api.HandleFunc("/servers/{id}", s.handleGetServer).Methods("GET")
 	api.HandleFunc("/servers/{id}", s.handleUpdateServer).Methods("PUT")
 	api.HandleFunc("/servers/{id}", s.handleDeleteServer).Methods("DELETE")
@@ -77,6 +78,11 @@ func (s *Server) setupRoutes() {
 	// Proxy endpoints
 	api.HandleFunc("/proxy/routes", s.handleGetProxyRoutes).Methods("GET")
 	api.HandleFunc("/proxy/status", s.handleGetProxyStatus).Methods("GET")
+	api.HandleFunc("/proxy/config", s.handleUpdateProxyConfig).Methods("PUT")
+	api.HandleFunc("/proxy/listeners", s.handleGetProxyListeners).Methods("GET")
+	api.HandleFunc("/proxy/listeners", s.handleCreateProxyListener).Methods("POST")
+	api.HandleFunc("/proxy/listeners/{id}", s.handleUpdateProxyListener).Methods("PUT")
+	api.HandleFunc("/proxy/listeners/{id}", s.handleDeleteProxyListener).Methods("DELETE")
 	api.HandleFunc("/servers/{id}/routing", s.handleGetServerRouting).Methods("GET")
 	api.HandleFunc("/servers/{id}/routing", s.handleUpdateServerRouting).Methods("PUT")
 	

@@ -49,6 +49,15 @@
 		};
 	});
 
+	// Reload config when server changes
+	let previousServerId = $state(server?.id);
+	$effect(() => {
+		if (server && server.id !== previousServerId) {
+			previousServerId = server.id;
+			loadServerConfig();
+		}
+	});
+
 	async function loadServerConfig() {
 		loading = true;
 		try {

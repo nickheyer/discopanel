@@ -21,6 +21,23 @@
 	let allRoutes = $state<any[]>([]);
 	let hostnameError = $state('');
 	let initialized = false;
+	let previousServerId = $state(server.id);
+
+	// Reset state when server changes
+	$effect(() => {
+		if (server.id !== previousServerId) {
+			previousServerId = server.id;
+			// Reset state variables
+			loading = true;
+			saving = false;
+			routingInfo = null;
+			hostname = '';
+			originalHostname = '';
+			allRoutes = [];
+			hostnameError = '';
+			initialized = false;
+		}
+	});
 
 	$effect(() => {
 		if (server && !initialized) {

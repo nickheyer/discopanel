@@ -34,6 +34,8 @@ export interface Server {
   java_version: string;
   docker_image: string;
   data_path: string;
+  detached?: boolean;
+  auto_start?: boolean;
 }
 
 export interface CreateServerRequest {
@@ -45,7 +47,9 @@ export interface CreateServerRequest {
   max_players: number;
   memory: number;
   docker_image?: string;
-  auto_start: boolean;
+  auto_start?: boolean;
+  detached?: boolean;
+  start_immediately?: boolean;
   proxy_hostname?: string;
 }
 
@@ -58,6 +62,8 @@ export interface UpdateServerRequest {
   mc_version?: string;
   java_version?: string;
   docker_image?: string;
+  detached?: boolean;
+  auto_start?: boolean;
 }
 
 export interface Mod {

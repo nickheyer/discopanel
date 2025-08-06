@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,17 +44,21 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var req struct {
-		Name          string           `json:"name"`
-		Description   string           `json:"description"`
-		ModLoader     models.ModLoader `json:"mod_loader"`
-		MCVersion     string           `json:"mc_version"`
-		Port          int              `json:"port"`
-		MaxPlayers    int              `json:"max_players"`
-		Memory        int              `json:"memory"`
-		DockerImage   string           `json:"docker_image"`
-		AutoStart     bool             `json:"auto_start"`
-		ModpackID     string           `json:"modpack_id,omitempty"`
-		ProxyHostname string           `json:"proxy_hostname,omitempty"`
+		Name            string           `json:"name"`
+		Description     string           `json:"description"`
+		ModLoader       models.ModLoader `json:"mod_loader"`
+		MCVersion       string           `json:"mc_version"`
+		Port            int              `json:"port"`
+		MaxPlayers      int              `json:"max_players"`
+		Memory          int              `json:"memory"`
+		DockerImage     string           `json:"docker_image"`
+		AutoStart       bool             `json:"auto_start"`
+		Detached        bool             `json:"detached"`
+		StartImmediately bool            `json:"start_immediately"`
+		ModpackID       string           `json:"modpack_id,omitempty"`
+		ProxyHostname   string           `json:"proxy_hostname,omitempty"`
+		ProxyListenerID string           `json:"proxy_listener_id,omitempty"`
+		UseBaseURL      bool             `json:"use_base_url,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -98,11 +103,57 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle port validation based on proxy configuration
+	// Handle proxy configuration
 	if s.config.Proxy.Enabled && req.ProxyHostname != "" {
-		// When using proxy with hostname, assign a default port that won't be used for binding
-		if req.Port == 0 {
-			req.Port = 25565 // Default port, won't be bound when using proxy
+		// If using base URL, append it to the hostname
+		if req.UseBaseURL {
+			proxyConfig, _, err := s.store.GetProxyConfig(ctx)
+			if err == nil && proxyConfig.BaseURL != "" {
+				// Only append base URL if hostname doesn't already contain a domain
+				if !strings.Contains(req.ProxyHostname, ".") {
+					req.ProxyHostname = req.ProxyHostname + "." + proxyConfig.BaseURL
+				}
+			}
+		}
+
+		// Validate listener selection
+		if req.ProxyListenerID != "" {
+			listener, err := s.store.GetProxyListener(ctx, req.ProxyListenerID)
+			if err != nil || !listener.Enabled {
+				s.respondError(w, http.StatusBadRequest, "Invalid or disabled proxy listener")
+				return
+			}
+			// Set the proxy port to the listener's port
+			req.Port = listener.Port
+		} else {
+			// No listener specified, get the default one
+			listeners, err := s.store.GetProxyListeners(ctx)
+			if err != nil || len(listeners) == 0 {
+				s.respondError(w, http.StatusInternalServerError, "No proxy listeners configured")
+				return
+			}
+			// Find default or first enabled listener
+			var defaultListener *models.ProxyListener
+			for _, l := range listeners {
+				if l.IsDefault && l.Enabled {
+					defaultListener = l
+					break
+				}
+			}
+			if defaultListener == nil {
+				for _, l := range listeners {
+					if l.Enabled {
+						defaultListener = l
+						break
+					}
+				}
+			}
+			if defaultListener == nil {
+				s.respondError(w, http.StatusBadRequest, "No enabled proxy listeners available")
+				return
+			}
+			req.ProxyListenerID = defaultListener.ID
+			req.Port = defaultListener.Port
 		}
 		// Skip port validation for proxy servers
 	} else {
@@ -111,7 +162,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 			s.respondError(w, http.StatusBadRequest, "Port is required for non-proxy servers")
 			return
 		}
-		
+
 		// Check if port is already in use (only checks non-proxy servers due to our updated GetServerByPort)
 		existing, err := s.store.GetServerByPort(ctx, req.Port)
 		if err != nil {
@@ -123,11 +174,15 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 			s.respondError(w, http.StatusBadRequest, "Port already in use")
 			return
 		}
-		
+
 		// Also check if this port is used by the proxy
-		if s.config.Proxy.Enabled && req.Port == s.config.Proxy.ListenPort {
-			s.respondError(w, http.StatusBadRequest, "Port is already in use by the proxy server")
-			return
+		if s.config.Proxy.Enabled {
+			for _, proxyPort := range s.config.Proxy.ListenPorts {
+				if req.Port == proxyPort {
+					s.respondError(w, http.StatusBadRequest, "Port is already in use by the proxy server")
+					return
+				}
+			}
 		}
 	}
 
@@ -138,19 +193,22 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 
 	// Create server object
 	server := &models.Server{
-		ID:            uuid.New().String(),
-		Name:          req.Name,
-		Description:   req.Description,
-		ModLoader:     req.ModLoader,
-		MCVersion:     req.MCVersion,
-		Status:        models.StatusStopped,
-		Port:          req.Port,
-		ProxyHostname: req.ProxyHostname,
-		MaxPlayers:    req.MaxPlayers,
-		Memory:        req.Memory,
-		DataPath:      filepath.Join(s.config.Storage.DataDir, "servers", req.Name),
-		JavaVersion:   strconv.Itoa(docker.GetRequiredJavaVersion(req.MCVersion, req.ModLoader)),
-		DockerImage:   req.DockerImage,
+		ID:              uuid.New().String(),
+		Name:            req.Name,
+		Description:     req.Description,
+		ModLoader:       req.ModLoader,
+		MCVersion:       req.MCVersion,
+		Status:          models.StatusStopped,
+		Port:            req.Port,
+		ProxyHostname:   req.ProxyHostname,
+		ProxyListenerID: req.ProxyListenerID,
+		MaxPlayers:      req.MaxPlayers,
+		Memory:          req.Memory,
+		DataPath:        filepath.Join(s.config.Storage.DataDir, "servers", req.Name),
+		JavaVersion:     strconv.Itoa(docker.GetRequiredJavaVersion(req.MCVersion, req.ModLoader)),
+		DockerImage:     req.DockerImage,
+		AutoStart:       req.AutoStart,
+		Detached:        req.Detached,
 	}
 
 	// Set defaults
@@ -244,8 +302,8 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 			s.log.Error("Failed to update server with container ID: %v", err)
 		}
 
-		// Auto-start the container if requested
-		if req.AutoStart {
+		// Start the container immediately if requested
+		if req.StartImmediately {
 			if err := s.docker.StartContainer(ctx, containerID); err != nil {
 				s.log.Error("Failed to start container: %v", err)
 				server.Status = models.StatusError
@@ -264,7 +322,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 				s.log.Error("Failed to update server status: %v", err)
 			}
 		} else {
-			s.log.Info("Skipped container auto-start because auto-start was disabled for this instance")
+			s.log.Info("Server created but not started immediately")
 		}
 	}
 
@@ -313,6 +371,8 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		MCVersion   string `json:"mc_version"`
 		JavaVersion string `json:"java_version"`
 		DockerImage string `json:"docker_image"`
+		AutoStart   *bool  `json:"auto_start"`
+		Detached    *bool  `json:"detached"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -363,6 +423,12 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	if req.DockerImage != "" && req.DockerImage != originalDockerImage {
 		server.DockerImage = req.DockerImage
 		needsRecreation = true
+	}
+	if req.AutoStart != nil {
+		server.AutoStart = *req.AutoStart
+	}
+	if req.Detached != nil {
+		server.Detached = *req.Detached
 	}
 
 	// Save server updates first
@@ -641,4 +707,48 @@ func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{"logs": logs})
+}
+
+func (s *Server) handleGetNextAvailablePort(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Get all servers
+	servers, err := s.store.ListServers(ctx)
+	if err != nil {
+		s.log.Error("Failed to list servers: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to get available port")
+		return
+	}
+
+	// Build a map of used ports (only for non-proxied servers)
+	usedPorts := make(map[int]bool)
+	for _, server := range servers {
+		// Only count ports for servers that don't use proxy
+		if server.ProxyHostname == "" && server.Port > 0 {
+			usedPorts[server.Port] = true
+		}
+	}
+
+	// Also mark proxy listening ports as used
+	if s.config.Proxy.Enabled {
+		for _, port := range s.config.Proxy.ListenPorts {
+			usedPorts[port] = true
+		}
+	}
+
+	// Find the next available port starting from 25565
+	nextPort := 25565
+	for usedPorts[nextPort] {
+		nextPort++
+		// Safety check to avoid infinite loop
+		if nextPort > 65535 {
+			s.respondError(w, http.StatusInternalServerError, "No available ports")
+			return
+		}
+	}
+
+	s.respondJSON(w, http.StatusOK, map[string]any{
+		"port":      nextPort,
+		"usedPorts": usedPorts,
+	})
 }

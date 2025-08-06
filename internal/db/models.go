@@ -19,21 +19,21 @@ type ModLoader string
 const (
 	// Vanilla
 	ModLoaderVanilla ModLoader = "vanilla"
-	
+
 	// Forge-based
 	ModLoaderForge    ModLoader = "forge"
 	ModLoaderNeoForge ModLoader = "neoforge"
-	
+
 	// Fabric-based
 	ModLoaderFabric ModLoader = "fabric"
 	ModLoaderQuilt  ModLoader = "quilt"
-	
+
 	// Bukkit-based
 	ModLoaderBukkit     ModLoader = "bukkit"
 	ModLoaderSpigot     ModLoader = "spigot"
 	ModLoaderPaper      ModLoader = "paper"
 	ModLoaderPufferfish ModLoader = "pufferfish"
-	
+
 	// Hybrids (Forge + Bukkit)
 	ModLoaderMagma           ModLoader = "magma"
 	ModLoaderMagmaMaintained ModLoader = "magma_maintained"
@@ -43,17 +43,17 @@ const (
 	ModLoaderBanner          ModLoader = "banner"
 	ModLoaderCatserver       ModLoader = "catserver"
 	ModLoaderArclight        ModLoader = "arclight"
-	
+
 	// Sponge
 	ModLoaderSpongeVanilla ModLoader = "spongevanilla"
-	
+
 	// Others
 	ModLoaderLimbo     ModLoader = "limbo"
 	ModLoaderNanoLimbo ModLoader = "nanolimbo"
 	ModLoaderCrucible  ModLoader = "crucible"
 	ModLoaderGlowstone ModLoader = "glowstone"
 	ModLoaderCustom    ModLoader = "custom"
-	
+
 	// Modpack Platforms
 	ModLoaderAutoCurseForge ModLoader = "auto_curseforge"
 	ModLoaderCurseForge     ModLoader = "curseforge"
@@ -62,24 +62,27 @@ const (
 )
 
 type Server struct {
-	ID          string       `json:"id" gorm:"primaryKey"`
-	Name        string       `json:"name" gorm:"not null"`
-	Description string       `json:"description"`
-	ModLoader   ModLoader    `json:"mod_loader" gorm:"not null"`
-	MCVersion   string       `json:"mc_version" gorm:"not null;column:mc_version"`
-	ContainerID string       `json:"container_id" gorm:"column:container_id"`
-	Status      ServerStatus `json:"status" gorm:"not null"`
-	Port        int          `json:"port"`
-	ProxyPort   int          `json:"proxy_port" gorm:"column:proxy_port"`
-	ProxyHostname string     `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex"`
-	MaxPlayers  int          `json:"max_players" gorm:"default:20;column:max_players"`
-	Memory      int          `json:"memory" gorm:"default:2048"` // in MB
-	CreatedAt   time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt   time.Time    `json:"updated_at" gorm:"autoUpdateTime"`
-	LastStarted *time.Time   `json:"last_started" gorm:"column:last_started"`
-	JavaVersion string       `json:"java_version" gorm:"column:java_version"`
-	DockerImage string       `json:"docker_image" gorm:"column:docker_image"`
-	DataPath    string       `json:"data_path" gorm:"not null;column:data_path"`
+	ID              string       `json:"id" gorm:"primaryKey"`
+	Name            string       `json:"name" gorm:"not null"`
+	Description     string       `json:"description"`
+	ModLoader       ModLoader    `json:"mod_loader" gorm:"not null"`
+	MCVersion       string       `json:"mc_version" gorm:"not null;column:mc_version"`
+	ContainerID     string       `json:"container_id" gorm:"column:container_id"`
+	Status          ServerStatus `json:"status" gorm:"not null"`
+	Port            int          `json:"port"`
+	ProxyPort       int          `json:"proxy_port" gorm:"column:proxy_port"`
+	ProxyHostname   string       `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex"`
+	ProxyListenerID string       `json:"proxy_listener_id" gorm:"column:proxy_listener_id"` // Which listener this server uses
+	MaxPlayers      int          `json:"max_players" gorm:"default:20;column:max_players"`
+	Memory          int          `json:"memory" gorm:"default:2048"` // in MB
+	CreatedAt       time.Time    `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt       time.Time    `json:"updated_at" gorm:"autoUpdateTime"`
+	LastStarted     *time.Time   `json:"last_started" gorm:"column:last_started"`
+	JavaVersion     string       `json:"java_version" gorm:"column:java_version"`
+	DockerImage     string       `json:"docker_image" gorm:"column:docker_image"`
+	DataPath        string       `json:"data_path" gorm:"not null;column:data_path"`
+	Detached        bool         `json:"detached" gorm:"default:false;column:detached"` // Detach server container from DiscoPanel lifecycle (default: false)
+	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
 }
 
 type ServerConfig struct {
@@ -199,25 +202,25 @@ type ServerConfig struct {
 	DebugAutostop       *bool `json:"debugAutostop" env:"DEBUG_AUTOSTOP" default:"false" desc:"Enable autostop debugging output" input:"checkbox" label:"Debug Auto-Stop"`
 
 	// Forge Configuration
-	ForgeVersion            *string `json:"forgeVersion" env:"FORGE_VERSION" default:"" desc:"Specific Forge version to install" input:"text" label:"Forge Version"`
-	ForgeInstaller          *string `json:"forgeInstaller" env:"FORGE_INSTALLER" default:"" desc:"Path to pre-downloaded Forge installer" input:"text" label:"Forge Installer"`
-	ForgeInstallerURL       *string `json:"forgeInstallerUrl" env:"FORGE_INSTALLER_URL" default:"" desc:"URL to download Forge installer" input:"text" label:"Forge Installer URL"`
-	
+	ForgeVersion      *string `json:"forgeVersion" env:"FORGE_VERSION" default:"" desc:"Specific Forge version to install" input:"text" label:"Forge Version"`
+	ForgeInstaller    *string `json:"forgeInstaller" env:"FORGE_INSTALLER" default:"" desc:"Path to pre-downloaded Forge installer" input:"text" label:"Forge Installer"`
+	ForgeInstallerURL *string `json:"forgeInstallerUrl" env:"FORGE_INSTALLER_URL" default:"" desc:"URL to download Forge installer" input:"text" label:"Forge Installer URL"`
+
 	// CurseForge
-	CFAPIKey                *string `json:"cfApiKey" env:"CF_API_KEY" default:"" desc:"CurseForge (Eternal) API Key" input:"password" label:"CurseForge API Key"`
-	CFAPIKeyFile            *string `json:"cfApiKeyFile" env:"CF_API_KEY_FILE" default:"" desc:"Path to file containing CurseForge API Key" input:"text" label:"CurseForge API Key File"`
-	CFPageURL               *string `json:"cfPageUrl" env:"CF_PAGE_URL" default:"" desc:"URL to modpack or specific file" input:"text" label:"CurseForge Page URL"`
-	CFSlug                  *string `json:"cfSlug" env:"CF_SLUG" default:"" desc:"Modpack slug identifier" input:"text" label:"CurseForge Slug"`
-	CFFileID                *string `json:"cfFileId" env:"CF_FILE_ID" default:"" desc:"Mod CurseForge numerical ID" input:"text" label:"CurseForge File ID"`
-	CFModpackZip            *string `json:"cfModpackZip" env:"CF_MODPACK_ZIP" default:"" desc:"Container path to unpublished modpack zip" input:"text" label:"CurseForge Modpack Zip"`
-	CFFilenameMatcher       *string `json:"cfFilenameMatcher" env:"CF_FILENAME_MATCHER" default:"" desc:"Substring to match desired filename" input:"text" label:"CurseForge Filename Matcher"`
-	CFExcludeIncludeFile    *string `json:"cfExcludeIncludeFile" env:"CF_EXCLUDE_INCLUDE_FILE" default:"" desc:"JSON file for global/modpack exclusions" input:"text" label:"CurseForge Exclude/Include File"`
-	CFExcludeMods           *string `json:"cfExcludeMods" env:"CF_EXCLUDE_MODS" default:"" desc:"Comma/space delimited list of mod slugs/IDs to exclude" input:"text" label:"CurseForge Exclude Mods"`
-	CFForceIncludeMods      *string `json:"cfForceIncludeMods" env:"CF_FORCE_INCLUDE_MODS" default:"" desc:"Comma/space delimited list of mod slugs/IDs to include" input:"text" label:"CurseForge Force Include Mods"`
-	CFForceSynchronize      *bool   `json:"cfForceSynchronize" env:"CF_FORCE_SYNCHRONIZE" default:"false" desc:"Force re-evaluation of excludes/includes" input:"checkbox" label:"CurseForge Force Synchronize"`
-	CFSetLevelFrom          *string `json:"cfSetLevelFrom" env:"CF_SET_LEVEL_FROM" default:"" desc:"Set LEVEL from WORLD_FILE or OVERRIDES" input:"select" label:"CurseForge Set Level From"`
-	CFParallelDownloads     *int    `json:"cfParallelDownloads" env:"CF_PARALLEL_DOWNLOADS" default:"4" desc:"Number of parallel mod downloads" input:"number" label:"CurseForge Parallel Downloads"`
-	CFOverridesSkipExisting *bool   `json:"cfOverridesSkipExisting" env:"CF_OVERRIDES_SKIP_EXISTING" default:"false" desc:"Skip existing files in overrides" input:"checkbox" label:"CurseForge Skip Existing Overrides"`
+	CFAPIKey                  *string `json:"cfApiKey" env:"CF_API_KEY" default:"" desc:"CurseForge (Eternal) API Key" input:"password" label:"CurseForge API Key"`
+	CFAPIKeyFile              *string `json:"cfApiKeyFile" env:"CF_API_KEY_FILE" default:"" desc:"Path to file containing CurseForge API Key" input:"text" label:"CurseForge API Key File"`
+	CFPageURL                 *string `json:"cfPageUrl" env:"CF_PAGE_URL" default:"" desc:"URL to modpack or specific file" input:"text" label:"CurseForge Page URL"`
+	CFSlug                    *string `json:"cfSlug" env:"CF_SLUG" default:"" desc:"Modpack slug identifier" input:"text" label:"CurseForge Slug"`
+	CFFileID                  *string `json:"cfFileId" env:"CF_FILE_ID" default:"" desc:"Mod CurseForge numerical ID" input:"text" label:"CurseForge File ID"`
+	CFModpackZip              *string `json:"cfModpackZip" env:"CF_MODPACK_ZIP" default:"" desc:"Container path to unpublished modpack zip" input:"text" label:"CurseForge Modpack Zip"`
+	CFFilenameMatcher         *string `json:"cfFilenameMatcher" env:"CF_FILENAME_MATCHER" default:"" desc:"Substring to match desired filename" input:"text" label:"CurseForge Filename Matcher"`
+	CFExcludeIncludeFile      *string `json:"cfExcludeIncludeFile" env:"CF_EXCLUDE_INCLUDE_FILE" default:"" desc:"JSON file for global/modpack exclusions" input:"text" label:"CurseForge Exclude/Include File"`
+	CFExcludeMods             *string `json:"cfExcludeMods" env:"CF_EXCLUDE_MODS" default:"" desc:"Comma/space delimited list of mod slugs/IDs to exclude" input:"text" label:"CurseForge Exclude Mods"`
+	CFForceIncludeMods        *string `json:"cfForceIncludeMods" env:"CF_FORCE_INCLUDE_MODS" default:"" desc:"Comma/space delimited list of mod slugs/IDs to include" input:"text" label:"CurseForge Force Include Mods"`
+	CFForceSynchronize        *bool   `json:"cfForceSynchronize" env:"CF_FORCE_SYNCHRONIZE" default:"false" desc:"Force re-evaluation of excludes/includes" input:"checkbox" label:"CurseForge Force Synchronize"`
+	CFSetLevelFrom            *string `json:"cfSetLevelFrom" env:"CF_SET_LEVEL_FROM" default:"" desc:"Set LEVEL from WORLD_FILE or OVERRIDES" input:"select" label:"CurseForge Set Level From"`
+	CFParallelDownloads       *int    `json:"cfParallelDownloads" env:"CF_PARALLEL_DOWNLOADS" default:"4" desc:"Number of parallel mod downloads" input:"number" label:"CurseForge Parallel Downloads"`
+	CFOverridesSkipExisting   *bool   `json:"cfOverridesSkipExisting" env:"CF_OVERRIDES_SKIP_EXISTING" default:"false" desc:"Skip existing files in overrides" input:"checkbox" label:"CurseForge Skip Existing Overrides"`
 	CFForceReinstallModloader *bool   `json:"cfForceReinstallModloader" env:"CF_FORCE_REINSTALL_MODLOADER" default:"false" desc:"Force reinstall modloader (cleared after start)" input:"checkbox" label:"Force Reinstall Modloader" ephemeral:"true"`
 }
 
@@ -236,45 +239,45 @@ type Mod struct {
 }
 
 type IndexedModpack struct {
-	ID              string    `json:"id" gorm:"primaryKey"` // Format: "indexer-originalId"
-	IndexerID       string    `json:"indexer_id" gorm:"index;column:indexer_id"` // Original ID from indexer
-	Indexer         string    `json:"indexer" gorm:"index"` // "fuego", "modrinth", etc.
-	Name            string    `json:"name" gorm:"not null;index"`
-	Slug            string    `json:"slug" gorm:"index"`
-	Summary         string    `json:"summary"`
-	Description     string    `json:"description" gorm:"type:text"`
-	LogoURL         string    `json:"logo_url" gorm:"column:logo_url"`
-	WebsiteURL      string    `json:"website_url" gorm:"column:website_url"`
-	DownloadCount   int64     `json:"download_count" gorm:"column:download_count"`
-	Categories      string    `json:"categories"` // JSON array stored as string
-	GameVersions    string    `json:"game_versions"` // JSON array stored as string
-	ModLoaders      string    `json:"mod_loaders"` // JSON array stored as string
-	LatestFileID    string    `json:"latest_file_id" gorm:"column:latest_file_id"`
-	DateCreated     time.Time `json:"date_created" gorm:"column:date_created"`
-	DateModified    time.Time `json:"date_modified" gorm:"column:date_modified"`
-	DateReleased    time.Time `json:"date_released" gorm:"column:date_released"`
-	UpdatedAt       time.Time `json:"updated_at" gorm:"autoUpdateTime"`
-	IndexedAt       time.Time `json:"indexed_at" gorm:"autoCreateTime"`
+	ID            string    `json:"id" gorm:"primaryKey"`                      // Format: "indexer-originalId"
+	IndexerID     string    `json:"indexer_id" gorm:"index;column:indexer_id"` // Original ID from indexer
+	Indexer       string    `json:"indexer" gorm:"index"`                      // "fuego", "modrinth", etc.
+	Name          string    `json:"name" gorm:"not null;index"`
+	Slug          string    `json:"slug" gorm:"index"`
+	Summary       string    `json:"summary"`
+	Description   string    `json:"description" gorm:"type:text"`
+	LogoURL       string    `json:"logo_url" gorm:"column:logo_url"`
+	WebsiteURL    string    `json:"website_url" gorm:"column:website_url"`
+	DownloadCount int64     `json:"download_count" gorm:"column:download_count"`
+	Categories    string    `json:"categories"`    // JSON array stored as string
+	GameVersions  string    `json:"game_versions"` // JSON array stored as string
+	ModLoaders    string    `json:"mod_loaders"`   // JSON array stored as string
+	LatestFileID  string    `json:"latest_file_id" gorm:"column:latest_file_id"`
+	DateCreated   time.Time `json:"date_created" gorm:"column:date_created"`
+	DateModified  time.Time `json:"date_modified" gorm:"column:date_modified"`
+	DateReleased  time.Time `json:"date_released" gorm:"column:date_released"`
+	UpdatedAt     time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	IndexedAt     time.Time `json:"indexed_at" gorm:"autoCreateTime"`
 	// Computed fields for server creation
-	MCVersion       string    `json:"mc_version" gorm:"column:mc_version"` // Primary MC version
-	JavaVersion     string    `json:"java_version" gorm:"column:java_version"` // Required Java version
-	DockerImage     string    `json:"docker_image" gorm:"column:docker_image"` // Recommended Docker image
-	RecommendedRAM  int       `json:"recommended_ram" gorm:"column:recommended_ram"` // Recommended RAM in MB
+	MCVersion      string `json:"mc_version" gorm:"column:mc_version"`           // Primary MC version
+	JavaVersion    string `json:"java_version" gorm:"column:java_version"`       // Required Java version
+	DockerImage    string `json:"docker_image" gorm:"column:docker_image"`       // Recommended Docker image
+	RecommendedRAM int    `json:"recommended_ram" gorm:"column:recommended_ram"` // Recommended RAM in MB
 }
 
 type IndexedModpackFile struct {
-	ID              string    `json:"id" gorm:"primaryKey"`
-	ModpackID       string    `json:"modpack_id" gorm:"index;column:modpack_id"`
-	DisplayName     string    `json:"display_name" gorm:"column:display_name"`
-	FileName        string    `json:"file_name" gorm:"column:file_name"`
-	FileDate        time.Time `json:"file_date" gorm:"column:file_date"`
-	FileLength      int64     `json:"file_length" gorm:"column:file_length"`
-	ReleaseType     string    `json:"release_type" gorm:"column:release_type"` // "release", "beta", "alpha"
-	DownloadURL     string    `json:"download_url" gorm:"column:download_url"`
-	GameVersions    string    `json:"game_versions"` // JSON array stored as string
-	ModLoader       string    `json:"mod_loader" gorm:"column:mod_loader"`
-	ServerPackFileID *string  `json:"server_pack_file_id" gorm:"column:server_pack_file_id"`
-	Modpack         *IndexedModpack `json:"-" gorm:"foreignKey:ModpackID;constraint:OnDelete:CASCADE"`
+	ID               string          `json:"id" gorm:"primaryKey"`
+	ModpackID        string          `json:"modpack_id" gorm:"index;column:modpack_id"`
+	DisplayName      string          `json:"display_name" gorm:"column:display_name"`
+	FileName         string          `json:"file_name" gorm:"column:file_name"`
+	FileDate         time.Time       `json:"file_date" gorm:"column:file_date"`
+	FileLength       int64           `json:"file_length" gorm:"column:file_length"`
+	ReleaseType      string          `json:"release_type" gorm:"column:release_type"` // "release", "beta", "alpha"
+	DownloadURL      string          `json:"download_url" gorm:"column:download_url"`
+	GameVersions     string          `json:"game_versions"` // JSON array stored as string
+	ModLoader        string          `json:"mod_loader" gorm:"column:mod_loader"`
+	ServerPackFileID *string         `json:"server_pack_file_id" gorm:"column:server_pack_file_id"`
+	Modpack          *IndexedModpack `json:"-" gorm:"foreignKey:ModpackID;constraint:OnDelete:CASCADE"`
 }
 
 type ModpackFavorite struct {
@@ -282,4 +285,24 @@ type ModpackFavorite struct {
 	ModpackID string          `json:"modpack_id" gorm:"index;column:modpack_id"`
 	CreatedAt time.Time       `json:"created_at" gorm:"autoCreateTime"`
 	Modpack   *IndexedModpack `json:"modpack,omitempty" gorm:"foreignKey:ModpackID;constraint:OnDelete:CASCADE"`
+}
+
+// ProxyConfig stores the global proxy configuration
+type ProxyConfig struct {
+	ID        string    `json:"id" gorm:"primaryKey"`
+	Enabled   bool      `json:"enabled" gorm:"not null;default:false"`
+	BaseURL   string    `json:"base_url" gorm:"column:base_url"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+// ProxyListener represents an individual proxy listening port configuration
+type ProxyListener struct {
+	ID          string    `json:"id" gorm:"primaryKey"`
+	Port        int       `json:"port" gorm:"not null;uniqueIndex"`
+	Name        string    `json:"name"` // e.g., "Primary", "Secondary", "Development"
+	Description string    `json:"description"`
+	Enabled     bool      `json:"enabled" gorm:"not null;default:true"`
+	IsDefault   bool      `json:"is_default" gorm:"not null;default:false"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }

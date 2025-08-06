@@ -25,6 +25,11 @@
 	let dockerImages = $state<DockerImageInfo[]>([]);
 	let latestVersion = $state('');
 	let proxyEnabled = $state(false);
+	let proxyBaseURL = $state('');
+	let proxyListeners = $state<any[]>([]);
+	let usedPorts = $state<Record<number, boolean>>({});
+	let portError = $state('');
+	let useProxyMode = $state(false); // Track connection mode separately
 	
 	// Modpack selection
 	let showModpackDialog = $state(false);
@@ -32,7 +37,11 @@
 	let favoriteModpacks = $state<IndexedModpack[]>([]);
 	let loadingModpacks = $state(false);
 
-	let formData = $state<CreateServerRequest & { proxy_hostname?: string }>({
+	let formData = $state<CreateServerRequest & { 
+		proxy_hostname?: string;
+		proxy_listener_id?: string;
+		use_base_url?: boolean;
+	}>({
 		name: '',
 		description: '',
 		mod_loader: 'vanilla',
@@ -42,16 +51,22 @@
 		memory: 2048,
 		docker_image: '',
 		auto_start: false,
-		proxy_hostname: ''
+		detached: false,
+		start_immediately: false,
+		proxy_hostname: '',
+		proxy_listener_id: '',
+		use_base_url: false
 	});
 
 	onMount(async () => {
 		try {
-			const [versionsData, loadersData, imagesData, proxyStatus] = await Promise.all([
+			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners] = await Promise.all([
 				api.getMinecraftVersions(),
 				api.getModLoaders(),
 				api.getDockerImages(),
-				api.getProxyStatus()
+				api.getProxyStatus(),
+				api.getNextAvailablePort(),
+				api.getProxyListeners()
 			]);
 			
 			minecraftVersions = versionsData.versions;
@@ -59,6 +74,20 @@
 			modLoaders = loadersData.modloaders;
 			dockerImages = imagesData.images;
 			proxyEnabled = proxyStatus.enabled;
+			proxyBaseURL = proxyStatus.base_url || '';
+			proxyListeners = listeners.filter((l: any) => l.enabled);
+			
+			// Set default listener if available
+			const defaultListener = proxyListeners.find((l: any) => l.is_default);
+			if (defaultListener) {
+				formData.proxy_listener_id = defaultListener.id;
+			} else if (proxyListeners.length > 0) {
+				formData.proxy_listener_id = proxyListeners[0].id;
+			}
+			
+			// Set the default port to the next available port
+			formData.port = portData.port;
+			usedPorts = portData.usedPorts;
 			
 			if (!formData.mc_version && latestVersion) {
 				formData.mc_version = latestVersion;
@@ -143,11 +172,44 @@
 		}
 	}
 
+	function validatePort(port: number) {
+		portError = '';
+		
+		if (port < 1 || port > 65535) {
+			portError = 'Port must be between 1 and 65535';
+			return false;
+		}
+		
+		if (usedPorts[port]) {
+			portError = 'This port is already in use';
+			return false;
+		}
+		
+		return true;
+	}
+
+	async function refreshAvailablePort() {
+		try {
+			const portData = await api.getNextAvailablePort();
+			formData.port = portData.port;
+			usedPorts = portData.usedPorts;
+			portError = '';
+		} catch (error) {
+			console.error('Failed to get available port:', error);
+		}
+	}
+
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		
 		if (!formData.name.trim()) {
 			toast.error('Server name is required');
+			return;
+		}
+
+		// Validate port only if not using proxy mode
+		if (!useProxyMode && !validatePort(formData.port)) {
+			toast.error('Please select a valid port');
 			return;
 		}
 
@@ -158,7 +220,7 @@
 				...formData,
 				modpack_id: selectedModpack?.id || '',
 				// When using proxy with hostname, set port to 0 to indicate proxy usage
-				port: formData.proxy_hostname ? 0 : formData.port
+				port: useProxyMode ? 0 : formData.port
 			};
 			
 			// Create the server
@@ -398,8 +460,13 @@
 								<div class="grid grid-cols-2 gap-3">
 									<Button
 										type="button"
-										variant={formData.proxy_hostname ? "outline" : "default"}
-										onclick={() => formData.proxy_hostname = ''}
+										variant={!useProxyMode ? "default" : "outline"}
+										onclick={() => {
+											useProxyMode = false;
+											formData.proxy_hostname = '';
+											// Reset port error when switching to direct port
+											portError = '';
+										}}
 										class="justify-start h-auto py-3 px-4"
 									>
 										<div class="text-left">
@@ -409,8 +476,15 @@
 									</Button>
 									<Button
 										type="button"
-										variant={formData.proxy_hostname ? "default" : "outline"}
-										onclick={() => formData.proxy_hostname = formData.name.toLowerCase().replace(/\s+/g, '-')}
+										variant={useProxyMode ? "default" : "outline"}
+										onclick={() => {
+											useProxyMode = true;
+											if (!formData.proxy_hostname) {
+												formData.proxy_hostname = formData.name.toLowerCase().replace(/\s+/g, '-') || 'minecraft-server';
+											}
+											// Clear port error when using proxy
+											portError = '';
+										}}
 										class="justify-start h-auto py-3 px-4"
 									>
 										<div class="text-left">
@@ -421,53 +495,140 @@
 								</div>
 							</div>
 
-							{#if formData.proxy_hostname}
-								<div class="space-y-2">
-									<Label for="proxy_hostname" class="text-sm font-medium">Server Hostname</Label>
-									<Input
-										id="proxy_hostname"
-										placeholder="survival.example.com"
-										bind:value={formData.proxy_hostname}
-										disabled={loading}
-										class="h-10"
-									/>
-									<p class="text-xs text-muted-foreground">
-										Players will connect using this hostname
-									</p>
+							{#if useProxyMode}
+								<div class="space-y-4">
+									<!-- Listener Selection -->
+									{#if proxyListeners.length > 0}
+										<div class="space-y-2">
+											<Label for="proxy_listener" class="text-sm font-medium">Proxy Listener</Label>
+											<Select 
+												type="single" 
+												value={formData.proxy_listener_id} 
+												onValueChange={(v) => formData.proxy_listener_id = v || ''}
+												disabled={loading}
+											>
+												<SelectTrigger id="proxy_listener">
+													<span>
+														{proxyListeners.find(l => l.id === formData.proxy_listener_id)?.name || 'Select a listener'}
+													</span>
+												</SelectTrigger>
+												<SelectContent>
+													{#each proxyListeners as listener}
+														<SelectItem value={listener.id}>
+															{listener.name} (Port {listener.port})
+															{#if listener.is_default}
+																<span class="text-xs text-muted-foreground ml-2">[Default]</span>
+															{/if}
+														</SelectItem>
+													{/each}
+												</SelectContent>
+											</Select>
+											<p class="text-xs text-muted-foreground">
+												Select which proxy port players will connect through
+											</p>
+										</div>
+									{/if}
+
+									<!-- Hostname Input -->
+									<div class="space-y-2">
+										<Label for="proxy_hostname" class="text-sm font-medium">Server Hostname</Label>
+										<Input
+											id="proxy_hostname"
+											placeholder={proxyBaseURL ? "survival" : "survival.example.com"}
+											bind:value={formData.proxy_hostname}
+											disabled={loading}
+											class="h-10"
+										/>
+										
+										<!-- Base URL Checkbox -->
+										{#if proxyBaseURL}
+											<div class="flex items-center gap-2">
+												<input
+													type="checkbox"
+													id="use_base_url"
+													bind:checked={formData.use_base_url}
+													class="h-4 w-4"
+												/>
+												<Label for="use_base_url" class="text-sm font-medium">
+													Append base domain ({proxyBaseURL})
+												</Label>
+											</div>
+										{/if}
+										
+										<p class="text-xs text-muted-foreground">
+											{#if formData.use_base_url && proxyBaseURL}
+												Players will connect using: {formData.proxy_hostname}.{proxyBaseURL}
+											{:else}
+												Players will connect using: {formData.proxy_hostname}
+											{/if}
+										</p>
+									</div>
 								</div>
 							{:else}
 								<div class="space-y-2">
-									<Label for="port" class="text-sm font-medium">Server Port</Label>
+									<div class="flex items-center justify-between">
+										<Label for="port" class="text-sm font-medium">Server Port</Label>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											onclick={refreshAvailablePort}
+											disabled={loading}
+										>
+											Auto-assign
+										</Button>
+									</div>
 									<Input
 										id="port"
 										type="number"
 										min="1"
 										max="65535"
 										bind:value={formData.port}
+										oninput={(e) => validatePort(Number(e.currentTarget.value))}
 										disabled={loading}
-										class="h-10"
+										class="h-10 {portError ? 'border-destructive' : ''}"
 									/>
-									<p class="text-xs text-muted-foreground">
-										Default Minecraft port is 25565
-									</p>
+									{#if portError}
+										<p class="text-xs text-destructive">{portError}</p>
+									{:else}
+										<p class="text-xs text-muted-foreground">
+											Default Minecraft port is 25565
+										</p>
+									{/if}
 								</div>
 							{/if}
 						</div>
 					{:else}
 						<div class="space-y-2">
-							<Label for="port" class="text-sm font-medium">Server Port</Label>
+							<div class="flex items-center justify-between">
+								<Label for="port" class="text-sm font-medium">Server Port</Label>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onclick={refreshAvailablePort}
+									disabled={loading}
+								>
+									Auto-assign
+								</Button>
+							</div>
 							<Input
 								id="port"
 								type="number"
 								min="1"
 								max="65535"
 								bind:value={formData.port}
+								oninput={(e) => validatePort(Number(e.currentTarget.value))}
 								disabled={loading}
-								class="h-10"
+								class="h-10 {portError ? 'border-destructive' : ''}"
 							/>
-							<p class="text-xs text-muted-foreground">
-								Default Minecraft port is 25565
-							</p>
+							{#if portError}
+								<p class="text-xs text-destructive">{portError}</p>
+							{:else}
+								<p class="text-xs text-muted-foreground">
+									Default Minecraft port is 25565
+								</p>
+							{/if}
 						</div>
 					{/if}
 
@@ -529,18 +690,70 @@
 
 					<Separator />
 
-					<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-						<div class="space-y-0.5">
-							<Label for="auto_start" class="text-sm font-medium cursor-pointer">Auto Start</Label>
-							<p class="text-xs text-muted-foreground">
-								Automatically start the server when DiscoPanel starts
-							</p>
+					<div class="space-y-4">
+						<h4 class="text-sm font-semibold">Lifecycle Management</h4>
+						
+						<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+							<div class="space-y-0.5">
+								<Label for="start_immediately" class="text-sm font-medium cursor-pointer">Start Immediately</Label>
+								<p class="text-xs text-muted-foreground">
+									Start the server right after creation
+								</p>
+							</div>
+							<Switch
+								id="start_immediately"
+								bind:checked={formData.start_immediately}
+								disabled={loading}
+							/>
 						</div>
-						<Switch
-							id="auto_start"
-							bind:checked={formData.auto_start}
-							disabled={loading}
-						/>
+						
+						<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+							<div class="space-y-0.5">
+								<Label for="detached" class="text-sm font-medium cursor-pointer">Detached Mode</Label>
+								<p class="text-xs text-muted-foreground">
+									Server continues running when DiscoPanel stops (not available for proxied servers)
+								</p>
+							</div>
+							<Switch
+								id="detached"
+								bind:checked={formData.detached}
+								disabled={loading || useProxyMode}
+								onCheckedChange={(checked) => {
+									if (checked && useProxyMode) {
+										toast.error("Cannot detach proxied servers");
+										formData.detached = false;
+										return;
+									}
+									formData.detached = checked;
+									// If detaching, disable auto-start
+									if (checked) {
+										formData.auto_start = false;
+									}
+								}}
+							/>
+						</div>
+
+						<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+							<div class="space-y-0.5">
+								<Label for="auto_start" class="text-sm font-medium cursor-pointer">Auto Start</Label>
+								<p class="text-xs text-muted-foreground">
+									Automatically start when DiscoPanel starts{formData.detached ? ' (disabled for detached servers)' : ''}
+								</p>
+							</div>
+							<Switch
+								id="auto_start"
+								bind:checked={formData.auto_start}
+								disabled={loading || formData.detached}
+								onCheckedChange={(checked) => {
+									if (formData.detached) {
+										toast.error("Cannot enable auto-start for detached servers");
+										formData.auto_start = false;
+										return;
+									}
+									formData.auto_start = checked;
+								}}
+							/>
+						</div>
 					</div>
 				</CardContent>
 			</Card>

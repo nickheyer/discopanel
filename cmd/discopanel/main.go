@@ -12,6 +12,7 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/api"
 	"github.com/nickheyer/discopanel/internal/config"
+	"github.com/nickheyer/discopanel/internal/db"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
@@ -111,9 +112,45 @@ func main() {
 		}
 	}
 
+	// Load proxy configuration from database
+	proxyConfig, isNew, err := store.GetProxyConfig(ctx)
+	if err != nil {
+		log.Warn("Failed to load proxy config from database, using file config: %v", err)
+	} else {
+		if isNew {
+			proxyConfig.Enabled = cfg.Proxy.Enabled
+			proxyConfig.BaseURL = cfg.Proxy.BaseURL
+			err = store.SaveProxyConfig(ctx, proxyConfig)
+			if err != nil {
+				log.Error("Failed to set proxy configs from startup configuration values: %v", err)
+			}
+		} else {
+			cfg.Proxy.Enabled = proxyConfig.Enabled
+			cfg.Proxy.BaseURL = proxyConfig.BaseURL
+		}
+
+		// Load listeners and build ports array
+		listeners, err := store.GetProxyListeners(ctx)
+		if err == nil && len(listeners) > 0 {
+			listenPorts := make([]int, 0, len(listeners))
+			for _, l := range listeners {
+				if l.Enabled {
+					listenPorts = append(listenPorts, l.Port)
+				}
+			}
+			if len(listenPorts) > 0 {
+				cfg.Proxy.ListenPorts = listenPorts
+				cfg.Proxy.ListenPort = listenPorts[0]
+			}
+		}
+
+		log.Info("Loaded proxy configuration from database: enabled=%v, base_url=%v, listeners=%d",
+			cfg.Proxy.Enabled, cfg.Proxy.BaseURL, len(cfg.Proxy.ListenPorts))
+	}
+
 	// Initialize proxy manager
 	proxyManager := proxy.NewManager(store, &cfg.Proxy, log)
-	
+
 	// Start proxy if enabled
 	if err := proxyManager.Start(); err != nil {
 		log.Error("Failed to start proxy manager: %v", err)
@@ -123,6 +160,62 @@ func main() {
 	// Initialize API server with full configuration
 	apiServer := api.NewServer(store, dockerClient, cfg, log)
 	apiServer.SetProxyManager(proxyManager)
+
+	// Auto-start servers that have auto_start enabled
+	log.Info("Checking for servers with auto-start enabled...")
+	autoStartServers, err := store.ListServers(ctx)
+	if err != nil {
+		log.Warn("Failed to auto-start server instances due to error: %v\n", err)
+	}
+
+	for i := range autoStartServers {
+		if autoStartServers[i].AutoStart && !autoStartServers[i].Detached {
+			server := autoStartServers[i]
+			log.Info("Auto-starting server: %s", server.Name)
+			go func() {
+				// Wait a moment for everything to initialize
+				time.Sleep(2 * time.Second)
+
+				// Get server config
+				_, err := store.GetServerConfig(ctx, server.ID)
+				if err != nil {
+					log.Error("Failed to get config for auto-start server %s: %v", server.Name, err)
+					return
+				}
+
+				status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID)
+				if err != nil {
+					log.Error("Failed to find existing container for auto-start server %s: %v", server.Name, err)
+					return
+				}
+
+				if status == db.StatusStopped {
+					// Start the container
+					if err := dockerClient.StartContainer(ctx, server.ContainerID); err != nil {
+						log.Error("Failed to start container for auto-start server %s: %v", server.Name, err)
+						return
+					}
+				}
+
+				// Update server status
+				server.Status = storage.StatusRunning
+				now := time.Now()
+				server.LastStarted = &now
+				if err := store.UpdateServer(ctx, server); err != nil {
+					log.Error("Failed to update auto-start server %s: %v", server.Name, err)
+				}
+
+				// Update proxy route if enabled
+				if cfg.Proxy.Enabled && server.ProxyHostname != "" {
+					if err := proxyManager.UpdateServerRoute(server); err != nil {
+						log.Error("Failed to update proxy route for auto-started server %s: %v", server.Name, err)
+					}
+				}
+
+				log.Info("Successfully auto-started server: %s", server.Name)
+			}()
+		}
+	}
 
 	// Setup HTTP server
 	srv := &http.Server{
@@ -152,9 +245,27 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Stop managed containers if auto-stop is enabled
+	log.Info("Checking for managed containers...")
+	managedServers, lsErr := store.ListServers(ctx)
+	if lsErr != nil {
+		log.Error("Unable to list managed containers prior to shutdown: %v", lsErr)
+	}
+
+	for _, server := range managedServers {
+		if server.Detached {
+			log.Info("Skipping shutdown of detached server: %s", server.Name)
+		} else if server.Status == storage.StatusRunning {
+			log.Info("Stopping managed container for server: %s", server.Name)
+			if err := dockerClient.StopContainer(ctx, server.ContainerID); err != nil {
+				log.Error("Failed to stop container %s: %v", server.ContainerID, err)
+			}
+		}
+	}
+
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error("Server forced to shutdown: %v", err)
 	}
 
-	log.Info("Server stopped")
+	log.Info("Server stopped\n")
 }

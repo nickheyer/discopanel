@@ -3,13 +3,16 @@
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
-	import { Settings } from '@lucide/svelte';
+	import { Settings, Globe, Server } from '@lucide/svelte';
 	import type { ConfigCategory } from '$lib/api/types';
+	import RoutingSettings from '$lib/components/routing-settings.svelte';
 	
 	let globalConfig = $state<ConfigCategory[]>([]);
 	let loading = $state(true);
 	let saving = $state(false);
+	let activeTab = $state('server-config');
 	
 	async function loadGlobalSettings() {
 		loading = true;
@@ -58,39 +61,58 @@
 				<Settings class="h-8 w-8 text-primary" />
 			</div>
 			<div class="space-y-1">
-				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Global Settings</h2>
-				<p class="text-base text-muted-foreground">Configure default values for all new servers</p>
+				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Settings</h2>
+				<p class="text-base text-muted-foreground">Configure DiscoPanel and default server settings</p>
 			</div>
 		</div>
 	</div>
 	
-	<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-		<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
-		<CardHeader class="relative pb-6">
-			<CardTitle class="text-2xl font-semibold">Default Server Configuration</CardTitle>
-			<CardDescription class="text-base">
-				Configure default values that will be applied to all new servers. These settings can be overridden on a per-server basis.
-			</CardDescription>
-		</CardHeader>
-		<CardContent class="relative">
-			{#if loading}
-				<div class="flex items-center justify-center py-16">
-					<div class="text-center space-y-3">
-						<div class="h-12 w-12 mx-auto rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
-							<Settings class="h-6 w-6 text-primary" />
+	<Tabs value={activeTab} onValueChange={(v) => activeTab = v || 'server-config'} class="space-y-6">
+		<TabsList class="grid w-full max-w-md grid-cols-2">
+			<TabsTrigger value="server-config" class="flex items-center gap-2">
+				<Server class="h-4 w-4" />
+				Server Defaults
+			</TabsTrigger>
+			<TabsTrigger value="routing" class="flex items-center gap-2">
+				<Globe class="h-4 w-4" />
+				Routing
+			</TabsTrigger>
+		</TabsList>
+		
+		<TabsContent value="server-config" class="space-y-4">
+			<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+				<CardHeader class="relative pb-6">
+					<CardTitle class="text-2xl font-semibold">Default Server Configuration</CardTitle>
+					<CardDescription class="text-base">
+						Configure default values that will be applied to all new servers. These settings can be overridden on a per-server basis.
+					</CardDescription>
+				</CardHeader>
+				<CardContent class="relative">
+					{#if loading}
+						<div class="flex items-center justify-center py-16">
+							<div class="text-center space-y-3">
+								<div class="h-12 w-12 mx-auto rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
+									<Settings class="h-6 w-6 text-primary" />
+								</div>
+								<div class="text-muted-foreground font-medium">Loading settings...</div>
+							</div>
 						</div>
-						<div class="text-muted-foreground font-medium">Loading settings...</div>
-					</div>
-				</div>
-			{:else}
-				<ServerConfiguration 
-					config={globalConfig} 
-					onSave={saveGlobalSettings}
-					{saving}
-				/>
-			{/if}
-		</CardContent>
-	</Card>
+					{:else}
+						<ServerConfiguration 
+							config={globalConfig} 
+							onSave={saveGlobalSettings}
+							{saving}
+						/>
+					{/if}
+				</CardContent>
+			</Card>
+		</TabsContent>
+		
+		<TabsContent value="routing" class="space-y-4">
+			<RoutingSettings />
+		</TabsContent>
+	</Tabs>
 </div>
 
 <ScrollToTop />

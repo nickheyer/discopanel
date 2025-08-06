@@ -388,7 +388,7 @@ func (s *Server) handleGetModpackConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	config := map[string]interface{}{
+	config := map[string]any{
 		"name":         modpack.Name,
 		"description":  modpack.Summary,
 		"mod_loader":   modLoader,

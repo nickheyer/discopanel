@@ -26,6 +26,23 @@
 	let showEditor = $state(false);
 
 	let hasLoaded = false;
+	let previousServerId = $state(server.id);
+	
+	// Reset state when server changes
+	$effect(() => {
+		if (server.id !== previousServerId) {
+			previousServerId = server.id;
+			// Reset state variables
+			files = [];
+			loading = true;
+			uploading = false;
+			selectedPath = '';
+			expandedDirs = new Set();
+			editingFile = null;
+			showEditor = false;
+			hasLoaded = false;
+		}
+	});
 	
 	$effect(() => {
 		if (active && !hasLoaded) {

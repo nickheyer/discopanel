@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -80,6 +81,8 @@ func (s *Store) Migrate() error {
 		&IndexedModpack{},
 		&IndexedModpackFile{},
 		&ModpackFavorite{},
+		&ProxyConfig{},
+		&ProxyListener{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate: %w", err)
@@ -512,4 +515,97 @@ func (s *Store) UpdateGlobalSettings(ctx context.Context, config *ServerConfig) 
 	config.ID = GlobalSettingsID
 	config.ServerID = GlobalSettingsID
 	return s.db.WithContext(ctx).Save(config).Error
+}
+
+// ProxyConfig operations
+func (s *Store) GetProxyConfig(ctx context.Context) (*ProxyConfig, bool, error) {
+	var config ProxyConfig
+	err := s.db.WithContext(ctx).First(&config).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// Return default config if none exists
+			return &ProxyConfig{
+				ID:      "default",
+				Enabled: false,
+				BaseURL: "",
+			}, true, nil
+		}
+		return nil, false, err
+	}
+	return &config, false, nil
+}
+
+func (s *Store) SaveProxyConfig(ctx context.Context, config *ProxyConfig) error {
+	if config.ID == "" {
+		config.ID = "default"
+	}
+
+	// Use Save to create or update
+	return s.db.WithContext(ctx).Save(config).Error
+}
+
+// ProxyListener operations
+func (s *Store) GetProxyListeners(ctx context.Context) ([]*ProxyListener, error) {
+	var listeners []*ProxyListener
+	err := s.db.WithContext(ctx).Order("is_default DESC, port ASC").Find(&listeners).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// If no listeners exist, create a default one
+	if len(listeners) == 0 {
+		defaultListener := &ProxyListener{
+			ID:        "default",
+			Port:      25565,
+			Name:      "Primary",
+			IsDefault: true,
+			Enabled:   true,
+		}
+		if err := s.CreateProxyListener(ctx, defaultListener); err != nil {
+			return nil, err
+		}
+		listeners = []*ProxyListener{defaultListener}
+	}
+
+	return listeners, nil
+}
+
+func (s *Store) GetProxyListener(ctx context.Context, id string) (*ProxyListener, error) {
+	var listener ProxyListener
+	err := s.db.WithContext(ctx).First(&listener, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &listener, nil
+}
+
+func (s *Store) GetProxyListenerByPort(ctx context.Context, port int) (*ProxyListener, error) {
+	var listener ProxyListener
+	err := s.db.WithContext(ctx).First(&listener, "port = ?", port).Error
+	if err != nil {
+		return nil, err
+	}
+	return &listener, nil
+}
+
+func (s *Store) CreateProxyListener(ctx context.Context, listener *ProxyListener) error {
+	if listener.ID == "" {
+		listener.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(listener).Error
+}
+
+func (s *Store) UpdateProxyListener(ctx context.Context, listener *ProxyListener) error {
+	return s.db.WithContext(ctx).Save(listener).Error
+}
+
+func (s *Store) DeleteProxyListener(ctx context.Context, id string) error {
+	// Don't delete if servers are using it
+	var count int64
+	s.db.Model(&Server{}).Where("proxy_listener_id = ?", id).Count(&count)
+	if count > 0 {
+		return fmt.Errorf("cannot delete listener: %d servers are using it", count)
+	}
+
+	return s.db.WithContext(ctx).Delete(&ProxyListener{}, "id = ?", id).Error
 }

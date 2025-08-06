@@ -110,6 +110,10 @@ class ApiClient {
     });
   }
 
+  async getNextAvailablePort(): Promise<{ port: number; usedPorts: Record<number, boolean> }> {
+    return this.request<{ port: number; usedPorts: Record<number, boolean> }>('/servers/next-port');
+  }
+
   async updateServer(id: string, data: UpdateServerRequest): Promise<Server> {
     return this.request<Server>(`/servers/${id}`, {
       method: 'PUT',
@@ -266,6 +270,51 @@ class ApiClient {
 
   async getProxyRoutes(): Promise<any[]> {
     return this.request<any[]>('/proxy/routes');
+  }
+
+  async updateProxyConfig(config: { enabled: boolean; base_url: string }): Promise<any> {
+    return this.request<any>('/proxy/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+  }
+
+  async getProxyListeners(): Promise<any[]> {
+    return this.request<any[]>('/proxy/listeners');
+  }
+
+  async createProxyListener(listener: {
+    port: number;
+    name: string;
+    description?: string;
+    enabled?: boolean;
+    is_default?: boolean;
+  }): Promise<any> {
+    return this.request<any>('/proxy/listeners', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(listener),
+    });
+  }
+
+  async updateProxyListener(id: string, listener: {
+    name?: string;
+    description?: string;
+    enabled?: boolean;
+    is_default?: boolean;
+  }): Promise<any> {
+    return this.request<any>(`/proxy/listeners/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(listener),
+    });
+  }
+
+  async deleteProxyListener(id: string): Promise<void> {
+    await this.request<any>(`/proxy/listeners/${id}`, {
+      method: 'DELETE',
+    });
   }
 
   async getServerRouting(id: string): Promise<any> {

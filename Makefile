@@ -1,10 +1,10 @@
-.PHONY: dev prod clean build-frontend run
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev
 
 # Variables
 DATA_DIR := ./data
 DB_FILE := $(DATA_DIR)/discopanel.db
 FRONTEND_DIR := web/discopanel
-BACKEND_BIN := discopanel
+DISCOPANEL_BIN:= build/discopanel
 
 # Development mode - runs backend and frontend concurrently
 run:
@@ -24,14 +24,17 @@ dev: clean run
 prod: build-frontend
 	@echo "Building for production..."
 	@mkdir -p $(DATA_DIR)
-	go build -o $(BACKEND_BIN) cmd/discopanel/main.go
-	@echo "Starting production server..."
-	./$(BACKEND_BIN)
+	go build -tags embed -o $(DISCOPANEL_BIN) cmd/discopanel/main.go
 
 # Build frontend for production
 build-frontend:
 	@echo "Building frontend..."
 	cd $(FRONTEND_DIR) && npm run build
+
+# Build backend with embedded frontend
+build: build-frontend
+	@echo "Building backend with embedded frontend..."
+	go build -o $(DISCOPANEL_BIN) cmd/discopanel/main.go
 
 # Clean development data
 clean:
@@ -40,9 +43,9 @@ clean:
 		echo "Removing data directory..."; \
 		rm -rf $(DATA_DIR); \
 	fi
-	@if [ -f "$(BACKEND_BIN)" ]; then \
+	@if [ -f "$(DISCOPANEL_BIN)" ]; then \
 		echo "Removing backend binary..."; \
-		rm -f $(BACKEND_BIN); \
+		rm -f $(DISCOPANEL_BIN); \
 	fi
 	@if [ -f "discopanel.db" ]; then \
 		echo "Removing old database file..."; \
@@ -92,6 +95,7 @@ check:
 help:
 	@echo "Available commands:"
 	@echo "  make dev          - Run in development mode (frontend + backend)"
+	@echo "  make build        - Build standalone binary with embedded frontend"
 	@echo "  make prod         - Build and run in production mode"
 	@echo "  make clean        - Remove data directory and build artifacts"
 	@echo "  make kill-dev     - Kill any orphaned dev processes"

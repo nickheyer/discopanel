@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/nickheyer/discopanel/internal/config"
@@ -12,6 +14,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	web "github.com/nickheyer/discopanel/web/discopanel"
 )
 
 type Server struct {
@@ -112,25 +115,61 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/servers/{id}/files/{path:.*}", s.handleUpdateFile).Methods("PUT")
 	api.HandleFunc("/servers/{id}/files/{path:.*}", s.handleDeleteFile).Methods("DELETE")
 
-	// Serve SvelteKit build output
-	// The SvelteKit app should be built and output to web/build
-	webRoot := filepath.Join("web", "build")
-
-	// Serve static files from the SvelteKit build
-	fileServer := http.FileServer(http.Dir(webRoot))
+	// Serve frontend - try embedded first, fall back to filesystem for development
+	var fileServer http.Handler
+	var embeddedFS fs.FS
+	useEmbedded := false
+	
+	// Try to use embedded frontend
+	if buildFS, err := web.BuildFS(); err == nil {
+		s.log.Info("Using embedded frontend")
+		embeddedFS = buildFS
+		fileServer = http.FileServer(http.FS(embeddedFS))
+		useEmbedded = true
+	} else {
+		// Fall back to filesystem for development
+		webRoot := filepath.Join("web", "discopanel", "build")
+		if _, err := os.Stat(webRoot); err == nil {
+			s.log.Info("Using filesystem frontend from %s", webRoot)
+			fileServer = http.FileServer(http.Dir(webRoot))
+		} else {
+			s.log.Warn("No frontend found - API only mode")
+		}
+	}
 
 	// Handle all non-API routes by serving the SvelteKit app
-	r.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if the requested file exists
-		path := filepath.Join(webRoot, r.URL.Path)
-		if _, err := os.Stat(path); err == nil {
-			// File exists, serve it
-			fileServer.ServeHTTP(w, r)
-		} else {
-			// File doesn't exist, serve the SvelteKit app's index.html for client-side routing
-			http.ServeFile(w, r, filepath.Join(webRoot, "index.html"))
-		}
-	}))
+	if fileServer != nil {
+		r.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Clean the path
+			path := strings.TrimPrefix(r.URL.Path, "/")
+			if path == "" {
+				path = "index.html"
+			}
+			
+			// Try to serve the file
+			if useEmbedded {
+				// Using embedded filesystem
+				if file, err := embeddedFS.Open(path); err == nil {
+					file.Close()
+					fileServer.ServeHTTP(w, r)
+				} else {
+					// Serve index.html for client-side routing
+					r.URL.Path = "/index.html"
+					fileServer.ServeHTTP(w, r)
+				}
+			} else {
+				// Using regular filesystem
+				webRoot := filepath.Join("web", "discopanel", "build")
+				fullPath := filepath.Join(webRoot, path)
+				if _, err := os.Stat(fullPath); err == nil {
+					fileServer.ServeHTTP(w, r)
+				} else {
+					// Serve index.html for client-side routing
+					http.ServeFile(w, r, filepath.Join(webRoot, "index.html"))
+				}
+			}
+		}))
+	}
 
 	// Middleware
 	r.Use(s.loggingMiddleware)

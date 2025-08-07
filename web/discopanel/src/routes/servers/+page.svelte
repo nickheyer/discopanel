@@ -197,23 +197,16 @@
 											Restart
 										</DropdownMenuItem>
 									{/if}
+									<DropdownMenuItem onclick={() => deleteServer(server)} class="text-destructive">
+										<Trash2 class="h-4 w-4 mr-2" />
+										Delete
+									</DropdownMenuItem>
 									<DropdownMenuSeparator />
 									<DropdownMenuItem>
 										<a href="/servers/{server.id}">
 											<Settings class="h-4 w-4 mr-2" />
 											Manage
 										</a>
-									</DropdownMenuItem>
-									<DropdownMenuItem>
-										<a href="/servers/{server.id}/mods">
-											<Package class="h-4 w-4 mr-2" />
-											Mods			
-										</a>
-									</DropdownMenuItem>
-									<DropdownMenuSeparator />
-									<DropdownMenuItem onclick={() => deleteServer(server)} class="text-destructive">
-										<Trash2 class="h-4 w-4 mr-2" />
-										Delete
 									</DropdownMenuItem>
 								</DropdownMenuContent>
 							</DropdownMenu>

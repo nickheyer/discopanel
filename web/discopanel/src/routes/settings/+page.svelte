@@ -5,9 +5,10 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
-	import { Settings, Globe, Server } from '@lucide/svelte';
+	import { Settings, Globe, Server, Shield } from '@lucide/svelte';
 	import type { ConfigCategory } from '$lib/api/types';
 	import RoutingSettings from '$lib/components/routing-settings.svelte';
+	import AuthSettings from '$lib/components/auth-settings.svelte';
 	
 	let globalConfig = $state<ConfigCategory[]>([]);
 	let loading = $state(true);
@@ -68,7 +69,7 @@
 	</div>
 	
 	<Tabs value={activeTab} onValueChange={(v) => activeTab = v || 'server-config'} class="space-y-6">
-		<TabsList class="grid w-full max-w-md grid-cols-2">
+		<TabsList class="grid w-full max-w-lg grid-cols-3">
 			<TabsTrigger value="server-config" class="flex items-center gap-2">
 				<Server class="h-4 w-4" />
 				Server Defaults
@@ -76,6 +77,10 @@
 			<TabsTrigger value="routing" class="flex items-center gap-2">
 				<Globe class="h-4 w-4" />
 				Routing
+			</TabsTrigger>
+			<TabsTrigger value="auth" class="flex items-center gap-2">
+				<Shield class="h-4 w-4" />
+				Authentication
 			</TabsTrigger>
 		</TabsList>
 		
@@ -111,6 +116,10 @@
 		
 		<TabsContent value="routing" class="space-y-4">
 			<RoutingSettings />
+		</TabsContent>
+		
+		<TabsContent value="auth" class="space-y-4">
+			<AuthSettings />
 		</TabsContent>
 	</Tabs>
 </div>

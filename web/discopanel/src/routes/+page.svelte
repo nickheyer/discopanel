@@ -7,28 +7,13 @@
 	import { Server, Cpu, MemoryStick, HardDrive, Activity, Plus, LayoutDashboard } from '@lucide/svelte';
 	import type { Server as ServerType } from '$lib/api/types';
 
-	let servers = $state<ServerType[]>([]);
-	let stats = $state({
-		total: 0,
-		running: 0,
-		stopped: 0,
-		totalMemory: 0,
-		usedMemory: 0
-	});
-
-	onMount(() => {
-		const unsubscribe = serversStore.subscribe(value => {
-			servers = value;
-			stats = {
-				total: value.length,
-				running: value.filter(s => s.status === 'running').length,
-				stopped: value.filter(s => s.status === 'stopped').length,
-				totalMemory: value.reduce((acc, s) => acc + s.memory, 0),
-				usedMemory: value.filter(s => s.status === 'running').reduce((acc, s) => acc + s.memory, 0)
-			};
-		});
-
-		return unsubscribe;
+	let servers = $derived($serversStore);
+	let stats = $derived({
+		total: servers.length,
+		running: servers.filter(s => s.status === 'running').length,
+		stopped: servers.filter(s => s.status === 'stopped').length,
+		totalMemory: servers.reduce((acc, s) => acc + s.memory, 0),
+		usedMemory: servers.filter(s => s.status === 'running').reduce((acc, s) => acc + s.memory, 0)
 	});
 
 	const getStatusColor = (status: ServerType['status']) => {

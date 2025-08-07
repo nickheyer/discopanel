@@ -83,6 +83,9 @@ func (s *Store) Migrate() error {
 		&ModpackFavorite{},
 		&ProxyConfig{},
 		&ProxyListener{},
+		&User{},
+		&AuthConfig{},
+		&Session{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate: %w", err)
@@ -90,6 +93,9 @@ func (s *Store) Migrate() error {
 
 	// Create indexes
 	if err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_servers_port ON servers(port)").Error; err != nil {
+		return err
+	}
+	if err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)").Error; err != nil {
 		return err
 	}
 
@@ -608,4 +614,134 @@ func (s *Store) DeleteProxyListener(ctx context.Context, id string) error {
 	}
 
 	return s.db.WithContext(ctx).Delete(&ProxyListener{}, "id = ?", id).Error
+}
+
+// User operations
+func (s *Store) CreateUser(ctx context.Context, user *User) error {
+	if user.ID == "" {
+		user.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(user).Error
+}
+
+func (s *Store) GetUser(ctx context.Context, id string) (*User, error) {
+	var user User
+	err := s.db.WithContext(ctx).First(&user, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+	var user User
+	err := s.db.WithContext(ctx).First(&user, "username = ?", username).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	var user User
+	err := s.db.WithContext(ctx).First(&user, "email = ?", email).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (s *Store) ListUsers(ctx context.Context) ([]*User, error) {
+	var users []*User
+	err := s.db.WithContext(ctx).Order("created_at DESC").Find(&users).Error
+	return users, err
+}
+
+func (s *Store) UpdateUser(ctx context.Context, user *User) error {
+	return s.db.WithContext(ctx).Save(user).Error
+}
+
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete sessions
+		if err := tx.Where("user_id = ?", id).Delete(&Session{}).Error; err != nil {
+			return err
+		}
+		// Delete user
+		return tx.Delete(&User{}, "id = ?", id).Error
+	})
+}
+
+func (s *Store) CountUsers(ctx context.Context) (int64, error) {
+	var count int64
+	err := s.db.WithContext(ctx).Model(&User{}).Count(&count).Error
+	return count, err
+}
+
+// AuthConfig operations
+func (s *Store) GetAuthConfig(ctx context.Context) (*AuthConfig, bool, error) {
+	var config AuthConfig
+	err := s.db.WithContext(ctx).First(&config).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// Return default config if none exists
+			return &AuthConfig{
+				ID:                "default",
+				Enabled:           false,
+				SessionTimeout:    86400, // 24 hours
+				RequireEmailVerify: false,
+				AllowRegistration: false,
+			}, true, nil
+		}
+		return nil, false, err
+	}
+	return &config, false, nil
+}
+
+func (s *Store) SaveAuthConfig(ctx context.Context, config *AuthConfig) error {
+	if config.ID == "" {
+		config.ID = "default"
+	}
+	return s.db.WithContext(ctx).Save(config).Error
+}
+
+// Session operations
+func (s *Store) CreateSession(ctx context.Context, session *Session) error {
+	if session.ID == "" {
+		session.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(session).Error
+}
+
+func (s *Store) GetSession(ctx context.Context, token string) (*Session, error) {
+	var session Session
+	err := s.db.WithContext(ctx).Preload("User").Where("token = ? AND expires_at > ?", token, time.Now()).First(&session).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("session not found or expired")
+		}
+		return nil, err
+	}
+	return &session, nil
+}
+
+func (s *Store) DeleteSession(ctx context.Context, token string) error {
+	return s.db.WithContext(ctx).Where("token = ?", token).Delete(&Session{}).Error
+}
+
+func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
+	return s.db.WithContext(ctx).Where("user_id = ?", userID).Delete(&Session{}).Error
+}
+
+func (s *Store) CleanExpiredSessions(ctx context.Context) error {
+	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
 }

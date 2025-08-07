@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/auth"
+	storage "github.com/nickheyer/discopanel/internal/db"
 	"gorm.io/gorm"
 )
 
@@ -169,7 +170,7 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 
 		// Check if server is running
 		wasRunning := false
-		if server.Status == models.StatusRunning {
+		if server.Status == storage.StatusRunning {
 			wasRunning = true
 			// Stop the container first
 			if err := s.docker.StopContainer(ctx, oldContainerID); err != nil {
@@ -211,7 +212,7 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 				s.log.Error("Failed to restart container after config update: %v", err)
 				// Don't fail the whole operation, config is already saved
 			} else {
-				server.Status = models.StatusStarting
+				server.Status = storage.StatusStarting
 				now := time.Now()
 				server.LastStarted = &now
 				if err := s.store.UpdateServer(ctx, server); err != nil {
@@ -414,6 +415,27 @@ func getCategoryIndex(key string) int {
 func (s *Server) handleGetGlobalSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// Check if auth is enabled and enforce admin role
+	authConfig, _, err := s.store.GetAuthConfig(ctx)
+	if err != nil {
+		s.log.Error("Failed to get auth config: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to get auth configuration")
+		return
+	}
+	
+	if authConfig.Enabled {
+		// Get user from context (set by OptionalAuth if token present)
+		user := auth.GetUserFromContext(ctx)
+		if user == nil {
+			s.respondError(w, http.StatusUnauthorized, "Authentication required")
+			return
+		}
+		if !auth.CheckPermission(user, storage.RoleAdmin) {
+			s.respondError(w, http.StatusForbidden, "Admin access required")
+			return
+		}
+	}
+
 	config, _, err := s.store.GetGlobalSettings(ctx)
 	if err != nil {
 		s.log.Error("Failed to get global settings: %v", err)
@@ -428,6 +450,27 @@ func (s *Server) handleGetGlobalSettings(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleUpdateGlobalSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Check if auth is enabled and enforce admin role
+	authConfig, _, err := s.store.GetAuthConfig(ctx)
+	if err != nil {
+		s.log.Error("Failed to get auth config: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to get auth configuration")
+		return
+	}
+	
+	if authConfig.Enabled {
+		// Get user from context (set by OptionalAuth if token present)
+		user := auth.GetUserFromContext(ctx)
+		if user == nil {
+			s.respondError(w, http.StatusUnauthorized, "Authentication required")
+			return
+		}
+		if !auth.CheckPermission(user, storage.RoleAdmin) {
+			s.respondError(w, http.StatusForbidden, "Admin access required")
+			return
+		}
+	}
 
 	// Get existing config
 	config, _, err := s.store.GetGlobalSettings(ctx)

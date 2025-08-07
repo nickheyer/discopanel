@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -24,14 +26,27 @@ type Server struct {
 	log          *logger.Logger
 	router       *mux.Router
 	proxyManager *proxy.Manager
+	authManager  *auth.Manager
+	authMiddleware *auth.Middleware
 }
 
 func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
+	// Initialize auth manager
+	authManager := auth.NewManager(store)
+	authMiddleware := auth.NewMiddleware(authManager, store)
+	
+	// Initialize auth on startup
+	if err := authManager.InitializeAuth(context.Background()); err != nil {
+		log.Error("Failed to initialize authentication: %v", err)
+	}
+	
 	s := &Server{
 		store:  store,
 		docker: docker,
 		config: cfg,
 		log:    log,
+		authManager: authManager,
+		authMiddleware: authMiddleware,
 	}
 
 	s.setupRoutes()
@@ -52,68 +67,107 @@ func (s *Server) setupRoutes() {
 	// API routes
 	api := r.PathPrefix("/api/v1").Subrouter()
 
-	// Minecraft version and mod loader endpoints
-	api.HandleFunc("/minecraft/versions", s.handleGetMinecraftVersions).Methods("GET")
-	api.HandleFunc("/minecraft/modloaders", s.handleGetModLoaders).Methods("GET")
-	api.HandleFunc("/minecraft/docker-images", s.handleGetDockerImages).Methods("GET")
+	// Public auth endpoints (no authentication required)
+	api.HandleFunc("/auth/status", s.handleGetAuthStatus).Methods("GET")
+	api.HandleFunc("/auth/login", s.handleLogin).Methods("POST")
+	api.HandleFunc("/auth/logout", s.handleLogout).Methods("POST")
+	api.HandleFunc("/auth/register", s.handleRegister).Methods("POST")
+	api.HandleFunc("/auth/reset-password", s.handleResetPassword).Methods("POST")
 
-	// Server management
-	api.HandleFunc("/servers", s.handleListServers).Methods("GET")
-	api.HandleFunc("/servers", s.handleCreateServer).Methods("POST")
-	api.HandleFunc("/servers/next-port", s.handleGetNextAvailablePort).Methods("GET")
-	api.HandleFunc("/servers/{id}", s.handleGetServer).Methods("GET")
-	api.HandleFunc("/servers/{id}", s.handleUpdateServer).Methods("PUT")
-	api.HandleFunc("/servers/{id}", s.handleDeleteServer).Methods("DELETE")
-	api.HandleFunc("/servers/{id}/start", s.handleStartServer).Methods("POST")
-	api.HandleFunc("/servers/{id}/stop", s.handleStopServer).Methods("POST")
-	api.HandleFunc("/servers/{id}/restart", s.handleRestartServer).Methods("POST")
-	api.HandleFunc("/servers/{id}/logs", s.handleGetServerLogs).Methods("GET")
-	api.HandleFunc("/servers/{id}/command", s.handleSendCommand).Methods("POST")
+	// Protected auth endpoints (require authentication)
+	authRouter := api.PathPrefix("/auth").Subrouter()
+	authRouter.Use(s.authMiddleware.RequireAuth(storage.RoleViewer))
+	authRouter.HandleFunc("/me", s.handleGetCurrentUser).Methods("GET")
+	authRouter.HandleFunc("/change-password", s.handleChangePassword).Methods("POST")
+
+	// User management endpoints (admin only)
+	userRouter := api.PathPrefix("/users").Subrouter()
+	userRouter.Use(s.authMiddleware.RequireAuth(storage.RoleAdmin))
+	userRouter.HandleFunc("", s.handleListUsers).Methods("GET")
+	userRouter.HandleFunc("", s.handleCreateUser).Methods("POST")
+	userRouter.HandleFunc("/{id}", s.handleUpdateUser).Methods("PUT")
+	userRouter.HandleFunc("/{id}", s.handleDeleteUser).Methods("DELETE")
+
+	// Auth config endpoints - use OptionalAuth to work both with and without auth
+	api.Handle("/auth/config", s.authMiddleware.OptionalAuth()(http.HandlerFunc(s.handleGetAuthConfig))).Methods("GET")
+	api.Handle("/auth/config", s.authMiddleware.OptionalAuth()(http.HandlerFunc(s.handleUpdateAuthConfig))).Methods("PUT")
+
+	// Protected API routes (require at least viewer role)
+	// All server-related endpoints require authentication when enabled
+	protectedAPI := api.NewRoute().Subrouter()
+	protectedAPI.Use(s.authMiddleware.RequireAuth(storage.RoleViewer))
+
+	// Minecraft version and mod loader endpoints (read-only, viewer access)
+	protectedAPI.HandleFunc("/minecraft/versions", s.handleGetMinecraftVersions).Methods("GET")
+	protectedAPI.HandleFunc("/minecraft/modloaders", s.handleGetModLoaders).Methods("GET")
+	protectedAPI.HandleFunc("/minecraft/docker-images", s.handleGetDockerImages).Methods("GET")
+
+	// Server management - viewer can read, editor can modify
+	protectedAPI.HandleFunc("/servers", s.handleListServers).Methods("GET")
+	protectedAPI.HandleFunc("/servers/next-port", s.handleGetNextAvailablePort).Methods("GET")
+	protectedAPI.HandleFunc("/servers/{id}", s.handleGetServer).Methods("GET")
+	protectedAPI.HandleFunc("/servers/{id}/logs", s.handleGetServerLogs).Methods("GET")
+	
+	// Server modification - requires editor role
+	editorAPI := api.NewRoute().Subrouter()
+	editorAPI.Use(s.authMiddleware.RequireAuth(storage.RoleEditor))
+	editorAPI.HandleFunc("/servers", s.handleCreateServer).Methods("POST")
+	editorAPI.HandleFunc("/servers/{id}", s.handleUpdateServer).Methods("PUT")
+	editorAPI.HandleFunc("/servers/{id}", s.handleDeleteServer).Methods("DELETE")
+	editorAPI.HandleFunc("/servers/{id}/start", s.handleStartServer).Methods("POST")
+	editorAPI.HandleFunc("/servers/{id}/stop", s.handleStopServer).Methods("POST")
+	editorAPI.HandleFunc("/servers/{id}/restart", s.handleRestartServer).Methods("POST")
+	editorAPI.HandleFunc("/servers/{id}/command", s.handleSendCommand).Methods("POST")
 
 	// Server configuration
-	api.HandleFunc("/servers/{id}/config", s.handleGetServerConfig).Methods("GET")
-	api.HandleFunc("/servers/{id}/config", s.handleUpdateServerConfig).Methods("PUT")
+	protectedAPI.HandleFunc("/servers/{id}/config", s.handleGetServerConfig).Methods("GET")
+	editorAPI.HandleFunc("/servers/{id}/config", s.handleUpdateServerConfig).Methods("PUT")
 	
-	// Global settings
-	api.HandleFunc("/settings", s.handleGetGlobalSettings).Methods("GET")
-	api.HandleFunc("/settings", s.handleUpdateGlobalSettings).Methods("PUT")
+	// Global settings - admin only when auth is enabled, accessible when auth is disabled
+	api.Handle("/settings", s.authMiddleware.OptionalAuth()(http.HandlerFunc(s.handleGetGlobalSettings))).Methods("GET")
+	api.Handle("/settings", s.authMiddleware.OptionalAuth()(http.HandlerFunc(s.handleUpdateGlobalSettings))).Methods("PUT")
 	
-	// Proxy endpoints
-	api.HandleFunc("/proxy/routes", s.handleGetProxyRoutes).Methods("GET")
-	api.HandleFunc("/proxy/status", s.handleGetProxyStatus).Methods("GET")
-	api.HandleFunc("/proxy/config", s.handleUpdateProxyConfig).Methods("PUT")
-	api.HandleFunc("/proxy/listeners", s.handleGetProxyListeners).Methods("GET")
-	api.HandleFunc("/proxy/listeners", s.handleCreateProxyListener).Methods("POST")
-	api.HandleFunc("/proxy/listeners/{id}", s.handleUpdateProxyListener).Methods("PUT")
-	api.HandleFunc("/proxy/listeners/{id}", s.handleDeleteProxyListener).Methods("DELETE")
-	api.HandleFunc("/servers/{id}/routing", s.handleGetServerRouting).Methods("GET")
-	api.HandleFunc("/servers/{id}/routing", s.handleUpdateServerRouting).Methods("PUT")
+	// Proxy endpoints - admin only when auth is enabled
+	adminAPI := api.NewRoute().Subrouter()
+	adminAPI.Use(s.authMiddleware.RequireAuth(storage.RoleAdmin))
+	adminAPI.HandleFunc("/proxy/routes", s.handleGetProxyRoutes).Methods("GET")
+	adminAPI.HandleFunc("/proxy/status", s.handleGetProxyStatus).Methods("GET")
+	adminAPI.HandleFunc("/proxy/config", s.handleUpdateProxyConfig).Methods("PUT")
+	adminAPI.HandleFunc("/proxy/listeners", s.handleGetProxyListeners).Methods("GET")
+	adminAPI.HandleFunc("/proxy/listeners", s.handleCreateProxyListener).Methods("POST")
+	adminAPI.HandleFunc("/proxy/listeners/{id}", s.handleUpdateProxyListener).Methods("PUT")
+	adminAPI.HandleFunc("/proxy/listeners/{id}", s.handleDeleteProxyListener).Methods("DELETE")
+	protectedAPI.HandleFunc("/servers/{id}/routing", s.handleGetServerRouting).Methods("GET")
+	editorAPI.HandleFunc("/servers/{id}/routing", s.handleUpdateServerRouting).Methods("PUT")
 	
-	// Indexed modpacks
-	api.HandleFunc("/modpacks", s.handleSearchModpacks).Methods("GET")
-	api.HandleFunc("/modpacks/sync", s.handleSyncModpacks).Methods("POST")
-	api.HandleFunc("/modpacks/upload", s.handleUploadModpack).Methods("POST")
-	api.HandleFunc("/modpacks/status", s.handleGetIndexerStatus).Methods("GET")
-	api.HandleFunc("/modpacks/favorites", s.handleListFavorites).Methods("GET")
-	api.HandleFunc("/modpacks/{id}", s.handleGetModpack).Methods("GET")
-	api.HandleFunc("/modpacks/{id}/config", s.handleGetModpackConfig).Methods("GET")
-	api.HandleFunc("/modpacks/{id}/favorite", s.handleToggleFavorite).Methods("POST")
-	api.HandleFunc("/modpacks/{id}/files/sync", s.handleSyncModpackFiles).Methods("POST")
-	api.HandleFunc("/modpacks/{id}/files", s.handleGetModpackFiles).Methods("GET")
+	// Indexed modpacks - viewers can browse, editors can sync/upload
+	protectedAPI.HandleFunc("/modpacks", s.handleSearchModpacks).Methods("GET")
+	protectedAPI.HandleFunc("/modpacks/status", s.handleGetIndexerStatus).Methods("GET")
+	protectedAPI.HandleFunc("/modpacks/favorites", s.handleListFavorites).Methods("GET")
+	protectedAPI.HandleFunc("/modpacks/{id}", s.handleGetModpack).Methods("GET")
+	protectedAPI.HandleFunc("/modpacks/{id}/config", s.handleGetModpackConfig).Methods("GET")
+	protectedAPI.HandleFunc("/modpacks/{id}/files", s.handleGetModpackFiles).Methods("GET")
+	
+	editorAPI.HandleFunc("/modpacks/sync", s.handleSyncModpacks).Methods("POST")
+	editorAPI.HandleFunc("/modpacks/upload", s.handleUploadModpack).Methods("POST")
+	editorAPI.HandleFunc("/modpacks/{id}/favorite", s.handleToggleFavorite).Methods("POST")
+	editorAPI.HandleFunc("/modpacks/{id}/files/sync", s.handleSyncModpackFiles).Methods("POST")
 
-	// Mod management
-	api.HandleFunc("/servers/{id}/mods", s.handleListMods).Methods("GET")
-	api.HandleFunc("/servers/{id}/mods", s.handleUploadMod).Methods("POST")
-	api.HandleFunc("/servers/{id}/mods/{modId}", s.handleGetMod).Methods("GET")
-	api.HandleFunc("/servers/{id}/mods/{modId}", s.handleUpdateMod).Methods("PUT")
-	api.HandleFunc("/servers/{id}/mods/{modId}", s.handleDeleteMod).Methods("DELETE")
+	// Mod management - viewers can list, editors can modify
+	protectedAPI.HandleFunc("/servers/{id}/mods", s.handleListMods).Methods("GET")
+	protectedAPI.HandleFunc("/servers/{id}/mods/{modId}", s.handleGetMod).Methods("GET")
+	
+	editorAPI.HandleFunc("/servers/{id}/mods", s.handleUploadMod).Methods("POST")
+	editorAPI.HandleFunc("/servers/{id}/mods/{modId}", s.handleUpdateMod).Methods("PUT")
+	editorAPI.HandleFunc("/servers/{id}/mods/{modId}", s.handleDeleteMod).Methods("DELETE")
 
-	// File management
-	api.HandleFunc("/servers/{id}/files", s.handleListFiles).Methods("GET")
-	api.HandleFunc("/servers/{id}/files", s.handleUploadFile).Methods("POST")
-	api.HandleFunc("/servers/{id}/files/{path:.*}", s.handleGetFile).Methods("GET")
-	api.HandleFunc("/servers/{id}/files/{path:.*}", s.handleUpdateFile).Methods("PUT")
-	api.HandleFunc("/servers/{id}/files/{path:.*}", s.handleDeleteFile).Methods("DELETE")
+	// File management - viewers can read, editors can modify
+	protectedAPI.HandleFunc("/servers/{id}/files", s.handleListFiles).Methods("GET")
+	protectedAPI.HandleFunc("/servers/{id}/files/{path:.*}", s.handleGetFile).Methods("GET")
+	
+	editorAPI.HandleFunc("/servers/{id}/files", s.handleUploadFile).Methods("POST")
+	editorAPI.HandleFunc("/servers/{id}/files/{path:.*}", s.handleUpdateFile).Methods("PUT")
+	editorAPI.HandleFunc("/servers/{id}/files/{path:.*}", s.handleDeleteFile).Methods("DELETE")
 
 	// Serve frontend - try embedded first, fall back to filesystem for development
 	var fileServer http.Handler
@@ -174,6 +228,7 @@ func (s *Server) setupRoutes() {
 	// Middleware
 	r.Use(s.loggingMiddleware)
 	r.Use(s.corsMiddleware)
+	r.Use(s.authMiddleware.CheckAuthStatus()) // Add auth status to all responses
 
 	s.router = r
 }

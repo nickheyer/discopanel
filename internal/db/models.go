@@ -306,3 +306,51 @@ type ProxyListener struct {
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
+
+// UserRole defines the role of a user in the system
+type UserRole string
+
+const (
+	RoleAdmin  UserRole = "admin"  // Full access to all features
+	RoleEditor UserRole = "editor" // Can manage servers but not system settings
+	RoleViewer UserRole = "viewer" // Read-only access
+)
+
+// User represents a user account
+type User struct {
+	ID           string    `json:"id" gorm:"primaryKey"`
+	Username     string    `json:"username" gorm:"not null;uniqueIndex"`
+	Email        *string   `json:"email" gorm:"uniqueIndex"` // Pointer allows NULL, unique only on non-NULL
+	PasswordHash string    `json:"-" gorm:"not null;column:password_hash"`
+	Role         UserRole  `json:"role" gorm:"not null;default:'viewer'"`
+	IsActive     bool      `json:"is_active" gorm:"not null;default:true"`
+	LastLogin    *time.Time `json:"last_login" gorm:"column:last_login"`
+	CreatedAt    time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt    time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+// AuthConfig stores authentication configuration
+type AuthConfig struct {
+	ID                 string    `json:"id" gorm:"primaryKey"`
+	Enabled            bool      `json:"enabled" gorm:"not null;default:false"`
+	RecoveryKey        string    `json:"-" gorm:"column:recovery_key"` // Secret key for account recovery
+	RecoveryKeyHash    string    `json:"-" gorm:"column:recovery_key_hash"` // Hashed version for verification
+	JWTSecret          string    `json:"-" gorm:"column:jwt_secret"` // Secret for JWT signing
+	SessionTimeout     int       `json:"session_timeout" gorm:"default:86400"` // Session timeout in seconds (default 24h)
+	RequireEmailVerify bool      `json:"require_email_verify" gorm:"default:false"`
+	AllowRegistration  bool      `json:"allow_registration" gorm:"default:false"` // Allow new user registration
+	CreatedAt          time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt          time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+// Session represents an active user session
+type Session struct {
+	ID        string    `json:"id" gorm:"primaryKey"`
+	UserID    string    `json:"user_id" gorm:"not null;index;column:user_id"`
+	Token     string    `json:"-" gorm:"not null;uniqueIndex"`
+	ExpiresAt time.Time `json:"expires_at" gorm:"not null;index"`
+	IPAddress string    `json:"ip_address"`
+	UserAgent string    `json:"user_agent"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+}

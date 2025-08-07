@@ -1,4 +1,5 @@
 import { toast } from 'svelte-sonner';
+import { authStore } from '$lib/stores/auth';
 import type {
   Server,
   CreateServerRequest,
@@ -24,9 +25,13 @@ class ApiClient {
     path: string,
     options: RequestInit = {}
   ): Promise<T> {
+    // Get auth headers
+    const authHeaders = authStore.getHeaders();
+    
     const response = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers: {
+        ...authHeaders,
         ...options.headers,
       },
     });
@@ -53,9 +58,13 @@ class ApiClient {
     path: string,
     options: RequestInit = {}
   ): Promise<Blob> {
+    // Get auth headers
+    const authHeaders = authStore.getHeaders();
+    
     const response = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers: {
+        ...authHeaders,
         ...options.headers,
       },
     });

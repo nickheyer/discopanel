@@ -11,19 +11,10 @@
 	import { Plus, Search, MoreVertical, Play, Square, RotateCw, Settings, Package, Trash2, Server as ServerIcon } from '@lucide/svelte';
 	import type { Server } from '$lib/api/types';
 
-	let servers = $state<Server[]>([]);
+	let servers = $derived($serversStore);
 	let filteredServers = $state<Server[]>([]);
 	let searchQuery = $state('');
 	let loading = $state(false);
-
-	onMount(() => {
-		const unsubscribe = serversStore.subscribe(value => {
-			servers = value;
-			filterServers();
-		});
-
-		return unsubscribe;
-	});
 
 	$effect(() => {
 		filterServers();

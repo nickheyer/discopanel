@@ -60,7 +60,7 @@ func (s *Server) handleGetProxyStatus(w http.ResponseWriter, r *http.Request) {
 		listeners = []*storage.ProxyListener{}
 	}
 
-	// Convert listeners to ports array for backward compatibility
+	// Convert listeners to ports array
 	listenPorts := make([]int, len(listeners))
 	for i, l := range listeners {
 		listenPorts[i] = l.Port
@@ -74,7 +74,7 @@ func (s *Server) handleGetProxyStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(listenPorts) > 0 {
-		status["listen_port"] = listenPorts[0] // Primary port for backward compatibility
+		status["listen_port"] = listenPorts[0] // Primary port
 	}
 
 	if s.proxyManager != nil {

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 
 	"github.com/nickheyer/discopanel/internal/db"
 	"github.com/spf13/viper"
@@ -33,6 +34,7 @@ type DatabaseConfig struct {
 }
 
 type DockerConfig struct {
+	SyncInterval  int    `mapstructure:"sync_interval"`
 	Host          string `mapstructure:"host"`
 	Version       string `mapstructure:"version"`
 	NetworkName   string `mapstructure:"network_name"`
@@ -50,8 +52,8 @@ type StorageConfig struct {
 type ProxyConfig struct {
 	Enabled      bool   `mapstructure:"enabled"`
 	BaseURL      string `mapstructure:"base_url"`
-	ListenPort   int    `mapstructure:"listen_port"`    // Primary listen port (kept for backward compatibility)
-	ListenPorts  []int  `mapstructure:"listen_ports"`   // Multiple listen ports
+	ListenPort   int    `mapstructure:"listen_port"`  // Primary listen port
+	ListenPorts  []int  `mapstructure:"listen_ports"` // Multiple listen ports
 	PortRangeMin int    `mapstructure:"port_range_min"`
 	PortRangeMax int    `mapstructure:"port_range_max"`
 }
@@ -120,6 +122,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.conn_max_lifetime", 300)
 
 	// Docker defaults
+	v.SetDefault("docker.sync_interval", 5)
 	v.SetDefault("docker.host", "unix:///var/run/docker.sock")
 	v.SetDefault("docker.version", "1.41")
 	v.SetDefault("docker.network_name", "discopanel-network")
@@ -175,19 +178,13 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("proxy port range min must be less than max")
 	}
 
-	// Ensure ListenPorts includes ListenPort for backward compatibility
+	// Ensure ListenPorts includes Primary ListenPort
 	if cfg.Proxy.Enabled {
 		if len(cfg.Proxy.ListenPorts) == 0 {
 			cfg.Proxy.ListenPorts = []int{cfg.Proxy.ListenPort}
 		} else {
 			// Make sure the primary port is in the list
-			hasPort := false
-			for _, port := range cfg.Proxy.ListenPorts {
-				if port == cfg.Proxy.ListenPort {
-					hasPort = true
-					break
-				}
-			}
+			hasPort := slices.Contains(cfg.Proxy.ListenPorts, cfg.Proxy.ListenPort)
 			if !hasPort {
 				cfg.Proxy.ListenPorts = append([]int{cfg.Proxy.ListenPort}, cfg.Proxy.ListenPorts...)
 			}

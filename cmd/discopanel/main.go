@@ -217,6 +217,39 @@ func main() {
 		}
 	}
 
+	// Start container status monitor
+	stopMonitor := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Duration(cfg.Docker.SyncInterval) * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Update status for all servers with containers
+				ctx := context.Background()
+				servers, err := store.ListServers(ctx)
+				if err != nil {
+					continue
+				}
+
+				for _, server := range servers {
+					if server.ContainerID != "" {
+						status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID)
+						if err == nil && server.Status != status {
+							server.Status = status
+							if err := store.UpdateServer(ctx, server); err != nil {
+								log.Error("Failed to update server status: %v", err)
+							}
+						}
+					}
+				}
+			case <-stopMonitor:
+				return
+			}
+		}
+	}()
+
 	// Setup HTTP server
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),

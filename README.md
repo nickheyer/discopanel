@@ -42,6 +42,26 @@ go build -o discopanel cmd/discopanel/main.go
 # http://localhost:8080
 ```
 
+## Docker Run
+
+```bash
+docker run -d \
+  --name discopanel \
+  --restart unless-stopped \
+  --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v ./data:/app/data \
+  -v ./backups:/app/backups \
+  -v ./tmp:/app/tmp \
+  -v ./config.yaml:/app/config.yaml:ro \
+  -e DISCOPANEL_DATA_DIR=/app/data \
+  -e DISCOPANEL_HOST_DATA_PATH="$(pwd)/data" \
+  -e TZ=UTC \
+  nickheyer/discopanel:latest
+```
+
+[Docker Hub](https://hub.docker.com/r/nickheyer/discopanel) • [GitHub Container Registry](https://github.com/nickheyer/discopanel/pkgs/container/discopanel)
+
 ## Docker Compose (Recommended)
 
 ```yaml
@@ -71,7 +91,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     environment:
       - DISCOPANEL_DATA_DIR=/app/data
-      - DISCOPANEL_HOST_DATA_PATH="<PUT THE FULL PATH TO YOUR DATA FOLDER HERE>"
+      - DISCOPANEL_HOST_DATA_PATH=/full/path/to/your/data # IMPORTANT: Replace this path with the folder this compose file lives in!
       - TZ=UTC
     extra_hosts:
       - "host.docker.internal:host-gateway"

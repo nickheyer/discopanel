@@ -5,7 +5,7 @@
   
   **The Minecraft server manager that works**
   
-  [Website](https://discopanel.app) • [Discord](https://discord.gg/6Z9yKTbsrP)
+  [Website](https://discopanel.app) • [Discord](https://discord.gg/6Z9yKTbsrP) • [Docker Hub](https://hub.docker.com/r/nickheyer/discopanel)
 </div>
 
 ---

@@ -60,8 +60,6 @@ docker run -d \
   nickheyer/discopanel:latest
 ```
 
-[Docker Hub](https://hub.docker.com/r/nickheyer/discopanel) • [GitHub Container Registry](https://github.com/nickheyer/discopanel/pkgs/container/discopanel)
-
 ## Docker Compose (Recommended)
 
 ```yaml

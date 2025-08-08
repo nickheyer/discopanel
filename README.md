@@ -1,185 +1,176 @@
 # DiscoPanel
 
-A modern Minecraft server hosting panel built with Go, designed specifically for managing modded Minecraft servers with support for Forge, Fabric, NeoForge, and other mod loaders.
+<div align="center">
+  <img src="web/discopanel/static/g1_256x256.png" alt="DiscoPanel" width="128" height="128" />
+  
+  **The Minecraft server manager that works**
+  
+  [Website](https://discopanel.app) • [Discord](https://discord.gg/6Z9yKTbsrP)
+</div>
 
-## Features
+---
 
-- **Docker-based Server Management**: Each Minecraft server runs in its own isolated Docker container
-- **Multiple Mod Loader Support**: Forge, Fabric, NeoForge, Paper, Spigot, and Vanilla
-- **Modern SvelteKit UI**: Built with Svelte 5 and Bootstrap for a responsive, reactive interface
-- **REST API**: Full API for programmatic access
-- **Mod Management**: Upload, enable/disable, and manage mods per server
-- **File Management**: Browse and edit server files directly
-- **Server Configuration**: Edit server.properties through the UI
-- **Real-time Logs**: View server logs in real-time
-- **Resource Management**: Set memory limits and monitor resource usage
+## What is this?
 
-## Prerequisites
+DiscoPanel is a web-based Minecraft server + proxy + modpack manager. Built by someone who was tired of bloated control panels that require a PhD to operate and still manage to break at the worst possible moment.
 
-- Go 1.24+
-- Node.js 18+ (for SvelteKit frontend)
-- Docker
-- SQLite (via GORM)
+## Why DiscoPanel?
 
-## Installation
+Because managing Minecraft servers shouldn't be difficult:
 
-1. Clone the repository:
+- **Docker-powered** - Each server runs in its own container. No more "works on my machine" disasters
+- **Multi-server** - Run vanilla, modded, different versions, whatever. They won't fight each other
+- **Smart Proxy** - Players connect through custom hostnames. No more port gymnastics (though basic ports assignment is still available)
+- **Modpack Support** - Native CurseForge integration that actually downloads the mods/modpacks you tell it to
+- **Web UI** - Clean interface that doesn't look like it crawled out of 2003
+- **Auto-everything** - Auto-start, auto-stop, auto-pause. Set it and forget it
+
+## Quick Start
+
 ```bash
-git clone https://github.com/nickheyer/discopanel.git
+# Clone it
+git clone https://github.com/nickheyer/discopanel
 cd discopanel
-```
 
-2. Install Go dependencies:
-```bash
-go mod download
-```
+# Build it
+go build -o discopanel cmd/discopanel/main.go
 
-3. Install and build the frontend:
-```bash
-cd web
-npm install
-npm run build
-cd ..
-```
-
-4. Build the application:
-```bash
-go build -o discopanel ./cmd/discopanel
-```
-
-## Usage
-
-Start the DiscoPanel server:
-
-```bash
+# Run it
 ./discopanel
+
+# Open it
+# http://localhost:8080
 ```
 
-Options:
-- `-port`: HTTP server port (default: 8080)
-- `-db`: Database file path (default: ./discopanel.db)
-- `-data`: Data directory for server files (default: ./data)
-- `-docker`: Docker daemon host (default: unix:///var/run/docker.sock)
+## Docker Compose (Recommended)
 
-Access the web UI at `http://localhost:8080`
+```yaml
+services:
+  discopanel:
+    build: .
+    image: nickheyer/discopanel:latest
+    container_name: discopanel
+    restart: unless-stopped
+    # Option 1: Use host network mode
+    network_mode: host
+    # Option 2: Use port mapping
+    ports:
+      - "8080:8080"         # DiscoPanel web interface
+      - "25565:25565"       # Minecraft port/proxy-port
+      - "25565-25665:25565-25665/tcp" # Additional ports/proxy-ports if needed
+      - "25565-25665:25565-25665/udp" # Also map UDP for some Minecraft features
+    volumes:
+      # Docker socket for managing containers
+      - /var/run/docker.sock:/var/run/docker.sock
+  
+      - ./data:/app/data
+      - ./backups:/app/backups
+      - ./tmp:/app/tmp
+      
+      # Configuration file (optional)
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - DISCOPANEL_DATA_DIR=/app/data
+      - DISCOPANEL_HOST_DATA_PATH="<PUT THE FULL PATH TO YOUR DATA FOLDER HERE>"
+      - TZ=UTC
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+```
 
-## API Documentation
+>> NOTE: Prebuilt binaries coming soon... but just use docker, you'll need it anyways. Ask for help in discord, we'd love to help.
 
-### Servers
+## Features That Actually Matter
 
-- `GET /api/v1/servers` - List all servers
-- `POST /api/v1/servers` - Create a new server
-- `GET /api/v1/servers/{id}` - Get server details
-- `PUT /api/v1/servers/{id}` - Update server
-- `DELETE /api/v1/servers/{id}` - Delete server
-- `POST /api/v1/servers/{id}/start` - Start server
-- `POST /api/v1/servers/{id}/stop` - Stop server
-- `POST /api/v1/servers/{id}/restart` - Restart server
-- `GET /api/v1/servers/{id}/logs` - Get server logs
+### Server Management
+- Create servers in seconds with any Minecraft version
+- Support for Forge, Fabric, Paper, Spigot, and every other mod loader that exists
+- Live console access and log streaming
+- RCON support for remote commands
+- Automatic Java version selection (no more version hell, unless you are into that)
 
-### Server Configuration
+### Proxy System
+- Can be enabled / disabled depending on your preference (disabled by default)
+- Automatic routing based on hostname
+- Multiple proxy listeners for different use cases
+- Custom hostnames for each server (`survival.yourserver.com`, `creative.yourserver.com`)
 
-- `GET /api/v1/servers/{id}/config` - Get server configuration
-- `PUT /api/v1/servers/{id}/config` - Update server configuration
+>> NOTE: DNS needs a wildcard A record, like `*.yourserver.com` -> your IP
 
-### Mods
+- Just one open port is required. No port forwarding nightmares
 
-- `GET /api/v1/servers/{id}/mods` - List server mods
-- `POST /api/v1/servers/{id}/mods` - Upload a mod
-- `GET /api/v1/servers/{id}/mods/{modId}` - Get mod details
-- `PUT /api/v1/servers/{id}/mods/{modId}` - Update mod
-- `DELETE /api/v1/servers/{id}/mods/{modId}` - Delete mod
+>> NOTE: With just the default proxy port 25565:25565 forwarded, you can host a virtually unlimited amount of servers
 
-### Files
+### Modpack Integration
+- Direct CurseForge modpack installation
+- Automatic mod downloading and updates
+- Server pack support for easier distribution
+- Manual mod uploads when automation fails
 
-- `GET /api/v1/servers/{id}/files` - List files in directory
-- `POST /api/v1/servers/{id}/files` - Upload file
-- `GET /api/v1/servers/{id}/files/{path}` - Download file
-- `PUT /api/v1/servers/{id}/files/{path}` - Update file
-- `DELETE /api/v1/servers/{id}/files/{path}` - Delete file
+### Resource Management
+- Per-server memory limits
+- JVM flag optimization (Aikar's flags included)
+- Automatic cleanup of orphaned containers
+- Detached mode for persistent servers
 
-## Architecture
+### Security
+- Can be enabled / disabled depending on your preference (disabled by default)
+- Built-in user authentication system with role-based access
+- Admin, Editor, and Viewer roles
+- Recovery key system (because passwords get forgotten)
+- Session management and JWT tokens
 
-DiscoPanel uses a clean architecture with:
+## Configuration
 
-- **Frontend**: SvelteKit with Svelte 5 and Bootstrap for the UI
-- **Backend**: Go REST API server
-- **Database**: SQLite with GORM ORM
-- **Routing**: Gorilla Mux for HTTP routing
-- **Containers**: Docker SDK for container management
-- **Minecraft**: itzg/minecraft-server Docker images
+DiscoPanel uses a `config.yaml` file. Here's what matters:
 
-## Development
+```yaml
+storage:
+  data_dir: "./data/servers"
+  backup_dir: "./data/backups"
 
-### Running in Development Mode
+proxy:
+  enabled: true
+  base_url: "minecraft.example.com"
+  listen_ports: [25565]
+```
 
-For development, you can run the frontend and backend separately:
+>> NOTE: There are a metric ton worth of configurable settings for your DiscoPanel and the servers it hosts, they can all be setup here ahead of time
 
-1. Start the Go backend:
+## Requirements
+
+- Docker (obviously)
+- Go 1.21+ (only if building from source)
+- A functioning brain (optional but recommended)
+
+## API
+
+DiscoPanel has a full REST API if you're into that sort of thing:
+
 ```bash
-go run ./cmd/discopanel
+# List servers
+curl http://localhost:3000/api/v1/servers
+
+# Create a server
+curl -X POST http://localhost:3000/api/v1/servers \
+  -H "Content-Type: application/json" \
+  -d '{"name":"My Server","mc_version":"1.20.1","mod_loader":"vanilla"}'
+
+# Start a server
+curl -X POST http://localhost:3000/api/v1/servers/{id}/start
 ```
 
-2. In another terminal, start the SvelteKit dev server:
-```bash
-cd web
-npm run dev
-```
-
-The SvelteKit dev server will proxy API requests to the Go backend (configure in `vite.config.js`).
-
-### Building for Production
-
-1. Build the frontend:
-```bash
-cd web
-npm run build
-```
-
-2. Build the Go binary:
-```bash
-go build -o discopanel ./cmd/discopanel
-```
-
-The project structure:
-
-```
-discopanel/
-├── cmd/discopanel/       # Main application entry point
-├── internal/
-│   ├── api/             # HTTP API handlers
-│   ├── docker/          # Docker client and container management
-│   ├── minecraft/       # Minecraft-specific logic
-│   ├── models/          # Data models
-│   ├── proxy/           # Minecraft proxy implementation
-│   └── storage/         # Database storage layer (GORM)
-├── pkg/
-│   ├── logger/          # Logging utilities
-│   └── utils/           # Shared utilities
-├── web/                 # SvelteKit frontend application
-│   ├── src/            # Source files
-│   ├── static/         # Static assets
-│   └── build/          # Build output (served by Go)
-└── deployments/         # Deployment configurations
-```
-
-## Docker Image
-
-DiscoPanel uses the `itzg/minecraft-server` Docker image which provides excellent support for various Minecraft server types and mod loaders.
-
-## Future Features
-
-- Minecraft server reverse proxy for single-port access
-- Automated backups
-- Player management
-- Plugin/mod auto-updates
-- Server templates
-- Multi-user support with permissions
-
-## License
-
-MIT License
+>> NOTE: See `internal/api/server.go` for all the routes, or join the discord and ask about it!
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Found a bug? Want a feature? Open an issue or submit a PR. Just don't make it worse.
+
+## License
+
+MIT. Do whatever you want with it, just don't blame me when it breaks.
+
+## Support
+
+- [Discord](https://discord.gg/6Z9yKTbsrP) - Come complain directly
+- [GitHub Issues](https://github.com/nickheyer/discopanel/issues) - For the brave

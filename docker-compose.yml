@@ -20,13 +20,13 @@ services:
       - ./backups:/app/backups
       - ./tmp:/app/tmp
       
-      # Configuration file (optional)
+      # Configuration file (optional, see config.example.yaml for all available options)
       - ./config.yaml:/app/config.yaml:ro
     environment:
       - DISCOPANEL_DATA_DIR=/app/data
 
       # IMPORTANT: Set host path for Docker bind mounts when DiscoPanel runs in container
-      - DISCOPANEL_HOST_DATA_PATH=/home/nick/code/discopanel/data
+      - DISCOPANEL_HOST_DATA_PATH="/home/user/data"
       - TZ=UTC
     extra_hosts:
       - "host.docker.internal:host-gateway"

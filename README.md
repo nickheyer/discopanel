@@ -167,15 +167,15 @@ DiscoPanel has a full REST API if you're into that sort of thing:
 
 ```bash
 # List servers
-curl http://localhost:3000/api/v1/servers
+curl http://localhost:8080/api/v1/servers
 
 # Create a server
-curl -X POST http://localhost:3000/api/v1/servers \
+curl -X POST http://localhost:8080/api/v1/servers \
   -H "Content-Type: application/json" \
   -d '{"name":"My Server","mc_version":"1.20.1","mod_loader":"vanilla"}'
 
 # Start a server
-curl -X POST http://localhost:3000/api/v1/servers/{id}/start
+curl -X POST http://localhost:8080/api/v1/servers/{id}/start
 ```
 
 >> NOTE: See `internal/api/server.go` for all the routes, or join the discord and ask about it!

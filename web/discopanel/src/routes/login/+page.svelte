@@ -57,10 +57,12 @@
 		try {
 			await authStore.login(username, password);
 			toast.success('Logged in successfully');
-			goto('/');
+			// Small delay to ensure auth state is fully propagated before navigation
+			setTimeout(() => {
+				goto('/');
+			}, 100);
 		} catch (err: any) {
 			error = err.message || 'Login failed';
-		} finally {
 			loading = false;
 		}
 	}
@@ -85,10 +87,12 @@
 			toast.success(authStatus.firstUserSetup ? 
 				'Admin account created successfully' : 
 				'Account created successfully');
-			goto('/');
+			// Small delay to ensure auth state is fully propagated before navigation
+			setTimeout(() => {
+				goto('/');
+			}, 100);
 		} catch (err: any) {
 			error = err.message || 'Registration failed';
-		} finally {
 			loading = false;
 		}
 	}

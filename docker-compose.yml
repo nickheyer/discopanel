@@ -1,0 +1,33 @@
+services:
+  discopanel:
+    build: .
+    image: nickheyer/discopanel:latest
+    container_name: discopanel
+    restart: unless-stopped
+    # Option 1: Use host network mode
+    network_mode: host
+    # Option 2: Use bridge mode with port mapping (default)
+    ports:
+      - "8080:8080"         # DiscoPanel web interface
+      - "25565:25565"       # Minecraft port/proxy-port
+      - "25565-25665:25565-25665/tcp" # Additional ports/proxy-ports if needed
+      - "25565-25665:25565-25665/udp" # Also map UDP for some Minecraft features
+    volumes:
+      # Docker socket for managing containers
+      - /var/run/docker.sock:/var/run/docker.sock
+  
+      - ./data:/app/data
+      - ./backups:/app/backups
+      - ./tmp:/app/tmp
+      
+      # Configuration file (optional)
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - DISCOPANEL_DATA_DIR=/app/data
+
+      # IMPORTANT: Set host path for Docker bind mounts when DiscoPanel runs in container
+      - DISCOPANEL_HOST_DATA_PATH=/home/nick/code/discopanel/data
+      - TZ=UTC
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+

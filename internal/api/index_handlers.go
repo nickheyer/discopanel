@@ -604,7 +604,7 @@ func (s *Server) handleUploadModpack(w http.ResponseWriter, r *http.Request) {
 
 	// Store the ZIP file
 	// Create directory for manual modpacks if it doesn't exist
-	manualDir := filepath.Join("/data", "modpacks", "manual")
+	manualDir := filepath.Join(s.config.Storage.DataDir, "modpacks", "manual")
 	if err := os.MkdirAll(manualDir, 0755); err != nil {
 		s.log.Error("Failed to create manual modpacks directory: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to store modpack file")

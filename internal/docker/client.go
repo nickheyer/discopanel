@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -322,12 +324,34 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		portBindings["25575/tcp"] = rconPortBinding
 	}
 	
+	// Handle path translation when DiscoPanel is running in a container
+	dataPath := server.DataPath
+	if hostDataPath := os.Getenv("DISCOPANEL_HOST_DATA_PATH"); hostDataPath != "" {
+		// When running in Docker, translate container path to host path
+		// Example: /app/data/servers/creative -> ./data/servers/creative
+		containerDataDir := os.Getenv("DISCOPANEL_DATA_DIR")
+		if containerDataDir == "" {
+			containerDataDir = "/app/data"
+		}
+		
+		// Replace the container path prefix with the host path
+		relPath, err := filepath.Rel(containerDataDir, server.DataPath)
+		if err == nil {
+			dataPath = filepath.Join(hostDataPath, relPath)
+		}
+	}
+	
+	// Ensure the directory exists
+	if err := os.MkdirAll(server.DataPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create server data directory: %w", err)
+	}
+	
 	hostConfig := &container.HostConfig{
 		PortBindings: portBindings,
 		Mounts: []mount.Mount{
 			{
 				Type:   mount.TypeBind,
-				Source: server.DataPath,
+				Source: dataPath,
 				Target: "/data",
 			},
 		},

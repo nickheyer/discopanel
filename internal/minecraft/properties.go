@@ -53,6 +53,11 @@ func LoadServerProperties(serverDataPath string) (ServerProperties, error) {
 func SaveServerProperties(serverDataPath string, properties ServerProperties) error {
 	propertiesPath := filepath.Join(serverDataPath, "server.properties")
 	
+	// Ensure directory exists
+	if err := os.MkdirAll(serverDataPath, 0755); err != nil {
+		return fmt.Errorf("failed to create server data directory: %w", err)
+	}
+	
 	// Read the original file to preserve comments and ordering
 	originalLines := []string{}
 	if file, err := os.Open(propertiesPath); err == nil {

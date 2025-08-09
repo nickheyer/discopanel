@@ -26,18 +26,10 @@
 	let loading = $state(true);
 	
 	onMount(async () => {
-		// Check auth status first
 		const authStatus = await authStore.checkAuthStatus();
-		
-		// If on login page, don't redirect
-		const currentPath = page.url.pathname as string;
-		if (currentPath === '/login') {
-			loading = false;
-			return;
-		}
-		
+		loading = false;
 		if (authStatus.enabled) {
-			if (authStatus.first_user_setup) {
+			if (authStatus.firstUserSetup) {
 				goto('/login');
 				return;
 			}
@@ -50,7 +42,6 @@
 		
 		// Fetch servers after auth check
 		await serversStore.fetchServers();
-		loading = false;
 	});
 	
 	function getUserInitials(user: any) {

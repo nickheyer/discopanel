@@ -254,7 +254,8 @@
 	}
 </script>
 
-<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-gradient-to-br from-background to-muted/10">
+<div class="h-full overflow-y-auto bg-gradient-to-br from-background to-muted/10">
+	<div class="space-y-8 p-4 sm:p-6 lg:p-8 pt-4 sm:pt-6">
 	<div class="flex items-center gap-4 pb-6 border-b-2 border-border/50">
 		<Button variant="ghost" size="icon" href="/servers" class="shrink-0 h-12 w-12 rounded-xl hover:bg-muted">
 			<ArrowLeft class="h-5 w-5" />
@@ -773,6 +774,7 @@
 			</Button>
 		</div>
 	</form>
+	</div>
 </div>
 
 <Dialog bind:open={showModpackDialog}>

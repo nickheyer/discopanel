@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, Upload, Download, Trash2, ToggleLeft, ToggleRight, Package, FileText } from '@lucide/svelte';
 	import { api } from '$lib/api/client';
@@ -146,6 +147,8 @@
 	}
 </script>
 
+<ResizablePaneGroup direction="vertical" class="h-full max-h-[800px] min-h-[400px] rounded-lg border">
+<ResizablePane defaultSize={100}>
 <Card class="h-full flex flex-col">
 	<CardHeader>
 		<div class="flex items-center justify-between">
@@ -260,3 +263,5 @@
 		{/if}
 	</CardContent>
 </Card>
+</ResizablePane>
+</ResizablePaneGroup>

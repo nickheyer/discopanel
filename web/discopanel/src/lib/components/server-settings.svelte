@@ -149,7 +149,7 @@
 	// });
 </script>
 
-<div class="space-y-6">
+<div class="space-y-6 p-4 overflow-y-auto h-full">
 	{#if server.status !== 'stopped'}
 		<Alert class="border-warning/50 bg-warning/10">
 			<AlertCircle class="h-4 w-4 text-warning" />

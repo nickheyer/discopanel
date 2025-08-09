@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
 	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, Plus, Edit2, RefreshCw } from '@lucide/svelte';
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
@@ -177,6 +177,8 @@
 	let flatFiles = $derived(renderFileTree(files));
 </script>
 
+<ResizablePaneGroup direction="vertical" class="h-full max-h-[800px] min-h-[400px] rounded-lg border">
+<ResizablePane defaultSize={100}>
 <Card class="h-full flex flex-col">
 	<CardHeader>
 		<div class="flex items-center justify-between">
@@ -286,6 +288,8 @@
 		{/if}
 	</CardContent>
 </Card>
+</ResizablePane>
+</ResizablePaneGroup>
 
 <FileEditorDialog
 	serverId={server.id}

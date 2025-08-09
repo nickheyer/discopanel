@@ -223,7 +223,7 @@
 	</div>
 	
 	<Card>
-		<CardContent class="p-0">
+		<CardContent>
 			{#if loading}
 				<div class="flex items-center justify-center py-16">
 					<div class="text-center space-y-3">

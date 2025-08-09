@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Progress } from '$lib/components/ui/progress';
@@ -57,7 +56,7 @@
 	</div>
 
 	<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-		<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+		<Card class="group relative border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
 			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
 				<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Total Servers</CardTitle>
@@ -73,7 +72,7 @@
 			</CardContent>
 		</Card>
 
-		<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+		<Card class="group relative border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
 			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
 				<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Active Servers</CardTitle>
@@ -87,7 +86,7 @@
 			</CardContent>
 		</Card>
 
-		<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+		<Card class="group relative border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
 			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
 				<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Memory Usage</CardTitle>
@@ -106,7 +105,7 @@
 			</CardContent>
 		</Card>
 
-		<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+		<Card class="group relative border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
 			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
 				<CardTitle class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">CPU Load</CardTitle>
@@ -214,3 +213,5 @@
 		</Card>
 	</div>
 </div>
+
+

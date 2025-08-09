@@ -180,29 +180,29 @@
 									<DropdownMenuLabel>Actions</DropdownMenuLabel>
 									<DropdownMenuSeparator />
 									{#if server.status === 'stopped' || server.status === 'error'}
-										<DropdownMenuItem onclick={() => handleServerAction('start', server)}>
+										<DropdownMenuItem class="flex flew-row" onclick={() => handleServerAction('start', server)}>
 											<Play class="h-4 w-4 mr-2" />
 											Start
 										</DropdownMenuItem>
 									{/if}
 									{#if server.status === 'running' || server.status === 'starting'}
-										<DropdownMenuItem onclick={() => handleServerAction('stop', server)}>
+										<DropdownMenuItem class="flex flew-row" onclick={() => handleServerAction('stop', server)}>
 											<Square class="h-4 w-4 mr-2" />
 											Stop
 										</DropdownMenuItem>
 									{/if}
 									{#if server.status === 'running'}
-										<DropdownMenuItem onclick={() => handleServerAction('restart', server)}>
+										<DropdownMenuItem  class="flex flew-row" onclick={() => handleServerAction('restart', server)}>
 											<RotateCw class="h-4 w-4 mr-2" />
 											Restart
 										</DropdownMenuItem>
 									{/if}
-									<DropdownMenuItem onclick={() => deleteServer(server)} class="text-destructive">
+									<DropdownMenuItem class="flex flew-row text-destructive" onclick={() => deleteServer(server)}>
 										<Trash2 class="h-4 w-4 mr-2" />
 										Delete
 									</DropdownMenuItem>
 									<DropdownMenuSeparator />
-									<DropdownMenuItem>
+									<DropdownMenuItem class="flex flew-row">
 										<a href="/servers/{server.id}">
 											<Settings class="h-4 w-4 mr-2" />
 											Manage

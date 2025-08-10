@@ -44,21 +44,21 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var req struct {
-		Name            string           `json:"name"`
-		Description     string           `json:"description"`
-		ModLoader       models.ModLoader `json:"mod_loader"`
-		MCVersion       string           `json:"mc_version"`
-		Port            int              `json:"port"`
-		MaxPlayers      int              `json:"max_players"`
-		Memory          int              `json:"memory"`
-		DockerImage     string           `json:"docker_image"`
-		AutoStart       bool             `json:"auto_start"`
-		Detached        bool             `json:"detached"`
-		StartImmediately bool            `json:"start_immediately"`
-		ModpackID       string           `json:"modpack_id,omitempty"`
-		ProxyHostname   string           `json:"proxy_hostname,omitempty"`
-		ProxyListenerID string           `json:"proxy_listener_id,omitempty"`
-		UseBaseURL      bool             `json:"use_base_url,omitempty"`
+		Name             string           `json:"name"`
+		Description      string           `json:"description"`
+		ModLoader        models.ModLoader `json:"mod_loader"`
+		MCVersion        string           `json:"mc_version"`
+		Port             int              `json:"port"`
+		MaxPlayers       int              `json:"max_players"`
+		Memory           int              `json:"memory"`
+		DockerImage      string           `json:"docker_image"`
+		AutoStart        bool             `json:"auto_start"`
+		Detached         bool             `json:"detached"`
+		StartImmediately bool             `json:"start_immediately"`
+		ModpackID        string           `json:"modpack_id,omitempty"`
+		ProxyHostname    string           `json:"proxy_hostname,omitempty"`
+		ProxyListenerID  string           `json:"proxy_listener_id,omitempty"`
+		UseBaseURL       bool             `json:"use_base_url,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -590,7 +590,12 @@ func (s *Server) handleStopServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if server.ContainerID == "" {
-		s.respondError(w, http.StatusBadRequest, "Server container not created")
+		// If there's no container, server is already stopped
+		server.Status = models.StatusStopped
+		if err := s.store.UpdateServer(ctx, server); err != nil {
+			s.log.Error("Failed to update server status: %v", err)
+		}
+		s.respondJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 		return
 	}
 

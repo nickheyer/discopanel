@@ -73,6 +73,31 @@
 		// Fetch servers after auth check
 		await serversStore.fetchServers();
 	});
+	
+	// Set up global status polling - always poll all servers
+	let statusPollingInterval: ReturnType<typeof setInterval> | null = null;
+	
+	$effect(() => {
+		// Clean up previous interval
+		if (statusPollingInterval) {
+			clearInterval(statusPollingInterval);
+			statusPollingInterval = null;
+		}
+		
+		// Always poll for all servers to keep sidebar in sync
+		if (!loading) {
+			statusPollingInterval = setInterval(() => {
+				serversStore.fetchServers();
+			}, 10000);
+		}
+		
+		return () => {
+			if (statusPollingInterval) {
+				clearInterval(statusPollingInterval);
+				statusPollingInterval = null;
+			}
+		};
+	});
 
 </script>
 
@@ -180,6 +205,8 @@
 																<div
 																	class="h-2 w-2 rounded-full {server.status === 'running'
 																		? 'bg-green-500'
+																		: server.status === 'error'
+																			? 'bg-red-500 animate-pulse'
 																		: server.status === 'starting' || server.status === 'stopping'
 																			? 'bg-yellow-500'
 																			: 'bg-gray-400'}"

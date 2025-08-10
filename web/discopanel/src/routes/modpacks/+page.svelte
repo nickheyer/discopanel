@@ -401,7 +401,7 @@
 						{/each}
 					</SelectContent>
 				</Select>
-				<Button onclick={searchModpacks} disabled={loading} class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-md hover:shadow-lg transition-all hover:scale-[1.02]">
+				<Button onclick={() => searchModpacks(true)} disabled={loading} class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-md hover:shadow-lg transition-all hover:scale-[1.02]">
 					<Search class="h-5 w-5 mr-2" />
 					Search
 				</Button>

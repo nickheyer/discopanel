@@ -172,10 +172,10 @@
 				</div>
 			</div>
 			<div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-				{#if server.status === 'stopped'}
+				{#if server.status === 'stopped' || !server.container_id}
 					<Button 
 						onclick={() => handleServerAction('start')} 
-						disabled={actionLoading}
+						disabled={actionLoading || server.status === 'starting' || server.status === 'stopping'}
 						size="default"
 						class="bg-green-600 hover:bg-green-700 text-white shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
 					>
@@ -184,8 +184,35 @@
 						{:else}
 							<Play class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
 						{/if}
-						<span class="hidden sm:inline">Start Server</span>
-						<span class="sm:hidden">Start</span>
+						<span class="sm:inline">Start</span>
+					</Button>
+				{:else if server.status === 'error'}
+					<Button 
+						onclick={() => handleServerAction('restart')} 
+						disabled={actionLoading}
+						size="default"
+						class="bg-yellow-600 hover:bg-yellow-700 text-white shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
+					>
+						{#if actionLoading}
+							<Loader2 class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2 animate-spin" />
+						{:else}
+							<RotateCw class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
+						{/if}
+						<span class="sm:inline">Restart</span>
+					</Button>
+					<Button 
+						variant="destructive" 
+						onclick={() => handleServerAction('stop')} 
+						disabled={actionLoading}
+						size="default"
+						class="shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
+					>
+						{#if actionLoading}
+							<Loader2 class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2 animate-spin" />
+						{:else}
+							<Square class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
+						{/if}
+						<span class="sm:inline">Stop</span>
 					</Button>
 				{:else if server.status === 'running' || server.status === 'starting'}
 					<Button 
@@ -200,25 +227,32 @@
 						{:else}
 							<Square class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
 						{/if}
-						<span class="hidden sm:inline">Stop Server</span>
-						<span class="sm:hidden">Stop</span>
+						<span class="sm:inline">Stop</span>
 					</Button>
-					{#if server.status === 'running'}
-						<Button 
-							variant="outline" 
-							onclick={() => handleServerAction('restart')} 
-							disabled={actionLoading}
-							size="default"
-							class="border-2 shadow-md hover:shadow-lg transition-all hover:scale-[1.02] hidden sm:flex"
-						>
-							{#if actionLoading}
-								<Loader2 class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2 animate-spin" />
-							{:else}
-								<RotateCw class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
-							{/if}
-							Restart
-						</Button>
-					{/if}
+					<Button 
+						variant="outline" 
+						onclick={() => handleServerAction('restart')} 
+						disabled={actionLoading}
+						size="default"
+						class="border-2 shadow-md hover:shadow-lg transition-all hover:scale-[1.02] hidden sm:flex"
+					>
+						{#if actionLoading}
+							<Loader2 class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2 animate-spin" />
+						{:else}
+							<RotateCw class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
+						{/if}
+						Restart
+					</Button>
+				{:else if server.status === 'stopping'}
+					<Button 
+						variant="secondary" 
+						disabled={true}
+						size="default"
+						class="shadow-lg"
+					>
+						<Loader2 class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2 animate-spin" />
+						<span class="sm:inline">Stopping...</span>
+					</Button>
 				{/if}
 				<div class="ml-2 sm:ml-4 h-10 w-px bg-border/50 hidden sm:block"></div>
 				<Button 
@@ -316,9 +350,9 @@
 			<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
 				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2 sm:pb-3">
-					<CardTitle class="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wider">Resources</CardTitle>
+					<CardTitle class="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wider">Performance</CardTitle>
 					<div class="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-						<HardDrive class="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+						<Activity class="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
 					</div>
 				</CardHeader>
 				<CardContent class="pt-2">
@@ -339,6 +373,7 @@
 					</div>
 				</CardContent>
 			</Card>
+
 		</div>
 
 		<Tabs value="overview" class="flex-1 flex flex-col min-h-0 gap-4" onValueChange={(value) => activeTab = value}>

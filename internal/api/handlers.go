@@ -443,7 +443,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		// Check if server was running
 		wasRunning := false
 		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
-		if err == nil && status == models.StatusRunning {
+		if err == nil && (status == models.StatusRunning || status == models.StatusUnhealthy) {
 			wasRunning = true
 			// Stop the container
 			if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
@@ -635,8 +635,53 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If container doesn't exist, create it and start it
 	if server.ContainerID == "" {
-		s.respondError(w, http.StatusBadRequest, "Server container not created")
+		// Get server config for container creation
+		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+		if err != nil {
+			s.log.Error("Failed to get server config: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to get server configuration")
+			return
+		}
+
+		// Create container
+		containerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+		if err != nil {
+			s.log.Error("Failed to create container: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to create server container")
+			return
+		}
+
+		server.ContainerID = containerID
+		if err := s.store.UpdateServer(ctx, server); err != nil {
+			s.log.Error("Failed to update server with container ID: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to update server")
+			return
+		}
+
+		// Now start the container
+		if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
+			s.log.Error("Failed to start container: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to start server")
+			return
+		}
+
+		// Update server status
+		now := time.Now()
+		server.Status = models.StatusStarting
+		server.LastStarted = &now
+
+		if err := s.store.UpdateServer(ctx, server); err != nil {
+			s.log.Error("Failed to update server status: %v", err)
+		}
+
+		// Clear ephemeral configuration fields after starting the server
+		if err := s.store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
+			s.log.Error("Failed to clear ephemeral config fields: %v", err)
+		}
+
+		s.respondJSON(w, http.StatusOK, map[string]string{"status": "starting"})
 		return
 	}
 

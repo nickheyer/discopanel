@@ -7,11 +7,12 @@ import (
 type ServerStatus string
 
 const (
-	StatusStopped  ServerStatus = "stopped"
-	StatusStarting ServerStatus = "starting"
-	StatusRunning  ServerStatus = "running"
-	StatusStopping ServerStatus = "stopping"
-	StatusError    ServerStatus = "error"
+	StatusStopped   ServerStatus = "stopped"
+	StatusStarting  ServerStatus = "starting"
+	StatusRunning   ServerStatus = "running"
+	StatusStopping  ServerStatus = "stopping"
+	StatusError     ServerStatus = "error"
+	StatusUnhealthy ServerStatus = "unhealthy"
 )
 
 type ModLoader string
@@ -81,7 +82,7 @@ type Server struct {
 	JavaVersion     string       `json:"java_version" gorm:"column:java_version"`
 	DockerImage     string       `json:"docker_image" gorm:"column:docker_image"`
 	DataPath        string       `json:"data_path" gorm:"not null;column:data_path"`
-	Detached        bool         `json:"detached" gorm:"default:false;column:detached"` // Detach server container from DiscoPanel lifecycle (default: false)
+	Detached        bool         `json:"detached" gorm:"default:false;column:detached"`     // Detach server container from DiscoPanel lifecycle (default: false)
 	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
 }
 
@@ -318,24 +319,24 @@ const (
 
 // User represents a user account
 type User struct {
-	ID           string    `json:"id" gorm:"primaryKey"`
-	Username     string    `json:"username" gorm:"not null;uniqueIndex"`
-	Email        *string   `json:"email" gorm:"uniqueIndex"` // Pointer allows NULL, unique only on non-NULL
-	PasswordHash string    `json:"-" gorm:"not null;column:password_hash"`
-	Role         UserRole  `json:"role" gorm:"not null;default:'viewer'"`
-	IsActive     bool      `json:"is_active" gorm:"not null;default:true"`
+	ID           string     `json:"id" gorm:"primaryKey"`
+	Username     string     `json:"username" gorm:"not null;uniqueIndex"`
+	Email        *string    `json:"email" gorm:"uniqueIndex"` // Pointer allows NULL, unique only on non-NULL
+	PasswordHash string     `json:"-" gorm:"not null;column:password_hash"`
+	Role         UserRole   `json:"role" gorm:"not null;default:'viewer'"`
+	IsActive     bool       `json:"is_active" gorm:"not null;default:true"`
 	LastLogin    *time.Time `json:"last_login" gorm:"column:last_login"`
-	CreatedAt    time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt    time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	CreatedAt    time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt    time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // AuthConfig stores authentication configuration
 type AuthConfig struct {
 	ID                 string    `json:"id" gorm:"primaryKey"`
 	Enabled            bool      `json:"enabled" gorm:"not null;default:false"`
-	RecoveryKey        string    `json:"-" gorm:"column:recovery_key"` // Secret key for account recovery
-	RecoveryKeyHash    string    `json:"-" gorm:"column:recovery_key_hash"` // Hashed version for verification
-	JWTSecret          string    `json:"-" gorm:"column:jwt_secret"` // Secret for JWT signing
+	RecoveryKey        string    `json:"-" gorm:"column:recovery_key"`         // Secret key for account recovery
+	RecoveryKeyHash    string    `json:"-" gorm:"column:recovery_key_hash"`    // Hashed version for verification
+	JWTSecret          string    `json:"-" gorm:"column:jwt_secret"`           // Secret for JWT signing
 	SessionTimeout     int       `json:"session_timeout" gorm:"default:86400"` // Session timeout in seconds (default 24h)
 	RequireEmailVerify bool      `json:"require_email_verify" gorm:"default:false"`
 	AllowRegistration  bool      `json:"allow_registration" gorm:"default:false"` // Allow new user registration

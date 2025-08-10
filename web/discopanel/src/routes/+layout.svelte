@@ -106,7 +106,7 @@
 </svelte:head>
 
 <ModeWatcher />
-<Toaster position="top-right" expand={true} richColors />
+<Toaster position="bottom-center" expand={true} richColors />
 
 {#if page.url.pathname === '/login'}
 	{@render children?.()}

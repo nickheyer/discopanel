@@ -3,7 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Progress } from '$lib/components/ui/progress';
 	import { serversStore } from '$lib/stores/servers';
-	import { Server, Cpu, MemoryStick, HardDrive, Activity, Plus, LayoutDashboard } from '@lucide/svelte';
+	import { Server, Cpu, MemoryStick, Activity, Plus, LayoutDashboard } from '@lucide/svelte';
 	import type { Server as ServerType } from '$lib/api/types';
 
 	let servers = $derived($serversStore);

@@ -401,10 +401,22 @@ func (c *Client) StartContainer(ctx context.Context, containerID string) error {
 }
 
 func (c *Client) StopContainer(ctx context.Context, containerID string) error {
-	timeout := 30 // seconds
-	return c.docker.ContainerStop(ctx, containerID, container.StopOptions{
+	// First try graceful stop with a short timeout
+	timeout := 5 // seconds
+	err := c.docker.ContainerStop(ctx, containerID, container.StopOptions{
 		Timeout: &timeout,
 	})
+
+	if err != nil {
+		// If graceful stop fails, force kill the container
+		fmt.Printf("Graceful stop failed for container %s: %v, attempting force kill\n", containerID, err)
+		killErr := c.docker.ContainerKill(ctx, containerID, "KILL")
+		if killErr != nil {
+			return fmt.Errorf("failed to stop container: graceful stop error: %v, force kill error: %v", err, killErr)
+		}
+	}
+
+	return nil
 }
 
 func (c *Client) RemoveContainer(ctx context.Context, containerID string) error {
@@ -421,10 +433,27 @@ func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (mo
 
 	switch inspect.State.Status {
 	case "running":
+		// Check health status if available
+		if inspect.State.Health != nil {
+			switch inspect.State.Health.Status {
+			case "healthy":
+				return models.StatusRunning, nil
+			case "starting":
+				return models.StatusStarting, nil
+			case "unhealthy":
+				// Server process isn't responding
+				return models.StatusUnhealthy, nil
+			default:
+				// No health status or unknown, assume running
+				return models.StatusRunning, nil
+			}
+		}
 		return models.StatusRunning, nil
 	case "restarting":
 		return models.StatusStarting, nil
-	case "created", "paused", "removing", "exited", "dead":
+	case "exited", "dead":
+		return models.StatusStopped, nil
+	case "created", "paused", "removing":
 		return models.StatusStopped, nil
 	default:
 		return models.StatusError, nil

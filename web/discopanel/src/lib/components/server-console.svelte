@@ -32,10 +32,7 @@
 
 	// Start/stop polling based on active prop
 	$effect(() => {
-		if (active) {
-			fetchLogs();
-			startPolling();
-		} else {
+		if (!active) {
 			stopPolling();
 		}
 	});
@@ -55,7 +52,7 @@
 
 	function startPolling() {
 		if (!pollingInterval) {
-			pollingInterval = setInterval(fetchLogs, 2000);
+			pollingInterval = setInterval(fetchLogs, 3000);
 		}
 	}
 
@@ -241,7 +238,7 @@
 				<div class="font-mono text-xs">
 					{#if !logs}
 						<div class="py-8 text-center text-zinc-500">
-							No logs available. Start the server to see output.
+							No logs available. {['running', 'starting', 'unhealthy'].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
 						</div>
 					{:else}
 						{#each logs.split('\n') as line}

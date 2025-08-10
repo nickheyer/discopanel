@@ -32,7 +32,10 @@
 
 	// Start/stop polling based on active prop
 	$effect(() => {
-		if (!active) {
+		if (active) {
+			fetchLogs();
+			startPolling();
+		} else {
 			stopPolling();
 		}
 	});

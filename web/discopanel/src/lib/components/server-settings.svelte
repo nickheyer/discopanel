@@ -18,7 +18,6 @@
 
 	let { server, onUpdate }: Props = $props();
 
-	let loading = $state(false);
 	let saving = $state(false);
 	let isDirty = $state(false);
 	
@@ -153,23 +152,6 @@
 		);
 	}
 
-	// Update java version when MC version changes
-	// $effect(() => {
-	// 	if (formData.mc_version) {
-	// 		const majorMinor = formData.mc_version.split('.').slice(0, 2).join('.');
-	// 		const majorVersion = parseFloat(majorMinor);
-			
-	// 		if (majorVersion >= 1.20) {
-	// 			formData.java_version = '21';
-	// 		} else if (majorVersion >= 1.17) {
-	// 			formData.java_version = '17';
-	// 		} else if (majorVersion >= 1.12) {
-	// 			formData.java_version = '8';
-	// 		} else {
-	// 			formData.java_version = '8';
-	// 		}
-	// 	}
-	// });
 </script>
 
 <div class="space-y-6 p-4 overflow-y-auto h-full">
@@ -211,7 +193,6 @@
 				bind:value={formData.memory}
 				oninput={handleMemoryInput}
 				min="512"
-				step="512"
 				class="h-10"
 			/>
 			<p class="text-xs text-muted-foreground">

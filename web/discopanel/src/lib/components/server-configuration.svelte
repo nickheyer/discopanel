@@ -487,5 +487,6 @@
 				</div>
 			{/if}
 		{/if}
+		<ScrollToTop />
 	</CardContent>
 </Card>

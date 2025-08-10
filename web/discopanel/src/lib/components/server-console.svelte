@@ -111,7 +111,7 @@
 			command = '';
 
 			// Refresh logs after command
-			setTimeout(fetchLogs, 500);
+			setTimeout(fetchLogs, 3000);
 		} catch (error) {
 			toast.error(
 				'Failed to send command: ' + (error instanceof Error ? error.message : 'Unknown error')

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
 	import { Input } from '$lib/components/ui/input';
@@ -10,7 +11,7 @@
 	import { Loader2, Globe, Save, Copy, AlertCircle, CheckCircle2, XCircle } from '@lucide/svelte';
 	import type { Server } from '$lib/api/types';
 
-	let { server, onUpdate }: { server: Server; onUpdate: () => void } = $props();
+	let { server, active }: { server: Server, active?: boolean } = $props();
 
 	let loading = $state(true);
 	let saving = $state(false);
@@ -20,7 +21,7 @@
 	let hasChanges = $derived(hostname !== originalHostname);
 	let allRoutes = $state<any[]>([]);
 	let hostnameError = $state('');
-	let initialized = false;
+	let initialized = $state(false);
 	let previousServerId = $state(server.id);
 
 	// Reset state when server changes
@@ -40,7 +41,7 @@
 	});
 
 	$effect(() => {
-		if (server && !initialized) {
+		if (server && !initialized && active) {
 			initialized = true;
 			loadRoutingInfo();
 			loadAllRoutes();
@@ -106,7 +107,6 @@
 			// Reload routing info to get updated server state
 			await loadRoutingInfo();
 			await loadAllRoutes();
-			onUpdate();
 		} catch (error: any) {
 			if (error.message.includes('Conflict')) {
 				hostnameError = 'Hostname already in use by another server';

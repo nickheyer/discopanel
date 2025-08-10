@@ -34,7 +34,6 @@
 	$effect(() => {
 		if (active) {
 			fetchLogs();
-			startPolling();
 		} else {
 			stopPolling();
 		}

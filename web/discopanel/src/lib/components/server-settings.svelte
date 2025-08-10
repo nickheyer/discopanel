@@ -36,6 +36,7 @@
 		auto_start: !!(server.auto_start)
 	});
 
+
 	// Available options
 	let minecraftVersions = $state<MinecraftVersion | null>(null);
 	let modLoaders = $state<ModLoaderInfo[]>([]);
@@ -103,6 +104,28 @@
 			toast.error('Failed to load options');
 		} finally {
 			loadingOptions = false;
+		}
+	}
+
+	function handleMemoryInput(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const value = Number(input.value);
+		
+		// Prevent negative values
+		if (value < 0) {
+			input.value = '512';
+			formData.memory = 512;
+		}
+	}
+
+	function handleMaxPlayersInput(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const value = Number(input.value);
+		
+		// Prevent negative values and zero
+		if (value <= 0) {
+			input.value = '1';
+			formData.max_players = 1;
 		}
 	}
 
@@ -186,6 +209,7 @@
 				id="memory"
 				type="number"
 				bind:value={formData.memory}
+				oninput={handleMemoryInput}
 				min="512"
 				step="512"
 				class="h-10"
@@ -201,8 +225,9 @@
 				id="max_players"
 				type="number"
 				bind:value={formData.max_players}
+				oninput={handleMaxPlayersInput}
 				min="1"
-				max="100"
+				max="1000"
 				class="h-10"
 			/>
 		</div>

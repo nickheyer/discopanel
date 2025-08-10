@@ -147,20 +147,9 @@ func (s *Server) handleSyncModpacks(w http.ResponseWriter, r *http.Request) {
 			mcVersion = "1.21.1" // Fallback
 		}
 
-		// Determine Java version and Docker image
-		// Extract first mod loader for docker tag selection
 		modLoader := models.ModLoaderVanilla
 		if len(modpack.ModLoaders) > 0 {
-			switch modpack.ModLoaders[0] {
-			case "forge":
-				modLoader = models.ModLoaderForge
-			case "fabric":
-				modLoader = models.ModLoaderFabric
-			case "neoforge":
-				modLoader = models.ModLoaderNeoForge
-			case "quilt":
-				modLoader = models.ModLoaderQuilt
-			}
+			modLoader = models.ModLoader(modpack.ModLoaders[0])
 		}
 
 		javaVersion := strconv.Itoa(docker.GetRequiredJavaVersion(mcVersion, modLoader))

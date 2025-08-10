@@ -188,6 +188,28 @@
 		return true;
 	}
 
+	function handleMemoryInput(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const value = Number(input.value);
+		
+		// Prevent negative values
+		if (value < 0) {
+			input.value = '512';
+			formData.memory = 512;
+		}
+	}
+
+	function handleMaxPlayersInput(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const value = Number(input.value);
+		
+		// Prevent negative values and zero
+		if (value <= 0) {
+			input.value = '1';
+			formData.max_players = 1;
+		}
+	}
+
 	async function refreshAvailablePort() {
 		try {
 			const portData = await api.getNextAvailablePort();
@@ -641,6 +663,7 @@
 							min="1"
 							max="1000"
 							bind:value={formData.max_players}
+							oninput={handleMaxPlayersInput}
 							disabled={loading}
 							class="h-10"
 						/>
@@ -655,6 +678,7 @@
 								min="512"
 								step="512"
 								bind:value={formData.memory}
+								oninput={handleMemoryInput}
 								disabled={loading}
 								class="h-10"
 							/>

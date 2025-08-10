@@ -20,27 +20,61 @@
 	
 	let searchResults = $state<ModpackSearchResponse | null>(null);
 	let favorites = $state<IndexedModpack[]>([]);
+	let uploadedPacks = $state<IndexedModpack[]>([]);
 	let loading = $state(false);
 	let syncing = $state(false);
 	let showFavorites = $state(false);
+	let showUploaded = $state(false);
 	let indexerStatus = $state<any>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let uploading = $state(false);
 	
-	// Available game versions and mod loaders
-	const gameVersions = ['1.20.1', '1.19.4', '1.19.2', '1.18.2', '1.17.1', '1.16.5', '1.12.2'];
-	const modLoaders = [
-		{ value: '', label: 'All Loaders' },
-		{ value: 'forge', label: 'Forge' },
-		{ value: 'fabric', label: 'Fabric' },
-		{ value: 'neoforge', label: 'NeoForge' },
-		{ value: 'quilt', label: 'Quilt' }
-	];
+	// Dynamic game versions and mod loaders from API
+	let gameVersions = $state<string[]>([]);
+	let modLoaders = $state<Array<{ value: string; label: string }>>([
+		{ value: '', label: 'All Loaders' }
+	]);
 	
 	onMount(async () => {
-		await checkIndexerStatus();
-		await loadFavorites();
+		await Promise.all([
+			checkIndexerStatus(),
+			loadFavorites(),
+			loadUploadedPacks(),
+			loadMinecraftVersions(),
+			loadModLoaders()
+		]);
 	});
+	
+	async function loadMinecraftVersions() {
+		try {
+			const response = await fetch('/api/v1/minecraft/versions');
+			if (response.ok) {
+				const data = await response.json();
+				gameVersions = data.versions || [];
+			}
+		} catch (error) {
+			console.error('Failed to load Minecraft versions:', error);
+		}
+	}
+	
+	async function loadModLoaders() {
+		try {
+			const response = await fetch('/api/v1/minecraft/modloaders');
+			if (response.ok) {
+				const data = await response.json();
+				const loaders = data.modloaders || [];
+				modLoaders = [
+					{ value: '', label: 'All Loaders' },
+					...loaders.map((loader: any) => ({
+						value: loader.Name,
+						label: loader.DisplayName || loader.Name
+					}))
+				];
+			}
+		} catch (error) {
+			console.error('Failed to load mod loaders:', error);
+		}
+	}
 	
 	async function checkIndexerStatus() {
 		try {
@@ -53,9 +87,14 @@
 		}
 	}
 	
-	async function searchModpacks() {
+	async function searchModpacks(resetPage = true) {
 		loading = true;
 		try {
+			// Reset to page 1 when searching
+			if (resetPage) {
+				searchParams.page = 1;
+			}
+			
 			const params = new URLSearchParams();
 			if (searchParams.q) params.append('q', searchParams.q);
 			if (searchParams.gameVersion) params.append('gameVersion', searchParams.gameVersion);
@@ -123,6 +162,11 @@
 				);
 			}
 			
+			// Update the modpack in uploaded packs
+			uploadedPacks = uploadedPacks.map(m => 
+				m.id === modpack.id ? { ...m, is_favorited: result.is_favorited } : m
+			);
+			
 			// Update favorites list immediately
 			if (result.is_favorited) {
 				// Add to favorites if not already there
@@ -157,6 +201,19 @@
 		} catch (error) {
 			toast.error('Failed to load favorites');
 			console.error(error);
+		}
+	}
+	
+	async function loadUploadedPacks() {
+		try {
+			// Use the indexer parameter to get only manual uploads
+			const response = await fetch('/api/v1/modpacks?indexer=manual');
+			if (!response.ok) throw new Error('Failed to load uploaded packs');
+			
+			const result = await response.json();
+			uploadedPacks = result.modpacks || [];
+		} catch (error) {
+			console.error('Failed to load uploaded packs:', error);
 		}
 	}
 	
@@ -206,8 +263,11 @@
 			const result = await response.json();
 			toast.success(`Modpack "${result.name}" uploaded successfully`);
 			
-			// Refresh the modpack list
-			await searchModpacks();
+			// Refresh the modpack list and uploaded packs
+			await Promise.all([
+				searchModpacks(),
+				loadUploadedPacks()
+			]);
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : 'Failed to upload modpack');
 		} finally {
@@ -219,18 +279,27 @@
 	onMount(async () => {
 		await Promise.all([
 			searchModpacks(),
-			loadFavorites()
+			loadFavorites(),
+			loadUploadedPacks()
 		]);
-		
-		// If no results and not searching, prompt to sync
+
 		if (searchResults && searchResults.total === 0 && !searchParams.q) {
-			// Automatically sync on first visit if no modpacks exist
 			syncModpacks();
 		}
 	});
 	
-	// Computed display list
-	let displayModpacks = $derived(showFavorites ? favorites : (searchResults?.modpacks || []));
+	// Computed display list with uploaded packs first
+	let displayModpacks = $derived(
+		showFavorites ? favorites :
+		showUploaded ? uploadedPacks :
+		(() => {
+			const results = searchResults?.modpacks || [];
+			const uploaded: IndexedModpack[] = [];
+			const indexed: IndexedModpack[] = [];
+			results.forEach((m) => (m.indexer === 'manual' ? uploaded : indexed).push(m))
+			return [...uploaded, ...indexed];
+		})()
+	);
 </script>
 
 <div class="flex-1 space-y-8 h-full p-8 pt-6 bg-gradient-to-br from-background to-muted/10">
@@ -246,13 +315,32 @@
 		</div>
 		<div class="flex items-center gap-2">
 			<Button
+				variant={showUploaded ? "outline" : "default"}
+				onclick={() => {
+					showUploaded = !showUploaded;
+					if (showUploaded) showFavorites = false;
+				}}
+				class="shadow-md hover:shadow-lg transition-all hover:scale-[1.02]"
+			>
+				{#if showUploaded}
+					<ArrowLeft class="h-5 w-5 mr-2" />
+					Back to all
+				{:else}
+					<Upload class="h-5 w-5 mr-2" />
+					Uploaded ({uploadedPacks.length})
+				{/if}
+			</Button>
+			<Button
 				variant={showFavorites ? "outline" : "default"}
-				onclick={() => showFavorites = !showFavorites}
+				onclick={() => {
+					showFavorites = !showFavorites;
+					if (showFavorites) showUploaded = false;
+				}}
 				class="shadow-md hover:shadow-lg transition-all hover:scale-[1.02]"
 			>
 				{#if showFavorites}
 					<ArrowLeft class="h-5 w-5 mr-2" />
-					Go back to modpacks
+					Back to all
 				{:else}
 					<Heart class="h-5 w-5 mr-2" />
 					Favorites ({favorites.length})
@@ -283,7 +371,7 @@
 		</Alert>
 	{/if}
 	
-	{#if !showFavorites}
+	{#if !showFavorites && !showUploaded}
 		<div class="flex flex-col gap-4">
 			<div class="flex gap-2">
 				<Input
@@ -360,6 +448,12 @@
 								<Badge variant="secondary" class="text-xs font-semibold">
 									{modpack.indexer === 'manual' ? 'Manual Upload' : modpack.indexer}
 								</Badge>
+								{#if modpack.indexer === 'manual'}
+									<Badge variant="outline" class="text-xs">
+										<Upload class="h-3 w-3 mr-1" />
+										Uploaded
+									</Badge>
+								{/if}
 								<span class="text-xs text-muted-foreground">
 									<Download class="h-3 w-3 inline mr-1" />
 									{formatNumber(modpack.download_count)}
@@ -420,14 +514,14 @@
 		{/each}
 	</div>
 	
-	{#if !showFavorites && searchResults && searchResults.total > searchResults.pageSize}
+	{#if !showFavorites && !showUploaded && searchResults && searchResults.total > searchResults.pageSize}
 		<div class="flex items-center justify-center gap-2 mt-6">
 			<Button
 				variant="outline"
 				disabled={(searchParams.page || 1) === 1}
 				onclick={() => {
 					searchParams.page = Math.max(1, (searchParams.page || 1) - 1);
-					searchModpacks();
+					searchModpacks(false);
 				}}
 			>
 				Previous
@@ -440,7 +534,7 @@
 				disabled={(searchParams.page || 1) >= Math.ceil(searchResults.total / searchResults.pageSize)}
 				onclick={() => {
 					searchParams.page = (searchParams.page || 1) + 1;
-					searchModpacks();
+					searchModpacks(false);
 				}}
 			>
 				Next
@@ -461,7 +555,7 @@
 					{#if searchParams.q}
 						No modpacks found matching your search.
 					{:else}
-						Loading modpacks from indexers for the first time...
+						No modpacks found.
 					{/if}
 				{/if}
 			</p>

@@ -188,7 +188,7 @@
 
 <ResizablePaneGroup
 	direction="vertical"
-	class="h-full max-h-[800px] min-h-[400px] rounded-lg border bg-black"
+	class="h-full max-h-[800px] min-h-[400px] w-full rounded-lg border bg-black overflow-hidden"
 >
 	<ResizablePane defaultSize={75} minSize={30}>
 		<div class="flex h-full flex-col">
@@ -235,7 +235,7 @@
 				</div>
 			</div>
 			<div
-				class="custom-scrollbar min-h-0 flex-1 overflow-y-auto bg-black px-4 py-2"
+				class="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-auto bg-black px-4 py-2"
 				bind:this={scrollAreaRef}
 			>
 				<div class="font-mono text-xs">
@@ -246,7 +246,7 @@
 					{:else}
 						{#each logs.split('\n') as line}
 							{@const parsed = formatLogLine(line)}
-							<div class="py-0.5 hover:bg-zinc-900/50">
+							<div class="py-0.5 hover:bg-zinc-900/50 whitespace-pre-wrap break-all">
 								{#if parsed.timestamp}
 									<span class="text-zinc-600">[{parsed.timestamp}]</span>
 								{/if}

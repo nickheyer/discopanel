@@ -199,9 +199,9 @@
 				</SidebarContent>
 
 				<SidebarFooter>
-					<Separator orientation="horizontal" />
-					<div class="flex items-center justify-between">
-						{#if isAuthEnabled && user}
+					{#if isAuthEnabled && user}
+						<Separator orientation="horizontal" />
+						<div class="flex items-center justify-between">
 							<DropdownMenu>
 								<div class="py-2 w-full">
 									<DropdownMenuTrigger class="w-full h-full justify-start group-data-[collapsible=icon]:p-0">
@@ -246,10 +246,9 @@
 										<span>Log out</span>
 									</DropdownMenuItem>
 								</DropdownMenuContent>
-							</DropdownMenu>
-						{/if}
-
-					</div>
+							</DropdownMenu>					
+						</div>
+					{/if}
 					<Separator orientation="horizontal" class="mb-2" />
 					<div class="ml-auto flex items-center gap-2">
 						<span class="text-muted-foreground text-xs group-data-[collapsible=icon]:hidden">v0.0.1</span>

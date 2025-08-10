@@ -116,7 +116,7 @@ func GetOptimalDockerTag(mcVersion string, modLoader models.ModLoader, preferGra
 			if minor < 18 {
 				return "java8" // Forge < 1.18 requires Java 8
 			}
-			if minor <= 21 && javaVersion > 17 {
+			if minor < 21 && javaVersion > 17 {
 				// Some Forge mods up to 1.21 may need Java 17
 				return "java17"
 			}
@@ -145,7 +145,7 @@ func GetRequiredJavaVersion(mcVersion string, modLoader models.ModLoader) int {
 	// Parse major.minor version
 	parts := strings.Split(mcVersion, ".")
 	if len(parts) < 2 {
-		return 21 // Default to Java 17
+		return 21 // Default to Java 21
 	}
 
 	// Find matching requirement
@@ -270,7 +270,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	if server.ProxyHostname != "" {
 		minecraftPort = 25565 // Proxy servers always use 25565 internally
 	}
-	
+
 	config := &container.Config{
 		Image: imageName,
 		Env:   env,
@@ -308,7 +308,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	// Host configuration
 	// If server has a proxy hostname configured, don't bind the game port to avoid conflicts
 	portBindings := nat.PortMap{}
-	
+
 	// Only bind the game port if not using proxy (no proxy_hostname set)
 	if server.ProxyHostname == "" {
 		portBindings[nat.Port(fmt.Sprintf("%d/tcp", minecraftPort))] = []nat.PortBinding{
@@ -318,12 +318,12 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 			},
 		}
 	}
-	
+
 	// Set RCON port binding based on proxy configuration
 	if len(rconPortBinding) > 0 {
 		portBindings["25575/tcp"] = rconPortBinding
 	}
-	
+
 	// Handle path translation when DiscoPanel is running in a container
 	dataPath := server.DataPath
 	if hostDataPath := os.Getenv("DISCOPANEL_HOST_DATA_PATH"); hostDataPath != "" {
@@ -333,19 +333,19 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		if containerDataDir == "" {
 			containerDataDir = "/app/data"
 		}
-		
+
 		// Replace the container path prefix with the host path
 		relPath, err := filepath.Rel(containerDataDir, server.DataPath)
 		if err == nil {
 			dataPath = filepath.Join(hostDataPath, relPath)
 		}
 	}
-	
+
 	// Ensure the directory exists
 	if err := os.MkdirAll(server.DataPath, 0755); err != nil {
 		return "", fmt.Errorf("failed to create server data directory: %w", err)
 	}
-	
+
 	hostConfig := &container.HostConfig{
 		PortBindings: portBindings,
 		Mounts: []mount.Mount{

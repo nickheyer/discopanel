@@ -207,7 +207,7 @@
 																		? 'bg-green-500'
 																		: server.status === 'error'
 																			? 'bg-red-500 animate-pulse'
-																		: server.status === 'starting' || server.status === 'stopping'
+																		: server.status === 'starting' || server.status === 'stopping' || server.status === 'unhealthy'
 																			? 'bg-yellow-500'
 																			: 'bg-gray-400'}"
 																></div>

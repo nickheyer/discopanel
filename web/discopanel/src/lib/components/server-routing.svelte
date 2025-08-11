@@ -11,11 +11,10 @@
 	import { Loader2, Globe, Save, Copy, AlertCircle, CheckCircle2, XCircle } from '@lucide/svelte';
 	import type { Server } from '$lib/api/types';
 
-	let { server, active }: { server: Server, active?: boolean } = $props();
+	let { server, active, router: routingInfo = $bindable(null) }: { server: Server, active?: boolean, router?:any } = $props();
 
 	let loading = $state(true);
 	let saving = $state(false);
-	let routingInfo = $state<any>(null);
 	let hostname = $state('');
 	let originalHostname = $state('');
 	let hasChanges = $derived(hostname !== originalHostname);
@@ -23,6 +22,14 @@
 	let hostnameError = $state('');
 	let initialized = $state(false);
 	let previousServerId = $state(server.id);
+
+	onMount(() => {
+		if (server && !initialized) {
+			initialized = true;
+			loadRoutingInfo();
+			loadAllRoutes();
+		}
+	})
 
 	// Reset state when server changes
 	$effect(() => {
@@ -37,6 +44,7 @@
 			allRoutes = [];
 			hostnameError = '';
 			initialized = false;
+			loadRoutingInfo();
 		}
 	});
 

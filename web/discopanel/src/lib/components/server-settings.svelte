@@ -32,7 +32,8 @@
 		java_version: server.java_version,
 		docker_image: server.docker_image,
 		detached: !!(server.detached),
-		auto_start: !!(server.auto_start)
+		auto_start: !!(server.auto_start),
+		tps_command: server.tps_command || ''
 	});
 
 
@@ -58,7 +59,8 @@
 				java_version: server.java_version,
 				docker_image: server.docker_image,
 				detached: !!(server.detached),
-				auto_start: !!(server.auto_start)
+				auto_start: !!(server.auto_start),
+				tps_command: server.tps_command || ''
 			};
 			saving = false;
 			isDirty = false;
@@ -84,7 +86,8 @@
 			formData.java_version !== server.java_version ||
 			formData.docker_image !== server.docker_image ||
 			formData.detached !== !!(server.detached) ||
-			formData.auto_start !== !!(server.auto_start);
+			formData.auto_start !== !!(server.auto_start) ||
+			formData.tps_command !== (server.tps_command || '');
 	});
 
 	async function loadOptions() {
@@ -296,6 +299,19 @@
 					{/each}
 				</SelectContent>
 			</Select>
+		</div>
+
+		<div class="space-y-2">
+			<Label for="tps_command" class="text-sm font-medium">TPS Command <span class="text-muted-foreground text-xs">(Optional)</span></Label>
+			<Input
+				id="tps_command"
+				placeholder="Auto-detect based on mod loader"
+				bind:value={formData.tps_command}
+				class="h-10"
+			/>
+			<p class="text-xs text-muted-foreground">
+				Override the TPS monitoring command (empty to disable). Use " ?? " to specify fallback commands (e.g., "forge tps ?? neoforge tps ?? tps")
+			</p>
 		</div>
 
 		<div class="space-y-4">

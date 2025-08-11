@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/files"
 )
 
@@ -28,8 +29,27 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get all proxy listeners once for efficiency
+	var listeners map[string]*models.ProxyListener
+	if s.config.Proxy.Enabled {
+		allListeners, err := s.store.GetProxyListeners(ctx)
+		if err == nil {
+			listeners = make(map[string]*models.ProxyListener)
+			for _, l := range allListeners {
+				listeners[l.ID] = l
+			}
+		}
+	}
+
 	// Update status from Docker (skip expensive stats for list view)
 	for _, server := range servers {
+		// If server uses proxy, ensure ProxyPort is populated from the listener
+		if server.ProxyHostname != "" && server.ProxyListenerID != "" && listeners != nil {
+			if listener, ok := listeners[server.ProxyListenerID]; ok {
+				server.ProxyPort = listener.Port
+			}
+		}
+
 		if server.ContainerID != "" {
 			status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
 			if err == nil {
@@ -210,6 +230,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		DockerImage:     req.DockerImage,
 		AutoStart:       req.AutoStart,
 		Detached:        req.Detached,
+		TPSCommand:      minecraft.GetTPSCommand(req.ModLoader),
 	}
 
 	// Set defaults
@@ -223,9 +244,13 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		server.ModLoader = models.ModLoaderVanilla
 	}
 
-	// Set ProxyPort to indicate proxy usage when hostname is set
-	if s.config.Proxy.Enabled && server.ProxyHostname != "" {
-		server.ProxyPort = 1 // Non-zero value to indicate proxy is being used
+	// Set ProxyPort to the actual listener port when using proxy
+	if s.config.Proxy.Enabled && server.ProxyHostname != "" && req.ProxyListenerID != "" {
+		// Get the listener to set the correct proxy port
+		listener, err := s.store.GetProxyListener(ctx, req.ProxyListenerID)
+		if err == nil && listener != nil {
+			server.ProxyPort = listener.Port
+		}
 	}
 
 	// Create data directory
@@ -341,6 +366,14 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If server uses proxy, ensure ProxyPort is populated from the listener
+	if server.ProxyHostname != "" && server.ProxyListenerID != "" {
+		listener, err := s.store.GetProxyListener(ctx, server.ProxyListenerID)
+		if err == nil && listener != nil {
+			server.ProxyPort = listener.Port
+		}
+	}
+
 	// Update status and stats from Docker
 	if server.ContainerID != "" {
 		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
@@ -356,35 +389,53 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 				} else {
 					s.log.Debug("Failed to get container stats for %s: %v", server.ContainerID, err)
 				}
+			}
 
-				// Calculate world directory size - check cache first
-				if cachedDiskUsage, ok := s.diskUsageCache.Get(DiskUsageKey(server.ID)); ok {
-					server.DiskUsage = cachedDiskUsage
+			if status == models.StatusRunning {
+
+				// Calculate world directory size
+				worldPath, err := files.FindWorldDir(server.DataPath)
+				if err != nil {
+					s.log.Error("Error unable to find world directory %v", err)
+				}
+				totalSize, err := files.CalculateDirSize(worldPath)
+				if err != nil {
+					s.log.Error("Error calculating world directory size for %s: %v", worldPath, err)
 				} else {
-					// Not in cache, calculate it
-					worldPath := filepath.Join(server.DataPath, "world")
-					totalSize, err := files.CalculateDirSize(worldPath)
-					if err != nil {
-						s.log.Error("Error calculating world directory size for %s: %v", worldPath, err)
-					} else {
-						server.DiskUsage = totalSize // Store as bytes
-						// Cache for 30 seconds
-						s.diskUsageCache.Set(DiskUsageKey(server.ID), totalSize, 30*time.Second)
-					}
+					server.DiskUsage = totalSize // Store as bytes
 				}
 
-				// Get total disk space - check cache first
-				if cachedDiskTotal, ok := s.diskTotalCache.Get(DiskTotalKey(server.ID)); ok {
-					server.DiskTotal = cachedDiskTotal
+				// Get total disk space
+				diskTotal, err := files.GetDiskSpace(server.DataPath)
+				if err != nil {
+					s.log.Debug("Failed to get disk space for %s: %v", server.DataPath, err)
 				} else {
-					// Not in cache, calculate it
-					diskTotal, err := files.GetDiskSpace(server.DataPath)
-					if err != nil {
-						s.log.Debug("Failed to get disk space for %s: %v", server.DataPath, err)
-					} else {
-						server.DiskTotal = diskTotal
-						// Cache for 1 hour
-						s.diskTotalCache.Set(DiskTotalKey(server.ID), diskTotal, time.Hour)
+					server.DiskTotal = diskTotal
+				}
+
+				// Get Minecraft server status (player count) using rcon-cli
+				output, err := s.docker.ExecCommand(ctx, server.ContainerID, "list")
+				if err == nil && output != "" {
+					count, _ := minecraft.ParsePlayerListFromOutput(output)
+					server.PlayersOnline = count
+				}
+
+				// Get TPS if server has a TPS command configured, fallback commands separated by " ?? "
+				if server.TPSCommand != "" {
+					for cmd := range strings.SplitSeq(server.TPSCommand, " ?? ") {
+						cmd = strings.TrimSpace(cmd)
+						if cmd == "" {
+							continue
+						}
+
+						output, err := s.docker.ExecCommand(ctx, server.ContainerID, cmd)
+						if err == nil && output != "" {
+							tps := minecraft.ParseTPSFromOutput(output)
+							if tps > 0 {
+								server.TPS = tps
+								break // Stop on first successful command
+							}
+						}
 					}
 				}
 			}
@@ -418,6 +469,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		DockerImage string `json:"docker_image"`
 		AutoStart   *bool  `json:"auto_start"`
 		Detached    *bool  `json:"detached"`
+		TPSCommand  string `json:"tps_command"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -455,6 +507,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ModLoader != "" && models.ModLoader(req.ModLoader) != originalModLoader {
 		server.ModLoader = models.ModLoader(req.ModLoader)
+		server.TPSCommand = minecraft.GetTPSCommand(server.ModLoader)
 		needsRecreation = true
 	}
 	if req.MCVersion != "" && req.MCVersion != originalMCVersion {
@@ -474,6 +527,9 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Detached != nil {
 		server.Detached = *req.Detached
+	}
+	if req.TPSCommand != "" {
+		server.TPSCommand = req.TPSCommand
 	}
 
 	// Save server updates first
@@ -566,10 +622,6 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusInternalServerError, "Failed to delete server")
 		return
 	}
-
-	// Clear cached stats for this server
-	s.diskTotalCache.Delete(DiskTotalKey(id))
-	s.diskUsageCache.Delete(DiskUsageKey(id))
 
 	// Delete data directory
 	if err := os.RemoveAll(server.DataPath); err != nil {
@@ -683,10 +735,6 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusNotFound, "Server not found")
 		return
 	}
-
-	// Clear cached stats for this server
-	s.diskTotalCache.Delete(DiskTotalKey(id))
-	s.diskUsageCache.Delete(DiskUsageKey(id))
 
 	// If container doesn't exist, create it and start it
 	if server.ContainerID == "" {

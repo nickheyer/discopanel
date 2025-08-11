@@ -27,11 +27,14 @@ export interface Server {
   proxy_port: number;
   proxy_hostname: string;
   max_players: number;
+  players_online: number;
   memory: number; // Allocated memory in MB
   memory_usage?: number; // Current memory usage in MB
   cpu_percent?: number; // Current CPU usage percentage
   disk_usage?: number; // Current disk usage in bytes
   disk_total?: number; // Total disk space available in bytes
+  tps?: number;
+  tps_command?: string;
   created_at: string;
   updated_at: string;
   last_started: string | null;
@@ -68,6 +71,7 @@ export interface UpdateServerRequest {
   docker_image?: string;
   detached?: boolean;
   auto_start?: boolean;
+  tps_command?: string;
 }
 
 export interface Mod {

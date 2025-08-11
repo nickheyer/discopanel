@@ -185,13 +185,13 @@
 											Start
 										</DropdownMenuItem>
 									{/if}
-									{#if server.status === 'running' || server.status === 'starting'}
+									{#if (server.status === 'running' || server.status === 'unhealthy')|| server.status === 'starting'}
 										<DropdownMenuItem class="flex flew-row" onclick={() => handleServerAction('stop', server)}>
 											<Square class="h-4 w-4 mr-2" />
 											Stop
 										</DropdownMenuItem>
 									{/if}
-									{#if server.status === 'running'}
+									{#if (server.status === 'running' || server.status === 'unhealthy')}
 										<DropdownMenuItem  class="flex flew-row" onclick={() => handleServerAction('restart', server)}>
 											<RotateCw class="h-4 w-4 mr-2" />
 											Restart

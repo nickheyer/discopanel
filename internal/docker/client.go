@@ -534,7 +534,12 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 	lines := strings.Split(buf.String(), "\n")
 	var filtered []string
 	for _, line := range lines {
+		// Filter out RCON thread messages
 		if strings.Contains(line, "Thread RCON Client") && (strings.Contains(line, "started") || strings.Contains(line, "shutting down")) {
+			continue
+		}
+		// Filter out RCON connection messages
+		if strings.Contains(line, "[RCON Listener") && strings.Contains(line, "Rcon connection from") {
 			continue
 		}
 		filtered = append(filtered, line)

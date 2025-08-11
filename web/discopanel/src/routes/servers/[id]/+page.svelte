@@ -10,7 +10,7 @@
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { toast } from 'svelte-sonner';
-	import { Play, Square, RotateCw, Terminal, Settings, Package, HardDrive, Activity, Loader2, Copy, ExternalLink, Trash2, Cpu, Info } from '@lucide/svelte';
+	import { Play, Square, RotateCw, Package, Activity, Loader2, Copy, ExternalLink, Trash2, Cpu, Info } from '@lucide/svelte';
 	import type { Server } from '$lib/api/types';
 	import { formatBytes } from '$lib/utils';
 	import ServerConsole from '$lib/components/server-console.svelte';
@@ -39,7 +39,6 @@
 		if (serverId) {
 			// Clear existing interval
 			if (interval) clearInterval(interval);
-			
 			// Load server immediately
 			loadServer();
 			
@@ -87,36 +86,6 @@
 			toast.error(`Failed to ${action} server: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		} finally {
 			actionLoading = false;
-		}
-	}
-
-	function getStatusColor(status: Server['status']) {
-		switch (status) {
-			case 'running':
-				return 'text-green-500';
-			case 'starting':
-			case 'stopping':
-				return 'text-yellow-500';
-			case 'stopped':
-				return 'text-gray-400';
-			case 'error':
-				return 'text-red-500';
-			default:
-				return 'text-gray-400';
-		}
-	}
-
-	function getStatusBadgeVariant(status: Server['status']): 'default' | 'secondary' | 'destructive' | 'outline' {
-		switch (status) {
-			case 'running':
-				return 'default';
-			case 'starting':
-			case 'stopping':
-				return 'secondary';
-			case 'error':
-				return 'destructive';
-			default:
-				return 'outline';
 		}
 	}
 
@@ -229,7 +198,7 @@
 						{/if}
 						<span class="sm:inline">Stop</span>
 					</Button>
-				{:else if server.status === 'running' || server.status === 'starting'}
+				{:else if server.status === 'running' || server.status === 'starting' || server.status === 'unhealthy'}
 					<Button 
 						variant="destructive" 
 						onclick={() => handleServerAction('stop')} 
@@ -290,8 +259,8 @@
 					<div class="absolute inset-0 bg-gradient-to-br from-green-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-green-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{:else if server.status === 'unhealthy'}
-					<div class="absolute inset-0 bg-gradient-to-br from-red-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-red-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-purple-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{:else if server.status === 'stopped'}
 					<div class="absolute inset-0 bg-gradient-to-br from-gray-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-gray-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
@@ -317,9 +286,11 @@
 								</div>
 							</div>
 						{:else if server.status === 'unhealthy'}
-							<div class="absolute inset-0 bg-gradient-to-br from-red-500/20 to-red-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-red-500/10 to-red-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
-								<Activity class="h-7 w-7 text-red-500 animate-pulse" />
+							<div class="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-purple-500/10 to-purple-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+								<div class="relative">
+									<Activity class="h-7 w-7 text-purple-500" />
+								</div>
 							</div>
 						{:else if server.status === 'stopped'}
 							<div class="absolute inset-0 bg-gradient-to-br from-gray-500/20 to-gray-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
@@ -352,7 +323,7 @@
 								{:else if server.status === 'unhealthy'}
 									<div class="heartbeat-container">
 										{#each Array(5) as _, i}
-											<div class="heartbeat-bar heartbeat-erratic bg-red-500" style="animation-delay: {i * 0.1}s; height: {20 + Math.random() * 30}px"></div>
+											<div class="heartbeat-bar heartbeat-erratic text-purple-500" style="animation-delay: {i * 0.1}s; height: {20 + Math.random() * 30}px"></div>
 										{/each}
 									</div>
 								{:else if server.status === 'stopped'}
@@ -378,7 +349,7 @@
 								{#if server.status === 'running'}
 									<span class="text-green-500">RUNNING</span>
 								{:else if server.status === 'unhealthy'}
-									<span class="text-red-500">UNHEALTHY</span>
+									<span class="text-purple-500">BUSY</span>
 								{:else if server.status === 'stopped'}
 									<span class="text-gray-500">STOPPED</span>
 								{:else if server.status === 'starting'}
@@ -393,7 +364,7 @@
 								{#if server.status === 'running'}
 									Server healthy and responding
 								{:else if server.status === 'unhealthy'}
-									Server experiencing issues
+									Server temporarily unresponsive
 								{:else if server.status === 'stopped'}
 									Server is currently offline
 								{:else if server.status === 'starting'}
@@ -430,8 +401,8 @@
 						<div class="relative flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-muted/50 to-muted/30 backdrop-blur-sm border border-border/50 group-hover/copy:border-primary/30 transition-all duration-300">
 							<div class="flex-1 min-w-0">
 								<span class="font-mono text-sm font-bold block truncate text-foreground/90">
-									{#if routingInfo?.proxy_enabled && (server.proxy_hostname || routingInfo?.current_route)}
-										{server.proxy_hostname || routingInfo.current_route?.hostname || `localhost:${server.port}`}
+									{#if server.proxy_hostname}
+										{server.proxy_hostname}
 									{:else}
 										localhost:{server.port}
 									{/if}
@@ -443,9 +414,7 @@
 								variant="ghost"
 								onclick={() => {
 									if (!server) return;
-									const connectionString = routingInfo?.proxy_enabled && (server.proxy_hostname || routingInfo?.current_route)
-										? (server.proxy_hostname || routingInfo.current_route?.hostname || `localhost:${server.port}`)
-										: `localhost:${server.port}`;
+									const connectionString = server.proxy_hostname || `localhost:${server.port}`;
 									copyToClipboard(connectionString);
 								}}
 								class="hover:bg-primary/20 hover:text-primary transition-all duration-300 hover:scale-110"
@@ -550,8 +519,8 @@
 				<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-orange-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
 					<div class="space-y-1">
-						<CardTitle class="text-xs font-bold text-muted-foreground/70 uppercase tracking-widest">Resources</CardTitle>
-						<p class="text-xs text-muted-foreground/50">System usage</p>
+						<CardTitle class="text-xs font-bold text-muted-foreground/70 uppercase tracking-widest">Performance</CardTitle>
+						<p class="text-xs text-muted-foreground/50">Resources & metrics</p>
 					</div>
 					<div class="relative">
 						<div class="absolute inset-0 bg-gradient-to-br from-orange-500/20 to-orange-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
@@ -645,6 +614,41 @@
 							{/if}
 						</div>
 
+						<!-- Players Online -->
+						{#if server.players_online !== undefined}
+							{@const playersPercent = (server.players_online / server.max_players) * 100}
+							<div>
+								<div class="flex items-center justify-between mb-1.5">
+									<span class="text-xs font-semibold text-muted-foreground/70">PLAYERS</span>
+									<span class="text-xs font-mono text-indigo-500">{server.players_online}/{server.max_players}</span>
+								</div>
+								<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+									
+									<div class="relative h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full transition-all duration-700" 
+										style="width: {Math.min(playersPercent, 100)}%">
+										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+									</div>
+								</div>
+							</div>
+						{/if}
+
+						<!-- TPS -->
+						{#if server.tps_command !== '' && server.tps !== undefined}
+							{@const tpsPercent = (server.tps / 20) * 100}
+							<div>
+								<div class="flex items-center justify-between mb-1.5">
+									<span class="text-xs font-semibold text-muted-foreground/70">TPS</span>
+									<span class="text-xs font-mono text-green-500">{server.tps.toFixed(1)}</span>
+								</div>
+								<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+									
+									<div class="relative h-full bg-gradient-to-r from-green-500 to-emerald-500 rounded-full transition-all duration-700" 
+										style="width: {Math.min(tpsPercent, 100)}%">
+										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+									</div>
+								</div>
+							</div>
+						{/if}
 					</div>
 				</CardContent>
 			</Card>
@@ -694,7 +698,7 @@
 				</TabsContent>
 
 				<TabsContent value="routing" class="h-full overflow-y-auto">
-					<ServerRouting {server} active={activeTab === 'routing'} />
+					<ServerRouting {server} bind:router={routingInfo} active={activeTab === 'routing'} />
 				</TabsContent>
 			</div>
 		</Tabs>
@@ -711,9 +715,6 @@
 	@keyframes shimmer {
 		0% { transform: translateX(-100%); }
 		100% { transform: translateX(100%); }
-	}
-	.animate-shimmer {
-		animation: shimmer 2s infinite;
 	}
 	@keyframes gradient-x {
 		0%, 100% { background-position: 0% 50%; }

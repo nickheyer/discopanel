@@ -79,7 +79,7 @@
 		if (loading) return;
 
 		// Don't try to fetch logs if server is not running
-		if (server.status !== 'running' && server.status !== 'starting') {
+		if (server.status === 'stopped') {
 			return;
 		}
 
@@ -195,7 +195,7 @@
 				<div class="flex items-center gap-2">
 					<Terminal class="h-4 w-4 text-green-500" />
 					<span class="font-mono text-sm text-green-500">Server Console</span>
-					<Badge variant={server.status === 'running' ? 'default' : 'secondary'} class="text-xs">
+					<Badge variant={(server.status === 'running' || server.status === 'unhealthy') ? 'default' : 'secondary'} class="text-xs">
 						{server.status}
 					</Badge>
 				</div>
@@ -272,7 +272,7 @@
 				<span class="font-mono text-sm text-green-500">$</span>
 				<input
 					type="text"
-					placeholder={server.status === 'running' ? 'Enter command...' : 'Server must be running'}
+					placeholder={(server.status === 'running' || server.status === 'unhealthy')? 'Enter command...' : 'Server must be running'}
 					bind:value={command}
 					disabled={server.status !== 'running'}
 					onkeydown={(e) => e.key === 'Enter' && sendCommand()}
@@ -281,7 +281,7 @@
 			</div>
 			<Button
 				onclick={sendCommand}
-				disabled={server.status !== 'running' || !command.trim()}
+				disabled={server.status === 'stopped' || !command.trim()}
 				size="sm"
 				class="h-7 bg-zinc-800 px-3 text-white hover:bg-zinc-700"
 			>

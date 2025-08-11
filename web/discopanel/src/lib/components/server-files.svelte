@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
-	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, Plus, Edit2, RefreshCw } from '@lucide/svelte';
+	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw } from '@lucide/svelte';
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
 	import type { Server, FileInfo } from '$lib/api/types';
@@ -258,7 +258,7 @@
 									onclick={() => editFile(file)}
 									title="Edit file"
 								>
-									<Edit2 class="h-3 w-3" />
+									<FileEdit class="h-3 w-3" />
 								</Button>
 							{/if}
 							{#if !file.is_dir}

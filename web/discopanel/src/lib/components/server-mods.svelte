@@ -49,7 +49,9 @@
 			loading = true;
 			mods = await api.getMods(server.id);
 		} catch (error) {
-			toast.error('Failed to load mods');
+			if (server.mod_loader !== 'vanilla') {
+				toast.error('Failed to load mods');
+			}
 		} finally {
 			loading = false;
 		}

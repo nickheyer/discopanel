@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/pkg/files"
 )
 
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +28,7 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update status from Docker
+	// Update status from Docker (skip expensive stats for list view)
 	for _, server := range servers {
 		if server.ContainerID != "" {
 			status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
@@ -340,11 +341,55 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update status from Docker
+	// Update status and stats from Docker
 	if server.ContainerID != "" {
 		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
 		if err == nil {
 			server.Status = status
+
+			// Only get stats if server is running or unhealthy
+			if status == models.StatusRunning || status == models.StatusUnhealthy {
+				stats, err := s.docker.GetContainerStats(ctx, server.ContainerID)
+				if err == nil {
+					server.MemoryUsage = stats.MemoryUsage
+					server.CPUPercent = stats.CPUPercent
+				} else {
+					s.log.Debug("Failed to get container stats for %s: %v", server.ContainerID, err)
+				}
+
+				// Calculate world directory size - check cache first
+				if cachedDiskUsage, ok := s.diskUsageCache.Get(DiskUsageKey(server.ID)); ok {
+					server.DiskUsage = cachedDiskUsage
+				} else {
+					// Not in cache, calculate it
+					worldPath := filepath.Join(server.DataPath, "world")
+					totalSize, err := files.CalculateDirSize(worldPath)
+					if err != nil {
+						s.log.Error("Error calculating world directory size for %s: %v", worldPath, err)
+					} else {
+						server.DiskUsage = totalSize // Store as bytes
+						// Cache for 30 seconds
+						s.diskUsageCache.Set(DiskUsageKey(server.ID), totalSize, 30*time.Second)
+					}
+				}
+
+				// Get total disk space - check cache first
+				if cachedDiskTotal, ok := s.diskTotalCache.Get(DiskTotalKey(server.ID)); ok {
+					server.DiskTotal = cachedDiskTotal
+				} else {
+					// Not in cache, calculate it
+					diskTotal, err := files.GetDiskSpace(server.DataPath)
+					if err != nil {
+						s.log.Debug("Failed to get disk space for %s: %v", server.DataPath, err)
+					} else {
+						server.DiskTotal = diskTotal
+						// Cache for 1 hour
+						s.diskTotalCache.Set(DiskTotalKey(server.ID), diskTotal, time.Hour)
+					}
+				}
+			}
+		} else {
+			s.log.Debug("Failed to get container status for %s: %v", server.ContainerID, err)
 		}
 	}
 
@@ -522,6 +567,10 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Clear cached stats for this server
+	s.diskTotalCache.Delete(DiskTotalKey(id))
+	s.diskUsageCache.Delete(DiskUsageKey(id))
+
 	// Delete data directory
 	if err := os.RemoveAll(server.DataPath); err != nil {
 		s.log.Error("Failed to delete server data: %v", err)
@@ -634,6 +683,10 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusNotFound, "Server not found")
 		return
 	}
+
+	// Clear cached stats for this server
+	s.diskTotalCache.Delete(DiskTotalKey(id))
+	s.diskUsageCache.Delete(DiskUsageKey(id))
 
 	// If container doesn't exist, create it and start it
 	if server.ContainerID == "" {

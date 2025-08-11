@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +21,12 @@ import (
 	"github.com/docker/go-connections/nat"
 	models "github.com/nickheyer/discopanel/internal/db"
 )
+
+type ContainerStats struct {
+	CPUPercent  float64 `json:"cpu_percent"`
+	MemoryUsage float64 `json:"memory_usage"` // in MB
+	MemoryLimit float64 `json:"memory_limit"` // in MB
+}
 
 type DockerImageTag struct {
 	Tag         string   `json:"tag"`         // Docker tag name (e.g., "latest", "java21", etc.)
@@ -458,6 +465,48 @@ func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (mo
 	default:
 		return models.StatusError, nil
 	}
+}
+
+func (c *Client) GetContainerStats(ctx context.Context, containerID string) (*ContainerStats, error) {
+	// Get real-time stats
+	statsResponse, err := c.docker.ContainerStats(ctx, containerID, false)
+	if err != nil {
+		return nil, err
+	}
+	defer statsResponse.Body.Close()
+
+	var stats container.Stats
+	if err := json.NewDecoder(statsResponse.Body).Decode(&stats); err != nil {
+		return nil, err
+	}
+
+	// Calculate CPU percentage (ns)
+	cpuPercent := 0.0
+	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage) - float64(stats.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(stats.CPUStats.SystemUsage) - float64(stats.PreCPUStats.SystemUsage)
+
+	// Number of CPU cores
+	cpuCount := float64(len(stats.CPUStats.CPUUsage.PercpuUsage))
+	if cpuCount == 0 {
+		cpuCount = float64(stats.CPUStats.OnlineCPUs)
+	}
+	if cpuCount == 0 {
+		cpuCount = 1.0
+	}
+
+	if systemDelta > 0.0 && cpuDelta > 0.0 {
+		cpuPercent = (cpuDelta / systemDelta) * cpuCount * 100.0
+	}
+
+	// Get memory usage in MB (excluding cache)
+	memoryUsage := float64(stats.MemoryStats.Usage-stats.MemoryStats.Stats["cache"]) / 1024 / 1024
+	memoryLimit := float64(stats.MemoryStats.Limit) / 1024 / 1024
+
+	return &ContainerStats{
+		CPUPercent:  cpuPercent,
+		MemoryUsage: memoryUsage,
+		MemoryLimit: memoryLimit,
+	}, nil
 }
 
 func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail int) (string, error) {

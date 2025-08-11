@@ -3,7 +3,7 @@ export type ModLoader = 'vanilla' | 'forge' | 'fabric' | 'neoforge' | 'paper' | 
   'mohist' | 'youer' | 'banner' | 'catserver' | 'arclight' | 'spongevanilla' | 
   'limbo' | 'nanolimbo' | 'crucible' | 'glowstone' | 'custom' | 
   'auto_curseforge' | 'curseforge' | 'ftba' | 'modrinth';
-export type ServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
+export type ServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'unhealthy';
 
 export interface DockerImageInfo {
   tag: string;
@@ -27,7 +27,11 @@ export interface Server {
   proxy_port: number;
   proxy_hostname: string;
   max_players: number;
-  memory: number;
+  memory: number; // Allocated memory in MB
+  memory_usage?: number; // Current memory usage in MB
+  cpu_percent?: number; // Current CPU usage percentage
+  disk_usage?: number; // Current disk usage in bytes
+  disk_total?: number; // Total disk space available in bytes
   created_at: string;
   updated_at: string;
   last_started: string | null;

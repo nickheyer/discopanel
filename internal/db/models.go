@@ -75,7 +75,7 @@ type Server struct {
 	ProxyHostname   string       `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex"`
 	ProxyListenerID string       `json:"proxy_listener_id" gorm:"column:proxy_listener_id"` // Which listener this server uses
 	MaxPlayers      int          `json:"max_players" gorm:"default:20;column:max_players"`
-	Memory          int          `json:"memory" gorm:"default:2048"` // in MB
+	Memory          int          `json:"memory" gorm:"default:2048"` // in MB (allocated)
 	CreatedAt       time.Time    `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt       time.Time    `json:"updated_at" gorm:"autoUpdateTime"`
 	LastStarted     *time.Time   `json:"last_started" gorm:"column:last_started"`
@@ -84,6 +84,12 @@ type Server struct {
 	DataPath        string       `json:"data_path" gorm:"not null;column:data_path"`
 	Detached        bool         `json:"detached" gorm:"default:false;column:detached"`     // Detach server container from DiscoPanel lifecycle (default: false)
 	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
+	
+	// Runtime stats (not persisted to DB)
+	MemoryUsage float64 `json:"memory_usage" gorm:"-"` // Current memory usage in MB
+	CPUPercent  float64 `json:"cpu_percent" gorm:"-"`  // Current CPU usage percentage
+	DiskUsage   int64   `json:"disk_usage" gorm:"-"`   // Current disk usage in bytes
+	DiskTotal   int64   `json:"disk_total" gorm:"-"`   // Total disk space available in bytes
 }
 
 type ServerConfig struct {

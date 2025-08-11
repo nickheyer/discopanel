@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/nickheyer/discopanel/internal/auth"
+	"github.com/nickheyer/discopanel/internal/cache"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -17,6 +18,10 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	web "github.com/nickheyer/discopanel/web/discopanel"
 )
+
+// CacheKey types for different cached values
+type DiskTotalKey string
+type DiskUsageKey string
 
 type Server struct {
 	store          *storage.Store
@@ -27,6 +32,8 @@ type Server struct {
 	proxyManager   *proxy.Manager
 	authManager    *auth.Manager
 	authMiddleware *auth.Middleware
+	diskTotalCache *cache.TTLCache[DiskTotalKey, int64]
+	diskUsageCache *cache.TTLCache[DiskUsageKey, int64]
 }
 
 func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
@@ -46,6 +53,8 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		log:            log,
 		authManager:    authManager,
 		authMiddleware: authMiddleware,
+		diskTotalCache: cache.NewTTLCache[DiskTotalKey, int64](),
+		diskUsageCache: cache.NewTTLCache[DiskUsageKey, int64](),
 	}
 
 	s.setupRoutes()

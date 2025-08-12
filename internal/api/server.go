@@ -217,37 +217,47 @@ func (s *Server) getFrontendFS() http.FileSystem {
 }
 
 func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
-	fileServer := http.FileServer(fs)
-
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/")
-		path = strings.TrimSuffix(path, "/")
-		if path == "" {
-			path = "index.html"
-		}
 
-		// Try to open the requested file
+		// Try to open
 		file, err := fs.Open(path)
 		if err == nil {
-			file.Close()
-			fileServer.ServeHTTP(w, r)
+			defer file.Close()
+
+			// Check if it's a directory
+			stat, err := file.Stat()
+			if err == nil && stat.IsDir() {
+				// Serve the root index.html for directory requests
+				s.serveIndexHTML(w, r, fs)
+				return
+			}
+
+			http.ServeContent(w, r, path, stat.ModTime(), file)
 			return
 		}
 
-		// Fallback to index.html
-		indexFile, err := fs.Open("index.html")
-		if err == nil {
-			indexFile.Close()
-
-			// Serve index.html but preserve original path
-			newReq := r.Clone(r.Context())
-			newReq.URL.Path = "/index.html"
-			fileServer.ServeHTTP(w, newReq)
-			return
-		}
-
-		http.NotFound(w, r)
+		// Path doesn't exist
+		s.serveIndexHTML(w, r, fs)
 	}
+}
+
+func (s *Server) serveIndexHTML(w http.ResponseWriter, r *http.Request, fs http.FileSystem) {
+	indexFile, err := fs.Open("index.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer indexFile.Close()
+
+	stat, err := indexFile.Stat()
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	http.ServeContent(w, r, "index.html", stat.ModTime(), indexFile)
 }
 
 func (s *Server) SetProxyManager(pm *proxy.Manager) {

@@ -201,6 +201,14 @@ func (s *Server) handleCreateProxyListener(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Add the listener to the proxy manager if it's running
+	if s.proxyManager != nil && s.config.Proxy.Enabled {
+		if err := s.proxyManager.AddListener(&req); err != nil {
+			s.log.Error("Failed to add listener to proxy manager: %v", err)
+			// Not critical - proxy can be restarted to pick it up
+		}
+	}
+
 	s.respondJSON(w, http.StatusCreated, req)
 }
 
@@ -238,10 +246,32 @@ func (s *Server) handleUpdateProxyListener(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	oldPort := listener.Port  // Save old port in case it changed
+	listener.Port = req.Port   // Update port if provided
+
 	if err := s.store.UpdateProxyListener(ctx, listener); err != nil {
 		s.log.Error("Failed to update proxy listener: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to update proxy listener")
 		return
+	}
+
+	// Handle proxy manager updates if running
+	if s.proxyManager != nil && s.config.Proxy.Enabled {
+		// If port changed, remove old and add new
+		if oldPort != listener.Port {
+			s.proxyManager.RemoveListener(oldPort)
+			if listener.Enabled {
+				if err := s.proxyManager.AddListener(listener); err != nil {
+					s.log.Error("Failed to add updated listener to proxy manager: %v", err)
+				}
+			}
+		} else if !listener.Enabled {
+			// If disabled, remove it
+			s.proxyManager.RemoveListener(listener.Port)
+		} else if listener.Enabled {
+			// If enabled and port didn't change, try to add it (in case it wasn't there)
+			s.proxyManager.AddListener(listener)
+		}
 	}
 
 	s.respondJSON(w, http.StatusOK, listener)
@@ -252,6 +282,13 @@ func (s *Server) handleDeleteProxyListener(w http.ResponseWriter, r *http.Reques
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	// Get the listener first to know which port to remove from proxy manager
+	listener, err := s.store.GetProxyListener(ctx, id)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Listener not found")
+		return
+	}
+
 	if err := s.store.DeleteProxyListener(ctx, id); err != nil {
 		if strings.Contains(err.Error(), "servers are using it") {
 			s.respondError(w, http.StatusBadRequest, err.Error())
@@ -260,6 +297,14 @@ func (s *Server) handleDeleteProxyListener(w http.ResponseWriter, r *http.Reques
 			s.respondError(w, http.StatusInternalServerError, "Failed to delete proxy listener")
 		}
 		return
+	}
+
+	// Remove the listener from the proxy manager if it's running
+	if s.proxyManager != nil && s.config.Proxy.Enabled {
+		if err := s.proxyManager.RemoveListener(listener.Port); err != nil {
+			s.log.Error("Failed to remove listener from proxy manager: %v", err)
+			// Not critical - proxy can be restarted to clean it up
+		}
 	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})

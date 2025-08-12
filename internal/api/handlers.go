@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,9 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if full stats are requested (for dashboard)
+	fullStats := r.URL.Query().Get("full_stats") == "true"
+
 	// Get all proxy listeners once for efficiency
 	var listeners map[string]*models.ProxyListener
 	if s.config.Proxy.Enabled {
@@ -41,9 +45,17 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Update status from Docker (skip expensive stats for list view)
+	// Get total disk space available
+	diskTotal, err := files.GetDiskSpace(s.config.Storage.DataDir)
+	if err != nil {
+		fmt.Printf("unable to get disk space available")
+		diskTotal = 0
+	}
+
+	// Update status from Docker
 	for _, server := range servers {
 		// If server uses proxy, ensure ProxyPort is populated from the listener
+		// ProxyPort is the external port players connect to
 		if server.ProxyHostname != "" && server.ProxyListenerID != "" && listeners != nil {
 			if listener, ok := listeners[server.ProxyListenerID]; ok {
 				server.ProxyPort = listener.Port
@@ -54,6 +66,52 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 			status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
 			if err == nil {
 				server.Status = status
+			}
+
+			// Only get expensive stats if requested (dashboard refresh)
+			if fullStats && (status == models.StatusRunning || status == models.StatusUnhealthy) {
+				// Get container stats
+				stats, err := s.docker.GetContainerStats(ctx, server.ContainerID)
+				if err == nil {
+					server.MemoryUsage = stats.MemoryUsage
+					server.CPUPercent = stats.CPUPercent
+				}
+
+				// Calculate disk usage for world directory
+				worldPath, err := files.FindWorldDir(server.DataPath)
+				if err == nil {
+					totalSize, err := files.CalculateDirSize(worldPath)
+					if err == nil {
+						server.DiskUsage = totalSize // Store as bytes
+					}
+				}
+
+				server.DiskTotal = diskTotal
+
+				// Get player count using rcon-cli
+				output, err := s.docker.ExecCommand(ctx, server.ContainerID, "list")
+				if err == nil && output != "" {
+					count, _ := minecraft.ParsePlayerListFromOutput(output)
+					server.PlayersOnline = count
+				}
+
+				// Get TPS if configured
+				if server.TPSCommand != "" {
+					for _, cmd := range strings.Split(server.TPSCommand, " ?? ") {
+						cmd = strings.TrimSpace(cmd)
+						if cmd == "" {
+							continue
+						}
+						output, err := s.docker.ExecCommand(ctx, server.ContainerID, cmd)
+						if err == nil && output != "" {
+							tps := minecraft.ParseTPSFromOutput(output)
+							if tps > 0 {
+								server.TPS = tps
+								break
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -198,11 +256,9 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 
 		// Also check if this port is used by the proxy
 		if s.config.Proxy.Enabled {
-			for _, proxyPort := range s.config.Proxy.ListenPorts {
-				if req.Port == proxyPort {
-					s.respondError(w, http.StatusBadRequest, "Port is already in use by the proxy server")
-					return
-				}
+			if slices.Contains(s.config.Proxy.ListenPorts, req.Port) {
+				s.respondError(w, http.StatusBadRequest, "Port is already in use by the proxy server")
+				return
 			}
 		}
 	}
@@ -244,12 +300,15 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		server.ModLoader = models.ModLoaderVanilla
 	}
 
-	// Set ProxyPort to the actual listener port when using proxy
+	// When using proxy, set the ports correctly:
+	// - ProxyPort: the external port that players connect to (from the listener)
+	// - Port: should be 25565 for container internal port when using proxy
 	if s.config.Proxy.Enabled && server.ProxyHostname != "" && req.ProxyListenerID != "" {
 		// Get the listener to set the correct proxy port
 		listener, err := s.store.GetProxyListener(ctx, req.ProxyListenerID)
 		if err == nil && listener != nil {
-			server.ProxyPort = listener.Port
+			server.ProxyPort = listener.Port // External port for players to connect
+			server.Port = 25565              // Internal container port (always 25565 for proxied servers)
 		}
 	}
 
@@ -367,6 +426,7 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If server uses proxy, ensure ProxyPort is populated from the listener
+	// ProxyPort is the external port players connect to
 	if server.ProxyHostname != "" && server.ProxyListenerID != "" {
 		listener, err := s.store.GetProxyListener(ctx, server.ProxyListenerID)
 		if err == nil && listener != nil {

@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 
@@ -13,7 +14,7 @@ import (
 
 // Manager handles the lifecycle of the proxy and manages routes
 type Manager struct {
-	proxy       *Proxy
+	proxies     map[int]*Proxy // Map of port -> Proxy instance
 	store       *db.Store
 	config      *config.ProxyConfig
 	logger      *logger.Logger
@@ -24,6 +25,7 @@ type Manager struct {
 // NewManager creates a new proxy manager
 func NewManager(store *db.Store, cfg *config.ProxyConfig, logger *logger.Logger) *Manager {
 	return &Manager{
+		proxies:     make(map[int]*Proxy),
 		store:       store,
 		config:      cfg,
 		logger:      logger,
@@ -41,17 +43,27 @@ func (m *Manager) Start() error {
 		return nil
 	}
 
-	// Determine listen address
-	listenAddr := ":25565" // Default Minecraft port
-	if m.config.ListenPort > 0 {
-		listenAddr = fmt.Sprintf(":%d", m.config.ListenPort)
+	// Get all proxy listeners from database
+	listeners, err := m.store.GetProxyListeners(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to load proxy listeners: %w", err)
 	}
 
-	// Create proxy instance
-	m.proxy = New(&Config{
-		ListenAddr: listenAddr,
-		Logger:     m.logger,
-	})
+	// Create a proxy instance for each enabled listener
+	for _, listener := range listeners {
+		if !listener.Enabled {
+			continue
+		}
+
+		listenAddr := fmt.Sprintf(":%d", listener.Port)
+		proxy := New(&Config{
+			ListenAddr: listenAddr,
+			Logger:     m.logger,
+		})
+
+		m.proxies[listener.Port] = proxy
+		m.logger.Info("Created proxy for listener %s on port %d", listener.Name, listener.Port)
+	}
 
 	// Load existing server routes
 	servers, err := m.store.ListServers(context.Background())
@@ -59,9 +71,29 @@ func (m *Manager) Start() error {
 		return fmt.Errorf("failed to load servers: %w", err)
 	}
 
+	// Map to track which listener each server uses
+	listenerMap := make(map[string]*db.ProxyListener)
+	for _, listener := range listeners {
+		listenerMap[listener.ID] = listener
+	}
+
 	for _, server := range servers {
 		// Add routes for servers with proxy hostname that are either running or have a container
-		if server.ProxyHostname != "" && server.ContainerID != "" {
+		if server.ProxyHostname != "" && server.ContainerID != "" && server.ProxyListenerID != "" {
+			// Find which listener this server uses
+			listener, ok := listenerMap[server.ProxyListenerID]
+			if !ok || !listener.Enabled {
+				m.logger.Error("Server %s has invalid or disabled listener %s", server.Name, server.ProxyListenerID)
+				continue
+			}
+
+			// Get the proxy instance for this listener's port
+			proxy, ok := m.proxies[listener.Port]
+			if !ok {
+				m.logger.Error("No proxy instance for port %d", listener.Port)
+				continue
+			}
+
 			// Get container IP address
 			containerIP, err := getContainerIP(server.ContainerID, m.networkName)
 			if err != nil {
@@ -69,41 +101,48 @@ func (m *Manager) Start() error {
 				continue
 			}
 
-			m.proxy.AddRoute(
+			proxy.AddRoute(
 				server.ID,
 				server.ProxyHostname,
 				containerIP, // Use IP address instead of container name
 				25565,       // Internal Minecraft port
 			)
-			m.logger.Info("Added proxy route for server %s: %s -> %s:25565", server.Name, server.ProxyHostname, containerIP)
+			m.logger.Info("Added proxy route for server %s: %s -> %s:25565 on listener port %d",
+				server.Name, server.ProxyHostname, containerIP, listener.Port)
 		}
 	}
 
-	// Start the proxy
-	if err := m.proxy.Start(); err != nil {
-		return fmt.Errorf("failed to start proxy: %w", err)
+	// Start all proxy instances
+	for port, proxy := range m.proxies {
+		if err := proxy.Start(); err != nil {
+			return fmt.Errorf("failed to start proxy on port %d: %w", port, err)
+		}
 	}
 
 	m.logger.Info("Proxy manager started")
 	return nil
 }
 
-// Stop stops the proxy
+// Stop stops all proxy instances
 func (m *Manager) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.proxy == nil {
+	if len(m.proxies) == 0 {
 		return nil
 	}
 
-	if err := m.proxy.Stop(); err != nil {
-		return fmt.Errorf("failed to stop proxy: %w", err)
+	var lastErr error
+	for port, proxy := range m.proxies {
+		if err := proxy.Stop(); err != nil {
+			lastErr = fmt.Errorf("failed to stop proxy on port %d: %w", port, err)
+			m.logger.Error("Failed to stop proxy on port %d: %v", port, err)
+		}
 	}
 
-	m.proxy = nil
+	m.proxies = make(map[int]*Proxy)
 	m.logger.Info("Proxy manager stopped")
-	return nil
+	return lastErr
 }
 
 // UpdateServerRoute updates or creates a route for a server
@@ -111,8 +150,28 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.proxy == nil || !m.config.Enabled {
+	if len(m.proxies) == 0 || !m.config.Enabled {
 		return nil
+	}
+
+	// Get the listener for this server
+	if server.ProxyListenerID == "" {
+		return nil // No listener assigned
+	}
+
+	listener, err := m.store.GetProxyListener(context.Background(), server.ProxyListenerID)
+	if err != nil {
+		return fmt.Errorf("failed to get proxy listener: %w", err)
+	}
+
+	if !listener.Enabled {
+		return nil // Listener is disabled
+	}
+
+	// Get the proxy instance for this listener's port
+	proxy, ok := m.proxies[listener.Port]
+	if !ok {
+		return fmt.Errorf("no proxy instance for port %d", listener.Port)
 	}
 
 	hostname := m.generateHostname(server)
@@ -133,15 +192,16 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 			return fmt.Errorf("server has no container")
 		}
 
-		routes := m.proxy.GetRoutes()
+		routes := proxy.GetRoutes()
 		if _, exists := routes[hostname]; exists {
-			m.proxy.UpdateRoute(hostname, containerIP, 25565)
+			proxy.UpdateRoute(hostname, containerIP, 25565)
 		} else {
-			m.proxy.AddRoute(server.ID, hostname, containerIP, 25565)
+			proxy.AddRoute(server.ID, hostname, containerIP, 25565)
 		}
+		m.logger.Info("Updated route for server %s on port %d", server.Name, listener.Port)
 	} else if server.Status == db.StatusStopped || server.Status == db.StatusStopping {
 		// Remove route if server is stopped or stopping
-		m.proxy.RemoveRoute(hostname)
+		proxy.RemoveRoute(hostname)
 	}
 
 	return nil
@@ -152,7 +212,7 @@ func (m *Manager) RemoveServerRoute(serverID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.proxy == nil || !m.config.Enabled {
+	if len(m.proxies) == 0 || !m.config.Enabled {
 		return nil
 	}
 
@@ -162,7 +222,11 @@ func (m *Manager) RemoveServerRoute(serverID string) error {
 	}
 
 	hostname := m.generateHostname(server)
-	m.proxy.RemoveRoute(hostname)
+
+	// Remove from all proxies (in case it was moved between listeners)
+	for _, proxy := range m.proxies {
+		proxy.RemoveRoute(hostname)
+	}
 
 	return nil
 }
@@ -183,28 +247,84 @@ func (m *Manager) generateHostname(server *db.Server) string {
 	return fmt.Sprintf("server-%s.minecraft.mc", server.ID)
 }
 
-// GetRoutes returns all current proxy routes
+// GetRoutes returns all current proxy routes from all proxies
 func (m *Manager) GetRoutes() map[string]*Route {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.proxy == nil {
-		return make(map[string]*Route)
+	allRoutes := make(map[string]*Route)
+	for _, proxy := range m.proxies {
+		maps.Copy(allRoutes, proxy.GetRoutes())
 	}
 
-	return m.proxy.GetRoutes()
+	return allRoutes
 }
 
-// IsRunning returns whether the proxy is running
+// IsRunning returns whether any proxy is running
 func (m *Manager) IsRunning() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.proxy == nil {
-		return false
+	for _, proxy := range m.proxies {
+		if proxy.IsRunning() {
+			return true
+		}
 	}
 
-	return m.proxy.IsRunning()
+	return false
+}
+
+// AddListener creates and starts a proxy instance for a new listener
+func (m *Manager) AddListener(listener *db.ProxyListener) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.config.Enabled || !listener.Enabled {
+		return nil
+	}
+
+	// Check if proxy already exists for this port
+	if _, exists := m.proxies[listener.Port]; exists {
+		return fmt.Errorf("proxy already exists for port %d", listener.Port)
+	}
+
+	// Create new proxy instance
+	listenAddr := fmt.Sprintf(":%d", listener.Port)
+	proxy := New(&Config{
+		ListenAddr: listenAddr,
+		Logger:     m.logger,
+	})
+
+	// Start the proxy
+	if err := proxy.Start(); err != nil {
+		return fmt.Errorf("failed to start proxy on port %d: %w", listener.Port, err)
+	}
+
+	m.proxies[listener.Port] = proxy
+	m.logger.Info("Added and started proxy for listener %s on port %d", listener.Name, listener.Port)
+
+	return nil
+}
+
+// RemoveListener stops and removes a proxy instance for a listener
+func (m *Manager) RemoveListener(port int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	proxy, exists := m.proxies[port]
+	if !exists {
+		return nil // Already removed or doesn't exist
+	}
+
+	// Stop the proxy
+	if err := proxy.Stop(); err != nil {
+		m.logger.Error("Failed to stop proxy on port %d: %v", port, err)
+	}
+
+	delete(m.proxies, port)
+	m.logger.Info("Removed proxy for port %d", port)
+
+	return nil
 }
 
 // AllocateProxyPort allocates a proxy port for a server

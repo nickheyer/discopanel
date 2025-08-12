@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -213,13 +211,6 @@ func (s *Server) getFrontendFS() http.FileSystem {
 	if buildFS, err := web.BuildFS(); err == nil {
 		s.log.Info("Using embedded frontend")
 		return http.FS(buildFS)
-	}
-
-	// Fall back to fs for dev
-	webRoot := filepath.Join("web", "discopanel", "build")
-	if _, err := os.Stat(webRoot); err == nil {
-		s.log.Info("Using filesystem frontend from %s", webRoot)
-		return http.Dir(webRoot)
 	}
 
 	return nil

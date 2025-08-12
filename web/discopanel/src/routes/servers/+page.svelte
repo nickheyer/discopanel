@@ -51,7 +51,6 @@
 					toast.success(`Restarting ${server.name}...`);
 					break;
 			}
-			await serversStore.fetchServers();
 		} catch (error) {
 			toast.error(`Failed to ${action} server: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		} finally {

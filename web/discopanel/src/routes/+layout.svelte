@@ -71,7 +71,9 @@
 		}
 
 		// Fetch servers after auth check
-		await serversStore.fetchServers();
+		if (page.url.pathname !== '/login') {
+			await serversStore.fetchServers();
+		}
 	});
 	
 	// Set up global status polling - always poll all servers
@@ -87,7 +89,9 @@
 		// Always poll for all servers to keep sidebar in sync
 		if (!loading) {
 			statusPollingInterval = setInterval(() => {
-				serversStore.fetchServers();
+				if (page.url.pathname !== '/login') {
+					serversStore.fetchServers();
+				}
 			}, 10000);
 		}
 		

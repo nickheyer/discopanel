@@ -305,7 +305,7 @@
 			<Label for="tps_command" class="text-sm font-medium">TPS Command <span class="text-muted-foreground text-xs">(Optional)</span></Label>
 			<Input
 				id="tps_command"
-				placeholder="Auto-detect based on mod loader"
+				placeholder="Polling TPS command"
 				bind:value={formData.tps_command}
 				class="h-10"
 			/>

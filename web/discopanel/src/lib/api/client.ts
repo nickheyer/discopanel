@@ -1,5 +1,6 @@
 import { toast } from 'svelte-sonner';
 import { authStore } from '$lib/stores/auth';
+import { loadingStore } from '$lib/stores/loading.svelte';
 import type {
   Server,
   CreateServerRequest,
@@ -23,35 +24,51 @@ const API_BASE = '/api/v1';
 class ApiClient {
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit & { skipLoading?: boolean } = {}
   ): Promise<T> {
-    // Get auth headers
-    const authHeaders = authStore.getHeaders();
+    // Generate unique operation ID for this request
+    const operationId = `${options.method || 'GET'}-${path}-${Date.now()}`;
     
-    const response = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      headers: {
-        ...authHeaders,
-        ...options.headers,
-      },
-    });
-
-    if (!response.ok) {
-      let errorMessage = `HTTP error! status: ${response.status}`;
-      try {
-        const error: ApiError = await response.json();
-        errorMessage = error.error || errorMessage;
-      } catch {
-        // If response is not JSON, use default error message
-      }
-      
-      // Show error toast
-      toast.error(errorMessage);
-      
-      throw new Error(errorMessage);
+    // Don't show loading for polling operations or if explicitly skipped
+    const showLoading = !options.skipLoading && !path.includes('?poll=true');
+    
+    if (showLoading) {
+      loadingStore.start(operationId);
     }
+    
+    try {
+      // Get auth headers
+      const authHeaders = authStore.getHeaders();
+      
+      const response = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers: {
+          ...authHeaders,
+          ...options.headers,
+        },
+      });
 
-    return response.json();
+      if (!response.ok) {
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const error: ApiError = await response.json();
+          errorMessage = error.error || errorMessage;
+        } catch {
+          // If response is not JSON, use default error message
+        }
+        
+        // Show error toast
+        toast.error(errorMessage);
+        
+        throw new Error(errorMessage);
+      }
+
+      return response.json();
+    } finally {
+      if (showLoading) {
+        loadingStore.stop(operationId);
+      }
+    }
   }
 
   private async requestBlob(
@@ -101,12 +118,12 @@ class ApiClient {
   }
 
   // Server Management
-  async getServers(): Promise<Server[]> {
-    return this.request<Server[]>('/servers');
+  async getServers(skipLoading = false): Promise<Server[]> {
+    return this.request<Server[]>('/servers', { skipLoading });
   }
 
-  async getServer(id: string): Promise<Server> {
-    return this.request<Server>(`/servers/${id}`);
+  async getServer(id: string, skipLoading = false): Promise<Server> {
+    return this.request<Server>(`/servers/${id}`, { skipLoading });
   }
 
   async createServer(data: CreateServerRequest): Promise<Server> {
@@ -159,7 +176,7 @@ class ApiClient {
   }
 
   async getServerLogs(id: string, tail: number = 100): Promise<ServerLogsResponse> {
-    return this.request<ServerLogsResponse>(`/servers/${id}/logs?tail=${tail}`);
+    return this.request<ServerLogsResponse>(`/servers/${id}/logs?tail=${tail}`, { skipLoading: true });
   }
 
   async sendServerCommand(id: string, command: string): Promise<{ success: boolean; output?: string; error?: string }> {

@@ -7,9 +7,9 @@ function createServersStore() {
 
   return {
     subscribe,
-    fetchServers: async () => {
+    fetchServers: async (skipLoading = true) => {
       try {
-        const servers = await api.getServers();
+        const servers = await api.getServers(skipLoading);
         set(servers);
         return servers;
       } catch (error) {

@@ -43,14 +43,14 @@
 			loadServer();
 			
 			// Set up new interval
-			interval = setInterval(loadServer, 5000); // Poll every 5 seconds
+			interval = setInterval(() => loadServer(true), 5000); // Poll every 5 seconds
 		}
 	});
 
-	async function loadServer() {
+	async function loadServer(skipLoading = false) {
 		try {
 			if (!serverId) return;
-			server = await api.getServer(serverId);
+			server = await api.getServer(serverId, skipLoading);
 			serversStore.updateServer(server);
 		
 		} catch (error) {

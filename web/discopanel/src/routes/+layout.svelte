@@ -34,6 +34,7 @@
 	import { authStore, currentUser, isAdmin } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
+	import GlobalLoading from '$lib/components/global-loading.svelte';
 
 	import { Server, Home, Settings, Package, User, Users, Shield, LogOut } from '@lucide/svelte';
 
@@ -70,9 +71,9 @@
 			}
 		}
 
-		// Fetch servers after auth check
+		// Fetch servers after auth check (show loading for initial load)
 		if (page.url.pathname !== '/login') {
-			await serversStore.fetchServers();
+			await serversStore.fetchServers(false);
 		}
 	});
 	
@@ -90,7 +91,7 @@
 		if (!loading) {
 			statusPollingInterval = setInterval(() => {
 				if (page.url.pathname !== '/login') {
-					serversStore.fetchServers();
+					serversStore.fetchServers(true);
 				}
 			}, 10000);
 		}
@@ -111,6 +112,7 @@
 
 <ModeWatcher />
 <Toaster position="bottom-center" expand={true} richColors />
+<GlobalLoading />
 
 {#if page.url.pathname === '/login'}
 	{@render children?.()}

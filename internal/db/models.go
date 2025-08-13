@@ -72,8 +72,8 @@ type Server struct {
 	Status          ServerStatus `json:"status" gorm:"not null"`
 	Port            int          `json:"port"`
 	ProxyPort       int          `json:"proxy_port" gorm:"column:proxy_port"`
-	ProxyHostname   string       `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener"`
-	ProxyListenerID string       `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener"` // Which listener this server uses
+	ProxyHostname   string       `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
+	ProxyListenerID string       `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
 	MaxPlayers      int          `json:"max_players" gorm:"default:20;column:max_players"`
 	Memory          int          `json:"memory" gorm:"default:2048"` // in MB (allocated)
 	CreatedAt       time.Time    `json:"created_at" gorm:"autoCreateTime"`

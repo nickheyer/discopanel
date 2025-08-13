@@ -172,28 +172,36 @@
 	};
 </script>
 
-<div class="flex-1 space-y-6 h-full p-6 bg-gradient-to-br from-background via-background to-muted/5">
-	<div class="flex items-center justify-between pb-4 border-b border-border/40">
-		<div class="flex items-center gap-4">
-			<div class="h-14 w-14 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg animate-in fade-in-50 duration-500">
-				<LayoutDashboard class="h-7 w-7 text-primary" />
-			</div>
-			<div class="space-y-1 animate-in slide-in-from-left-5 duration-500">
-				<h2 class="text-3xl font-bold tracking-tight">Dashboard</h2>
-				<p class="text-sm text-muted-foreground">Monitor and manage your Minecraft server infrastructure</p>
-			</div>
+{#if isLoading}
+	<div class="flex-1 flex items-center justify-center h-full p-6">
+		<div class="text-center space-y-4">
+			<div class="h-12 w-12 border-4 border-primary/30 border-t-primary rounded-full animate-spin mx-auto"></div>
+			<p class="text-muted-foreground">Loading dashboard...</p>
 		</div>
-		<div class="flex items-center gap-3 animate-in slide-in-from-right-5 duration-500">
-			<Button 
-				variant="outline" 
-				size="sm"
-				onclick={refreshDashboard}
-				disabled={isRefreshing}
-				class="flex items-center gap-2"
-			>
-				<RefreshCw class="h-4 w-4 {isRefreshing ? 'animate-spin' : ''}" />
-				Refresh
-			</Button>
+	</div>
+{:else}
+	<div class="flex-1 space-y-6 h-full p-6 bg-gradient-to-br from-background via-background to-muted/5">
+		<div class="flex items-center justify-between pb-4 border-b border-border/40">
+			<div class="flex items-center gap-4">
+				<div class="h-14 w-14 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg animate-in fade-in-50 duration-500">
+					<LayoutDashboard class="h-7 w-7 text-primary" />
+				</div>
+				<div class="space-y-1 animate-in slide-in-from-left-5 duration-500">
+					<h2 class="text-3xl font-bold tracking-tight">Dashboard</h2>
+					<p class="text-sm text-muted-foreground">Monitor and manage your Minecraft server infrastructure</p>
+				</div>
+			</div>
+			<div class="flex items-center gap-3 animate-in slide-in-from-right-5 duration-500">
+				<Button 
+					variant="outline" 
+					size="sm"
+					onclick={refreshDashboard}
+					disabled={isRefreshing}
+					class="flex items-center gap-2"
+				>
+					<RefreshCw class="h-4 w-4 {isRefreshing ? 'animate-spin' : ''}" />
+					Refresh
+				</Button>
 			<Button 
 				href="/servers/new" 
 				size="default" 
@@ -597,3 +605,4 @@
 		</Card>
 	</div>
 </div>
+{/if}

@@ -247,8 +247,6 @@
 			
 			// Create the server
 			const server = await api.createServer(createRequest);
-			serversStore.addServer(server);
-			
 			toast.success(`Server "${server.name}" created successfully!`);
 			goto(`/servers/${server.id}`);
 		} catch (error) {

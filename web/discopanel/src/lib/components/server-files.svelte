@@ -41,13 +41,19 @@
 			editingFile = null;
 			showEditor = false;
 			hasLoaded = false;
+			
+			// If currently active, load files immediately
+			if (active) {
+				loadFiles();
+				hasLoaded = true;
+			}
 		}
 	});
 	
 	$effect(() => {
 		if (active && !hasLoaded) {
-			hasLoaded = true;
 			loadFiles();
+			hasLoaded = true;
 		}
 	});
 

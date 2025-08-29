@@ -28,11 +28,19 @@ Because managing Minecraft servers shouldn't be difficult:
 ## Quick Start
 
 ```bash
+
+# Non-exhaustive list of requirements for building from source:
+# 1. Go (v1.24.5 if that matters)
+# 2. NodeJs + npm (for building front end)
+
 # Clone it
 git clone https://github.com/nickheyer/discopanel
 cd discopanel
 
-# Build it
+# Build frontend
+cd web/discopanel && npm run build
+
+# Build backend and embed front end
 go build -o discopanel cmd/discopanel/main.go
 
 # Run it
@@ -45,6 +53,7 @@ go build -o discopanel cmd/discopanel/main.go
 ## Docker Run
 
 ```bash
+
 docker run -d \
   --name discopanel \
   --restart unless-stopped \
@@ -63,37 +72,51 @@ docker run -d \
 ## Docker Compose (Recommended)
 
 ```yaml
+
 services:
   discopanel:
-    build: .
+    # build: .
     image: nickheyer/discopanel:latest
     container_name: discopanel
     restart: unless-stopped
-    # Option 1: Use host network mode
+
+    # Option 1 (RECOMENDED FOR SIMPLICITY): Use host network mode
     network_mode: host
-    # Option 2: Use port mapping
-    ports:
-      - "8080:8080"         # DiscoPanel web interface
-      - "25565:25565"       # Minecraft port/proxy-port
-      - "25565-25665:25565-25665/tcp" # Additional ports/proxy-ports if needed
-      - "25565-25665:25565-25665/udp" # Also map UDP for some Minecraft features
+
+    # Option 2 (MORE COMPLICATED, ONLY USE IF YOU NEEDED): Use bridge mode with port mapping (default)
+    # ports:
+    #   - "8080:8080"         # DiscoPanel web interface
+    #   - "25565:25565"       # Minecraft port/proxy-port
+    #   - "25565-25665:25565-25665/tcp" # Additional ports/proxy-ports if needed
+    #   - "25565-25665:25565-25665/udp" # Also map UDP for some Minecraft features
+
     volumes:
       # Docker socket for managing containers
       - /var/run/docker.sock:/var/run/docker.sock
   
-      - ./data:/app/data
+      # IMPORTANT: This is where your server(s) data will be stored on the host.
+      # You can set this to any path you'd like, but the path must exist AND you must use the same
+      # absolute paths below for the below env vars (in the environment section at the bottom). Example:
+      # DISCOPANEL_DATA_DIR=/app/data
+      # DISCOPANEL_HOST_DATA_PATH=/home/user/data
+      # (See environment)
+      - /home/user/data:/app/data
+
       - ./backups:/app/backups
       - ./tmp:/app/tmp
       
-      # Configuration file (optional)
+      # Configuration file (optional, see config.example.yaml for all available options).
       - ./config.yaml:/app/config.yaml:ro
     environment:
       - DISCOPANEL_DATA_DIR=/app/data
-      - DISCOPANEL_HOST_DATA_PATH=/full/path/to/your/data # IMPORTANT: Replace this path with the folder this compose file lives in!
+
+      # IMPORTANT: THIS MUST BE SET TO THE SAME PATH AS THE SERVER DATA PATH IN "volumes" above
+      - DISCOPANEL_HOST_DATA_PATH=/home/user/data
       - TZ=UTC
+
+    # DONT FORGET THIS
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    restart: unless-stopped
 ```
 
 >> NOTE: Prebuilt binaries coming soon... but just use docker, you'll need it anyways. Ask for help in discord, we'd love to help.

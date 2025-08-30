@@ -150,6 +150,7 @@ func (s *Server) setupServerRoutes(api *mux.Router) {
 	editor.HandleFunc("/servers/{id}/files", s.handleUploadFile).Methods("POST")
 	editor.HandleFunc("/servers/{id}/files/{path:.*}", s.handleUpdateFile).Methods("PUT")
 	editor.HandleFunc("/servers/{id}/files/{path:.*}", s.handleDeleteFile).Methods("DELETE")
+	editor.HandleFunc("/servers/{id}/rename/{path:.*}", s.handleRenameFile).Methods("POST")
 
 	// Mod write operations
 	editor.HandleFunc("/servers/{id}/mods", s.handleUploadMod).Methods("POST")

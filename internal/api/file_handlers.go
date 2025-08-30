@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -11,12 +13,13 @@ import (
 )
 
 type FileInfo struct {
-	Name     string     `json:"name"`
-	Path     string     `json:"path"`
-	IsDir    bool       `json:"is_dir"`
-	Size     int64      `json:"size"`
-	Modified int64      `json:"modified"`
-	Children []FileInfo `json:"children,omitempty"`
+	Name       string     `json:"name"`
+	Path       string     `json:"path"`
+	IsDir      bool       `json:"is_dir"`
+	Size       int64      `json:"size"`
+	Modified   int64      `json:"modified"`
+	IsEditable bool       `json:"is_editable"`
+	Children   []FileInfo `json:"children,omitempty"`
 }
 
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +278,129 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	serverID := vars["id"]
+	filePath := vars["path"]
+
+	// Parse request body
+	var req struct {
+		NewName string `json:"new_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate new name
+	if req.NewName == "" {
+		s.respondError(w, http.StatusBadRequest, "New name cannot be empty")
+		return
+	}
+
+	// Ensure new name doesn't contain path separators
+	if strings.Contains(req.NewName, "/") || strings.Contains(req.NewName, "\\") {
+		s.respondError(w, http.StatusBadRequest, "Name cannot contain path separators")
+		return
+	}
+
+	// Get server
+	server, err := s.store.GetServer(ctx, serverID)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+
+	// Clean and validate old path
+	oldFullPath := filepath.Join(server.DataPath, filePath)
+	if !strings.HasPrefix(oldFullPath, server.DataPath) {
+		s.respondError(w, http.StatusBadRequest, "Invalid path")
+		return
+	}
+
+	// Build new path
+	dir := filepath.Dir(filePath)
+	newPath := filepath.Join(dir, req.NewName)
+	newFullPath := filepath.Join(server.DataPath, newPath)
+
+	// Validate new path
+	if !strings.HasPrefix(newFullPath, server.DataPath) {
+		s.respondError(w, http.StatusBadRequest, "Invalid new path")
+		return
+	}
+
+	// Check if source exists
+	if _, err := os.Stat(oldFullPath); err != nil {
+		if os.IsNotExist(err) {
+			s.respondError(w, http.StatusNotFound, "File not found")
+		} else {
+			s.respondError(w, http.StatusInternalServerError, "Failed to access file")
+		}
+		return
+	}
+
+	// Check if destination already exists
+	if _, err := os.Stat(newFullPath); err == nil {
+		s.respondError(w, http.StatusConflict, "A file or folder with that name already exists")
+		return
+	}
+
+	// Rename
+	if err := os.Rename(oldFullPath, newFullPath); err != nil {
+		s.log.Error("Failed to rename file: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to rename file")
+		return
+	}
+
+	s.respondJSON(w, http.StatusOK, map[string]string{
+		"message": "File renamed successfully",
+		"old_path": filePath,
+		"new_path": newPath,
+	})
+}
+
+func isTextFile(path string) bool {
+	// Read first 512 bytes to detect content type
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	// Read up to 512 bytes
+	buffer := make([]byte, 512)
+	n, err := file.Read(buffer)
+	if err != nil && err != io.EOF {
+		return false
+	}
+	
+	if n == 0 {
+		// Empty files are considered text
+		return true
+	}
+
+	// Check for null bytes (binary indicator)
+	if bytes.Contains(buffer[:n], []byte{0}) {
+		return false
+	}
+
+	// Check if it's valid UTF-8 with printable characters
+	for i := 0; i < n; i++ {
+		b := buffer[i]
+		// Allow printable ASCII, tabs, newlines, carriage returns
+		if b < 32 && b != 9 && b != 10 && b != 13 {
+			return false
+		}
+		// Reject high control characters
+		if b == 127 {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (s *Server) listDirectory(path, basePath string) ([]FileInfo, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -289,13 +415,15 @@ func (s *Server) listDirectory(path, basePath string) ([]FileInfo, error) {
 		}
 
 		relPath, _ := filepath.Rel(basePath, filepath.Join(path, entry.Name()))
+		fullPath := filepath.Join(path, entry.Name())
 
 		fileInfo := FileInfo{
-			Name:     entry.Name(),
-			Path:     relPath,
-			IsDir:    entry.IsDir(),
-			Size:     info.Size(),
-			Modified: info.ModTime().Unix(),
+			Name:       entry.Name(),
+			Path:       relPath,
+			IsDir:      entry.IsDir(),
+			Size:       info.Size(),
+			Modified:   info.ModTime().Unix(),
+			IsEditable: !entry.IsDir() && isTextFile(fullPath),
 		}
 
 		files = append(files, fileInfo)
@@ -322,13 +450,15 @@ func (s *Server) listDirectoryTree(path, basePath string, depth, maxDepth int) (
 		}
 
 		relPath, _ := filepath.Rel(basePath, filepath.Join(path, entry.Name()))
+		fullPath := filepath.Join(path, entry.Name())
 
 		fileInfo := FileInfo{
-			Name:     entry.Name(),
-			Path:     relPath,
-			IsDir:    entry.IsDir(),
-			Size:     info.Size(),
-			Modified: info.ModTime().Unix(),
+			Name:       entry.Name(),
+			Path:       relPath,
+			IsDir:      entry.IsDir(),
+			Size:       info.Size(),
+			Modified:   info.ModTime().Unix(),
+			IsEditable: !entry.IsDir() && isTextFile(fullPath),
 		}
 
 		// If it's a directory and we haven't reached max depth, get children

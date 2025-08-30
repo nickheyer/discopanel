@@ -100,6 +100,7 @@ export interface FileInfo {
   is_dir: boolean;
   size: number;
   modified: number;
+  is_editable: boolean;
   children?: FileInfo[];
 }
 

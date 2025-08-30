@@ -289,6 +289,21 @@ class ApiClient {
     });
   }
 
+  async renameFile(serverId: string, path: string, newName: string): Promise<void> {
+    const response = await fetch(`${API_BASE}/servers/${serverId}/rename/${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ new_name: newName }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to rename file');
+    }
+  }
+
   // Proxy/Routing Management
   async getProxyStatus(): Promise<any> {
     return this.request<any>('/proxy/status');

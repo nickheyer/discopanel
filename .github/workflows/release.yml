@@ -1,0 +1,253 @@
+name: DiscoPanel Releaser
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/discopanel/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd web/discopanel
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd web/discopanel
+          npm run build
+
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: web/discopanel/build
+          retention-days: 1
+
+  build-binaries:
+    name: Build Binaries
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64.exe
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.5'
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: web/discopanel/build
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -tags embed -o discopanel-${{ matrix.suffix }} ./cmd/discopanel
+
+      - name: Compress binary (non-Windows)
+        if: matrix.goos != 'windows'
+        run: |
+          tar -czf discopanel-${{ matrix.suffix }}.tar.gz discopanel-${{ matrix.suffix }}
+
+      - name: Compress binary (Windows)
+        if: matrix.goos == 'windows'
+        run: |
+          zip discopanel-${{ matrix.suffix }}.zip discopanel-${{ matrix.suffix }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.suffix }}
+          path: |
+            discopanel-${{ matrix.suffix }}.tar.gz
+            discopanel-${{ matrix.suffix }}.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  build-docker:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            nickheyer/discopanel
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-binaries, build-docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: ./artifacts
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 ${VERSION}^ 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found"
+            CHANGELOG="Initial release"
+          else
+            echo "Generating changelog from ${PREV_TAG} to ${VERSION}"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..${VERSION})
+          fi
+          
+          # Save to file for release body
+          cat << EOF > RELEASE_NOTES.md
+          ## What's Changed
+          
+          ${CHANGELOG}
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: DiscoPanel ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            ./artifacts/**/*.tar.gz
+            ./artifacts/**/*.zip
+
+  notify-discord:
+    name: Discord Notification
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Send Discord notification
+        if: success()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
+          
+          curl -H "Content-Type: application/json" \
+            -d '{
+              "embeds": [{
+                "title": "DiscoPanel '"${VERSION}"' Released!",
+                "description": "A new version of DiscoPanel has been released.",
+                "url": "'"${RELEASE_URL}"'",
+                "color": 5814783,
+                "image": {
+                  "url": "https://i.imgur.com/tqAz2h0.png"
+                },
+                "fields": [
+                  {
+                    "name": "Version",
+                    "value": "`'"${VERSION}"'`",
+                    "inline": true
+                  },
+                  {
+                    "name": "Release Page",
+                    "value": "[View Release]('"${RELEASE_URL}"')",
+                    "inline": true
+                  },
+                  {
+                    "name": "Docker Hub",
+                    "value": "[View Images](https://hub.docker.com/r/nickheyer/discopanel)",
+                    "inline": true
+                  }
+                ],
+                "footer": {
+                  "text": "DiscoPanel Release"
+                },
+                "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'"
+              }]
+            }' \
+            $DISCORD_WEBHOOK

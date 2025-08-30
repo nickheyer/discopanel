@@ -2,12 +2,16 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
-	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw } from '@lucide/svelte';
+	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw, Plus, FolderPlus, FilePlus, Pencil } from '@lucide/svelte';
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
 	import type { Server, FileInfo } from '$lib/api/types';
 	import { formatBytes } from '$lib/utils';
 	import FileEditorDialog from './file-editor-dialog.svelte';
+	import { DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
+	import { Dialog as DialogPrimitive } from "bits-ui";
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
 
 	interface Props {
 		server: Server;
@@ -21,9 +25,14 @@
 	let uploading = $state(false);
 	let selectedPath = $state('');
 	let expandedDirs = $state<Set<string>>(new Set());
-	let fileInput = $state<HTMLInputElement | null>(null);
 	let editingFile = $state<FileInfo | null>(null);
 	let showEditor = $state(false);
+	let showNewFileDialog = $state(false);
+	let showNewFolderDialog = $state(false);
+	let showRenameDialog = $state(false);
+	let targetPath = $state('');
+	let newItemName = $state('');
+	let renamingItem = $state<FileInfo | null>(null);
 
 	let hasLoaded = false;
 	let previousServerId = $state(server.id);
@@ -95,17 +104,18 @@
 		expandedDirs = new Set(expandedDirs);
 	}
 
-	async function handleFileSelect(event: Event) {
+	async function handleFileSelect(event: Event, path?: string) {
 		const input = event.target as HTMLInputElement;
 		const files = input.files;
 		if (!files || files.length === 0) return;
 
+		const uploadPath = path || selectedPath || '';
 		uploading = true;
 		try {
 			for (const file of Array.from(files)) {
-				await api.uploadFile(server.id, file, selectedPath);
+				await api.uploadFile(server.id, file, uploadPath);
 			}
-			toast.success(`Uploaded ${files.length} file(s)`);
+			toast.success(`Uploaded ${files.length} file(s) to ${uploadPath || 'root'}`);
 			await loadFiles();
 		} catch (error) {
 			toast.error('Failed to upload files');
@@ -113,6 +123,15 @@
 			uploading = false;
 			input.value = '';
 		}
+	}
+
+	function triggerUpload(path: string = '') {
+		targetPath = path;
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.multiple = true;
+		input.onchange = (e) => handleFileSelect(e, path);
+		input.click();
 	}
 
 	async function downloadFile(file: FileInfo) {
@@ -159,25 +178,66 @@
 		return file.path.split('/').length - 1;
 	}
 
-	function isTextFile(file: FileInfo): boolean {
-		if (file.is_dir) return false;
-		const ext = file.name.toLowerCase().split('.').pop() || '';
-		const textExts = [
-			'txt', 'md', 'json', 'yml', 'yaml', 'toml', 'properties', 'conf', 'cfg', 'log',
-			'js', 'ts', 'jsx', 'tsx', 'py', 'java', 'cpp', 'c', 'h', 'cs', 'go', 'rs', 
-			'php', 'rb', 'lua', 'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'cmd',
-			'html', 'css', 'scss', 'sass', 'less', 'xml', 'ini', 'env'
-		];
-		return textExts.includes(ext) || file.name.startsWith('.');
-	}
-
 	function editFile(file: FileInfo) {
-		if (!isTextFile(file)) {
-			toast.error('This file type cannot be edited');
+		if (file.is_dir || !file.is_editable) {
+			toast.error('This file cannot be edited');
 			return;
 		}
 		editingFile = file;
 		showEditor = true;
+	}
+
+	async function createNewFile(path: string, fileName: string) {
+		if (!fileName.trim()) {
+			toast.error('File name cannot be empty');
+			return;
+		}
+		
+		const fullPath = path ? `${path}/${fileName}` : fileName;
+		try {
+			await api.updateFile(server.id, fullPath, '');
+			toast.success(`Created file: ${fileName}`);
+			await loadFiles();
+		} catch (error) {
+			toast.error('Failed to create file');
+		}
+	}
+
+	async function createNewFolder(path: string, folderName: string) {
+		if (!folderName.trim()) {
+			toast.error('Folder name cannot be empty');
+			return;
+		}
+		
+		const fullPath = path ? `${path}/${folderName}` : folderName;
+		try {
+			// Create a dummy file in the folder to ensure it exists
+			await api.updateFile(server.id, `${fullPath}/.gitkeep`, '');
+			toast.success(`Created folder: ${folderName}`);
+			await api.deleteFile(server.id, `${fullPath}/.gitkeep`);
+			await loadFiles();
+		} catch (error) {
+			toast.error('Failed to create folder');
+		}
+	}
+
+	async function renameItem(item: FileInfo, newName: string) {
+		if (!newName.trim()) {
+			toast.error('Name cannot be empty');
+			return;
+		}
+		
+		if (newName === item.name) {
+			return;
+		}
+		
+		try {
+			await api.renameFile(server.id, item.path, newName);
+			toast.success(`Renamed ${item.name} to ${newName}`);
+			await loadFiles();
+		} catch (error: any) {
+			toast.error(error.message || 'Failed to rename item');
+		}
 	}
 
 	let flatFiles = $derived(renderFileTree(files));
@@ -195,24 +255,26 @@
 				</p>
 			</div>
 			<div class="flex items-center gap-2">
-				<Button size="sm" variant="outline" onclick={loadFiles}>
+				<Button size="sm" variant="outline" onclick={loadFiles} title="Refresh">
 					<RefreshCw class="h-4 w-4" />
 				</Button>
-				<Button onclick={() => fileInput?.click()} disabled={uploading}>
-					{#if uploading}
-						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
-					{:else}
-						<Upload class="h-4 w-4 mr-2" />
-					{/if}
-					Upload Files
+				<Button size="sm" variant="outline" onclick={() => triggerUpload('')} title="Upload To Server Folder">
+					<Upload class="h-4 w-4" />
 				</Button>
-				<input
-					bind:this={fileInput}
-					type="file"
-					multiple
-					onchange={handleFileSelect}
-					class="hidden"
-				/>
+				<Button size="sm" variant="outline" onclick={() => {
+					targetPath = '';
+					newItemName = '';
+					showNewFileDialog = true;
+				}} title="New file in server folder">
+					<FilePlus class="h-4 w-4" />
+				</Button>
+				<Button size="sm" variant="outline" onclick={() => {
+					targetPath = '';
+					newItemName = '';
+					showNewFolderDialog = true;
+				}} title="New folder in server folder">
+					<FolderPlus class="h-4 w-4" />
+				</Button>
 			</div>
 		</div>
 	</CardHeader>
@@ -241,7 +303,7 @@
 							onclick={() => {
 								if (file.is_dir) {
 									toggleDir(file.path);
-								} else if (isTextFile(file)) {
+								} else if (file.is_editable) {
 									editFile(file);
 								}
 							}}
@@ -256,7 +318,44 @@
 						</button>
 						
 						<div class="flex items-center gap-1">
-							{#if !file.is_dir && isTextFile(file)}
+							{#if file.is_dir}
+								<Button
+									size="icon"
+									variant="ghost"
+									class="h-7 w-7"
+									onclick={() => triggerUpload(file.path)}
+									title="Upload files to this folder"
+								>
+									<Upload class="h-3 w-3" />
+								</Button>
+								<Button
+									size="icon"
+									variant="ghost"
+									class="h-7 w-7"
+									onclick={() => {
+										targetPath = file.path;
+										newItemName = '';
+										showNewFileDialog = true;
+									}}
+									title="Create new file in this folder"
+								>
+									<FilePlus class="h-3 w-3" />
+								</Button>
+								<Button
+									size="icon"
+									variant="ghost"
+									class="h-7 w-7"
+									onclick={() => {
+										targetPath = file.path;
+										newItemName = '';
+										showNewFolderDialog = true;
+									}}
+									title="Create new folder in this folder"
+								>
+									<FolderPlus class="h-3 w-3" />
+								</Button>
+							{/if}
+							{#if file.is_editable}
 								<Button
 									size="icon"
 									variant="ghost"
@@ -278,6 +377,19 @@
 									<Download class="h-3 w-3" />
 								</Button>
 							{/if}
+							<Button
+								size="icon"
+								variant="ghost"
+								class="h-7 w-7"
+								onclick={() => {
+									renamingItem = file;
+									newItemName = file.name;
+									showRenameDialog = true;
+								}}
+								title="Rename {file.is_dir ? 'folder' : 'file'}"
+							>
+								<Pencil class="h-3 w-3" />
+							</Button>
 							<Button
 								size="icon"
 								variant="ghost"
@@ -306,6 +418,125 @@
 		editingFile = null;
 	}}
 	onSave={() => {
-		// Optionally reload files if needed
+		// TODO: reload files
 	}}
 />
+
+<!-- New File Dialog -->
+<DialogPrimitive.Root bind:open={showNewFileDialog}>
+	<DialogContent>
+		<DialogHeader>
+			<DialogTitle>Create New File</DialogTitle>
+			<DialogDescription>
+				Enter a name for the new file in {targetPath || 'root'}
+			</DialogDescription>
+		</DialogHeader>
+		<div class="grid gap-4 py-4">
+			<div class="grid gap-2">
+				<Label for="new-file-name">File Name</Label>
+				<Input 
+					id="new-file-name" 
+					bind:value={newItemName}
+					placeholder="example.txt"
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							createNewFile(targetPath, newItemName);
+							showNewFileDialog = false;
+						}
+					}}
+				/>
+			</div>
+		</div>
+		<DialogFooter>
+			<Button variant="outline" onclick={() => showNewFileDialog = false}>
+				Cancel
+			</Button>
+			<Button onclick={() => {
+				createNewFile(targetPath, newItemName);
+				showNewFileDialog = false;
+			}}>
+				Create
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</DialogPrimitive.Root>
+
+<!-- New Folder Dialog -->
+<DialogPrimitive.Root bind:open={showNewFolderDialog}>
+	<DialogContent>
+		<DialogHeader>
+			<DialogTitle>Create New Folder</DialogTitle>
+			<DialogDescription>
+				Enter a name for the new folder in {targetPath || 'root'}
+			</DialogDescription>
+		</DialogHeader>
+		<div class="grid gap-4 py-4">
+			<div class="grid gap-2">
+				<Label for="new-folder-name">Folder Name</Label>
+				<Input 
+					id="new-folder-name" 
+					bind:value={newItemName}
+					placeholder="new-folder"
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							createNewFolder(targetPath, newItemName);
+							showNewFolderDialog = false;
+						}
+					}}
+				/>
+			</div>
+		</div>
+		<DialogFooter>
+			<Button variant="outline" onclick={() => showNewFolderDialog = false}>
+				Cancel
+			</Button>
+			<Button onclick={() => {
+				createNewFolder(targetPath, newItemName);
+				showNewFolderDialog = false;
+			}}>
+				Create
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</DialogPrimitive.Root>
+
+<!-- Rename Dialog -->
+<DialogPrimitive.Root bind:open={showRenameDialog}>
+	<DialogContent>
+		<DialogHeader>
+			<DialogTitle>Rename {renamingItem?.is_dir ? 'Folder' : 'File'}</DialogTitle>
+			<DialogDescription>
+				Enter a new name for {renamingItem?.name}
+			</DialogDescription>
+		</DialogHeader>
+		<div class="grid gap-4 py-4">
+			<div class="grid gap-2">
+				<Label for="rename-item">New Name</Label>
+				<Input 
+					id="rename-item" 
+					bind:value={newItemName}
+					placeholder={renamingItem?.name}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' && renamingItem) {
+							renameItem(renamingItem, newItemName);
+							showRenameDialog = false;
+						}
+					}}
+				/>
+			</div>
+		</div>
+		<DialogFooter>
+			<Button variant="outline" onclick={() => showRenameDialog = false}>
+				Cancel
+			</Button>
+			<Button onclick={() => {
+				if (renamingItem) {
+					renameItem(renamingItem, newItemName);
+					showRenameDialog = false;
+				}
+			}}>
+				Rename
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</DialogPrimitive.Root>

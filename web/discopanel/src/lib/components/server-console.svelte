@@ -196,7 +196,10 @@
 		const isoMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+(.+)/);
 		if (isoMatch) {
 			return {
-				timestamp: new Date(isoMatch[1]).toLocaleTimeString(),
+				timestamp: new Date(isoMatch[1]).toLocaleTimeString('en-US', { 
+					timeZone: 'UTC',
+					hour12: false 
+				}),
 				level: 'INFO',
 				message: isoMatch[2],
 				rawTimestamp: isoMatch[1]
@@ -239,7 +242,11 @@
 	}
 
 	function formatCommandEntry(entry: CommandEntry): string {
-		const timestamp = new Date(entry.timestamp).toLocaleTimeString();
+		// Convert to UTC to match server log timestamps
+		const timestamp = new Date(entry.timestamp).toLocaleTimeString('en-US', { 
+			timeZone: 'UTC',
+			hour12: false 
+		});
 		const status = entry.success ? '✓' : '✗';
 		const statusColor = entry.success ? 'text-green-400' : 'text-red-400';
 		

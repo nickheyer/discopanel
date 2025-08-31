@@ -192,6 +192,17 @@
 			};
 		}
 
+		// Parse simple timestamp format: [HH:MM:SS] message (for container logs and simple server logs)
+		const simpleTimeMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]\s+(.+)/);
+		if (simpleTimeMatch) {
+			return {
+				timestamp: simpleTimeMatch[1],
+				level: 'INFO',
+				message: simpleTimeMatch[2],
+				rawTimestamp: simpleTimeMatch[1]
+			};
+		}
+
 		// Parse ISO timestamp format from mc-server-runner (2025-08-31T09:05:53.937084718Z)
 		const isoMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+(.+)/);
 		if (isoMatch) {

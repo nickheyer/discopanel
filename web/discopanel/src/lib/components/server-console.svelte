@@ -6,11 +6,12 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
 	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw } from '@lucide/svelte';
-	import type { Server } from '$lib/api/types';
+	import type { Server, CommandEntry } from '$lib/api/types';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
 	let logs = $state('');
+	let commandHistory = $state<CommandEntry[]>([]);
 	let command = $state('');
 	let loading = $state(false);
 	let autoScroll = $state(true);
@@ -21,6 +22,8 @@
 
 	onMount(() => {
 		if (active) {
+			// Load command history first to ensure persistence across refreshes
+			fetchCommandHistory();
 			fetchLogs();
 			startPolling();
 		}
@@ -33,7 +36,10 @@
 	// Start/stop polling based on active prop
 	$effect(() => {
 		if (active) {
+			// Ensure command history is loaded first for proper persistence
+			fetchCommandHistory();
 			fetchLogs();
+			startPolling();
 		} else {
 			stopPolling();
 		}
@@ -45,8 +51,11 @@
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
 			logs = '';
+			commandHistory = [];
 			command = '';
 			if (active) {
+				// Load command history first to ensure persistence
+				fetchCommandHistory();
 				fetchLogs();
 			}
 		}
@@ -67,7 +76,7 @@
 
 	// Handle auto-scrolling in a separate effect to avoid scroll-linked positioning issues
 	$effect(() => {
-		if (logs && autoScroll && endOfLogsRef) {
+		if ((logs || commandHistory.length > 0) && autoScroll && endOfLogsRef) {
 			// Use a microtask to ensure DOM has updated
 			queueMicrotask(() => {
 				endOfLogsRef?.scrollIntoView({ behavior: 'instant', block: 'end' });
@@ -91,27 +100,49 @@
 		}
 	}
 
+	async function fetchCommandHistory() {
+		try {
+			const response = await api.getServerCommandHistory(server.id, 50);
+			commandHistory = response.commands || [];
+		} catch (error) {
+			console.error('Failed to fetch command history:', error);
+			// Don't clear existing history on error to maintain persistence
+			if (commandHistory.length === 0) {
+				commandHistory = [];
+			}
+		}
+	}
+
 	async function sendCommand() {
 		if (!command.trim()) return;
 
 		loading = true;
+		const commandToExecute = command;
+		command = ''; // Clear input immediately for better UX
+		
 		try {
-			const response = await api.sendServerCommand(server.id, command);
+			const response = await api.sendServerCommand(server.id, commandToExecute);
 			if (response.success) {
-				// Command executed successfully
-				if (response.output) {
-					// Add command output to logs temporarily
-					logs += `\n> ${command}\n${response.output}`;
-				}
 				toast.success('Command sent successfully');
 			} else {
 				toast.error(response.error || 'Failed to execute command');
 			}
-			command = '';
 
-			// Refresh logs after command
-			setTimeout(fetchLogs, 3000);
+			// Refresh command history immediately to show the new command with output
+			await fetchCommandHistory();
+			
+			// Refresh logs after a short delay to capture any server-side effects
+			setTimeout(fetchLogs, 1000);
+			
+			// Ensure auto-scroll is triggered to show the new command output
+			if (autoScroll && endOfLogsRef) {
+				setTimeout(() => {
+					endOfLogsRef?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+				}, 100);
+			}
 		} catch (error) {
+			// Restore command in input if there was an error
+			command = commandToExecute;
 			toast.error(
 				'Failed to send command: ' + (error instanceof Error ? error.message : 'Unknown error')
 			);
@@ -122,20 +153,31 @@
 
 	function clearLogs() {
 		logs = '';
+		commandHistory = [];
 		toast.success('Console cleared');
 	}
 
 	function downloadLogs() {
-		const blob = new Blob([logs], { type: 'text/plain' });
+		const combinedDisplay = getCombinedDisplay();
+		const content = combinedDisplay.map(item => {
+			if (item.type === 'command') {
+				// Strip HTML tags for plain text download and format nicely
+				const cleanContent = item.content.replace(/<[^>]*>/g, '');
+				return `--- COMMAND ---\n${cleanContent}\n--- END COMMAND ---`;
+			}
+			return item.content;
+		}).join('\n');
+		
+		const blob = new Blob([content], { type: 'text/plain' });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
-		a.download = `${server.name}-logs-${new Date().toISOString()}.txt`;
+		a.download = `${server.name}-console-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
 		URL.revokeObjectURL(url);
-		toast.success('Logs downloaded');
+		toast.success('Console downloaded with command history');
 	}
 
 	function formatLogLine(line: string): { timestamp: string; level: string; message: string } {
@@ -183,6 +225,93 @@
 				return 'text-zinc-300';
 		}
 	}
+
+	function formatCommandEntry(entry: CommandEntry): string {
+		const timestamp = new Date(entry.timestamp).toLocaleTimeString();
+		const status = entry.success ? '✓' : '✗';
+		const statusColor = entry.success ? 'text-green-400' : 'text-red-400';
+		
+		let result = `<span class="text-zinc-600">[${timestamp}]</span> `;
+		result += `<span class="${statusColor}">[CMD ${status}]</span> `;
+		result += `<span class="text-cyan-400">$ ${entry.command}</span>`;
+		
+		if (entry.output) {
+			// Highlight common error patterns in output
+			let output = entry.output;
+			// Highlight error messages
+			output = output.replace(/(error|failed|exception|invalid|unknown)/gi, '<span class="text-red-400">$1</span>');
+			// Highlight success messages
+			output = output.replace(/(success|completed|done|ok)/gi, '<span class="text-green-400">$1</span>');
+			// Highlight warnings
+			output = output.replace(/(warning|warn)/gi, '<span class="text-yellow-400">$1</span>');
+			
+			result += `\n<span class="text-zinc-300">${output}</span>`;
+		}
+		
+		if (entry.error) {
+			result += `\n<span class="text-red-400 font-semibold">Error: ${entry.error}</span>`;
+		}
+		
+		return result;
+	}
+
+	// Create a combined display of logs and command history
+	function getCombinedDisplay(): Array<{type: 'log' | 'command', content: string, timestamp?: Date}> {
+		const items: Array<{type: 'log' | 'command', content: string, timestamp?: Date}> = [];
+		
+		// Add server logs with extracted timestamps
+		if (logs) {
+			logs.split('\n').forEach(line => {
+				if (line.trim()) {
+					const parsed = formatLogLine(line);
+					let logTimestamp: Date | undefined;
+					
+					// Try to extract a proper timestamp for chronological ordering
+					if (parsed.timestamp) {
+						// For ISO format timestamps
+						if (parsed.timestamp.includes('T')) {
+							logTimestamp = new Date(parsed.timestamp);
+						} else {
+							// For time-only format [HH:MM:SS], use today's date
+							const today = new Date();
+							const [hours, minutes, seconds] = parsed.timestamp.split(':').map(Number);
+							logTimestamp = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, seconds);
+						}
+					}
+					
+					items.push({ 
+						type: 'log', 
+						content: line,
+						timestamp: logTimestamp
+					});
+				}
+			});
+		}
+		
+		// Add command history with proper timestamps
+		commandHistory.forEach(entry => {
+			items.push({ 
+				type: 'command', 
+				content: formatCommandEntry(entry),
+				timestamp: new Date(entry.timestamp)
+			});
+		});
+		
+		// Sort by timestamp if available, with fallback to maintain original order
+		items.sort((a, b) => {
+			// If both have timestamps, sort chronologically
+			if (a.timestamp && b.timestamp) {
+				return a.timestamp.getTime() - b.timestamp.getTime();
+			}
+			// If only one has timestamp, prioritize it based on recency
+			if (a.timestamp && !b.timestamp) return -1;
+			if (!a.timestamp && b.timestamp) return 1;
+			// If neither has timestamp, maintain original order
+			return 0;
+		});
+		
+		return items;
+	}
 </script>
 
 <ResizablePaneGroup
@@ -217,7 +346,7 @@
 						size="sm"
 						variant="ghost"
 						onclick={downloadLogs}
-						disabled={!logs}
+						disabled={!logs && commandHistory.length === 0}
 						class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
 					>
 						<Download class="h-3 w-3" />
@@ -226,7 +355,7 @@
 						size="sm"
 						variant="ghost"
 						onclick={clearLogs}
-						disabled={!logs}
+						disabled={!logs && commandHistory.length === 0}
 						class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
 					>
 						<Trash2 class="h-3 w-3" />
@@ -238,24 +367,30 @@
 				bind:this={scrollAreaRef}
 			>
 				<div class="font-mono text-xs">
-					{#if !logs}
+					{#if getCombinedDisplay().length === 0}
 						<div class="py-8 text-center text-zinc-500">
-							No logs available. {['running', 'starting', 'unhealthy'].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
+							No logs or commands available. {['running', 'starting', 'unhealthy'].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
 						</div>
 					{:else}
-						{#each logs.split('\n') as line}
-							{@const parsed = formatLogLine(line)}
-							<div class="py-0.5 hover:bg-zinc-900/50 whitespace-pre-wrap break-all">
-								{#if parsed.timestamp}
-									<span class="text-zinc-600">[{parsed.timestamp}]</span>
-								{/if}
-								{#if parsed.level !== 'INFO'}
-									<span class={getLogLevelColor(parsed.level)}>[{parsed.level}]</span>
-								{/if}
-								<span class="text-zinc-300">
-									{parsed.message}
-								</span>
-							</div>
+						{#each getCombinedDisplay() as item}
+							{#if item.type === 'command'}
+								<div class="py-0.5 hover:bg-zinc-900/50 whitespace-pre-wrap break-all border-l-2 border-cyan-500 pl-2 my-1 bg-zinc-900/20">
+									{@html item.content}
+								</div>
+							{:else}
+								{@const parsed = formatLogLine(item.content)}
+								<div class="py-0.5 hover:bg-zinc-900/50 whitespace-pre-wrap break-all">
+									{#if parsed.timestamp}
+										<span class="text-zinc-600">[{parsed.timestamp}]</span>
+									{/if}
+									{#if parsed.level !== 'INFO'}
+										<span class={getLogLevelColor(parsed.level)}>[{parsed.level}]</span>
+									{/if}
+									<span class="text-zinc-300">
+										{parsed.message}
+									</span>
+								</div>
+							{/if}
 						{/each}
 					{/if}
 					<div bind:this={endOfLogsRef} aria-hidden="true"></div>
@@ -310,7 +445,7 @@
 				</div>
 			</div>
 			<div class="font-mono">
-				{logs.split('\n').length} lines
+				{getCombinedDisplay().length} lines ({commandHistory.length} commands)
 			</div>
 		</div>
 	</div>

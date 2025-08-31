@@ -120,6 +120,7 @@ func (s *Server) setupServerRoutes(api *mux.Router) {
 	viewer.HandleFunc("/servers/next-port", s.handleGetNextAvailablePort).Methods("GET")
 	viewer.HandleFunc("/servers/{id}", s.handleGetServer).Methods("GET")
 	viewer.HandleFunc("/servers/{id}/logs", s.handleGetServerLogs).Methods("GET")
+	viewer.HandleFunc("/servers/{id}/command-history", s.handleGetCommandHistory).Methods("GET")
 	viewer.HandleFunc("/servers/{id}/config", s.handleGetServerConfig).Methods("GET")
 	viewer.HandleFunc("/servers/{id}/routing", s.handleGetServerRouting).Methods("GET")
 

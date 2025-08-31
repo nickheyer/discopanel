@@ -180,24 +180,36 @@
 		toast.success('Console downloaded with command history');
 	}
 
-	function formatLogLine(line: string): { timestamp: string; level: string; message: string } {
+	function formatLogLine(line: string): { timestamp: string; level: string; message: string; rawTimestamp?: string } {
 		// Parse Minecraft log format: [HH:MM:SS] [Thread/LEVEL]: Message
 		const mcMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]\s*\[([^\/]+)\/([A-Z]+)\]:\s*(.+)/);
 		if (mcMatch) {
 			return {
 				timestamp: mcMatch[1],
 				level: mcMatch[3],
-				message: mcMatch[4]
+				message: mcMatch[4],
+				rawTimestamp: mcMatch[1]
 			};
 		}
 
-		// Parse ISO timestamp format from mc-server-runner
-		const isoMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+([A-Z]+)\s+(.+)/);
+		// Parse ISO timestamp format from mc-server-runner (2025-08-31T09:05:53.937084718Z)
+		const isoMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+(.+)/);
 		if (isoMatch) {
 			return {
 				timestamp: new Date(isoMatch[1]).toLocaleTimeString(),
-				level: isoMatch[2],
-				message: isoMatch[3]
+				level: 'INFO',
+				message: isoMatch[2],
+				rawTimestamp: isoMatch[1]
+			};
+		}
+
+		// Parse simple format with level: [LEVEL] message
+		const levelMatch = line.match(/^\[([A-Z]+)\]\s+(.+)/);
+		if (levelMatch) {
+			return {
+				timestamp: '',
+				level: levelMatch[1],
+				message: levelMatch[2]
 			};
 		}
 
@@ -261,22 +273,27 @@
 		
 		// Add server logs with extracted timestamps
 		if (logs) {
-			logs.split('\n').forEach(line => {
+			logs.split('\n').forEach((line, index) => {
 				if (line.trim()) {
 					const parsed = formatLogLine(line);
 					let logTimestamp: Date | undefined;
 					
 					// Try to extract a proper timestamp for chronological ordering
-					if (parsed.timestamp) {
-						// For ISO format timestamps
-						if (parsed.timestamp.includes('T')) {
-							logTimestamp = new Date(parsed.timestamp);
-						} else {
+					if (parsed.rawTimestamp) {
+						// For ISO format timestamps (2025-08-31T09:05:53.937084718Z)
+						if (parsed.rawTimestamp.includes('T') && parsed.rawTimestamp.includes('Z')) {
+							logTimestamp = new Date(parsed.rawTimestamp);
+						} else if (parsed.rawTimestamp.match(/^\d{2}:\d{2}:\d{2}$/)) {
 							// For time-only format [HH:MM:SS], use today's date
 							const today = new Date();
-							const [hours, minutes, seconds] = parsed.timestamp.split(':').map(Number);
+							const [hours, minutes, seconds] = parsed.rawTimestamp.split(':').map(Number);
 							logTimestamp = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, seconds);
 						}
+					}
+					
+					// If no timestamp could be parsed, use a very old date to ensure logs appear first
+					if (!logTimestamp) {
+						logTimestamp = new Date(2000, 0, 1, 0, 0, index); // Use index to maintain order
 					}
 					
 					items.push({ 
@@ -297,17 +314,11 @@
 			});
 		});
 		
-		// Sort by timestamp if available, with fallback to maintain original order
+		// Sort by timestamp chronologically
 		items.sort((a, b) => {
-			// If both have timestamps, sort chronologically
-			if (a.timestamp && b.timestamp) {
-				return a.timestamp.getTime() - b.timestamp.getTime();
-			}
-			// If only one has timestamp, prioritize it based on recency
-			if (a.timestamp && !b.timestamp) return -1;
-			if (!a.timestamp && b.timestamp) return 1;
-			// If neither has timestamp, maintain original order
-			return 0;
+			const timeA = a.timestamp?.getTime() || 0;
+			const timeB = b.timestamp?.getTime() || 0;
+			return timeA - timeB;
 		});
 		
 		return items;

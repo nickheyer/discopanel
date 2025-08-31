@@ -286,38 +286,37 @@
 	}
 
 	// Create a combined display of logs and command history
-	function getCombinedDisplay(): Array<{type: 'log' | 'command', content: string, timestamp?: Date}> {
-		const items: Array<{type: 'log' | 'command', content: string, timestamp?: Date}> = [];
+	function getCombinedDisplay(): Array<{type: 'log' | 'command', content: string, sortKey: string}> {
+		const items: Array<{type: 'log' | 'command', content: string, sortKey: string}> = [];
 		
 		// Add server logs with extracted timestamps
 		if (logs) {
 			logs.split('\n').forEach((line, index) => {
 				if (line.trim()) {
 					const parsed = formatLogLine(line);
-					let logTimestamp: Date | undefined;
+					let sortKey = '';
 					
-					// Try to extract a proper timestamp for chronological ordering
+					// Extract sort key from timestamp
 					if (parsed.rawTimestamp) {
-						// For ISO format timestamps (2025-08-31T09:05:53.937084718Z)
 						if (parsed.rawTimestamp.includes('T') && parsed.rawTimestamp.includes('Z')) {
-							logTimestamp = new Date(parsed.rawTimestamp);
+							// For ISO format timestamps (2025-08-31T09:05:53.937084718Z)
+							sortKey = parsed.rawTimestamp;
 						} else if (parsed.rawTimestamp.match(/^\d{2}:\d{2}:\d{2}$/)) {
-							// For time-only format [HH:MM:SS], use today's date
-							const today = new Date();
-							const [hours, minutes, seconds] = parsed.rawTimestamp.split(':').map(Number);
-							logTimestamp = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, seconds);
+							// For time-only format [HH:MM:SS], prefix with today's date for sorting
+							const today = new Date().toISOString().split('T')[0];
+							sortKey = `${today}T${parsed.rawTimestamp}.000Z`;
 						}
 					}
 					
-					// If no timestamp could be parsed, use a very old date to ensure logs appear first
-					if (!logTimestamp) {
-						logTimestamp = new Date(2000, 0, 1, 0, 0, index); // Use index to maintain order
+					// If no timestamp could be parsed, use a very early time to ensure logs appear first
+					if (!sortKey) {
+						sortKey = `2000-01-01T00:00:${index.toString().padStart(2, '0')}.000Z`;
 					}
 					
 					items.push({ 
 						type: 'log', 
 						content: line,
-						timestamp: logTimestamp
+						sortKey: sortKey
 					});
 				}
 			});
@@ -328,15 +327,13 @@
 			items.push({ 
 				type: 'command', 
 				content: formatCommandEntry(entry),
-				timestamp: new Date(entry.timestamp)
+				sortKey: entry.timestamp
 			});
 		});
 		
-		// Sort by timestamp chronologically
+		// Sort by timestamp string chronologically
 		items.sort((a, b) => {
-			const timeA = a.timestamp?.getTime() || 0;
-			const timeB = b.timestamp?.getTime() || 0;
-			return timeA - timeB;
+			return a.sortKey.localeCompare(b.sortKey);
 		});
 		
 		return items;

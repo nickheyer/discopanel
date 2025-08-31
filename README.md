@@ -37,8 +37,8 @@ Because managing Minecraft servers shouldn't be difficult:
 git clone https://github.com/nickheyer/discopanel
 cd discopanel
 
-# Build frontend
-cd web/discopanel && npm run build
+# Get npm deps and build frontend first
+cd web/discopanel && npm install && npm run build && cd ../..
 
 # Build backend and embed front end
 go build -o discopanel cmd/discopanel/main.go

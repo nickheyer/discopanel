@@ -289,6 +289,10 @@
 	function getCombinedDisplay(): Array<{type: 'log' | 'command', content: string, sortKey: string}> {
 		const items: Array<{type: 'log' | 'command', content: string, sortKey: string}> = [];
 		
+		// Track last seen time (in seconds) and how many days we've rolled over
+		let lastSeconds = -1;
+		let dayOffset = 0;
+		
 		// Add server logs with extracted timestamps
 		if (logs) {
 			logs.split('\n').forEach((line, index) => {
@@ -302,9 +306,22 @@
 							// For ISO format timestamps (2025-08-31T09:05:53.937084718Z)
 							sortKey = parsed.rawTimestamp;
 						} else if (parsed.rawTimestamp.match(/^\d{2}:\d{2}:\d{2}$/)) {
-							// For time-only format [HH:MM:SS], prefix with today's date for sorting
-							const today = new Date().toISOString().split('T')[0];
-							sortKey = `${today}T${parsed.rawTimestamp}.000Z`;
+							// For time-only format [HH:MM:SS], detect midnight rollover
+							const [hh, mm, ss] = parsed.rawTimestamp.split(':').map(Number);
+							const seconds = hh * 3600 + mm * 60 + ss;
+							
+							if (lastSeconds !== -1 && seconds < lastSeconds) {
+								// Time went backwards → must have rolled past midnight
+								dayOffset++;
+							}
+							
+							const baseDate = new Date();
+							baseDate.setDate(baseDate.getDate() + dayOffset);
+							
+							const dateStr = baseDate.toISOString().split('T')[0];
+							sortKey = `${dateStr}T${parsed.rawTimestamp}.000Z`;
+							
+							lastSeconds = seconds;
 						}
 					}
 					

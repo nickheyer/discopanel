@@ -16,7 +16,8 @@ import type {
   UploadResponse,
   ServerProperties,
   ApiError,
-  ConfigCategory
+  ConfigCategory,
+  CommandEntry
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -187,6 +188,11 @@ class ApiClient {
       },
       body: JSON.stringify({ command }),
     });
+  }
+
+  async getServerCommandHistory(id: string, limit?: number): Promise<{ commands: CommandEntry[] }> {
+    const params = limit ? `?limit=${limit}` : '';
+    return this.request<{ commands: CommandEntry[] }>(`/servers/${id}/command-history${params}`);
   }
 
   // Server Configuration

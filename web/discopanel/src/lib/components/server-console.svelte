@@ -6,11 +6,12 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
 	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw } from '@lucide/svelte';
-	import type { Server } from '$lib/api/types';
+	import type { Server, CommandEntry } from '$lib/api/types';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
 	let logs = $state('');
+	let commandHistory = $state<CommandEntry[]>([]);
 	let command = $state('');
 	let loading = $state(false);
 	let autoScroll = $state(true);
@@ -21,6 +22,8 @@
 
 	onMount(() => {
 		if (active) {
+			// Load command history first to ensure persistence across refreshes
+			fetchCommandHistory();
 			fetchLogs();
 			startPolling();
 		}
@@ -33,7 +36,10 @@
 	// Start/stop polling based on active prop
 	$effect(() => {
 		if (active) {
+			// Ensure command history is loaded first for proper persistence
+			fetchCommandHistory();
 			fetchLogs();
+			startPolling();
 		} else {
 			stopPolling();
 		}
@@ -45,8 +51,11 @@
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
 			logs = '';
+			commandHistory = [];
 			command = '';
 			if (active) {
+				// Load command history first to ensure persistence
+				fetchCommandHistory();
 				fetchLogs();
 			}
 		}
@@ -67,7 +76,7 @@
 
 	// Handle auto-scrolling in a separate effect to avoid scroll-linked positioning issues
 	$effect(() => {
-		if (logs && autoScroll && endOfLogsRef) {
+		if ((logs || commandHistory.length > 0) && autoScroll && endOfLogsRef) {
 			// Use a microtask to ensure DOM has updated
 			queueMicrotask(() => {
 				endOfLogsRef?.scrollIntoView({ behavior: 'instant', block: 'end' });
@@ -91,27 +100,49 @@
 		}
 	}
 
+	async function fetchCommandHistory() {
+		try {
+			const response = await api.getServerCommandHistory(server.id, 50);
+			commandHistory = response.commands || [];
+		} catch (error) {
+			console.error('Failed to fetch command history:', error);
+			// Don't clear existing history on error to maintain persistence
+			if (commandHistory.length === 0) {
+				commandHistory = [];
+			}
+		}
+	}
+
 	async function sendCommand() {
 		if (!command.trim()) return;
 
 		loading = true;
+		const commandToExecute = command;
+		command = ''; // Clear input immediately for better UX
+		
 		try {
-			const response = await api.sendServerCommand(server.id, command);
+			const response = await api.sendServerCommand(server.id, commandToExecute);
 			if (response.success) {
-				// Command executed successfully
-				if (response.output) {
-					// Add command output to logs temporarily
-					logs += `\n> ${command}\n${response.output}`;
-				}
 				toast.success('Command sent successfully');
 			} else {
 				toast.error(response.error || 'Failed to execute command');
 			}
-			command = '';
 
-			// Refresh logs after command
-			setTimeout(fetchLogs, 3000);
+			// Refresh command history immediately to show the new command with output
+			await fetchCommandHistory();
+			
+			// Refresh logs after a short delay to capture any server-side effects
+			setTimeout(fetchLogs, 1000);
+			
+			// Ensure auto-scroll is triggered to show the new command output
+			if (autoScroll && endOfLogsRef) {
+				setTimeout(() => {
+					endOfLogsRef?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+				}, 100);
+			}
 		} catch (error) {
+			// Restore command in input if there was an error
+			command = commandToExecute;
 			toast.error(
 				'Failed to send command: ' + (error instanceof Error ? error.message : 'Unknown error')
 			);
@@ -122,40 +153,77 @@
 
 	function clearLogs() {
 		logs = '';
+		commandHistory = [];
 		toast.success('Console cleared');
 	}
 
 	function downloadLogs() {
-		const blob = new Blob([logs], { type: 'text/plain' });
+		const combinedDisplay = getCombinedDisplay();
+		const content = combinedDisplay.map(item => {
+			if (item.type === 'command') {
+				// Strip HTML tags for plain text download and format nicely
+				const cleanContent = item.content.replace(/<[^>]*>/g, '');
+				return `--- COMMAND ---\n${cleanContent}\n--- END COMMAND ---`;
+			}
+			return item.content;
+		}).join('\n');
+		
+		const blob = new Blob([content], { type: 'text/plain' });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
-		a.download = `${server.name}-logs-${new Date().toISOString()}.txt`;
+		a.download = `${server.name}-console-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
 		URL.revokeObjectURL(url);
-		toast.success('Logs downloaded');
+		toast.success('Console downloaded with command history');
 	}
 
-	function formatLogLine(line: string): { timestamp: string; level: string; message: string } {
+	function formatLogLine(line: string): { timestamp: string; level: string; message: string; rawTimestamp?: string } {
 		// Parse Minecraft log format: [HH:MM:SS] [Thread/LEVEL]: Message
 		const mcMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]\s*\[([^\/]+)\/([A-Z]+)\]:\s*(.+)/);
 		if (mcMatch) {
 			return {
 				timestamp: mcMatch[1],
 				level: mcMatch[3],
-				message: mcMatch[4]
+				message: mcMatch[4],
+				rawTimestamp: mcMatch[1]
 			};
 		}
 
-		// Parse ISO timestamp format from mc-server-runner
-		const isoMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+([A-Z]+)\s+(.+)/);
+		// Parse simple timestamp format: [HH:MM:SS] message (for container logs and simple server logs)
+		const simpleTimeMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]\s+(.+)/);
+		if (simpleTimeMatch) {
+			return {
+				timestamp: simpleTimeMatch[1],
+				level: 'INFO',
+				message: simpleTimeMatch[2],
+				rawTimestamp: simpleTimeMatch[1]
+			};
+		}
+
+		// Parse ISO timestamp format from mc-server-runner (2025-08-31T09:05:53.937084718Z)
+		const isoMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+(.+)/);
 		if (isoMatch) {
 			return {
-				timestamp: new Date(isoMatch[1]).toLocaleTimeString(),
-				level: isoMatch[2],
-				message: isoMatch[3]
+				timestamp: new Date(isoMatch[1]).toLocaleTimeString('en-US', { 
+					timeZone: 'UTC',
+					hour12: false 
+				}),
+				level: 'INFO',
+				message: isoMatch[2],
+				rawTimestamp: isoMatch[1]
+			};
+		}
+
+		// Parse simple format with level: [LEVEL] message
+		const levelMatch = line.match(/^\[([A-Z]+)\]\s+(.+)/);
+		if (levelMatch) {
+			return {
+				timestamp: '',
+				level: levelMatch[1],
+				message: levelMatch[2]
 			};
 		}
 
@@ -182,6 +250,110 @@
 			default:
 				return 'text-zinc-300';
 		}
+	}
+
+	function formatCommandEntry(entry: CommandEntry): string {
+		// Convert to UTC to match server log timestamps
+		const timestamp = new Date(entry.timestamp).toLocaleTimeString('en-US', { 
+			timeZone: 'UTC',
+			hour12: false 
+		});
+		const status = entry.success ? '✓' : '✗';
+		const statusColor = entry.success ? 'text-green-400' : 'text-red-400';
+		
+		let result = `<span class="text-zinc-600">[${timestamp}]</span> `;
+		result += `<span class="${statusColor}">[CMD ${status}]</span> `;
+		result += `<span class="text-cyan-400">$ ${entry.command}</span>`;
+		
+		if (entry.output) {
+			// Highlight common error patterns in output
+			let output = entry.output;
+			// Highlight error messages
+			output = output.replace(/(error|failed|exception|invalid|unknown)/gi, '<span class="text-red-400">$1</span>');
+			// Highlight success messages
+			output = output.replace(/(success|completed|done|ok)/gi, '<span class="text-green-400">$1</span>');
+			// Highlight warnings
+			output = output.replace(/(warning|warn)/gi, '<span class="text-yellow-400">$1</span>');
+			
+			result += `\n<span class="text-zinc-300">${output}</span>`;
+		}
+		
+		if (entry.error) {
+			result += `\n<span class="text-red-400 font-semibold">Error: ${entry.error}</span>`;
+		}
+		
+		return result;
+	}
+
+	// Create a combined display of logs and command history
+	function getCombinedDisplay(): Array<{type: 'log' | 'command', content: string, sortKey: string}> {
+		const items: Array<{type: 'log' | 'command', content: string, sortKey: string}> = [];
+		
+		// Track last seen time (in seconds) and how many days we've rolled over
+		let lastSeconds = -1;
+		let dayOffset = 0;
+		
+		// Add server logs with extracted timestamps
+		if (logs) {
+			logs.split('\n').forEach((line, index) => {
+				if (line.trim()) {
+					const parsed = formatLogLine(line);
+					let sortKey = '';
+					
+					// Extract sort key from timestamp
+					if (parsed.rawTimestamp) {
+						if (parsed.rawTimestamp.includes('T') && parsed.rawTimestamp.includes('Z')) {
+							// For ISO format timestamps (2025-08-31T09:05:53.937084718Z)
+							sortKey = parsed.rawTimestamp;
+						} else if (parsed.rawTimestamp.match(/^\d{2}:\d{2}:\d{2}$/)) {
+							// For time-only format [HH:MM:SS], detect midnight rollover
+							const [hh, mm, ss] = parsed.rawTimestamp.split(':').map(Number);
+							const seconds = hh * 3600 + mm * 60 + ss;
+							
+							if (lastSeconds !== -1 && seconds < lastSeconds) {
+								// Time went backwards → must have rolled past midnight
+								dayOffset++;
+							}
+							
+							const baseDate = new Date();
+							baseDate.setDate(baseDate.getDate() + dayOffset);
+							
+							const dateStr = baseDate.toISOString().split('T')[0];
+							sortKey = `${dateStr}T${parsed.rawTimestamp}.000Z`;
+							
+							lastSeconds = seconds;
+						}
+					}
+					
+					// If no timestamp could be parsed, use a very early time to ensure logs appear first
+					if (!sortKey) {
+						sortKey = `2000-01-01T00:00:${index.toString().padStart(2, '0')}.000Z`;
+					}
+					
+					items.push({ 
+						type: 'log', 
+						content: line,
+						sortKey: sortKey
+					});
+				}
+			});
+		}
+		
+		// Add command history with proper timestamps
+		commandHistory.forEach(entry => {
+			items.push({ 
+				type: 'command', 
+				content: formatCommandEntry(entry),
+				sortKey: entry.timestamp
+			});
+		});
+		
+		// Sort by timestamp string chronologically
+		items.sort((a, b) => {
+			return a.sortKey.localeCompare(b.sortKey);
+		});
+		
+		return items;
 	}
 </script>
 
@@ -217,7 +389,7 @@
 						size="sm"
 						variant="ghost"
 						onclick={downloadLogs}
-						disabled={!logs}
+						disabled={!logs && commandHistory.length === 0}
 						class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
 					>
 						<Download class="h-3 w-3" />
@@ -226,7 +398,7 @@
 						size="sm"
 						variant="ghost"
 						onclick={clearLogs}
-						disabled={!logs}
+						disabled={!logs && commandHistory.length === 0}
 						class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
 					>
 						<Trash2 class="h-3 w-3" />
@@ -238,24 +410,30 @@
 				bind:this={scrollAreaRef}
 			>
 				<div class="font-mono text-xs">
-					{#if !logs}
+					{#if getCombinedDisplay().length === 0}
 						<div class="py-8 text-center text-zinc-500">
-							No logs available. {['running', 'starting', 'unhealthy'].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
+							No logs or commands available. {['running', 'starting', 'unhealthy'].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
 						</div>
 					{:else}
-						{#each logs.split('\n') as line}
-							{@const parsed = formatLogLine(line)}
-							<div class="py-0.5 hover:bg-zinc-900/50 whitespace-pre-wrap break-all">
-								{#if parsed.timestamp}
-									<span class="text-zinc-600">[{parsed.timestamp}]</span>
-								{/if}
-								{#if parsed.level !== 'INFO'}
-									<span class={getLogLevelColor(parsed.level)}>[{parsed.level}]</span>
-								{/if}
-								<span class="text-zinc-300">
-									{parsed.message}
-								</span>
-							</div>
+						{#each getCombinedDisplay() as item}
+							{#if item.type === 'command'}
+								<div class="py-0.5 hover:bg-zinc-900/50 whitespace-pre-wrap break-all border-l-2 border-cyan-500 pl-2 my-1 bg-zinc-900/20">
+									{@html item.content}
+								</div>
+							{:else}
+								{@const parsed = formatLogLine(item.content)}
+								<div class="py-0.5 hover:bg-zinc-900/50 whitespace-pre-wrap break-all">
+									{#if parsed.timestamp}
+										<span class="text-zinc-600">[{parsed.timestamp}]</span>
+									{/if}
+									{#if parsed.level !== 'INFO'}
+										<span class={getLogLevelColor(parsed.level)}>[{parsed.level}]</span>
+									{/if}
+									<span class="text-zinc-300">
+										{parsed.message}
+									</span>
+								</div>
+							{/if}
 						{/each}
 					{/if}
 					<div bind:this={endOfLogsRef} aria-hidden="true"></div>
@@ -310,7 +488,7 @@
 				</div>
 			</div>
 			<div class="font-mono">
-				{logs.split('\n').length} lines
+				{getCombinedDisplay().length} lines ({commandHistory.length} commands)
 			</div>
 		</div>
 	</div>

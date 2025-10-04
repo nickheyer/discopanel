@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/nickheyer/discopanel/internal/console"
 )
 
 type CommandRequest struct {
@@ -15,6 +17,10 @@ type CommandResponse struct {
 	Success bool   `json:"success"`
 	Output  string `json:"output,omitempty"`
 	Error   string `json:"error,omitempty"`
+}
+
+type CommandHistoryResponse struct {
+	Commands []*console.CommandEntry `json:"commands"`
 }
 
 func (s *Server) handleSendCommand(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +64,10 @@ func (s *Server) handleSendCommand(w http.ResponseWriter, r *http.Request) {
 	output, err := s.docker.ExecCommand(ctx, server.ContainerID, req.Command)
 	if err != nil {
 		s.log.Error("Failed to execute command: %v", err)
+		
+		// Store failed command in history
+		console.AddCommand(serverID, req.Command, "", false, err)
+		
 		s.respondJSON(w, http.StatusOK, CommandResponse{
 			Success: false,
 			Error:   err.Error(),
@@ -65,8 +75,31 @@ func (s *Server) handleSendCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Store successful command in history
+	console.AddCommand(serverID, req.Command, output, true, nil)
+
 	s.respondJSON(w, http.StatusOK, CommandResponse{
 		Success: true,
 		Output:  output,
+	})
+}
+
+func (s *Server) handleGetCommandHistory(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	serverID := vars["id"]
+
+	// Get limit from query parameter (default to 50)
+	limit := 50
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	// Get command history
+	commands := console.GetCommands(serverID, limit)
+
+	s.respondJSON(w, http.StatusOK, CommandHistoryResponse{
+		Commands: commands,
 	})
 }

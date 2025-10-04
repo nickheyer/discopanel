@@ -15,6 +15,16 @@ export interface DockerImageInfo {
   note: string;
 }
 
+export interface CommandEntry {
+  id: string;
+  server_id: string;
+  command: string;
+  output: string;
+  success: boolean;
+  error?: string;
+  timestamp: string;
+}
+
 export interface Server {
   id: string;
   name: string;

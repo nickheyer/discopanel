@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RandomTechrate/discopanel-fork/internal/db"
+	models "github.com/RandomTechrate/discopanel-fork/internal/db"
+	"github.com/RandomTechrate/discopanel-fork/internal/docker"
+	"github.com/RandomTechrate/discopanel-fork/internal/indexers"
+	"github.com/RandomTechrate/discopanel-fork/internal/indexers/fuego"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/nickheyer/discopanel/internal/db"
-	models "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/indexers"
-	"github.com/nickheyer/discopanel/internal/indexers/fuego"
 )
 
 func (s *Server) handleSearchModpacks(w http.ResponseWriter, r *http.Request) {

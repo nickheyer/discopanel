@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/RandomTechrate/discopanel-fork/internal/auth"
+	storage "github.com/RandomTechrate/discopanel-fork/internal/db"
 	"github.com/gorilla/mux"
-	"github.com/nickheyer/discopanel/internal/auth"
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"gorm.io/gorm"
 )
 
@@ -422,7 +422,7 @@ func (s *Server) handleGetGlobalSettings(w http.ResponseWriter, r *http.Request)
 		s.respondError(w, http.StatusInternalServerError, "Failed to get auth configuration")
 		return
 	}
-	
+
 	if authConfig.Enabled {
 		// Get user from context (set by OptionalAuth if token present)
 		user := auth.GetUserFromContext(ctx)
@@ -458,7 +458,7 @@ func (s *Server) handleUpdateGlobalSettings(w http.ResponseWriter, r *http.Reque
 		s.respondError(w, http.StatusInternalServerError, "Failed to get auth configuration")
 		return
 	}
-	
+
 	if authConfig.Enabled {
 		// Get user from context (set by OptionalAuth if token present)
 		user := auth.GetUserFromContext(ctx)

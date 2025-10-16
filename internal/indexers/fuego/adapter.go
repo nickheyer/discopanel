@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nickheyer/discopanel/internal/indexers"
+	"github.com/RandomTechrate/discopanel-fork/internal/indexers"
 )
 
 // Ensure FuegoIndexer implements ModpackIndexer
@@ -117,11 +117,11 @@ func (f *FuegoIndexer) convertModpack(fm Modpack) indexers.Modpack {
 	// Extract game versions and mod loaders from files
 	gameVersions := []string{}
 	modLoaders := []string{}
-	
+
 	for _, file := range fm.LatestFiles {
 		gameVersions = append(gameVersions, file.GameVersions...)
 	}
-	
+
 	for _, fileIndex := range fm.LatestFilesIndexes {
 		if fileIndex.ModLoader != nil {
 			switch *fileIndex.ModLoader {
@@ -147,23 +147,23 @@ func (f *FuegoIndexer) convertModpack(fm Modpack) indexers.Modpack {
 	}
 
 	return indexers.Modpack{
-		ID:              fmt.Sprintf("fuego-%d", fm.ID),
-		IndexerID:       strconv.Itoa(fm.ID),
-		Indexer:         "fuego",
-		Name:            fm.Name,
-		Slug:            fm.Slug,
-		Summary:         fm.Summary,
-		Description:     fm.Summary, // Fuego doesn't provide separate description in search
-		LogoURL:         logoURL,
-		WebsiteURL:      fm.Links.WebsiteURL,
-		DownloadCount:   int64(fm.DownloadCount),
-		Categories:      categories,
-		GameVersions:    gameVersions,
-		ModLoaders:      modLoaders,
-		LatestFileID:    strconv.Itoa(fm.MainFileID),
-		DateCreated:     fm.DateCreated,
-		DateModified:    fm.DateModified,
-		DateReleased:    fm.DateReleased,
+		ID:            fmt.Sprintf("fuego-%d", fm.ID),
+		IndexerID:     strconv.Itoa(fm.ID),
+		Indexer:       "fuego",
+		Name:          fm.Name,
+		Slug:          fm.Slug,
+		Summary:       fm.Summary,
+		Description:   fm.Summary, // Fuego doesn't provide separate description in search
+		LogoURL:       logoURL,
+		WebsiteURL:    fm.Links.WebsiteURL,
+		DownloadCount: int64(fm.DownloadCount),
+		Categories:    categories,
+		GameVersions:  gameVersions,
+		ModLoaders:    modLoaders,
+		LatestFileID:  strconv.Itoa(fm.MainFileID),
+		DateCreated:   fm.DateCreated,
+		DateModified:  fm.DateModified,
+		DateReleased:  fm.DateReleased,
 	}
 }
 
@@ -211,13 +211,13 @@ func (f *FuegoIndexer) convertFile(file File, modpackID string) indexers.Modpack
 func deduplicateStrings(strings []string) []string {
 	seen := make(map[string]bool)
 	result := []string{}
-	
+
 	for _, str := range strings {
 		if !seen[str] {
 			seen[str] = true
 			result = append(result, str)
 		}
 	}
-	
+
 	return result
 }

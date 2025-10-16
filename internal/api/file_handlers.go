@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -130,10 +131,85 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If uploaded file is a .mrpack (Modrinth pack), try extracting it
+	lower := strings.ToLower(header.Filename)
+	if strings.HasSuffix(lower, ".mrpack") || strings.HasSuffix(lower, ".zip") {
+		// Try to extract into the target directory (create a subdir without extension)
+		dirName := strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+		extractDir := filepath.Join(fullPath, dirName)
+		if err := os.MkdirAll(extractDir, 0755); err == nil {
+			if err := extractZip(filePath, extractDir); err != nil {
+				s.log.Error("Failed to extract archive: %v", err)
+			} else {
+				// Optionally remove original archive after extraction
+				_ = os.Remove(filePath)
+				filePath = filepath.Join(targetPath, dirName)
+			}
+		}
+	}
+
 	s.respondJSON(w, http.StatusCreated, map[string]string{
 		"message": "File uploaded successfully",
-		"path":    filepath.Join(targetPath, header.Filename),
+		"path":    filePath,
 	})
+}
+
+// extractZip extracts a zip archive at src into dest directory
+func extractZip(src, dest string) error {
+	r, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	// stat not needed
+
+	// Use archive/zip via reading from file
+	// We need to reopen with zip Reader using file path
+	// Simpler: use zip.OpenReader
+	zr, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+
+	for _, f := range zr.File {
+		fpath := filepath.Join(dest, f.Name)
+
+		// Prevent ZipSlip vulnerability
+		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
+			continue
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, f.Mode())
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
+
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
@@ -354,7 +430,7 @@ func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{
-		"message": "File renamed successfully",
+		"message":  "File renamed successfully",
 		"old_path": filePath,
 		"new_path": newPath,
 	})
@@ -374,7 +450,7 @@ func isTextFile(path string) bool {
 	if err != nil && err != io.EOF {
 		return false
 	}
-	
+
 	if n == 0 {
 		// Empty files are considered text
 		return true

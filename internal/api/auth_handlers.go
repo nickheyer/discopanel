@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/RandomTechrate/discopanel-fork/internal/auth"
+	"github.com/RandomTechrate/discopanel-fork/internal/db"
 	"github.com/gorilla/mux"
-	"github.com/nickheyer/discopanel/internal/auth"
-	"github.com/nickheyer/discopanel/internal/db"
 )
 
 // Auth request/response structures

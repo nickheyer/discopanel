@@ -214,4 +214,4 @@ MIT. Do whatever you want with it, just don't blame me when it breaks.
 ## Support
 
 - [Discord](https://discord.gg/6Z9yKTbsrP) - Come complain directly
-- [GitHub Issues](https://github.com/nickheyer/discopanel/issues) - For the brave
+- [GitHub Issues](https://github.com/RandomTechrate/discopanel-fork/issues) - For the brave

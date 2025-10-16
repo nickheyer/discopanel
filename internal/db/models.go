@@ -84,8 +84,8 @@ type Server struct {
 	DataPath        string       `json:"data_path" gorm:"not null;column:data_path"`
 	Detached        bool         `json:"detached" gorm:"default:false;column:detached"`     // Detach server container from DiscoPanel lifecycle (default: false)
 	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
-	TPSCommand      string       `json:"tps_command" gorm:"column:tps_command"`              // The TPS command for this server (empty if not supported)
-	
+	TPSCommand      string       `json:"tps_command" gorm:"column:tps_command"`             // The TPS command for this server (empty if not supported)
+
 	// Runtime stats (not persisted to DB)
 	MemoryUsage   float64 `json:"memory_usage" gorm:"-"`   // Current memory usage in MB
 	CPUPercent    float64 `json:"cpu_percent" gorm:"-"`    // Current CPU usage percentage
@@ -363,4 +363,17 @@ type Session struct {
 	UserAgent string    `json:"user_agent"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+}
+
+// ScheduledJob represents a cron-like scheduled task for a server
+type ScheduledJob struct {
+	ID        string    `json:"id" gorm:"primaryKey"`
+	ServerID  string    `json:"server_id" gorm:"index;column:server_id"`
+	Name      string    `json:"name"`
+	Spec      string    `json:"spec"`    // cron spec (robfig/cron format)
+	Action    string    `json:"action"`  // restart, exec
+	Payload   string    `json:"payload"` // command for exec, optional
+	Enabled   bool      `json:"enabled" gorm:"default:true"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }

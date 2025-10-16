@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/RandomTechrate/discopanel-fork/pkg/logger"
 )
 
 // Proxy manages the Minecraft TCP proxy server
@@ -193,7 +193,6 @@ func (p *Proxy) handleConnection(clientConn net.Conn) {
 		hostname = hostname[:idx]
 		p.logger.Debug("Null byte(s) detected, trimmed suffix null termination: %s\n", hostname)
 	}
-
 
 	// Find the route
 	p.routesMutex.RLock()

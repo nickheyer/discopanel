@@ -14,7 +14,7 @@
 	import { serversStore } from '$lib/stores/servers';
 	import { toast } from 'svelte-sonner';
 	import { ArrowLeft, Loader2, Package, Heart, Settings, HardDrive } from '@lucide/svelte';
-	import type { CreateServerRequest, ModLoader, MinecraftVersion, ModLoaderInfo, DockerImageInfo, IndexedModpack } from '$lib/api/types';
+	import type { CreateServerRequest, ModLoader, MinecraftVersion, ModLoaderInfo, DockerImageInfo } from '$lib/api/types';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 
@@ -31,32 +31,59 @@
 	let portError = $state('');
 	let useProxyMode = $state(false); // Track connection mode separately
 	
-	// Modpack selection
+
+
+	// Modpack dialog and selection state
 	let showModpackDialog = $state(false);
-	let selectedModpack = $state<IndexedModpack | null>(null);
-	let favoriteModpacks = $state<IndexedModpack[]>([]);
-	let loadingModpacks = $state(false);
+	let favoriteModpacks = $state<any[]>([]);
+	let selectedModpack: any = null;
+
+	// Helper to parse JSON arrays (for modpack game_versions etc)
+	function parseJsonArray(json: string): any[] {
+		try {
+			const arr = JSON.parse(json);
+			return Array.isArray(arr) ? arr : [];
+		} catch {
+			return [];
+		}
+	}
+
+	// Select modpack from dialog
+	function selectModpack(modpack: any) {
+		selectedModpack = modpack;
+		showModpackDialog = false;
+	}
+
+	// Load favorite modpacks (example API call, adjust endpoint as needed)
+	async function loadFavoriteModpacks() {
+		try {
+			const res = await fetch('/api/v1/modpacks/favorites').then(r => r.json());
+			favoriteModpacks = res.modpacks || [];
+		} catch (err) {
+			favoriteModpacks = [];
+		}
+	}
 
 	let formData = $state<CreateServerRequest & { 
-		proxy_hostname?: string;
-		proxy_listener_id?: string;
-		use_base_url?: boolean;
-	}>({
-		name: '',
-		description: '',
-		mod_loader: 'vanilla',
-		mc_version: '',
-		port: 25565,
-		max_players: 20,
-		memory: 2048,
-		docker_image: '',
-		auto_start: false,
-		detached: false,
-		start_immediately: false,
-		proxy_hostname: '',
-		proxy_listener_id: '',
-		use_base_url: false
-	});
+			proxy_hostname?: string;
+			proxy_listener_id?: string;
+			use_base_url?: boolean;
+		}>({
+			name: '',
+			description: '',
+			mod_loader: 'vanilla',
+			mc_version: '',
+			port: 25565,
+			max_players: 20,
+			memory: 2048,
+			docker_image: '',
+			auto_start: false,
+			detached: false,
+			start_immediately: false,
+			proxy_hostname: '',
+			proxy_listener_id: '',
+			use_base_url: false
+		});
 
 	onMount(async () => {
 		try {
@@ -88,28 +115,14 @@
 			// Set the default port to the next available port
 			formData.port = portData.port;
 			usedPorts = portData.usedPorts;
+  // Load favorite modpacks for dialog
+  await loadFavoriteModpacks();
 			
 			if (!formData.mc_version && latestVersion) {
 				formData.mc_version = latestVersion;
 			}
 			
-			// Load favorite modpacks
-			await loadFavoriteModpacks();
-			
-			// Check if modpack was passed in URL
-			const modpackId = $page.url.searchParams.get('modpack');
-			if (modpackId) {
-				// Load and select the modpack
-				try {
-					const response = await fetch(`/api/v1/modpacks/${modpackId}`);
-					if (response.ok) {
-						const data = await response.json();
-						await selectModpack(data.modpack);
-					}
-				} catch (error) {
-					console.error('Failed to load modpack from URL:', error);
-				}
-			}
+
 		} catch (error) {
 			toast.error('Failed to load server configuration options');
 			console.error(error);
@@ -118,59 +131,7 @@
 		}
 	});
 	
-	async function loadFavoriteModpacks() {
-		try {
-			const response = await fetch('/api/v1/modpacks/favorites');
-			if (!response.ok) throw new Error('Failed to load favorites');
-			
-			const result = await response.json();
-			favoriteModpacks = result.modpacks;
-		} catch (error) {
-			console.error('Failed to load favorite modpacks:', error);
-		}
-	}
-	
-	async function selectModpack(modpack: IndexedModpack) {
-		selectedModpack = modpack;
-		showModpackDialog = false;
-		
-		try {
-			// Get configuration from the server
-			const response = await fetch(`/api/v1/modpacks/${modpack.id}/config`);
-			if (!response.ok) throw new Error('Failed to get modpack config');
-			
-			const config = await response.json();
-			
-			// Populate ALL form fields from server response
-			formData.name = config.name;
-			formData.description = config.description;
-			formData.mod_loader = config.mod_loader;
-			formData.mc_version = config.mc_version;
-			formData.memory = config.memory;
-			formData.docker_image = config.docker_image;
-		} catch (error) {
-			toast.error('Failed to load modpack configuration');
-			console.error(error);
-			selectedModpack = null;
-		}
-	}
-	
-	function removeModpack() {
-		selectedModpack = null;
-		// Reset fields that were set by modpack
-		formData.mod_loader = 'vanilla';
-		formData.mc_version = latestVersion || '';
-		formData.docker_image = '';
-		formData.memory = 2048;
-	}
-	
-	function parseJsonArray(jsonStr: string): string[] {
-		try {
-			return JSON.parse(jsonStr);
-		} catch {
-			return [];
-		}
-	}
+
 
 	function validatePort(port: number) {
 		portError = '';
@@ -307,85 +268,6 @@
 					</div>
 				</CardHeader>
 				<CardContent class="space-y-6">
-					<div class="space-y-3">
-						<Label class="text-sm font-medium">Configuration Method</Label>
-						<div class="grid grid-cols-2 gap-3">
-							<Button
-								type="button"
-								variant={selectedModpack ? "outline" : "default"}
-								onclick={() => selectedModpack = null}
-								class="justify-start h-auto py-3 px-4 transition-all hover:scale-[1.02]"
-							>
-								<div class="text-left">
-									<div class="font-medium">Manual Configuration</div>
-									<div class="text-xs text-muted-foreground mt-0.5">Start from scratch</div>
-								</div>
-							</Button>
-							<Button
-								type="button"
-								variant={selectedModpack ? "default" : "outline"}
-								onclick={() => showModpackDialog = true}
-								disabled={loading || favoriteModpacks.length === 0}
-								class="justify-start h-auto py-3 px-4 transition-all hover:scale-[1.02]"
-							>
-								<Package class="h-4 w-4 mr-2 shrink-0" />
-								<div class="text-left">
-									<div class="font-medium">{favoriteModpacks.length === 0 ? 'No Favorites' : 'From Modpack'}</div>
-									<div class="text-xs text-muted-foreground mt-0.5">Use preset configuration</div>
-								</div>
-							</Button>
-						</div>
-						
-						{#if selectedModpack}
-							<Card class="border-2 border-primary/30 bg-gradient-to-br from-primary/10 to-primary/5 shadow-lg">
-								<CardContent class="p-5">
-									<div class="flex items-start gap-3">
-										{#if selectedModpack.logo_url}
-											<img 
-												src={selectedModpack.logo_url} 
-												alt={selectedModpack.name}
-												class="w-12 h-12 rounded-md object-cover"
-											/>
-										{/if}
-										<div class="flex-1 min-w-0">
-											<h4 class="font-semibold">{selectedModpack.name}</h4>
-											<p class="text-sm text-muted-foreground line-clamp-2">
-												{selectedModpack.summary}
-											</p>
-											<div class="flex gap-2 mt-2">
-												{#if parseJsonArray(selectedModpack.game_versions).length > 0}
-													<Badge variant="secondary" class="text-xs">
-														MC {parseJsonArray(selectedModpack.game_versions)[0]}
-													</Badge>
-												{/if}
-												{#if parseJsonArray(selectedModpack.mod_loaders).length > 0}
-													<Badge variant="secondary" class="text-xs">
-														{parseJsonArray(selectedModpack.mod_loaders)[0]}
-													</Badge>
-												{/if}
-											</div>
-										</div>
-										<Button
-											type="button"
-											variant="ghost"
-											size="sm"
-											onclick={removeModpack}
-											disabled={loading}
-										>
-											Remove
-										</Button>
-									</div>
-								</CardContent>
-							</Card>
-						{:else if favoriteModpacks.length === 0}
-							<p class="text-sm text-muted-foreground">
-								Visit the <a href="/modpacks" class="underline">Modpacks</a> page to browse and favorite modpacks
-							</p>
-						{/if}
-					</div>
-
-					<Separator />
-
 					<div class="space-y-2">
 						<Label for="name" class="text-sm font-medium">Server Name <span class="text-destructive">*</span></Label>
 						<Input

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/nickheyer/discopanel/internal/db"
+	"github.com/RandomTechrate/discopanel-fork/internal/db"
 	"github.com/spf13/viper"
 )
 

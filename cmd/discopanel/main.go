@@ -10,13 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/api"
-	"github.com/nickheyer/discopanel/internal/config"
-	"github.com/nickheyer/discopanel/internal/db"
-	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/proxy"
-	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/RandomTechrate/discopanel-fork/internal/api"
+	"github.com/RandomTechrate/discopanel-fork/internal/config"
+	"github.com/RandomTechrate/discopanel-fork/internal/db"
+	storage "github.com/RandomTechrate/discopanel-fork/internal/db"
+	"github.com/RandomTechrate/discopanel-fork/internal/docker"
+	"github.com/RandomTechrate/discopanel-fork/internal/proxy"
+	"github.com/RandomTechrate/discopanel-fork/pkg/logger"
 )
 
 func main() {

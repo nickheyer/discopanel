@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/nickheyer/discopanel/internal/db"
+	"github.com/RandomTechrate/discopanel-fork/internal/db"
 )
 
 type contextKey string
@@ -117,7 +117,7 @@ func (m *Middleware) CheckAuthStatus() func(http.Handler) http.Handler {
 				w.Header().Set("X-Auth-Enabled", "error")
 			} else if authConfig.Enabled {
 				w.Header().Set("X-Auth-Enabled", "true")
-				
+
 				// Check if this is the first user setup
 				userCount, _ := m.store.CountUsers(r.Context())
 				if userCount == 0 {

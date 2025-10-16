@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nickheyer/discopanel/internal/config"
-	db "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/RandomTechrate/discopanel-fork/internal/config"
+	db "github.com/RandomTechrate/discopanel-fork/internal/db"
+	"github.com/RandomTechrate/discopanel-fork/pkg/logger"
 )
 
 // Manager handles the lifecycle of the proxy and manages routes

@@ -3,11 +3,24 @@ package api
 import (
 	"net/http"
 
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/RandomTechrate/discopanel-fork/internal/db"
+	"github.com/RandomTechrate/discopanel-fork/internal/minecraft"
 )
 
 func (s *Server) handleGetMinecraftVersions(w http.ResponseWriter, r *http.Request) {
-	versions := minecraft.GetVersions()
+	modloader := r.URL.Query().Get("modloader")
+
+	var versions []string
+	if modloader != "" {
+		versions = minecraft.GetVersionsForModloader(db.ModLoader(modloader))
+	} else {
+		var err error
+		versions, err = minecraft.GetVersions(string(db.ModLoaderPaper))
+		if err != nil {
+			s.respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 
 	s.respondJSON(w, http.StatusOK, map[string]any{
 		"versions": versions,

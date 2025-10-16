@@ -45,6 +45,9 @@ export interface Server {
   auto_start?: boolean;
 }
 
+// Backwards-compatible alias used by some components
+export type ServerType = Server;
+
 export interface CreateServerRequest {
   name: string;
   description: string;
@@ -212,4 +215,16 @@ export interface ModpackSyncRequest {
   gameVersion: string;
   modLoader: string;
   indexer?: string;
+}
+
+export interface ScheduledJob {
+  id: string;
+  server_id: string;
+  name: string;
+  spec: string;
+  action: string; // 'restart' | 'exec'
+  payload?: string;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
 }

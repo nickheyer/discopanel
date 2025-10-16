@@ -6,14 +6,15 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/RandomTechrate/discopanel-fork/internal/auth"
+	"github.com/RandomTechrate/discopanel-fork/internal/config"
+	storage "github.com/RandomTechrate/discopanel-fork/internal/db"
+	"github.com/RandomTechrate/discopanel-fork/internal/docker"
+	"github.com/RandomTechrate/discopanel-fork/internal/minecraft"
+	"github.com/RandomTechrate/discopanel-fork/internal/proxy"
+	"github.com/RandomTechrate/discopanel-fork/pkg/logger"
+	web "github.com/RandomTechrate/discopanel-fork/web/discopanel"
 	"github.com/gorilla/mux"
-	"github.com/nickheyer/discopanel/internal/auth"
-	"github.com/nickheyer/discopanel/internal/config"
-	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/proxy"
-	"github.com/nickheyer/discopanel/pkg/logger"
-	web "github.com/nickheyer/discopanel/web/discopanel"
 )
 
 type Server struct {
@@ -25,6 +26,9 @@ type Server struct {
 	proxyManager   *proxy.Manager
 	authManager    *auth.Manager
 	authMiddleware *auth.Middleware
+
+	// MCJars v2 client
+	mcjars *minecraft.MCJarsClient
 }
 
 func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
@@ -37,6 +41,9 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		log.Error("Failed to initialize authentication: %v", err)
 	}
 
+	// Initialize MCJars client
+	mcjarsClient := minecraft.NewMCJarsClient()
+
 	s := &Server{
 		store:          store,
 		docker:         docker,
@@ -44,6 +51,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		log:            log,
 		authManager:    authManager,
 		authMiddleware: authMiddleware,
+		mcjars:         mcjarsClient,
 	}
 
 	s.setupRoutes()
@@ -68,7 +76,7 @@ func (s *Server) setupRoutes() {
 	s.setupUserRoutes(api)
 	s.setupServerRoutes(api)
 	s.setupProxyRoutes(api)
-	s.setupModpackRoutes(api)
+
 	s.setupSettingsRoutes(api)
 
 	// Setup frontend serving
@@ -156,6 +164,7 @@ func (s *Server) setupServerRoutes(api *mux.Router) {
 	editor.HandleFunc("/servers/{id}/mods", s.handleUploadMod).Methods("POST")
 	editor.HandleFunc("/servers/{id}/mods/{modId}", s.handleUpdateMod).Methods("PUT")
 	editor.HandleFunc("/servers/{id}/mods/{modId}", s.handleDeleteMod).Methods("DELETE")
+
 }
 
 func (s *Server) setupProxyRoutes(api *mux.Router) {
@@ -168,26 +177,6 @@ func (s *Server) setupProxyRoutes(api *mux.Router) {
 	proxy.HandleFunc("/listeners", s.handleCreateProxyListener).Methods("POST")
 	proxy.HandleFunc("/listeners/{id}", s.handleUpdateProxyListener).Methods("PUT")
 	proxy.HandleFunc("/listeners/{id}", s.handleDeleteProxyListener).Methods("DELETE")
-}
-
-func (s *Server) setupModpackRoutes(api *mux.Router) {
-	// Viewer-level modpack routes
-	viewer := api.PathPrefix("/modpacks").Subrouter()
-	viewer.Use(s.authMiddleware.RequireAuth(storage.RoleViewer))
-	viewer.HandleFunc("", s.handleSearchModpacks).Methods("GET")
-	viewer.HandleFunc("/status", s.handleGetIndexerStatus).Methods("GET")
-	viewer.HandleFunc("/favorites", s.handleListFavorites).Methods("GET")
-	viewer.HandleFunc("/{id}", s.handleGetModpack).Methods("GET")
-	viewer.HandleFunc("/{id}/config", s.handleGetModpackConfig).Methods("GET")
-	viewer.HandleFunc("/{id}/files", s.handleGetModpackFiles).Methods("GET")
-
-	// Editor-level modpack routes
-	editor := api.PathPrefix("/modpacks").Subrouter()
-	editor.Use(s.authMiddleware.RequireAuth(storage.RoleEditor))
-	editor.HandleFunc("/sync", s.handleSyncModpacks).Methods("POST")
-	editor.HandleFunc("/upload", s.handleUploadModpack).Methods("POST")
-	editor.HandleFunc("/{id}/favorite", s.handleToggleFavorite).Methods("POST")
-	editor.HandleFunc("/{id}/files/sync", s.handleSyncModpackFiles).Methods("POST")
 }
 
 func (s *Server) setupSettingsRoutes(api *mux.Router) {

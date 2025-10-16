@@ -86,6 +86,7 @@ func (s *Store) Migrate() error {
 		&User{},
 		&AuthConfig{},
 		&Session{},
+		&ScheduledJob{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate: %w", err)
@@ -428,6 +429,44 @@ func (s *Store) ListIndexedModpacks(ctx context.Context, offset, limit int) ([]*
 	return modpacks, total, err
 }
 
+// ScheduledJob operations
+func (s *Store) CreateScheduledJob(ctx context.Context, job *ScheduledJob) error {
+	if job.ID == "" {
+		job.ID = fmt.Sprintf("sched-%d", time.Now().UnixNano())
+	}
+	return s.db.WithContext(ctx).Create(job).Error
+}
+
+func (s *Store) ListScheduledJobs(ctx context.Context, serverID string) ([]*ScheduledJob, error) {
+	var jobs []*ScheduledJob
+	db := s.db.WithContext(ctx).Order("created_at DESC")
+	if serverID != "" {
+		db = db.Where("server_id = ?", serverID)
+	}
+	err := db.Find(&jobs).Error
+	return jobs, err
+}
+
+func (s *Store) GetScheduledJob(ctx context.Context, id string) (*ScheduledJob, error) {
+	var job ScheduledJob
+	err := s.db.WithContext(ctx).First(&job, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("scheduled job not found")
+		}
+		return nil, err
+	}
+	return &job, nil
+}
+
+func (s *Store) UpdateScheduledJob(ctx context.Context, job *ScheduledJob) error {
+	return s.db.WithContext(ctx).Save(job).Error
+}
+
+func (s *Store) DeleteScheduledJob(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Delete(&ScheduledJob{}, "id = ?", id).Error
+}
+
 // Indexed Modpack File operations
 func (s *Store) UpsertIndexedModpackFile(ctx context.Context, file *IndexedModpackFile) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -695,11 +734,11 @@ func (s *Store) GetAuthConfig(ctx context.Context) (*AuthConfig, bool, error) {
 		if err == gorm.ErrRecordNotFound {
 			// Return default config if none exists
 			return &AuthConfig{
-				ID:                "default",
-				Enabled:           false,
-				SessionTimeout:    86400, // 24 hours
+				ID:                 "default",
+				Enabled:            false,
+				SessionTimeout:     86400, // 24 hours
 				RequireEmailVerify: false,
-				AllowRegistration: false,
+				AllowRegistration:  false,
 			}, true, nil
 		}
 		return nil, false, err

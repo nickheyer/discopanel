@@ -16,7 +16,8 @@ import type {
   UploadResponse,
   ServerProperties,
   ApiError,
-  ConfigCategory
+  ConfigCategory,
+  ScheduledJob,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -370,6 +371,32 @@ class ApiClient {
       },
       body: JSON.stringify({ proxy_hostname: hostname }),
     });
+  }
+
+  // Schedules
+  async listSchedules(serverId?: string): Promise<ScheduledJob[]> {
+    const query = serverId ? `?server_id=${encodeURIComponent(serverId)}` : '';
+    return this.request<ScheduledJob[]>(`/schedules${query}`);
+  }
+
+  async createSchedule(job: Partial<ScheduledJob>): Promise<ScheduledJob> {
+    return this.request<ScheduledJob>(`/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(job),
+    });
+  }
+
+  async updateSchedule(id: string, job: Partial<ScheduledJob>): Promise<ScheduledJob> {
+    return this.request<ScheduledJob>(`/schedules/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(job),
+    });
+  }
+
+  async deleteSchedule(id: string): Promise<void> {
+    await fetch(`${API_BASE}/schedules/${id}`, { method: 'DELETE' });
   }
 }
 

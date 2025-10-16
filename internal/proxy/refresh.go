@@ -3,7 +3,7 @@ package proxy
 import (
 	"context"
 
-	db "github.com/nickheyer/discopanel/internal/db"
+	db "github.com/RandomTechrate/discopanel-fork/internal/db"
 )
 
 // RefreshRoutes refreshes all routes based on current server states

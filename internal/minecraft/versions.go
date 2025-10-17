@@ -3,7 +3,7 @@ package minecraft
 import (
 	"log"
 
-	"github.com/RandomTechrate/discopanel-fork/internal/db"
+	"github.com/nickheyer/discopanel/internal/db"
 )
 
 // GetLatestVersion returns the latest Minecraft version

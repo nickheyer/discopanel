@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	models "github.com/RandomTechrate/discopanel-fork/internal/db"
+	models "github.com/nickheyer/discopanel/internal/db"
 )
 
 // ParseTPSFromOutput parses TPS value from various server command outputs

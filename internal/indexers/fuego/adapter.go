@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/RandomTechrate/discopanel-fork/internal/indexers"
+	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
 // Ensure FuegoIndexer implements ModpackIndexer

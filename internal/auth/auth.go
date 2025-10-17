@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/RandomTechrate/discopanel-fork/internal/db"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/db"
 	"golang.org/x/crypto/bcrypt"
 )
 

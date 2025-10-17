@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	models "github.com/RandomTechrate/discopanel-fork/internal/db"
-	"github.com/RandomTechrate/discopanel-fork/internal/minecraft"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 )
 
 func (s *Server) handleListMods(w http.ResponseWriter, r *http.Request) {

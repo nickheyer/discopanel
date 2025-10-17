@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	models "github.com/RandomTechrate/discopanel-fork/internal/db"
-	"github.com/RandomTechrate/discopanel-fork/internal/docker"
-	"github.com/RandomTechrate/discopanel-fork/internal/minecraft"
-	"github.com/RandomTechrate/discopanel-fork/pkg/files"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/files"
 )
 
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {

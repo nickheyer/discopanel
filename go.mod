@@ -1,4 +1,4 @@
-module github.com/RandomTechrate/discopanel-fork
+module github.com/nickheyer/discopanel
 
 go 1.24.5
 

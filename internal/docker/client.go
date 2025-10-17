@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 
-	models "github.com/RandomTechrate/discopanel-fork/internal/db"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
@@ -20,6 +19,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
+	models "github.com/nickheyer/discopanel/internal/db"
 )
 
 type ContainerStats struct {
@@ -223,7 +223,7 @@ func NewClient(host string, config ...ClientConfig) (*Client, error) {
 	} else {
 		// Set defaults
 		c.config = ClientConfig{
-			NetworkName:   "discopanel-network",
+			NetworkName:   "discopanelnetwork",
 			NetworkSubnet: "172.20.0.0/16",
 		}
 	}
@@ -393,7 +393,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		hostConfig,
 		networkConfig,
 		nil,
-		fmt.Sprintf("discopanel-server-%s", server.ID),
+		fmt.Sprintf("discopanelserver-%s", server.ID),
 	)
 
 	if err != nil {

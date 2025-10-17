@@ -18,6 +18,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 
+
 	let loading = $state(false);
 	let loadingVersions = $state(true);
 	let minecraftVersions = $state<string[]>([]);
@@ -30,6 +31,9 @@
 	let usedPorts = $state<Record<number, boolean>>({});
 	let portError = $state('');
 	let useProxyMode = $state(false); // Track connection mode separately
+
+	// Basic/Advanced view toggle
+	let showAdvanced = $state(false);
 	
 
 
@@ -236,447 +240,475 @@
 </script>
 
 <div class="h-full overflow-y-auto bg-gradient-to-br from-background to-muted/10">
-	<div class="space-y-8 p-4 sm:p-6 lg:p-8 pt-4 sm:pt-6">
-	<div class="flex items-center gap-4 pb-6 border-b-2 border-border/50">
-		<Button variant="ghost" size="icon" href="/servers" class="shrink-0 h-12 w-12 rounded-xl hover:bg-muted">
-			<ArrowLeft class="h-5 w-5" />
-		</Button>
-		<div class="flex items-center gap-4">
-			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
-				<Package class="h-8 w-8 text-primary" />
-			</div>
-			<div class="space-y-1">
-				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Create New Server</h2>
-				<p class="text-base text-muted-foreground">Set up a new Minecraft server instance with your preferred configuration</p>
-			</div>
+   <div class="space-y-8 p-4 sm:p-6 lg:p-8 pt-4 sm:pt-6">
+   <div class="flex items-center gap-4 pb-6 border-b-2 border-border/50">
+	   <Button variant="ghost" size="icon" href="/servers" class="shrink-0 h-12 w-12 rounded-xl hover:bg-muted">
+		   <ArrowLeft class="h-5 w-5" />
+	   </Button>
+	   <div class="flex items-center gap-4">
+		   <div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+			   <Package class="h-8 w-8 text-primary" />
+		   </div>
+		   <div class="space-y-1">
+			   <h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Create New Server</h2>
+			   <p class="text-base text-muted-foreground">Set up a new Minecraft server instance with your preferred configuration</p>
+		   </div>
+	   </div>
+   </div>
+
+   <!-- Basic/Advanced toggle -->
+   <div class="flex items-center gap-3 mb-4">
+	   <Button type="button" variant={!showAdvanced ? 'default' : 'outline'} onclick={() => showAdvanced = false} class="px-4 py-2">Basic</Button>
+	   <Button type="button" variant={showAdvanced ? 'default' : 'outline'} onclick={() => showAdvanced = true} class="px-4 py-2">Advanced</Button>
+	   <span class="text-xs text-muted-foreground">{showAdvanced ? 'Showing all settings' : 'Showing basic settings only'}</span>
+   </div>
+
+   <form onsubmit={handleSubmit}>
+	   <div class="grid gap-6 lg:grid-cols-2">
+			   <Card class="relative overflow-hidden border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
+				   <div class="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-primary/10 to-transparent rounded-full -mr-24 -mt-24"></div>
+				   <CardHeader class="pb-6">
+					   <div class="flex items-center gap-3">
+						   <div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+							   <Settings class="h-5 w-5 text-primary" />
+						   </div>
+						   <div>
+							   <CardTitle class="text-2xl">Basic Information</CardTitle>
+							   <CardDescription class="text-base">Configure your server's basic settings and metadata</CardDescription>
+						   </div>
+					   </div>
+				   </CardHeader>
+				   <CardContent class="space-y-6">
+					   <div class="space-y-2">
+						   <Label for="name" class="text-sm font-medium">Server Name <span class="text-destructive">*</span></Label>
+						   <Input
+							   id="name"
+							   placeholder="My Awesome Server"
+							   bind:value={formData.name}
+							   required
+							   disabled={loading}
+							   class="h-10"
+						   />
+					   </div>
+
+					   <div class="space-y-2">
+						   <Label for="description" class="text-sm font-medium">Description <span class="text-muted-foreground text-xs">(optional)</span></Label>
+						   <Textarea
+							   id="description"
+							   placeholder="A fun server for friends..."
+							   bind:value={formData.description}
+							   disabled={loading}
+							   class="min-h-[80px] resize-none"
+						   />
+					   </div>
+
+					   <Separator />
+
+					   <div class="space-y-2">
+						   <Label for="mc_version" class="text-sm font-medium">Minecraft Version</Label>
+						   {#if loadingVersions}
+							   <div class="flex items-center justify-center p-4">
+								   <Loader2 class="h-4 w-4 animate-spin" />
+							   </div>
+						   {:else}
+							   <Select type="single" value={formData.mc_version} onValueChange={(v: string | undefined) => formData.mc_version = v ?? ''} disabled={loading}>
+								   <SelectTrigger id="mc_version">
+									   <span>{formData.mc_version || 'Select a version'}</span>
+								   </SelectTrigger>
+								   <SelectContent>
+									   {#each minecraftVersions as version}
+										   <SelectItem value={version}>
+											   {version} {version === latestVersion ? '(Latest)' : ''}
+										   </SelectItem>
+									   {/each}
+								   </SelectContent>
+							   </Select>
+						   {/if}
+					   </div>
+
+					   <div class="space-y-2">
+						   <Label for="mod_loader" class="text-sm font-medium">Mod Loader</Label>
+						   <Select type="single" value={formData.mod_loader} onValueChange={(v: string | undefined) => formData.mod_loader = (v as ModLoader) ?? 'vanilla'} disabled={loading}>
+							   <SelectTrigger id="mod_loader">
+								   <span>{modLoaders.find(l => l.Name === formData.mod_loader)?.DisplayName || 'Select a mod loader'}</span>
+							   </SelectTrigger>
+							   <SelectContent>
+								   {#each modLoaders as loader}
+									   <SelectItem value={loader.Name}>
+										   {loader.DisplayName}
+									   </SelectItem>
+								   {/each}
+							   </SelectContent>
+						   </Select>
+						   {#if formData.mod_loader === 'vanilla'}
+							   <p class="text-sm text-muted-foreground">
+								   No mod support - vanilla Minecraft server
+							   </p>
+						   {:else if modLoaders.find(l => l.Name === formData.mod_loader)?.ModsDirectory}
+							   <p class="text-sm text-muted-foreground">
+								   Mods will be stored in: {modLoaders.find(l => l.Name === formData.mod_loader)?.ModsDirectory}/
+							   </p>
+						   {/if}
+					   </div>
+
+					   <!-- Show only in Basic view -->
+					   {#if !showAdvanced}
+						   <Separator />
+						   <div class="space-y-2">
+							   <Label for="max_players" class="text-sm font-medium">Max Players</Label>
+							   <Input
+								   id="max_players"
+								   type="number"
+								   min="1"
+								   max="1000"
+								   bind:value={formData.max_players}
+								   oninput={handleMaxPlayersInput}
+								   disabled={loading}
+								   class="h-10"
+							   />
+						   </div>
+					   {/if}
+				   </CardContent>
+			   </Card>
+
+			   <!-- Only show this card in Advanced view -->
+			   {#if showAdvanced}
+			   <Card class="relative overflow-hidden border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
+				   <div class="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-primary/10 to-transparent rounded-full -mr-24 -mt-24"></div>
+				   <CardHeader class="pb-6">
+					   <div class="flex items-center gap-3">
+						   <div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+							   <HardDrive class="h-5 w-5 text-primary" />
+						   </div>
+						   <div>
+							   <CardTitle class="text-2xl">Server Configuration</CardTitle>
+							   <CardDescription class="text-base">Fine-tune your server's performance and network settings</CardDescription>
+						   </div>
+					   </div>
+				   </CardHeader>
+				   <CardContent class="space-y-6">
+					   {#if proxyEnabled}
+						   <div class="space-y-4">
+							   <div class="space-y-2">
+								   <Label class="text-sm font-medium">Connection Method</Label>
+								   <div class="grid grid-cols-2 gap-3">
+									   <Button
+										   type="button"
+										   variant={!useProxyMode ? "default" : "outline"}
+										   onclick={() => {
+											   useProxyMode = false;
+											   formData.proxy_hostname = '';
+											   // Reset port error when switching to direct port
+											   portError = '';
+										   }}
+										   class="justify-start h-auto py-3 px-4"
+									   >
+										   <div class="text-left">
+											   <div class="font-medium">Direct Port</div>
+											   <div class="text-xs text-muted-foreground mt-0.5">Connect via port number</div>
+										   </div>
+									   </Button>
+									   <Button
+										   type="button"
+										   variant={useProxyMode ? "default" : "outline"}
+										   onclick={() => {
+											   useProxyMode = true;
+											   if (!formData.proxy_hostname) {
+												   formData.proxy_hostname = formData.name.toLowerCase().replace(/\s+/g, '-') || 'minecraft-server';
+											   }
+											   // Clear port error when using proxy
+											   portError = '';
+										   }}
+										   class="justify-start h-auto py-3 px-4"
+									   >
+										   <div class="text-left">
+											   <div class="font-medium">Custom Hostname</div>
+											   <div class="text-xs text-muted-foreground mt-0.5">Connect via domain name</div>
+										   </div>
+									   </Button>
+								   </div>
+							   </div>
+
+							   {#if useProxyMode}
+								   <div class="space-y-4">
+									   <!-- Listener Selection -->
+									   {#if proxyListeners.length > 0}
+										   <div class="space-y-2">
+											   <Label for="proxy_listener" class="text-sm font-medium">Proxy Listener</Label>
+											   <Select 
+												   type="single" 
+												   value={formData.proxy_listener_id} 
+												   onValueChange={(v) => formData.proxy_listener_id = v || ''}
+												   disabled={loading}
+											   >
+												   <SelectTrigger id="proxy_listener">
+													   <span>
+														   {proxyListeners.find(l => l.id === formData.proxy_listener_id)?.name || 'Select a listener'}
+													   </span>
+												   </SelectTrigger>
+												   <SelectContent>
+													   {#each proxyListeners as listener}
+														   <SelectItem value={listener.id}>
+															   {listener.name} (Port {listener.port})
+															   {#if listener.is_default}
+																   <span class="text-xs text-muted-foreground ml-2">[Default]</span>
+															   {/if}
+														   </SelectItem>
+													   {/each}
+												   </SelectContent>
+											   </Select>
+											   <p class="text-xs text-muted-foreground">
+												   Select which proxy port players will connect through
+											   </p>
+										   </div>
+									   {/if}
+
+									   <!-- Hostname Input -->
+									   <div class="space-y-2">
+										   <Label for="proxy_hostname" class="text-sm font-medium">Server Hostname</Label>
+										   <Input
+											   id="proxy_hostname"
+											   placeholder={proxyBaseURL ? "survival" : "survival.example.com"}
+											   bind:value={formData.proxy_hostname}
+											   disabled={loading}
+											   class="h-10"
+										   />
+                                       
+										   <!-- Base URL Checkbox -->
+										   {#if proxyBaseURL}
+											   <div class="flex items-center gap-2">
+												   <input
+													   type="checkbox"
+													   id="use_base_url"
+													   bind:checked={formData.use_base_url}
+													   class="h-4 w-4"
+												   />
+												   <Label for="use_base_url" class="text-sm font-medium">
+													   Append base domain ({proxyBaseURL})
+												   </Label>
+											   </div>
+										   {/if}
+                                       
+										   <p class="text-xs text-muted-foreground">
+											   {#if formData.use_base_url && proxyBaseURL}
+												   Players will connect using: {formData.proxy_hostname}.{proxyBaseURL}
+											   {:else}
+												   Players will connect using: {formData.proxy_hostname}
+											   {/if}
+										   </p>
+									   </div>
+								   </div>
+							   {:else}
+								   <div class="space-y-2">
+									   <div class="flex items-center justify-between">
+										   <Label for="port" class="text-sm font-medium">Server Port</Label>
+										   <Button
+											   type="button"
+											   variant="ghost"
+											   size="sm"
+											   onclick={refreshAvailablePort}
+											   disabled={loading}
+										   >
+											   Auto-assign
+										   </Button>
+									   </div>
+									   <Input
+										   id="port"
+										   type="number"
+										   min="1"
+										   max="65535"
+										   bind:value={formData.port}
+										   oninput={(e) => validatePort(Number(e.currentTarget.value))}
+										   disabled={loading}
+										   class="h-10 {portError ? 'border-destructive' : ''}"
+									   />
+									   {#if portError}
+										   <p class="text-xs text-destructive">{portError}</p>
+									   {:else}
+										   <p class="text-xs text-muted-foreground">
+											   Default Minecraft port is 25565
+										   </p>
+									   {/if}
+								   </div>
+							   {/if}
+						   </div>
+					   {:else}
+						   <div class="space-y-2">
+							   <div class="flex items-center justify-between">
+								   <Label for="port" class="text-sm font-medium">Server Port</Label>
+								   <Button
+									   type="button"
+									   variant="ghost"
+									   size="sm"
+									   onclick={refreshAvailablePort}
+									   disabled={loading}
+								   >
+									   Auto-assign
+								   </Button>
+							   </div>
+							   <Input
+								   id="port"
+								   type="number"
+								   min="1"
+								   max="65535"
+								   bind:value={formData.port}
+								   oninput={(e) => validatePort(Number(e.currentTarget.value))}
+								   disabled={loading}
+								   class="h-10 {portError ? 'border-destructive' : ''}"
+							   />
+							   {#if portError}
+								   <p class="text-xs text-destructive">{portError}</p>
+							   {:else}
+								   <p class="text-xs text-muted-foreground">
+									   Default Minecraft port is 25565
+								   </p>
+							   {/if}
+						   </div>
+					   {/if}
+
+					   <div class="space-y-2">
+						   <Label for="max_players" class="text-sm font-medium">Max Players</Label>
+						   <Input
+							   id="max_players"
+							   type="number"
+							   min="1"
+							   max="1000"
+							   bind:value={formData.max_players}
+							   oninput={handleMaxPlayersInput}
+							   disabled={loading}
+							   class="h-10"
+						   />
+					   </div>
+
+					   <div class="space-y-2">
+						   <Label for="memory" class="text-sm font-medium">Memory Allocation (MB)</Label>
+						   <div class="flex gap-2">
+							   <Input
+								   id="memory"
+								   type="number"
+								   min="512"
+								   step="512"
+								   bind:value={formData.memory}
+								   oninput={handleMemoryInput}
+								   disabled={loading}
+								   class="h-10"
+							   />
+						   </div>
+						   <p class="text-xs text-muted-foreground">
+							   Recommended for {formData.mod_loader}: {formData.mod_loader === 'forge' || formData.mod_loader === 'neoforge' ? '4096' : formData.mod_loader === 'fabric' ? '3072' : '2048'} MB
+						   </p>
+					   </div>
+
+					   <Separator />
+
+					   <div class="space-y-2">
+						   <Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
+						   <Select type="single" value={formData.docker_image} onValueChange={(v: string | undefined) => formData.docker_image = v ?? ''} disabled={loading || loadingVersions}>
+							   <SelectTrigger id="docker_image">
+								   <span>{formData.docker_image ? getDockerImageDisplayName(formData.docker_image) : 'Auto-select (Recommended)'}</span>
+							   </SelectTrigger>
+							   <SelectContent>
+								   <SelectItem value="">Auto-select (Recommended)</SelectItem>
+								   {#each dockerImages.filter(img => !img.deprecated) as image}
+									   <SelectItem value={image.tag}>
+										   {getDockerImageDisplayName(image)}
+										   {#if image.note}
+											   <span class="text-xs text-muted-foreground ml-2">({image.note})</span>
+										   {/if}
+									   </SelectItem>
+								   {/each}
+							   </SelectContent>
+						   </Select>
+						   <p class="text-xs text-muted-foreground">
+							   Leave as auto-select unless you have specific requirements
+						   </p>
+					   </div>
+
+					   <Separator />
+
+					   <div class="space-y-4">
+						   <h4 class="text-sm font-semibold">Lifecycle Management</h4>
+                       
+						   <div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+							   <div class="space-y-0.5">
+								   <Label for="start_immediately" class="text-sm font-medium cursor-pointer">Start Immediately</Label>
+								   <p class="text-xs text-muted-foreground">
+									   Start the server right after creation
+								   </p>
+							   </div>
+							   <Switch
+								   id="start_immediately"
+								   bind:checked={formData.start_immediately}
+								   disabled={loading}
+							   />
+						   </div>
+                       
+						   <div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+							   <div class="space-y-0.5">
+								   <Label for="detached" class="text-sm font-medium cursor-pointer">Detached Mode</Label>
+								   <p class="text-xs text-muted-foreground">
+									   Server continues running when DiscoPanel stops (not available for proxied servers)
+								   </p>
+							   </div>
+							   <Switch
+								   id="detached"
+								   bind:checked={formData.detached}
+								   disabled={loading || useProxyMode}
+								   onCheckedChange={(checked) => {
+									   if (checked && useProxyMode) {
+										   toast.error("Cannot detach proxied servers");
+										   formData.detached = false;
+										   return;
+									   }
+									   formData.detached = checked;
+									   // If detaching, disable auto-start
+									   if (checked) {
+										   formData.auto_start = false;
+									   }
+								   }}
+							   />
+						   </div>
+
+						   <div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+							   <div class="space-y-0.5">
+								   <Label for="auto_start" class="text-sm font-medium cursor-pointer">Auto Start</Label>
+								   <p class="text-xs text-muted-foreground">
+									   Automatically start when DiscoPanel starts{formData.detached ? ' (disabled for detached servers)' : ''}
+								   </p>
+							   </div>
+							   <Switch
+								   id="auto_start"
+								   bind:checked={formData.auto_start}
+								   disabled={loading || formData.detached}
+								   onCheckedChange={(checked) => {
+									   if (formData.detached) {
+										   toast.error("Cannot enable auto-start for detached servers");
+										   formData.auto_start = false;
+										   return;
+									   }
+									   formData.auto_start = checked;
+								   }}
+							   />
+						   </div>
+					   </div>
+				   </CardContent>
+			   </Card>
+			   {/if}
 		</div>
-	</div>
 
-	<form onsubmit={handleSubmit}>
-		<div class="grid gap-6 lg:grid-cols-2">
-			<Card class="relative overflow-hidden border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
-				<div class="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-primary/10 to-transparent rounded-full -mr-24 -mt-24"></div>
-				<CardHeader class="pb-6">
-					<div class="flex items-center gap-3">
-						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-							<Settings class="h-5 w-5 text-primary" />
-						</div>
-						<div>
-							<CardTitle class="text-2xl">Basic Information</CardTitle>
-							<CardDescription class="text-base">Configure your server's basic settings and metadata</CardDescription>
-						</div>
-					</div>
-				</CardHeader>
-				<CardContent class="space-y-6">
-					<div class="space-y-2">
-						<Label for="name" class="text-sm font-medium">Server Name <span class="text-destructive">*</span></Label>
-						<Input
-							id="name"
-							placeholder="My Awesome Server"
-							bind:value={formData.name}
-							required
-							disabled={loading}
-							class="h-10"
-						/>
-					</div>
-
-					<div class="space-y-2">
-						<Label for="description" class="text-sm font-medium">Description <span class="text-muted-foreground text-xs">(optional)</span></Label>
-						<Textarea
-							id="description"
-							placeholder="A fun server for friends..."
-							bind:value={formData.description}
-							disabled={loading}
-							class="min-h-[80px] resize-none"
-						/>
-					</div>
-
-					<Separator />
-
-					<div class="space-y-2">
-						<Label for="mc_version" class="text-sm font-medium">Minecraft Version</Label>
-						{#if loadingVersions}
-							<div class="flex items-center justify-center p-4">
-								<Loader2 class="h-4 w-4 animate-spin" />
-							</div>
-						{:else}
-							<Select type="single" value={formData.mc_version} onValueChange={(v: string | undefined) => formData.mc_version = v ?? ''} disabled={loading}>
-								<SelectTrigger id="mc_version">
-									<span>{formData.mc_version || 'Select a version'}</span>
-								</SelectTrigger>
-								<SelectContent>
-									{#each minecraftVersions as version}
-										<SelectItem value={version}>
-											{version} {version === latestVersion ? '(Latest)' : ''}
-										</SelectItem>
-									{/each}
-								</SelectContent>
-							</Select>
-						{/if}
-					</div>
-
-					<div class="space-y-2">
-						<Label for="mod_loader" class="text-sm font-medium">Mod Loader</Label>
-						<Select type="single" value={formData.mod_loader} onValueChange={(v: string | undefined) => formData.mod_loader = (v as ModLoader) ?? 'vanilla'} disabled={loading}>
-							<SelectTrigger id="mod_loader">
-								<span>{modLoaders.find(l => l.Name === formData.mod_loader)?.DisplayName || 'Select a mod loader'}</span>
-							</SelectTrigger>
-							<SelectContent>
-								{#each modLoaders as loader}
-									<SelectItem value={loader.Name}>
-										{loader.DisplayName}
-									</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
-						{#if formData.mod_loader === 'vanilla'}
-							<p class="text-sm text-muted-foreground">
-								No mod support - vanilla Minecraft server
-							</p>
-						{:else if modLoaders.find(l => l.Name === formData.mod_loader)?.ModsDirectory}
-							<p class="text-sm text-muted-foreground">
-								Mods will be stored in: {modLoaders.find(l => l.Name === formData.mod_loader)?.ModsDirectory}/
-							</p>
-						{/if}
-					</div>
-				</CardContent>
-			</Card>
-
-			<Card class="relative overflow-hidden border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
-				<div class="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-primary/10 to-transparent rounded-full -mr-24 -mt-24"></div>
-				<CardHeader class="pb-6">
-					<div class="flex items-center gap-3">
-						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-							<HardDrive class="h-5 w-5 text-primary" />
-						</div>
-						<div>
-							<CardTitle class="text-2xl">Server Configuration</CardTitle>
-							<CardDescription class="text-base">Fine-tune your server's performance and network settings</CardDescription>
-						</div>
-					</div>
-				</CardHeader>
-				<CardContent class="space-y-6">
-					{#if proxyEnabled}
-						<div class="space-y-4">
-							<div class="space-y-2">
-								<Label class="text-sm font-medium">Connection Method</Label>
-								<div class="grid grid-cols-2 gap-3">
-									<Button
-										type="button"
-										variant={!useProxyMode ? "default" : "outline"}
-										onclick={() => {
-											useProxyMode = false;
-											formData.proxy_hostname = '';
-											// Reset port error when switching to direct port
-											portError = '';
-										}}
-										class="justify-start h-auto py-3 px-4"
-									>
-										<div class="text-left">
-											<div class="font-medium">Direct Port</div>
-											<div class="text-xs text-muted-foreground mt-0.5">Connect via port number</div>
-										</div>
-									</Button>
-									<Button
-										type="button"
-										variant={useProxyMode ? "default" : "outline"}
-										onclick={() => {
-											useProxyMode = true;
-											if (!formData.proxy_hostname) {
-												formData.proxy_hostname = formData.name.toLowerCase().replace(/\s+/g, '-') || 'minecraft-server';
-											}
-											// Clear port error when using proxy
-											portError = '';
-										}}
-										class="justify-start h-auto py-3 px-4"
-									>
-										<div class="text-left">
-											<div class="font-medium">Custom Hostname</div>
-											<div class="text-xs text-muted-foreground mt-0.5">Connect via domain name</div>
-										</div>
-									</Button>
-								</div>
-							</div>
-
-							{#if useProxyMode}
-								<div class="space-y-4">
-									<!-- Listener Selection -->
-									{#if proxyListeners.length > 0}
-										<div class="space-y-2">
-											<Label for="proxy_listener" class="text-sm font-medium">Proxy Listener</Label>
-											<Select 
-												type="single" 
-												value={formData.proxy_listener_id} 
-												onValueChange={(v) => formData.proxy_listener_id = v || ''}
-												disabled={loading}
-											>
-												<SelectTrigger id="proxy_listener">
-													<span>
-														{proxyListeners.find(l => l.id === formData.proxy_listener_id)?.name || 'Select a listener'}
-													</span>
-												</SelectTrigger>
-												<SelectContent>
-													{#each proxyListeners as listener}
-														<SelectItem value={listener.id}>
-															{listener.name} (Port {listener.port})
-															{#if listener.is_default}
-																<span class="text-xs text-muted-foreground ml-2">[Default]</span>
-															{/if}
-														</SelectItem>
-													{/each}
-												</SelectContent>
-											</Select>
-											<p class="text-xs text-muted-foreground">
-												Select which proxy port players will connect through
-											</p>
-										</div>
-									{/if}
-
-									<!-- Hostname Input -->
-									<div class="space-y-2">
-										<Label for="proxy_hostname" class="text-sm font-medium">Server Hostname</Label>
-										<Input
-											id="proxy_hostname"
-											placeholder={proxyBaseURL ? "survival" : "survival.example.com"}
-											bind:value={formData.proxy_hostname}
-											disabled={loading}
-											class="h-10"
-										/>
-										
-										<!-- Base URL Checkbox -->
-										{#if proxyBaseURL}
-											<div class="flex items-center gap-2">
-												<input
-													type="checkbox"
-													id="use_base_url"
-													bind:checked={formData.use_base_url}
-													class="h-4 w-4"
-												/>
-												<Label for="use_base_url" class="text-sm font-medium">
-													Append base domain ({proxyBaseURL})
-												</Label>
-											</div>
-										{/if}
-										
-										<p class="text-xs text-muted-foreground">
-											{#if formData.use_base_url && proxyBaseURL}
-												Players will connect using: {formData.proxy_hostname}.{proxyBaseURL}
-											{:else}
-												Players will connect using: {formData.proxy_hostname}
-											{/if}
-										</p>
-									</div>
-								</div>
-							{:else}
-								<div class="space-y-2">
-									<div class="flex items-center justify-between">
-										<Label for="port" class="text-sm font-medium">Server Port</Label>
-										<Button
-											type="button"
-											variant="ghost"
-											size="sm"
-											onclick={refreshAvailablePort}
-											disabled={loading}
-										>
-											Auto-assign
-										</Button>
-									</div>
-									<Input
-										id="port"
-										type="number"
-										min="1"
-										max="65535"
-										bind:value={formData.port}
-										oninput={(e) => validatePort(Number(e.currentTarget.value))}
-										disabled={loading}
-										class="h-10 {portError ? 'border-destructive' : ''}"
-									/>
-									{#if portError}
-										<p class="text-xs text-destructive">{portError}</p>
-									{:else}
-										<p class="text-xs text-muted-foreground">
-											Default Minecraft port is 25565
-										</p>
-									{/if}
-								</div>
-							{/if}
-						</div>
-					{:else}
-						<div class="space-y-2">
-							<div class="flex items-center justify-between">
-								<Label for="port" class="text-sm font-medium">Server Port</Label>
-								<Button
-									type="button"
-									variant="ghost"
-									size="sm"
-									onclick={refreshAvailablePort}
-									disabled={loading}
-								>
-									Auto-assign
-								</Button>
-							</div>
-							<Input
-								id="port"
-								type="number"
-								min="1"
-								max="65535"
-								bind:value={formData.port}
-								oninput={(e) => validatePort(Number(e.currentTarget.value))}
-								disabled={loading}
-								class="h-10 {portError ? 'border-destructive' : ''}"
-							/>
-							{#if portError}
-								<p class="text-xs text-destructive">{portError}</p>
-							{:else}
-								<p class="text-xs text-muted-foreground">
-									Default Minecraft port is 25565
-								</p>
-							{/if}
-						</div>
-					{/if}
-
-					<div class="space-y-2">
-						<Label for="max_players" class="text-sm font-medium">Max Players</Label>
-						<Input
-							id="max_players"
-							type="number"
-							min="1"
-							max="1000"
-							bind:value={formData.max_players}
-							oninput={handleMaxPlayersInput}
-							disabled={loading}
-							class="h-10"
-						/>
-					</div>
-
-					<div class="space-y-2">
-						<Label for="memory" class="text-sm font-medium">Memory Allocation (MB)</Label>
-						<div class="flex gap-2">
-							<Input
-								id="memory"
-								type="number"
-								min="512"
-								step="512"
-								bind:value={formData.memory}
-								oninput={handleMemoryInput}
-								disabled={loading}
-								class="h-10"
-							/>
-						</div>
-						<p class="text-xs text-muted-foreground">
-							Recommended for {formData.mod_loader}: {formData.mod_loader === 'forge' || formData.mod_loader === 'neoforge' ? '4096' : formData.mod_loader === 'fabric' ? '3072' : '2048'} MB
-						</p>
-					</div>
-
-					<Separator />
-
-					<div class="space-y-2">
-						<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
-						<Select type="single" value={formData.docker_image} onValueChange={(v: string | undefined) => formData.docker_image = v ?? ''} disabled={loading || loadingVersions}>
-							<SelectTrigger id="docker_image">
-								<span>{formData.docker_image ? getDockerImageDisplayName(formData.docker_image) : 'Auto-select (Recommended)'}</span>
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="">Auto-select (Recommended)</SelectItem>
-								{#each dockerImages.filter(img => !img.deprecated) as image}
-									<SelectItem value={image.tag}>
-										{getDockerImageDisplayName(image)}
-										{#if image.note}
-											<span class="text-xs text-muted-foreground ml-2">({image.note})</span>
-										{/if}
-									</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
-						<p class="text-xs text-muted-foreground">
-							Leave as auto-select unless you have specific requirements
-						</p>
-					</div>
-
-					<Separator />
-
-					<div class="space-y-4">
-						<h4 class="text-sm font-semibold">Lifecycle Management</h4>
-						
-						<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-							<div class="space-y-0.5">
-								<Label for="start_immediately" class="text-sm font-medium cursor-pointer">Start Immediately</Label>
-								<p class="text-xs text-muted-foreground">
-									Start the server right after creation
-								</p>
-							</div>
-							<Switch
-								id="start_immediately"
-								bind:checked={formData.start_immediately}
-								disabled={loading}
-							/>
-						</div>
-						
-						<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-							<div class="space-y-0.5">
-								<Label for="detached" class="text-sm font-medium cursor-pointer">Detached Mode</Label>
-								<p class="text-xs text-muted-foreground">
-									Server continues running when DiscoPanel stops (not available for proxied servers)
-								</p>
-							</div>
-							<Switch
-								id="detached"
-								bind:checked={formData.detached}
-								disabled={loading || useProxyMode}
-								onCheckedChange={(checked) => {
-									if (checked && useProxyMode) {
-										toast.error("Cannot detach proxied servers");
-										formData.detached = false;
-										return;
-									}
-									formData.detached = checked;
-									// If detaching, disable auto-start
-									if (checked) {
-										formData.auto_start = false;
-									}
-								}}
-							/>
-						</div>
-
-						<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-							<div class="space-y-0.5">
-								<Label for="auto_start" class="text-sm font-medium cursor-pointer">Auto Start</Label>
-								<p class="text-xs text-muted-foreground">
-									Automatically start when DiscoPanel starts{formData.detached ? ' (disabled for detached servers)' : ''}
-								</p>
-							</div>
-							<Switch
-								id="auto_start"
-								bind:checked={formData.auto_start}
-								disabled={loading || formData.detached}
-								onCheckedChange={(checked) => {
-									if (formData.detached) {
-										toast.error("Cannot enable auto-start for detached servers");
-										formData.auto_start = false;
-										return;
-									}
-									formData.auto_start = checked;
-								}}
-							/>
-						</div>
-					</div>
-				</CardContent>
-			</Card>
-		</div>
-
-		<div class="flex justify-end gap-3 mt-8">
-			<Button variant="outline" href="/servers" disabled={loading} size="lg">
-				Cancel
-			</Button>
-			<Button type="submit" disabled={loading || loadingVersions} size="lg" class="min-w-[140px]">
-				{#if loading}
-					<Loader2 class="h-4 w-4 mr-2 animate-spin" />
-					Creating...
-				{:else}
-					Create Server
-				{/if}
-			</Button>
-		</div>
+		   <div class="flex justify-end gap-3 mt-8">
+			   <Button variant="outline" href="/servers" disabled={loading} size="lg">
+				   Cancel
+			   </Button>
+			   <Button type="submit" disabled={loading || loadingVersions} size="lg" class="min-w-[140px]">
+				   {#if loading}
+					   <Loader2 class="h-4 w-4 mr-2 animate-spin" />
+					   Creating...
+				   {:else}
+					   Create Server
+				   {/if}
+			   </Button>
+		   </div>
 	</form>
 	</div>
 </div>

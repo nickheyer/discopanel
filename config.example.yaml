@@ -20,7 +20,7 @@ database:
 docker:
   host: "unix:///var/run/docker.sock"
   version: "1.41"
-  network_name: "discopanel-network"
+  network_name: "discopanelnetwork"
   network_subnet: "172.20.0.0/16"
   registry_url: ""
 

@@ -4,16 +4,16 @@ import (
 	"context"
 	"strings"
 
-	"github.com/RandomTechrate/discopanel-fork/pkg/logger"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
 // CleanupOrphanedContainers removes containers that are no longer tracked in the database
 func (c *Client) CleanupOrphanedContainers(ctx context.Context, trackedContainerIDs map[string]bool, log *logger.Logger) error {
 	// List all containers with the discopanel prefix
 	filterArgs := filters.NewArgs()
-	filterArgs.Add("name", "discopanel-server-")
+	filterArgs.Add("name", "discopanelserver-")
 
 	containers, err := c.docker.ContainerList(ctx, container.ListOptions{
 		All:     true,
@@ -55,7 +55,7 @@ func (c *Client) CleanupOrphanedContainers(ctx context.Context, trackedContainer
 // GetDiscopanelContainers returns all containers managed by DiscoPanel
 func (c *Client) GetDiscopanelContainers(ctx context.Context) ([]string, error) {
 	filterArgs := filters.NewArgs()
-	filterArgs.Add("name", "discopanel-server-")
+	filterArgs.Add("name", "discopanelserver-")
 
 	containers, err := c.docker.ContainerList(ctx, container.ListOptions{
 		All:     true,
@@ -87,8 +87,8 @@ func (c *Client) GetContainerInfo(ctx context.Context, containerID string) (*Con
 		Created: inspect.Created,
 	}
 
-	// Extract server ID from container name (format: discopanel-server-{uuid})
-	if after, ok := strings.CutPrefix(info.Name, "discopanel-server-"); ok {
+	// Extract server ID from container name (format: discopanelserver-{uuid})
+	if after, ok := strings.CutPrefix(info.Name, "discopanelserver-"); ok {
 		info.ServerID = after
 	}
 

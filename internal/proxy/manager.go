@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/RandomTechrate/discopanel-fork/internal/config"
-	db "github.com/RandomTechrate/discopanel-fork/internal/db"
-	"github.com/RandomTechrate/discopanel-fork/pkg/logger"
+	"github.com/nickheyer/discopanel/internal/config"
+	db "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
 // Manager handles the lifecycle of the proxy and manages routes
@@ -29,7 +29,7 @@ func NewManager(store *db.Store, cfg *config.ProxyConfig, logger *logger.Logger)
 		store:       store,
 		config:      cfg,
 		logger:      logger,
-		networkName: "discopanel-network", // TODO: Get from main config
+		networkName: "discopanelnetwork", // TODO: Get from main config
 	}
 }
 

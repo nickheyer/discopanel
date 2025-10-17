@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/RandomTechrate/discopanel-fork/internal/db"
+	"github.com/nickheyer/discopanel/internal/db"
 	"github.com/spf13/viper"
 )
 
@@ -125,7 +125,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.sync_interval", 5)
 	v.SetDefault("docker.host", "unix:///var/run/docker.sock")
 	v.SetDefault("docker.version", "1.41")
-	v.SetDefault("docker.network_name", "discopanel-network")
+	v.SetDefault("docker.network_name", "discopanelnetwork")
 	v.SetDefault("docker.network_subnet", "172.20.0.0/16")
 	v.SetDefault("docker.registry_url", "")
 

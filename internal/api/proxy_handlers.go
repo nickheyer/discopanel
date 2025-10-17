@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	storage "github.com/RandomTechrate/discopanel-fork/internal/db"
 	"github.com/gorilla/mux"
+	storage "github.com/nickheyer/discopanel/internal/db"
 )
 
 func (s *Server) handleGetProxyRoutes(w http.ResponseWriter, r *http.Request) {

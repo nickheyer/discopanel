@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	models "github.com/RandomTechrate/discopanel-fork/internal/db"
+	models "github.com/nickheyer/discopanel/internal/db"
 )
 
 // ModLoaderInfo contains information about a specific mod loader

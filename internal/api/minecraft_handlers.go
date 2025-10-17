@@ -3,8 +3,8 @@ package api
 import (
 	"net/http"
 
-	"github.com/RandomTechrate/discopanel-fork/internal/db"
-	"github.com/RandomTechrate/discopanel-fork/internal/minecraft"
+	"github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 )
 
 func (s *Server) handleGetMinecraftVersions(w http.ResponseWriter, r *http.Request) {

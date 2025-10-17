@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/RandomTechrate/discopanel-fork/internal/db"
+	"github.com/nickheyer/discopanel/internal/db"
 )
 
 type contextKey string

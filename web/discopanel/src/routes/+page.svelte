@@ -495,7 +495,7 @@
 				<Button 
 					variant="outline" 
 					class="w-full justify-start gap-3 hover:bg-muted/50 hover:border-primary/50 transition-all"
-					onclick={() => window.open('https://github.com/RandomTechrate/discopanel-fork/issues', '_blank')}
+					onclick={() => window.open('https://github.com/nickheyer/discopanel/issues', '_blank')}
 				>
 					<Github class="h-4 w-4" />
 					<span class="flex-1 text-left">Report an Issue</span>

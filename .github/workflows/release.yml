@@ -100,7 +100,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
         run: |
-          go build -tags embed -o discopanel-${{ matrix.suffix }} ./cmd/discopanel
+          go build -tags embed -o discopanel${{ matrix.suffix }} ./cmd/discopanel
 
       - name: Build binary (Windows with CGO)
         if: matrix.goos == 'windows' && matrix.cgo == 1
@@ -111,7 +111,7 @@ jobs:
           CC: x86_64-w64-mingw32-gcc
           CXX: x86_64-w64-mingw32-g++
         run: |
-          go build -tags embed -o discopanel-${{ matrix.suffix }} ./cmd/discopanel
+          go build -tags embed -o discopanel${{ matrix.suffix }} ./cmd/discopanel
 
       - name: Build binary (Standard)
         if: (matrix.goos != 'darwin' || matrix.goarch != 'arm64' || matrix.cgo != 1) && (matrix.goos != 'windows' || matrix.cgo != 1)
@@ -120,25 +120,25 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: ${{ matrix.cgo }}
         run: |
-          go build -tags embed -o discopanel-${{ matrix.suffix }} ./cmd/discopanel
+          go build -tags embed -o discopanel${{ matrix.suffix }} ./cmd/discopanel
 
       - name: Compress binary (non-Windows)
         if: matrix.goos != 'windows'
         run: |
-          tar -czf discopanel-${{ matrix.suffix }}.tar.gz discopanel-${{ matrix.suffix }}
+          tar -czf discopanel${{ matrix.suffix }}.tar.gz discopanel${{ matrix.suffix }}
 
       - name: Compress binary (Windows)
         if: matrix.goos == 'windows'
         run: |
-          zip discopanel-${{ matrix.suffix }}.zip discopanel-${{ matrix.suffix }}
+          zip discopanel${{ matrix.suffix }}.zip discopanel${{ matrix.suffix }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.suffix }}
           path: |
-            discopanel-${{ matrix.suffix }}.tar.gz
-            discopanel-${{ matrix.suffix }}.zip
+            discopanel${{ matrix.suffix }}.tar.gz
+            discopanel${{ matrix.suffix }}.zip
           if-no-files-found: error
           retention-days: 1
 

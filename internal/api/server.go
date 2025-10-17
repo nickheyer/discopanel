@@ -6,15 +6,15 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/RandomTechrate/discopanel-fork/internal/auth"
-	"github.com/RandomTechrate/discopanel-fork/internal/config"
-	storage "github.com/RandomTechrate/discopanel-fork/internal/db"
-	"github.com/RandomTechrate/discopanel-fork/internal/docker"
-	"github.com/RandomTechrate/discopanel-fork/internal/minecraft"
-	"github.com/RandomTechrate/discopanel-fork/internal/proxy"
-	"github.com/RandomTechrate/discopanel-fork/pkg/logger"
-	web "github.com/RandomTechrate/discopanel-fork/web/discopanel"
 	"github.com/gorilla/mux"
+	"github.com/nickheyer/discopanel/internal/auth"
+	"github.com/nickheyer/discopanel/internal/config"
+	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/logger"
+	web "github.com/nickheyer/discopanel/web/discopanel"
 )
 
 type Server struct {

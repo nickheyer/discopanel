@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/RandomTechrate/discopanel-fork/internal/auth"
-	storage "github.com/RandomTechrate/discopanel-fork/internal/db"
 	"github.com/gorilla/mux"
+	"github.com/nickheyer/discopanel/internal/auth"
+	storage "github.com/nickheyer/discopanel/internal/db"
 	"gorm.io/gorm"
 )
 

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/RandomTechrate/discopanel-fork/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
 // Proxy manages the Minecraft TCP proxy server

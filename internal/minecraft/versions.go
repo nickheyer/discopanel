@@ -1,147 +1,272 @@
 package minecraft
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"sync"
 	"time"
 )
 
-// MinecraftRelease represents a Minecraft version release
-type MinecraftRelease struct {
-	Version string
-	Date    string
+const (
+	// v2 API
+	versionManifestV2URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+
+	// Cache for 1 hour
+	cacheDuration = time.Hour
+)
+
+type VersionManifestV2 struct {
+	Latest   LatestVersions `json:"latest"`
+	Versions []Version      `json:"versions"`
 }
 
-// MinecraftReleases contains all Minecraft releases
-var MinecraftReleases = []MinecraftRelease{
-	{Version: "1.21.8", Date: "2025-07-17"},
-	{Version: "1.21.7", Date: "2025-06-30"},
-	{Version: "1.21.6", Date: "2025-06-17"},
-	{Version: "1.21.5", Date: "2025-03-25"},
-	{Version: "1.21.4", Date: "2024-12-03"},
-	{Version: "1.21.3", Date: "2024-10-23"},
-	{Version: "1.21.2", Date: "2024-10-22"},
-	{Version: "1.21.1", Date: "2024-08-08"},
-	{Version: "1.21", Date: "2024-06-13"},
-	{Version: "1.20.6", Date: "2024-04-29"},
-	{Version: "1.20.5", Date: "2024-04-23"},
-	{Version: "1.20.4", Date: "2023-12-07"},
-	{Version: "1.20.3", Date: "2023-12-04"},
-	{Version: "1.20.2", Date: "2023-09-20"},
-	{Version: "1.20.1", Date: "2023-06-12"},
-	{Version: "1.20", Date: "2023-06-02"},
-	{Version: "1.19.4", Date: "2023-03-14"},
-	{Version: "1.19.3", Date: "2022-12-07"},
-	{Version: "1.19.2", Date: "2022-08-05"},
-	{Version: "1.19.1", Date: "2022-07-27"},
-	{Version: "1.19", Date: "2022-06-07"},
-	{Version: "1.18.2", Date: "2022-02-28"},
-	{Version: "1.18.1", Date: "2021-12-10"},
-	{Version: "1.18", Date: "2021-11-30"},
-	{Version: "1.17.1", Date: "2021-07-06"},
-	{Version: "1.17", Date: "2021-06-08"},
-	{Version: "1.16.5", Date: "2021-01-14"},
-	{Version: "1.16.4", Date: "2020-10-29"},
-	{Version: "1.16.3", Date: "2020-09-10"},
-	{Version: "1.16.2", Date: "2020-08-11"},
-	{Version: "1.16.1", Date: "2020-06-24"},
-	{Version: "1.16", Date: "2020-06-23"},
-	{Version: "1.15.2", Date: "2020-01-17"},
-	{Version: "1.15.1", Date: "2019-12-16"},
-	{Version: "1.15", Date: "2019-12-09"},
-	{Version: "1.14.4", Date: "2019-07-19"},
-	{Version: "1.14.3", Date: "2019-06-24"},
-	{Version: "1.14.2", Date: "2019-05-27"},
-	{Version: "1.14.1", Date: "2019-05-13"},
-	{Version: "1.14", Date: "2019-04-23"},
-	{Version: "1.13.2", Date: "2018-10-22"},
-	{Version: "1.13.1", Date: "2018-08-22"},
-	{Version: "1.13", Date: "2018-07-18"},
-	{Version: "1.12.2", Date: "2017-09-18"},
-	{Version: "1.12.1", Date: "2017-08-03"},
-	{Version: "1.12", Date: "2017-06-02"},
-	{Version: "1.11.2", Date: "2016-12-21"},
-	{Version: "1.11.1", Date: "2016-12-20"},
-	{Version: "1.11", Date: "2016-11-14"},
-	{Version: "1.10.2", Date: "2016-06-23"},
-	{Version: "1.10.1", Date: "2016-06-22"},
-	{Version: "1.10", Date: "2016-06-08"},
-	{Version: "1.9.4", Date: "2016-05-10"},
-	{Version: "1.9.3", Date: "2016-05-10"},
-	{Version: "1.9.2", Date: "2016-03-30"},
-	{Version: "1.9.1", Date: "2016-03-30"},
-	{Version: "1.9", Date: "2016-02-29"},
-	{Version: "1.8.9", Date: "2015-12-03"},
-	{Version: "1.8.8", Date: "2015-07-27"},
-	{Version: "1.8.7", Date: "2015-06-05"},
-	{Version: "1.8.6", Date: "2015-05-25"},
-	{Version: "1.8.5", Date: "2015-05-22"},
-	{Version: "1.8.4", Date: "2015-04-17"},
-	{Version: "1.8.3", Date: "2015-02-20"},
-	{Version: "1.8.2", Date: "2015-02-19"},
-	{Version: "1.8.1", Date: "2014-11-24"},
-	{Version: "1.8", Date: "2014-09-02"},
-	{Version: "1.7.10", Date: "2014-05-14"},
-	{Version: "1.7.9", Date: "2014-04-14"},
-	{Version: "1.7.8", Date: "2014-04-09"},
-	{Version: "1.7.7", Date: "2014-04-09"},
-	{Version: "1.7.6", Date: "2014-04-09"},
-	{Version: "1.7.5", Date: "2014-02-26"},
-	{Version: "1.7.4", Date: "2013-12-09"},
-	{Version: "1.7.3", Date: "2013-12-06"},
-	{Version: "1.7.2", Date: "2013-10-25"},
-	{Version: "1.6.4", Date: "2013-09-19"},
-	{Version: "1.6.2", Date: "2013-07-05"},
-	{Version: "1.6.1", Date: "2013-06-28"},
-	{Version: "1.5.2", Date: "2013-04-25"},
-	{Version: "1.5.1", Date: "2013-03-20"},
-	{Version: "1.4.7", Date: "2012-12-27"},
-	{Version: "1.4.5", Date: "2012-12-19"},
-	{Version: "1.4.6", Date: "2012-12-19"},
-	{Version: "1.4.4", Date: "2012-12-13"},
-	{Version: "1.4.2", Date: "2012-11-24"},
-	{Version: "1.3.2", Date: "2012-08-15"},
-	{Version: "1.3.1", Date: "2012-07-31"},
-	{Version: "1.2.5", Date: "2012-03-29"},
-	{Version: "1.2.4", Date: "2012-03-21"},
-	{Version: "1.2.3", Date: "2012-03-01"},
-	{Version: "1.2.2", Date: "2012-02-29"},
-	{Version: "1.2.1", Date: "2012-02-29"},
-	{Version: "1.1", Date: "2012-01-11"},
-	{Version: "1.0", Date: "2011-11-17"},
+type LatestVersions struct {
+	Release  string `json:"release"`
+	Snapshot string `json:"snapshot"`
 }
 
-// GetLatestVersion returns the latest Minecraft version
+// A single Minecraft version entry
+type Version struct {
+	ID              string    `json:"id"`
+	Type            string    `json:"type"`
+	URL             string    `json:"url"`
+	Time            time.Time `json:"time"`
+	ReleaseTime     time.Time `json:"releaseTime"`
+	SHA1            string    `json:"sha1"`
+	ComplianceLevel int       `json:"complianceLevel"`
+}
+
+// Metadata for a specific version
+type VersionMetadata struct {
+	JavaVersion struct {
+		Component    string `json:"component"`
+		MajorVersion int    `json:"majorVersion"`
+	} `json:"javaVersion"`
+}
+
+// Manifest data
+type versionCache struct {
+	mu            sync.RWMutex
+	manifest      *VersionManifestV2
+	lastFetchTime time.Time
+	javaVersions  map[string]string // Cache for Java versions by MC version ID
+}
+
+var cache = &versionCache{
+	javaVersions: make(map[string]string),
+}
+
+// Fetches the version manifest from the Mojang API
+func fetchVersionManifest() (*VersionManifestV2, error) {
+	// Check cache first
+	cache.mu.RLock()
+	if cache.manifest != nil && time.Since(cache.lastFetchTime) < cacheDuration {
+		manifest := cache.manifest
+		cache.mu.RUnlock()
+		return manifest, nil
+	}
+	cache.mu.RUnlock()
+
+	// Fetch new manifest
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(versionManifestV2URL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch version manifest: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch version manifest: status code %d", resp.StatusCode)
+	}
+
+	var manifest VersionManifestV2
+	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("failed to decode version manifest: %w", err)
+	}
+
+	// Update cache
+	cache.mu.Lock()
+	cache.manifest = &manifest
+	cache.lastFetchTime = time.Now()
+	cache.mu.Unlock()
+
+	return &manifest, nil
+}
+
+// Returns the latest Minecraft release version
 func GetLatestVersion() string {
-	if len(MinecraftReleases) > 0 {
-		return MinecraftReleases[0].Version
+	manifest, err := fetchVersionManifest()
+	if err != nil {
+		return "0"
 	}
-	return "1.21.8"
+
+	if manifest.Latest.Release != "" {
+		return manifest.Latest.Release
+	}
+
+	// Fallback to first release in the list
+	for _, version := range manifest.Versions {
+		if version.Type == "release" {
+			return version.ID
+		}
+	}
+
+	return "0"
 }
 
-// GetVersions returns a list of all Minecraft versions
+// Returns a list of all Minecraft release versions
 func GetVersions() []string {
-	versions := make([]string, len(MinecraftReleases))
-	for i, release := range MinecraftReleases {
-		versions[i] = release.Version
+	manifest, err := fetchVersionManifest()
+	if err != nil {
+		return []string{}
 	}
+
+	var versions []string
+	for _, version := range manifest.Versions {
+		if version.Type == "release" {
+			versions = append(versions, version.ID)
+		}
+	}
+
 	return versions
 }
 
-// IsValidVersion checks if a given version string is a valid Minecraft version
+// Returns all versions including snapshots
+func GetAllVersions() []string {
+	manifest, err := fetchVersionManifest()
+	if err != nil {
+		return []string{}
+	}
+
+	var versions []string
+	for _, version := range manifest.Versions {
+		versions = append(versions, version.ID)
+	}
+
+	return versions
+}
+
+// Checks if a given version string is a valid Minecraft version
 func IsValidVersion(version string) bool {
-	for _, release := range MinecraftReleases {
-		if release.Version == version {
+	manifest, err := fetchVersionManifest()
+	if err != nil {
+		return false
+	}
+
+	for _, v := range manifest.Versions {
+		if v.ID == version {
 			return true
 		}
 	}
+
 	return false
 }
 
-// GetVersionDate returns the release date of a Minecraft version
+// Returns the release date of a Minecraft version
 func GetVersionDate(version string) (time.Time, error) {
-	for _, release := range MinecraftReleases {
-		if release.Version == version {
-			return time.Parse("2006-01-02", release.Date)
+	manifest, err := fetchVersionManifest()
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	for _, v := range manifest.Versions {
+		if v.ID == version {
+			return v.ReleaseTime, nil
 		}
 	}
-	return time.Time{}, nil
+
+	return time.Time{}, fmt.Errorf("version %s not found", version)
+}
+
+// Returns detailed information about a specific version
+func GetVersionInfo(version string) (*Version, error) {
+	manifest, err := fetchVersionManifest()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, v := range manifest.Versions {
+		if v.ID == version {
+			return &v, nil
+		}
+	}
+
+	return nil, fmt.Errorf("version %s not found", version)
+}
+
+// Returns the latest snapshot version
+func GetLatestSnapshot() string {
+	manifest, err := fetchVersionManifest()
+	if err != nil {
+		return ""
+	}
+
+	return manifest.Latest.Snapshot
+}
+
+// Checks if a version is a snapshot
+func IsSnapshot(version string) bool {
+	manifest, err := fetchVersionManifest()
+	if err != nil {
+		return false
+	}
+
+	for _, v := range manifest.Versions {
+		if v.ID == version {
+			return v.Type == "snapshot"
+		}
+	}
+
+	return false
+}
+
+// Fetches required Java version for a specific Minecraft version
+func GetJavaVersion(mcVersion string) (string, error) {
+	// Check cache first
+	cache.mu.RLock()
+	if javaVer, ok := cache.javaVersions[mcVersion]; ok {
+		cache.mu.RUnlock()
+		return javaVer, nil
+	}
+	cache.mu.RUnlock()
+
+	// Get version URL from manifest
+	versionInfo, err := GetVersionInfo(mcVersion)
+	if err != nil {
+		return "0", fmt.Errorf("version %s not found in manifest", mcVersion)
+	}
+
+	// Fetch version metadata
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(versionInfo.URL)
+	if err != nil {
+		return "0", fmt.Errorf("failed to fetch version metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "0", fmt.Errorf("failed to fetch version metadata: status code %d", resp.StatusCode)
+	}
+
+	var metadata VersionMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		return "0", fmt.Errorf("failed to decode version metadata: %w", err)
+	}
+
+	javaVersion := strconv.Itoa(metadata.JavaVersion.MajorVersion)
+
+	// Cache the result
+	cache.mu.Lock()
+	cache.javaVersions[mcVersion] = javaVersion
+	cache.mu.Unlock()
+
+	return javaVersion, nil
 }

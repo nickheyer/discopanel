@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -269,20 +270,23 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create server object
+	serverUUID := uuid.New().String()
+	serverDataDir := fmt.Sprintf("%s_%s", files.SanitizePathName(req.Name), serverUUID)
+	serverDataPath := filepath.Join(s.config.Storage.DataDir, "servers", serverDataDir)
 	server := &models.Server{
-		ID:              uuid.New().String(),
+		ID:              serverUUID,
 		Name:            req.Name,
 		Description:     req.Description,
 		ModLoader:       req.ModLoader,
 		MCVersion:       req.MCVersion,
-		Status:          models.StatusStopped,
+		Status:          models.StatusCreating, // Set initial status to creating
 		Port:            req.Port,
 		ProxyHostname:   req.ProxyHostname,
 		ProxyListenerID: req.ProxyListenerID,
 		MaxPlayers:      req.MaxPlayers,
 		Memory:          req.Memory,
-		DataPath:        filepath.Join(s.config.Storage.DataDir, "servers", req.Name),
-		JavaVersion:     strconv.Itoa(docker.GetRequiredJavaVersion(req.MCVersion, req.ModLoader)),
+		DataPath:        serverDataPath,
+		JavaVersion:     docker.GetRequiredJavaVersion(req.MCVersion, req.ModLoader),
 		DockerImage:     req.DockerImage,
 		AutoStart:       req.AutoStart,
 		Detached:        req.Detached,
@@ -294,7 +298,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		server.MaxPlayers = 20
 	}
 	if server.Memory == 0 {
-		server.Memory = 2048
+		server.Memory = 4096
 	}
 	if server.ModLoader == "" {
 		server.ModLoader = models.ModLoaderVanilla
@@ -331,6 +335,22 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.log.Error("Failed to get server config: %v", err)
 		serverConfig = s.store.CreateDefaultServerConfig(server.ID)
+	}
+
+	if serverConfig.MaxMemory == nil && serverConfig.Memory == nil && serverConfig.InitMemory == nil {
+		strMax := fmt.Sprintf("%dM", int(float64(server.Memory)*0.75)) // DOCS WANT 25 PERCENT HEADROOM
+		serverConfig.MaxMemory = &strMax
+		strMin := fmt.Sprintf("%dM", int(float64(server.Memory)*0.45)) // ARBITRARY MIN, IDK 30 OFFSET SOUNDS RIGHT
+		serverConfig.InitMemory = &strMin
+	}
+
+	if serverConfig.Memory != nil {
+		serverConfig.MaxMemory = serverConfig.Memory
+		serverConfig.InitMemory = serverConfig.Memory
+	}
+
+	if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
+		s.log.Error("Failed to update server config with modpack settings: %v", err)
 	}
 
 	// If modpack was selected, configure it
@@ -370,26 +390,37 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create Docker container
-	containerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
-	if err != nil {
-		s.log.Error("Failed to create container: %v", err)
-		// Don't fail the whole operation, just log the error
-		server.Status = models.StatusError
-		if err := s.store.UpdateServer(ctx, server); err != nil {
-			s.log.Error("Failed to update server with container ID: %v", err)
+	// Create Docker container asynchronously to prevent request timeout
+	// The container creation includes image pulling which can take minutes
+	go func() {
+		// Create a new context for the background operation
+		bgCtx := context.Background()
+
+		s.log.Info("Starting async Docker container creation for server %s", server.ID)
+
+		containerID, err := s.docker.CreateContainer(bgCtx, server, serverConfig)
+		if err != nil {
+			s.log.Error("Failed to create container: %v", err)
+			// Update server status to error
+			server.Status = models.StatusError
+			if updateErr := s.store.UpdateServer(bgCtx, server); updateErr != nil {
+				s.log.Error("Failed to update server status to error: %v", updateErr)
+			}
+			return
 		}
-	} else {
+
 		server.ContainerID = containerID
+		s.log.Info("Container created successfully for server %s: %s", server.ID, containerID)
 
 		// Update server with container ID
-		if err := s.store.UpdateServer(ctx, server); err != nil {
+		if err := s.store.UpdateServer(bgCtx, server); err != nil {
 			s.log.Error("Failed to update server with container ID: %v", err)
+			return
 		}
 
 		// Start the container immediately if requested
 		if req.StartImmediately {
-			if err := s.docker.StartContainer(ctx, containerID); err != nil {
+			if err := s.docker.StartContainer(bgCtx, containerID); err != nil {
 				s.log.Error("Failed to start container: %v", err)
 				server.Status = models.StatusError
 			} else {
@@ -398,19 +429,26 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 				now := time.Now()
 				server.LastStarted = &now
 				// Clear ephemeral configuration fields after starting the server
-				if err := s.store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
+				if err := s.store.ClearEphemeralConfigFields(bgCtx, server.ID); err != nil {
 					s.log.Error("Failed to clear ephemeral config fields: %v", err)
 				}
 			}
 			// Update status in database
-			if err := s.store.UpdateServer(ctx, server); err != nil {
+			if err := s.store.UpdateServer(bgCtx, server); err != nil {
 				s.log.Error("Failed to update server status: %v", err)
 			}
 		} else {
-			s.log.Info("Server created but not started immediately")
+			// Update status to stopped once container is ready
+			server.Status = models.StatusStopped
+			if err := s.store.UpdateServer(bgCtx, server); err != nil {
+				s.log.Error("Failed to update server status: %v", err)
+			}
+			s.log.Info("Server %s created but not started immediately", server.ID)
 		}
-	}
+	}()
 
+	// Return immediately with the server in "creating" state
+	// The client can poll the server status to check when it's ready
 	s.respondJSON(w, http.StatusCreated, server)
 }
 
@@ -457,12 +495,13 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 				worldPath, err := files.FindWorldDir(server.DataPath)
 				if err != nil {
 					s.log.Error("Error unable to find world directory %v", err)
-				}
-				totalSize, err := files.CalculateDirSize(worldPath)
-				if err != nil {
-					s.log.Error("Error calculating world directory size for %s: %v", worldPath, err)
 				} else {
-					server.DiskUsage = totalSize // Store as bytes
+					totalSize, err := files.CalculateDirSize(worldPath)
+					if err != nil {
+						s.log.Error("Error calculating world directory size for %s: %v", worldPath, err)
+					} else {
+						server.DiskUsage = totalSize // Store as bytes
+					}
 				}
 
 				// Get total disk space
@@ -525,7 +564,6 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		Memory      int    `json:"memory"`
 		ModLoader   string `json:"mod_loader"`
 		MCVersion   string `json:"mc_version"`
-		JavaVersion string `json:"java_version"`
 		DockerImage string `json:"docker_image"`
 		AutoStart   *bool  `json:"auto_start"`
 		Detached    *bool  `json:"detached"`
@@ -542,7 +580,6 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	originalMemory := server.Memory
 	originalModLoader := server.ModLoader
 	originalMCVersion := server.MCVersion
-	originalJavaVersion := server.JavaVersion
 	originalDockerImage := server.DockerImage
 
 	// Update fields
@@ -559,9 +596,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	if req.Memory > 0 && req.Memory != originalMemory {
 		server.Memory = req.Memory
 		needsRecreation = true
-		// Update the ServerConfig to sync memory settings
-		memoryStr := fmt.Sprintf("%dM", req.Memory)
-		if err := s.store.UpdateServerConfigMemory(ctx, server.ID, memoryStr); err != nil {
+		if err := s.store.UpdateServerConfigMemory(ctx, server.ID, req.Memory); err != nil {
 			s.log.Error("Failed to update server config memory: %v", err)
 		}
 	}
@@ -572,10 +607,6 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MCVersion != "" && req.MCVersion != originalMCVersion {
 		server.MCVersion = req.MCVersion
-		needsRecreation = true
-	}
-	if req.JavaVersion != "" && req.JavaVersion != originalJavaVersion {
-		server.JavaVersion = req.JavaVersion
 		needsRecreation = true
 	}
 	if req.DockerImage != "" && req.DockerImage != originalDockerImage {

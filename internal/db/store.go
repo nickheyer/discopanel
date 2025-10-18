@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -192,22 +190,18 @@ func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) erro
 }
 
 // UpdateServerConfigMemory updates memory settings in ServerConfig
-func (s *Store) UpdateServerConfigMemory(ctx context.Context, serverID string, memory string) error {
+func (s *Store) UpdateServerConfigMemory(ctx context.Context, serverID string, memory int) error {
 	config, err := s.GetServerConfig(ctx, serverID)
 	if err != nil {
 		return err
 	}
 
-	// Update memory and max memory (they're the same I THINK)
-	config.Memory = &memory
-	config.MaxMemory = &memory
+	// Update memory and max memory (they're the same I THINK) ... Note: They are not...
+	strServerMem := fmt.Sprintf("%dM", int64(float64(memory)*.75))
+	config.MaxMemory = &strServerMem
 
-	// Only update InitMemory if it's not already set
-	if config.InitMemory == nil {
-		memoryValue, _ := strconv.Atoi(strings.TrimSuffix(memory, "M"))
-		initMemoryValue := max(memoryValue/4, 1024) // Minimum 1G
-		initMemoryStr := fmt.Sprintf("%dM", initMemoryValue)
-		config.InitMemory = &initMemoryStr
+	if config.Memory != nil {
+		config.Memory = &strServerMem
 	}
 
 	return s.SaveServerConfig(ctx, config)
@@ -241,18 +235,6 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 	// Helper functions
 	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
-
-	// Update system fields
-	// Set memory as the max, with init at 1/4 of max for better JVM performance
-	maxMemory := fmt.Sprintf("%dM", server.Memory)
-	initMemory := fmt.Sprintf("%dM", server.Memory/4)
-	if server.Memory/4 < 512 {
-		initMemory = "512M" // Minimum 512MB initial
-	}
-
-	config.Memory = stringPtr(maxMemory)      // This is used by the container as -Xmx
-	config.InitMemory = stringPtr(initMemory) // -Xms
-	config.MaxMemory = stringPtr(maxMemory)   // -Xmx
 	config.Type = stringPtr(string(server.ModLoader))
 	config.Version = stringPtr(server.MCVersion)
 	config.ServerPort = intPtr(server.Port)
@@ -278,7 +260,6 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 		EULA:         stringPtr("TRUE"),
 		EnableRCON:   boolPtr(true),
 		RCONPassword: stringPtr(rconPassword),
-		Memory:       stringPtr("2G"),
 		Version:      stringPtr("LATEST"),
 		Type:         stringPtr("VANILLA"),
 		Difficulty:   stringPtr("easy"),
@@ -695,11 +676,11 @@ func (s *Store) GetAuthConfig(ctx context.Context) (*AuthConfig, bool, error) {
 		if err == gorm.ErrRecordNotFound {
 			// Return default config if none exists
 			return &AuthConfig{
-				ID:                "default",
-				Enabled:           false,
-				SessionTimeout:    86400, // 24 hours
+				ID:                 "default",
+				Enabled:            false,
+				SessionTimeout:     86400, // 24 hours
 				RequireEmailVerify: false,
-				AllowRegistration: false,
+				AllowRegistration:  false,
 			}, true, nil
 		}
 		return nil, false, err

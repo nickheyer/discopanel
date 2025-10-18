@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -20,6 +22,15 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/minecraft"
+)
+
+const (
+	// Docker images manifest URL from itzg/docker-minecraft-server repo
+	dockerImagesURL = "https://raw.githubusercontent.com/itzg/docker-minecraft-server/refs/heads/master/images.json"
+
+	// Cache for 1 hour
+	dockerImagesCacheDuration = time.Hour
 )
 
 type ContainerStats struct {
@@ -29,160 +40,107 @@ type ContainerStats struct {
 }
 
 type DockerImageTag struct {
-	Tag         string   `json:"tag"`         // Docker tag name (e.g., "latest", "java21", etc.)
-	JavaVersion int      `json:"javaVersion"` // Java version number
-	Linux       string   `json:"linux"`       // Linux distribution (Ubuntu, Alpine, Oracle)
-	JVMType     string   `json:"jvmType"`     // JVM type (Hotspot, GraalVM, etc.)
-	Archs       []string `json:"archs"`       // Supported architectures
-	Deprecated  bool     `json:"deprecated"`  // Whether this tag is deprecated
-	Note        string   `json:"note"`        // Additional notes about the tag
+	Tag           string   `json:"tag"`           // Docker tag name (e.g., "latest", "java21", etc.)
+	Java          string   `json:"java"`          // Java version number
+	Distribution  string   `json:"distribution"`  // Linux distribution (ubuntu, alpine, oracle)
+	JVM           string   `json:"jvm"`           // JVM type (hotspot, graalvm)
+	Architectures []string `json:"architectures"` // Supported architectures
+	Deprecated    bool     `json:"deprecated"`    // Whether this tag is deprecated
+	LTS           bool     `json:"lts"`           // Whether this is an LTS version
+	JDK           bool     `json:"jdk"`           // Whether this includes JDK
+	Notes         string   `json:"notes"`         // Additional notes about the tag
 }
 
-// MinecraftVersionRequirements maps Minecraft versions to required Java versions
-type MinecraftVersionRequirements struct {
-	MinecraftVersion string // Minecraft version or range
-	RequiredJava     int    // Minimum required Java version
-	MaxJava          int    // Maximum supported Java version (0 = no limit)
+// Cached docker images data
+type dockerImagesCache struct {
+	mu            sync.RWMutex
+	images        []DockerImageTag
+	lastFetchTime time.Time
 }
 
-var (
-	// DockerImageTags contains all available Docker image tags for itzg/minecraft-server
-	DockerImageTags = []DockerImageTag{
-		// Current/Latest tags
-		{Tag: "latest", JavaVersion: 21, Linux: "Ubuntu", JVMType: "Hotspot", Archs: []string{"amd64", "arm64"}},
-		{Tag: "stable", JavaVersion: 21, Linux: "Ubuntu", JVMType: "Hotspot", Archs: []string{"amd64", "arm64"}},
+var dockerCache = &dockerImagesCache{}
 
-		// Java 24
-		{Tag: "java24", JavaVersion: 24, Linux: "Ubuntu", JVMType: "Hotspot", Archs: []string{"amd64", "arm64"}, Note: "Short-term variant"},
-		{Tag: "java24-graalvm", JavaVersion: 24, Linux: "Oracle", JVMType: "Oracle GraalVM", Archs: []string{"amd64", "arm64"}, Note: "Short-term variant"},
+// Fetches the docker images manifest from itzg
+func fetchDockerImages() ([]DockerImageTag, error) {
+	// Check cache first
+	dockerCache.mu.RLock()
+	if len(dockerCache.images) > 0 && time.Since(dockerCache.lastFetchTime) < dockerImagesCacheDuration {
+		images := dockerCache.images
+		dockerCache.mu.RUnlock()
+		return images, nil
+	}
+	dockerCache.mu.RUnlock()
 
-		// Java 21
-		{Tag: "java21", JavaVersion: 21, Linux: "Ubuntu", JVMType: "Hotspot", Archs: []string{"amd64", "arm64"}},
-		{Tag: "java21-jdk", JavaVersion: 21, Linux: "Ubuntu", JVMType: "Hotspot+JDK", Archs: []string{"amd64", "arm64"}},
-		{Tag: "java21-alpine", JavaVersion: 21, Linux: "Alpine", JVMType: "Hotspot", Archs: []string{"amd64", "arm64"}},
-		{Tag: "java21-graalvm", JavaVersion: 21, Linux: "Oracle", JVMType: "Oracle GraalVM", Archs: []string{"amd64", "arm64"}},
-
-		// Java 17
-		{Tag: "java17", JavaVersion: 17, Linux: "Ubuntu", JVMType: "Hotspot", Archs: []string{"amd64", "arm64", "armv7"}},
-		{Tag: "java17-graalvm", JavaVersion: 17, Linux: "Oracle", JVMType: "Oracle GraalVM", Archs: []string{"amd64", "arm64"}},
-		{Tag: "java17-alpine", JavaVersion: 17, Linux: "Alpine", JVMType: "Hotspot", Archs: []string{"amd64"}, Note: "No arm64 support"},
-
-		// Java 16
-		{Tag: "java16", JavaVersion: 16, Linux: "Ubuntu", JVMType: "Hotspot", Archs: []string{"amd64", "arm64", "armv7"}, Note: "Recommended for PaperMC 1.16.5"},
-
-		// Java 11
-		{Tag: "java11", JavaVersion: 11, Linux: "Ubuntu", JVMType: "Hotspot", Archs: []string{"amd64", "arm64", "armv7"}},
-
-		// Java 8
-		{Tag: "java8", JavaVersion: 8, Linux: "Ubuntu", JVMType: "Hotspot", Archs: []string{"amd64", "arm64", "armv7"}},
+	// Fetch new manifest
+	client := &http.Client{
+		Timeout: 10 * time.Second,
 	}
 
-	// MinecraftJavaRequirements maps Minecraft versions to Java requirements
-	MinecraftJavaRequirements = []MinecraftVersionRequirements{
-		// Minecraft 1.7-1.16 requires Java 8
-		{MinecraftVersion: "1.7", RequiredJava: 8, MaxJava: 8},
-		{MinecraftVersion: "1.8", RequiredJava: 8, MaxJava: 8},
-		{MinecraftVersion: "1.9", RequiredJava: 8, MaxJava: 8},
-		{MinecraftVersion: "1.10", RequiredJava: 8, MaxJava: 8},
-		{MinecraftVersion: "1.11", RequiredJava: 8, MaxJava: 8},
-		{MinecraftVersion: "1.12", RequiredJava: 8, MaxJava: 8},
-		{MinecraftVersion: "1.13", RequiredJava: 8, MaxJava: 8},
-		{MinecraftVersion: "1.14", RequiredJava: 8, MaxJava: 8},
-		{MinecraftVersion: "1.15", RequiredJava: 8, MaxJava: 8},
-		{MinecraftVersion: "1.16", RequiredJava: 8, MaxJava: 8},
+	resp, err := client.Get(dockerImagesURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch docker images manifest: %w", err)
+	}
+	defer resp.Body.Close()
 
-		// Minecraft 1.17 requires Java 16
-		{MinecraftVersion: "1.17", RequiredJava: 16, MaxJava: 16},
-
-		// Minecraft 1.18-1.20.4 requires Java 17
-		{MinecraftVersion: "1.18", RequiredJava: 17, MaxJava: 0},
-		{MinecraftVersion: "1.19", RequiredJava: 17, MaxJava: 0},
-		{MinecraftVersion: "1.20", RequiredJava: 17, MaxJava: 0},
-
-		// Minecraft 1.21+ requires Java 21
-		{MinecraftVersion: "1.21", RequiredJava: 21, MaxJava: 0},
-		{MinecraftVersion: "1.22", RequiredJava: 21, MaxJava: 0},
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch docker images manifest: status code %d", resp.StatusCode)
 	}
 
-	// ForgeJavaCompatibility maps Forge/Minecraft versions to Java compatibility issues
-	ForgeJavaCompatibility = map[string]string{
-		"forge-1.17":  "Some mods require Java 17 and won't work with newer versions",
-		"forge-<1.18": "Must use Java 8 (java8 tag)",
+	var images []DockerImageTag
+	if err := json.NewDecoder(resp.Body).Decode(&images); err != nil {
+		return nil, fmt.Errorf("failed to decode docker images manifest: %w", err)
 	}
-)
 
-// GetOptimalDockerTag returns the best Docker tag for a given Minecraft version and mod loader
+	// Update cache
+	dockerCache.mu.Lock()
+	dockerCache.images = images
+	dockerCache.lastFetchTime = time.Now()
+	dockerCache.mu.Unlock()
+
+	return images, nil
+}
+
+// Gets ideal docker tag for a given Minecraft version + mod loader
 func GetOptimalDockerTag(mcVersion string, modLoader models.ModLoader, preferGraalVM bool) string {
 	javaVersion := GetRequiredJavaVersion(mcVersion, modLoader)
+	if javaVersion == "0" || javaVersion == "" {
+		// Could not determine Java version, use stable
+		return "stable"
+	}
 
-	// Handle Forge special cases
-	if modLoader != models.ModLoaderVanilla {
-		parts := strings.Split(mcVersion, ".")
-		if len(parts) >= 2 {
-			minor, _ := strconv.Atoi(parts[1])
-			if minor < 18 {
-				return "java8" // Forge < 1.18 requires Java 8
-			}
-			if minor < 21 && javaVersion > 17 {
-				// Some Forge mods up to 1.21 may need Java 17
-				return "java17"
-			}
-		}
+	// Fetch Docker images from API
+	images, err := fetchDockerImages()
+	if err != nil {
+		// Could not fetch Docker images, use stable
+		return "stable"
 	}
 
 	// Find matching tag
-	for _, tag := range DockerImageTags {
-		if tag.JavaVersion == javaVersion && !tag.Deprecated {
+	for _, tag := range images {
+		if tag.Java == javaVersion && !tag.Deprecated {
 			if preferGraalVM && strings.Contains(tag.Tag, "graalvm") {
 				return tag.Tag
 			}
-			// Return first matching non-GraalVM tag
+			// Return first matching non-special tag (not graalvm, alpine, or jdk)
 			if !strings.Contains(tag.Tag, "graalvm") && !strings.Contains(tag.Tag, "alpine") && !strings.Contains(tag.Tag, "jdk") {
 				return tag.Tag
 			}
 		}
 	}
 
-	// Fallback to java version tag
-	return fmt.Sprintf("java%d", javaVersion)
+	// No matching tag found, construct one
+	return fmt.Sprintf("java%s", javaVersion)
 }
 
-// GetRequiredJavaVersion returns the required Java version for a Minecraft version
-func GetRequiredJavaVersion(mcVersion string, modLoader models.ModLoader) int {
-	// Parse major.minor version
-	parts := strings.Split(mcVersion, ".")
-	if len(parts) < 2 {
-		return 21 // Default to Java 21
-	}
-
-	// Find matching requirement
-	versionPrefix := parts[0] + "." + parts[1]
-	for _, req := range MinecraftJavaRequirements {
-		if strings.HasPrefix(versionPrefix, req.MinecraftVersion) {
-			if modLoader != models.ModLoaderVanilla && req.MaxJava > 0 {
-				return req.MaxJava
-			}
-			return req.RequiredJava
-		}
-	}
-
-	// Parse minor version for fallback logic
-	minor, err := strconv.Atoi(parts[1])
+// Gets required Java version for a Minecraft version
+func GetRequiredJavaVersion(mcVersion string, modLoader models.ModLoader) string {
+	// Fetch the Java version from the Minecraft version metadata
+	javaVersion, err := minecraft.GetJavaVersion(mcVersion)
 	if err != nil {
-		return 21
+		// If we can't determine the Java version, return 0 to indicate error
+		return "0"
 	}
-
-	// Fallback based on minor version
-	switch {
-	case minor <= 16:
-		return 8
-	case minor == 17:
-		return 16
-	case minor <= 20:
-		return 17
-	default:
-		return 21
-	}
+	return javaVersion
 }
 
 type ClientConfig struct {
@@ -366,8 +324,8 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 			Name: "unless-stopped",
 		},
 		Resources: container.Resources{
-			Memory:     int64(server.Memory) * 1024 * 1024, // Convert MB to bytes
-			MemorySwap: int64(server.Memory) * 1024 * 1024, // Prevent swap usage
+			Memory:     int64(server.Memory) * 1024 * 1024,
+			MemorySwap: int64(server.Memory) * 1024 * 1024,
 		},
 		LogConfig: container.LogConfig{
 			Type: "json-file",
@@ -605,7 +563,20 @@ func (c *Client) pullImage(ctx context.Context, imageName string) error {
 }
 
 func (c *Client) GetDockerImages() []DockerImageTag {
-	return DockerImageTags
+	images, err := fetchDockerImages()
+	if err != nil {
+		fmt.Printf("Error: failed to fetch docker images: %v\n", err)
+		return []DockerImageTag{}
+	}
+
+	// Filter out deprecated images
+	var activeImages []DockerImageTag
+	for _, img := range images {
+		if !img.Deprecated {
+			activeImages = append(activeImages, img)
+		}
+	}
+	return activeImages
 }
 
 func getDockerImage(loader models.ModLoader, mcVersion string) string {
@@ -676,7 +647,7 @@ func buildEnvFromConfig(config *models.ServerConfig) []string {
 		fieldValue := configValue.Field(i)
 
 		// Handle pointer types
-		if fieldValue.Kind() == reflect.Ptr {
+		if fieldValue.Kind() == reflect.Pointer {
 			// Skip if nil
 			if fieldValue.IsNil() {
 				continue

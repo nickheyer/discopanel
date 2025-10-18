@@ -29,7 +29,6 @@
 		memory: server.memory,
 		mod_loader: server.mod_loader,
 		mc_version: server.mc_version,
-		java_version: server.java_version,
 		docker_image: server.docker_image,
 		detached: !!(server.detached),
 		auto_start: !!(server.auto_start),
@@ -56,7 +55,6 @@
 				memory: server.memory,
 				mod_loader: server.mod_loader,
 				mc_version: server.mc_version,
-				java_version: server.java_version,
 				docker_image: server.docker_image,
 				detached: !!(server.detached),
 				auto_start: !!(server.auto_start),
@@ -83,7 +81,6 @@
 			formData.memory !== server.memory ||
 			formData.mod_loader !== server.mod_loader ||
 			formData.mc_version !== server.mc_version ||
-			formData.java_version !== server.java_version ||
 			formData.docker_image !== server.docker_image ||
 			formData.detached !== !!(server.detached) ||
 			formData.auto_start !== !!(server.auto_start) ||
@@ -199,7 +196,7 @@
 				class="h-10"
 			/>
 			<p class="text-xs text-muted-foreground">
-				Recommended: {formData.mod_loader === 'forge' || formData.mod_loader === 'neoforge' ? '4096' : formData.mod_loader === 'fabric' ? '3072' : '2048'} MB
+				Recommended: {formData.mod_loader === 'vanilla' ? '2048' : '4096'} MB
 			</p>
 		</div>
 
@@ -261,26 +258,6 @@
 		</div>
 
 		<div class="space-y-2">
-			<Label for="java_version" class="text-sm font-medium">Java Version</Label>
-			<Select
-				type="single"
-				disabled={loadingOptions || server.status !== 'stopped'}
-				value={formData.java_version}
-				onValueChange={(value: string | undefined) => formData.java_version = value || ''}
-			>
-				<SelectTrigger id="java_version" class="h-10">
-					<span>{formData.java_version || 'Select Java version'}</span>
-				</SelectTrigger>
-				<SelectContent>
-					<SelectItem value="8">Java 8</SelectItem>
-					<SelectItem value="11">Java 11</SelectItem>
-					<SelectItem value="17">Java 17</SelectItem>
-					<SelectItem value="21">Java 21</SelectItem>
-				</SelectContent>
-			</Select>
-		</div>
-
-		<div class="space-y-2">
 			<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
 			<Select
 				type="single"
@@ -294,7 +271,7 @@
 				<SelectContent>
 					{#each dockerImages as image}
 						<SelectItem value={image.tag}>
-							{image.tag} - Java {image.javaVersion} ({image.linux})
+							{image.tag} - Java {image.java} ({image.distribution})
 						</SelectItem>
 					{/each}
 				</SelectContent>

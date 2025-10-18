@@ -238,10 +238,13 @@ func buildConfigCategories(config any) []ConfigCategory {
 		{Name: "World Generation", Properties: []ConfigProperty{}},
 		{Name: "RCON", Properties: []ConfigProperty{}},
 		{Name: "Resource Pack", Properties: []ConfigProperty{}},
+		{Name: "Management Server", Properties: []ConfigProperty{}},
+		{Name: "Ops/Admins", Properties: []ConfigProperty{}},
 		{Name: "Whitelist", Properties: []ConfigProperty{}},
 		{Name: "Auto-Pause", Properties: []ConfigProperty{}},
 		{Name: "Auto-Stop", Properties: []ConfigProperty{}},
 		{Name: "CurseForge", Properties: []ConfigProperty{}},
+		{Name: "Modrinth", Properties: []ConfigProperty{}},
 	}
 
 	configValue := reflect.ValueOf(config).Elem()
@@ -329,6 +332,16 @@ func buildConfigCategories(config any) []ConfigCategory {
 				prop.Options = []string{"creative", "survival", "adventure", "spectator"}
 			case "cfSetLevelFrom":
 				prop.Options = []string{"", "WORLD_FILE", "OVERRIDES"}
+			case "userApiProvider":
+				prop.Options = []string{"playerdb", "mojang"}
+			case "existingOpsFile":
+				prop.Options = []string{"SKIP", "SYNCHRONIZE", "MERGE", "SYNC_FILE_MERGE_LIST"}
+			case "existingWhitelistFile":
+				prop.Options = []string{"SKIP", "SYNCHRONIZE", "MERGE", "SYNC_FILE_MERGE_LIST"}
+			case "modrinthDownloadDependencies":
+				prop.Options = []string{"none", "required", "optional"}
+			case "modrinthProjectsDefaultVersionType":
+				prop.Options = []string{"release", "beta", "alpha"}
 			}
 		}
 
@@ -360,9 +373,10 @@ func getCategoryIndex(key string) int {
 		return 0
 
 	// Server Settings (1)
-	case "type", "eula", "version", "motd", "icon", "overrideIcon", "serverName",
+	case "type", "customServer", "customJarExec", "eula", "version", "motd", "icon", "overrideIcon", "serverName",
 		"serverPort", "console", "gui", "stopDuration", "setupOnly", "execDirectly",
-		"stopServerAnnounceDelay", "proxy", "useFlareFlags", "useSimdFlags":
+		"stopServerAnnounceDelay", "proxy", "useFlareFlags", "useSimdFlags",
+		"serverPropertiesEscapeUnicode", "bugReportLink", "customServerProperties":
 		return 1
 
 	// Game Settings (2)
@@ -372,40 +386,60 @@ func getCategoryIndex(key string) int {
 		"mode", "pvp", "onlineMode", "allowFlight", "playerIdleTimeout", "syncChunkWrites",
 		"enableStatus", "entityBroadcastRangePercentage", "functionPermissionLevel",
 		"networkCompressionThreshold", "opPermissionLevel", "preventProxyConnections",
-		"useNativeTransport", "simulationDistance":
+		"useNativeTransport", "simulationDistance", "enableQuery", "queryPort",
+		"acceptsTransfers", "broadcastConsoleToOps", "enforceSecureProfile",
+		"hideOnlinePlayers", "logIps", "maxChainedNeighborUpdates", "pauseWhenEmptySeconds",
+		"rateLimit", "statusHeartbeatInterval":
 		return 2
 
 	// World Generation (3)
-	case "generateStructures", "maxWorldSize", "seed", "levelType", "generatorSettings", "level":
+	case "generateStructures", "maxWorldSize", "seed", "levelType", "generatorSettings", "level",
+		"regionFileCompression":
 		return 3
 
 	// RCON (4)
-	case "enableRcon", "rconPassword", "rconPort", "broadcastRconToOps", "rconCmdsStartup",
+	case "enableRcon", "rconPassword", "rconPort", "rconCmdsStartup",
 		"rconCmdsOnConnect", "rconCmdsFirstConnect", "rconCmdsOnDisconnect", "rconCmdsLastDisconnect":
 		return 4
 
 	// Resource Pack (5)
-	case "resourcePack", "resourcePackSha1", "resourcePackEnforce":
+	case "resourcePack", "resourcePackSha1", "resourcePackEnforce", "resourcePackId", "resourcePackPrompt":
 		return 5
 
-	// Whitelist (6)
-	case "enableWhitelist", "whitelist", "whitelistFile", "overrideWhitelist":
+	// Management Server (6)
+	case "managementServerAllowedOrigins", "managementServerEnabled", "managementServerHost",
+		"managementServerPort", "managementServerSecret", "managementServerTlsEnabled",
+		"managementServerTlsKeystore", "managementServerTlsKeystorePassword":
 		return 6
 
-	// Auto-Pause (7)
-	case "enableAutopause", "autopauseTimeoutEst", "autopauseTimeoutInit", "autopauseTimeoutKn",
-		"autopausePeriod", "autopauseKnockInterface", "debugAutopause":
+	// Ops/Admins (7)
+	case "userApiProvider", "ops", "opsFile", "existingOpsFile":
 		return 7
 
-	// Auto-Stop (8)
-	case "enableAutostop", "autostopTimeoutEst", "autostopTimeoutInit", "autostopPeriod", "debugAutostop":
+	// Whitelist (8)
+	case "enableWhitelist", "whitelist", "whitelistFile", "overrideWhitelist",
+		"existingWhitelistFile", "enforceWhitelist":
 		return 8
 
-	// CurseForge (9)
+	// Auto-Pause (9)
+	case "enableAutopause", "autopauseTimeoutEst", "autopauseTimeoutInit", "autopauseTimeoutKn",
+		"autopausePeriod", "autopauseKnockInterface", "debugAutopause":
+		return 9
+
+	// Auto-Stop (10)
+	case "enableAutostop", "autostopTimeoutEst", "autostopTimeoutInit", "autostopPeriod", "debugAutostop":
+		return 10
+
+	// CurseForge (11)
 	case "cfApiKey", "cfApiKeyFile", "cfPageUrl", "cfSlug", "cfFileId", "cfFilenameMatcher",
 		"cfExcludeIncludeFile", "cfExcludeMods", "cfForceIncludeMods", "cfForceSynchronize",
 		"cfSetLevelFrom", "cfParallelDownloads", "cfOverridesSkipExisting", "cfForceReinstallModloader":
-		return 9
+		return 11
+
+	// Modrinth (12)
+	case "modrinthProjects", "modrinthDownloadDependencies", "modrinthProjectsDefaultVersionType",
+		"modrinthLoader", "versionFromModrinthProjects":
+		return 12
 
 	default:
 		return -1 // Unknown category
@@ -422,7 +456,7 @@ func (s *Server) handleGetGlobalSettings(w http.ResponseWriter, r *http.Request)
 		s.respondError(w, http.StatusInternalServerError, "Failed to get auth configuration")
 		return
 	}
-	
+
 	if authConfig.Enabled {
 		// Get user from context (set by OptionalAuth if token present)
 		user := auth.GetUserFromContext(ctx)
@@ -458,7 +492,7 @@ func (s *Server) handleUpdateGlobalSettings(w http.ResponseWriter, r *http.Reque
 		s.respondError(w, http.StatusInternalServerError, "Failed to get auth configuration")
 		return
 	}
-	
+
 	if authConfig.Enabled {
 		// Get user from context (set by OptionalAuth if token present)
 		user := auth.GetUserFromContext(ctx)

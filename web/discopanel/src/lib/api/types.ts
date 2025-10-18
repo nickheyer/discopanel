@@ -2,17 +2,19 @@ export type ModLoader = 'vanilla' | 'forge' | 'fabric' | 'neoforge' | 'paper' | 
   'bukkit' | 'pufferfish' | 'quilt' | 'magma' | 'magma_maintained' | 'ketting' | 
   'mohist' | 'youer' | 'banner' | 'catserver' | 'arclight' | 'spongevanilla' | 
   'limbo' | 'nanolimbo' | 'crucible' | 'glowstone' | 'custom' | 
-  'auto_curseforge' | 'curseforge' | 'ftba' | 'modrinth';
-export type ServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'unhealthy';
+  'auto_curseforge' | 'curseforge' | 'ftba' | 'modrinth' | 'purpur';
+export type ServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'unhealthy' | 'creating';
 
 export interface DockerImageInfo {
   tag: string;
-  javaVersion: number;
-  linux: string;
-  jvmType: string;
-  archs: string[];
+  java: string;
+  distribution: string;
+  jvm: string;
+  architectures: string[];
   deprecated: boolean;
-  note: string;
+  notes: string;
+  lts: boolean;
+  jdk: boolean;
 }
 
 export interface Server {
@@ -38,7 +40,7 @@ export interface Server {
   created_at: string;
   updated_at: string;
   last_started: string | null;
-  java_version: string;
+  java_version?: string;
   docker_image: string;
   data_path: string;
   detached?: boolean;
@@ -58,6 +60,8 @@ export interface CreateServerRequest {
   detached?: boolean;
   start_immediately?: boolean;
   proxy_hostname?: string;
+  proxy_listener_id?: string;
+  use_base_url?: boolean;
 }
 
 export interface UpdateServerRequest {
@@ -67,7 +71,6 @@ export interface UpdateServerRequest {
   memory?: number;
   mod_loader?: string;
   mc_version?: string;
-  java_version?: string;
   docker_image?: string;
   detached?: boolean;
   auto_start?: boolean;

@@ -267,9 +267,45 @@ func (s *Server) SetProxyManager(pm *proxy.Manager) {
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip polling endpoints to reduce noise
+		if s.isPollingEndpoint(r.URL.Path, r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		s.log.Info("%s %s %s", r.RemoteAddr, r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) isPollingEndpoint(path string, method string) bool {
+	// Only skip GET requests
+	if method != "GET" {
+		return false
+	}
+
+	pollingPatterns := []string{
+		"/api/v1/servers",
+		"/api/v1/servers/",
+		"/api/v1/auth/status",
+		"/api/v1/proxy/status",
+	}
+
+	// Check path
+	for _, pattern := range pollingPatterns {
+		if strings.HasPrefix(path, pattern) {
+			// Don't skip for server creation/deletion/actions
+			if strings.Contains(path, "/start") ||
+				strings.Contains(path, "/stop") ||
+				strings.Contains(path, "/restart") ||
+				strings.Contains(path, "/command") {
+				return false
+			}
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {

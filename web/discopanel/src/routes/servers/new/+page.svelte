@@ -35,13 +35,8 @@
 	let showModpackDialog = $state(false);
 	let selectedModpack = $state<IndexedModpack | null>(null);
 	let favoriteModpacks = $state<IndexedModpack[]>([]);
-	let loadingModpacks = $state(false);
 
-	let formData = $state<CreateServerRequest & { 
-		proxy_hostname?: string;
-		proxy_listener_id?: string;
-		use_base_url?: boolean;
-	}>({
+	let formData = $state<CreateServerRequest>({
 		name: '',
 		description: '',
 		mod_loader: 'vanilla',
@@ -188,28 +183,6 @@
 		return true;
 	}
 
-	function handleMemoryInput(e: Event) {
-		const input = e.currentTarget as HTMLInputElement;
-		const value = Number(input.value);
-		
-		// Prevent negative values
-		if (value < 0) {
-			input.value = '512';
-			formData.memory = 512;
-		}
-	}
-
-	function handleMaxPlayersInput(e: Event) {
-		const input = e.currentTarget as HTMLInputElement;
-		const value = Number(input.value);
-		
-		// Prevent negative values and zero
-		if (value <= 0) {
-			input.value = '1';
-			formData.max_players = 1;
-		}
-	}
-
 	async function refreshAvailablePort() {
 		try {
 			const portData = await api.getNextAvailablePort();
@@ -263,12 +236,12 @@
 		
 		if (!image) return tagOrImage as string;
 		
-		let displayName = `Java ${image.javaVersion} (${image.tag})`;
-		if (image.linux !== 'Ubuntu') {
-			displayName = `Java ${image.javaVersion} ${image.linux} (${image.tag})`;
+		let displayName = `Java ${image.java} (${image.tag})`;
+		if (image.distribution !== 'Ubuntu') {
+			displayName = `Java ${image.java} ${image.distribution} (${image.tag})`;
 		}
-		if (image.jvmType !== 'Hotspot') {
-			displayName = `Java ${image.javaVersion} ${image.jvmType} (${image.tag})`;
+		if (image.jvm !== 'Hotspot') {
+			displayName = `Java ${image.java} ${image.jvm} (${image.tag})`;
 		}
 		return displayName;
 	}
@@ -661,7 +634,6 @@
 							min="1"
 							max="1000"
 							bind:value={formData.max_players}
-							oninput={handleMaxPlayersInput}
 							disabled={loading}
 							class="h-10"
 						/>
@@ -674,15 +646,13 @@
 								id="memory"
 								type="number"
 								min="512"
-								step="512"
 								bind:value={formData.memory}
-								oninput={handleMemoryInput}
 								disabled={loading}
 								class="h-10"
 							/>
 						</div>
 						<p class="text-xs text-muted-foreground">
-							Recommended for {formData.mod_loader}: {formData.mod_loader === 'forge' || formData.mod_loader === 'neoforge' ? '4096' : formData.mod_loader === 'fabric' ? '3072' : '2048'} MB
+							Recommended: {formData.mod_loader === 'vanilla' ? '2048' : '4096'} MB
 						</p>
 					</div>
 
@@ -699,8 +669,8 @@
 								{#each dockerImages.filter(img => !img.deprecated) as image}
 									<SelectItem value={image.tag}>
 										{getDockerImageDisplayName(image)}
-										{#if image.note}
-											<span class="text-xs text-muted-foreground ml-2">({image.note})</span>
+										{#if image.notes}
+											<span class="text-xs text-muted-foreground ml-2">({image.notes})</span>
 										{/if}
 									</SelectItem>
 								{/each}

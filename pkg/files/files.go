@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -82,3 +83,14 @@ func CalculateDirSize(dirPath string) (int64, error) {
 	return totalSize, nil
 }
 
+func SanitizePathName(name string) string {
+	// alphanum + _ + -
+	re := regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
+	safe := re.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "_")
+
+	// Empty
+	if safe == "" {
+		safe = "DISCO_GENERIC"
+	}
+	return safe
+}

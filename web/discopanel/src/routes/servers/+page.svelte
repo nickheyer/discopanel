@@ -81,6 +81,7 @@
 				return 'default';
 			case 'starting':
 			case 'stopping':
+			case 'creating':
 				return 'secondary';
 			case 'error':
 				return 'destructive';

@@ -1,8 +1,8 @@
 package minecraft
 
 import (
-	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	models "github.com/nickheyer/discopanel/internal/db"
@@ -88,6 +88,14 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Paper",
+			ModsDirectory:   "plugins",
+			ConfigDirectory: "plugins",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderPurpur:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Purpur",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
@@ -214,8 +222,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Custom",
-			ModsDirectory:   "",
-			ConfigDirectory: "",
+			ModsDirectory:   "mods",
+			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
 		}
 
@@ -273,15 +281,6 @@ func GetModsPath(serverDataPath string, loader models.ModLoader) string {
 	return filepath.Join(serverDataPath, info.ModsDirectory)
 }
 
-// GetConfigPath returns the path where configs should be stored for a given server
-func GetConfigPath(serverDataPath string, loader models.ModLoader) string {
-	info := GetModLoaderInfo(loader)
-	if info.ConfigDirectory == "" {
-		return serverDataPath
-	}
-	return filepath.Join(serverDataPath, info.ConfigDirectory)
-}
-
 // IsValidModFile checks if a file is a valid mod file for the given loader
 func IsValidModFile(filename string, loader models.ModLoader) bool {
 	info := GetModLoaderInfo(loader)
@@ -290,12 +289,7 @@ func IsValidModFile(filename string, loader models.ModLoader) bool {
 	}
 
 	ext := strings.ToLower(filepath.Ext(filename))
-	for _, validExt := range info.FileExtensions {
-		if ext == validExt {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(info.FileExtensions, ext)
 }
 
 // GetAllModLoaders returns information about all available mod loaders
@@ -316,6 +310,7 @@ func GetAllModLoaders() []ModLoaderInfo {
 		models.ModLoaderBukkit,
 		models.ModLoaderSpigot,
 		models.ModLoaderPaper,
+		models.ModLoaderPurpur,
 		models.ModLoaderPufferfish,
 
 		// Hybrids (Forge + Bukkit)
@@ -351,32 +346,4 @@ func GetAllModLoaders() []ModLoaderInfo {
 	}
 
 	return infos
-}
-
-// GetStartupFlags returns recommended JVM flags for the server
-func GetStartupFlags(memory int) []string {
-	return []string{
-		fmt.Sprintf("-Xms%dM", memory),
-		fmt.Sprintf("-Xmx%dM", memory),
-		"-XX:+UseG1GC",
-		"-XX:+ParallelRefProcEnabled",
-		"-XX:MaxGCPauseMillis=200",
-		"-XX:+UnlockExperimentalVMOptions",
-		"-XX:+DisableExplicitGC",
-		"-XX:+AlwaysPreTouch",
-		"-XX:G1NewSizePercent=30",
-		"-XX:G1MaxNewSizePercent=40",
-		"-XX:G1HeapRegionSize=8M",
-		"-XX:G1ReservePercent=20",
-		"-XX:G1HeapWastePercent=5",
-		"-XX:G1MixedGCCountTarget=4",
-		"-XX:InitiatingHeapOccupancyPercent=15",
-		"-XX:G1MixedGCLiveThresholdPercent=90",
-		"-XX:G1RSetUpdatingPauseTimePercent=5",
-		"-XX:SurvivorRatio=32",
-		"-XX:+PerfDisableSharedMem",
-		"-XX:MaxTenuringThreshold=1",
-		"-Dusing.aikars.flags=https://mcflags.emc.gs",
-		"-Daikars.new.flags=true",
-	}
 }

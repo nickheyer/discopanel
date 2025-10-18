@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/nickheyer/discopanel/internal/db"
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/indexers"
@@ -46,7 +45,7 @@ func (s *Server) handleSearchModpacks(w http.ResponseWriter, r *http.Request) {
 
 	// Check if modpacks are favorited
 	type ModpackWithFavorite struct {
-		*db.IndexedModpack
+		*models.IndexedModpack
 		IsFavorited bool `json:"is_favorited"`
 	}
 
@@ -141,21 +140,15 @@ func (s *Server) handleSyncModpacks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// If still no version found, log error
-		if mcVersion == "" {
-			s.log.Error("No valid Minecraft version found in modpack %s game versions: %v", modpack.ID, modpack.GameVersions)
-			mcVersion = "1.21.1" // Fallback
-		}
-
 		modLoader := models.ModLoaderVanilla
 		if len(modpack.ModLoaders) > 0 {
 			modLoader = models.ModLoader(modpack.ModLoaders[0])
 		}
 
-		javaVersion := strconv.Itoa(docker.GetRequiredJavaVersion(mcVersion, modLoader))
+		javaVersion := docker.GetRequiredJavaVersion(mcVersion, modLoader)
 		dockerImage := docker.GetOptimalDockerTag(mcVersion, modLoader, false)
 
-		dbModpack := &db.IndexedModpack{
+		dbModpack := &models.IndexedModpack{
 			ID:            modpack.ID,
 			IndexerID:     modpack.IndexerID,
 			Indexer:       modpack.Indexer,
@@ -312,7 +305,7 @@ func (s *Server) handleSyncModpackFiles(w http.ResponseWriter, r *http.Request) 
 		// Convert to JSON strings for storage
 		gameVersionsJSON, _ := json.Marshal(file.GameVersions)
 
-		dbFile := &db.IndexedModpackFile{
+		dbFile := &models.IndexedModpackFile{
 			ID:               file.ID,
 			ModpackID:        modpackID,
 			DisplayName:      file.DisplayName,
@@ -554,14 +547,14 @@ func (s *Server) handleUploadModpack(w http.ResponseWriter, r *http.Request) {
 		manualModLoader = models.ModLoaderQuilt
 	}
 
-	javaVersion := strconv.Itoa(docker.GetRequiredJavaVersion(manifest.Minecraft.Version, manualModLoader))
+	javaVersion := docker.GetRequiredJavaVersion(manifest.Minecraft.Version, manualModLoader)
 	dockerImage := docker.GetOptimalDockerTag(manifest.Minecraft.Version, manualModLoader, false)
 
 	// Create database entry
 	gameVersionsJSON, _ := json.Marshal([]string{manifest.Minecraft.Version})
 	modLoadersJSON, _ := json.Marshal([]string{modLoader})
 
-	dbModpack := &db.IndexedModpack{
+	dbModpack := &models.IndexedModpack{
 		ID:             modpackID,
 		IndexerID:      modpackID,
 		Indexer:        "manual",
@@ -623,7 +616,7 @@ func (s *Server) handleUploadModpack(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a file entry for the uploaded modpack
-	dbFile := &db.IndexedModpackFile{
+	dbFile := &models.IndexedModpackFile{
 		ID:               modpackID,
 		ModpackID:        modpackID,
 		DisplayName:      header.Filename,

@@ -449,10 +449,12 @@
 								<span class="text-[10px] text-muted-foreground/60">Minecraft</span>
 								<span class="text-[11px] font-mono font-semibold text-purple-500">{server.mc_version}</span>
 							</div>
-							<div class="flex items-center justify-between">
-								<span class="text-[10px] text-muted-foreground/60">Java</span>
-								<span class="text-[11px] font-mono font-semibold text-purple-400">Java {server.java_version}</span>
-							</div>
+							{#if server.java_version}
+								<div class="flex items-center justify-between">
+									<span class="text-[10px] text-muted-foreground/60">Java</span>
+									<span class="text-[11px] font-mono font-semibold text-purple-400">Java {server.java_version}</span>
+								</div>
+							{/if}
 							<div class="flex items-center justify-between">
 								<span class="text-[10px] text-muted-foreground/60">Mod Loader</span>
 								{#if server.mod_loader === 'vanilla'}

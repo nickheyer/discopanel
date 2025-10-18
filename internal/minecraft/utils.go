@@ -160,7 +160,7 @@ func stripMinecraftColors(text string) string {
 func GetTPSCommand(modLoader models.ModLoader) string {
 	// Determine TPS command based on modloader
 	switch modLoader {
-	case models.ModLoaderPaper, models.ModLoaderSpigot, models.ModLoaderBukkit, models.ModLoaderPufferfish:
+	case models.ModLoaderPaper, models.ModLoaderPurpur, models.ModLoaderSpigot, models.ModLoaderBukkit, models.ModLoaderPufferfish:
 		return "tps"
 	case models.ModLoaderForge:
 		return "forge tps"

@@ -13,6 +13,7 @@ const (
 	StatusStopping  ServerStatus = "stopping"
 	StatusError     ServerStatus = "error"
 	StatusUnhealthy ServerStatus = "unhealthy"
+	StatusCreating  ServerStatus = "creating" // Container is being created/image pulled
 )
 
 type ModLoader string
@@ -33,6 +34,7 @@ const (
 	ModLoaderBukkit     ModLoader = "bukkit"
 	ModLoaderSpigot     ModLoader = "spigot"
 	ModLoaderPaper      ModLoader = "paper"
+	ModLoaderPurpur     ModLoader = "purpur"
 	ModLoaderPufferfish ModLoader = "pufferfish"
 
 	// Hybrids (Forge + Bukkit)
@@ -75,7 +77,7 @@ type Server struct {
 	ProxyHostname   string       `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
 	ProxyListenerID string       `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
 	MaxPlayers      int          `json:"max_players" gorm:"default:20;column:max_players"`
-	Memory          int          `json:"memory" gorm:"default:2048"` // in MB (allocated)
+	Memory          int          `json:"memory" gorm:"default:4096"` // in MB (allocated) - IMPORTANT: This applies to the container's memory allocation first, then used to calc the JVM min/max for mc server proc inside w/ overhead
 	CreatedAt       time.Time    `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt       time.Time    `json:"updated_at" gorm:"autoUpdateTime"`
 	LastStarted     *time.Time   `json:"last_started" gorm:"column:last_started"`
@@ -84,8 +86,8 @@ type Server struct {
 	DataPath        string       `json:"data_path" gorm:"not null;column:data_path"`
 	Detached        bool         `json:"detached" gorm:"default:false;column:detached"`     // Detach server container from DiscoPanel lifecycle (default: false)
 	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
-	TPSCommand      string       `json:"tps_command" gorm:"column:tps_command"`              // The TPS command for this server (empty if not supported)
-	
+	TPSCommand      string       `json:"tps_command" gorm:"column:tps_command"`             // The TPS command for this server (empty if not supported)
+
 	// Runtime stats (not persisted to DB)
 	MemoryUsage   float64 `json:"memory_usage" gorm:"-"`   // Current memory usage in MB
 	CPUPercent    float64 `json:"cpu_percent" gorm:"-"`    // Current CPU usage percentage
@@ -104,9 +106,9 @@ type ServerConfig struct {
 	// JVM Configuration
 	UID                    *int    `json:"uid" env:"UID" default:"1000" desc:"The linux user id to run as" input:"number" label:"User ID"`
 	GID                    *int    `json:"gid" env:"GID" default:"1000" desc:"The linux group id to run as" input:"number" label:"Group ID"`
-	Memory                 *string `json:"memory" env:"MEMORY" default:"1G" desc:"Initial and maximum Java memory-heap limit" input:"text" label:"Memory" system:"true"`
-	InitMemory             *string `json:"initMemory" env:"INIT_MEMORY" default:"1G" desc:"Independently sets the initial heap size" input:"text" label:"Initial Memory" system:"true"`
-	MaxMemory              *string `json:"maxMemory" env:"MAX_MEMORY" default:"1G" desc:"Independently sets the max heap size" input:"text" label:"Maximum Memory" system:"true"`
+	Memory                 *string `json:"memory" env:"MEMORY" default:"" desc:"Initial and maximum Java memory-heap limit" input:"text" label:"Memory" system:"true"`
+	InitMemory             *string `json:"initMemory" env:"INIT_MEMORY" default:"2048M" desc:"Independently sets the initial heap size" input:"text" label:"Initial Memory" system:"true"`
+	MaxMemory              *string `json:"maxMemory" env:"MAX_MEMORY" default:"3120M" desc:"Independently sets the max heap size" input:"text" label:"Maximum Memory" system:"true"`
 	TZ                     *string `json:"tz" env:"TZ" default:"UTC" desc:"Timezone configuration" input:"text" label:"Timezone"`
 	EnableRollingLogs      *bool   `json:"enableRollingLogs" env:"ENABLE_ROLLING_LOGS" default:"false" desc:"Enable rolling log files strategy" input:"checkbox" label:"Enable Rolling Logs"`
 	EnableJMX              *bool   `json:"enableJmx" env:"ENABLE_JMX" default:"false" desc:"Enable remote JMX for profiling" input:"checkbox" label:"Enable JMX"`
@@ -122,6 +124,8 @@ type ServerConfig struct {
 
 	// Server Configuration
 	Type                           *string `json:"type" env:"TYPE" default:"VANILLA" desc:"The server type" input:"text" label:"Server Type" system:"true"`
+	CustomServer                   *string `json:"customServer" env:"CUSTOM_SERVER" default:"" desc:"URL or container path to custom server jar" input:"text" label:"Custom Server JAR"`
+	CustomJarExec                  *string `json:"customJarExec" env:"CUSTOM_JAR_EXEC" default:"" desc:"Custom jar execution command (e.g. -cp classpath MainClass or -jar file.jar)" input:"text" label:"Custom JAR Execution"`
 	EULA                           *string `json:"eula" env:"EULA" default:"TRUE" desc:"This MUST be set to TRUE" input:"checkbox" required:"true" label:"Accept EULA" system:"true"`
 	Version                        *string `json:"version" env:"VERSION" default:"LATEST" desc:"The minecraft version" input:"text" label:"Minecraft Version" system:"true"`
 	MOTD                           *string `json:"motd" env:"MOTD" default:"" desc:"Server log in message" input:"text" label:"Message of the Day"`
@@ -163,6 +167,22 @@ type ServerConfig struct {
 	PreventProxyConnections        *bool   `json:"preventProxyConnections" env:"PREVENT_PROXY_CONNECTIONS" default:"false" desc:"Prevent proxy connections" input:"checkbox" label:"Prevent Proxy Connections"`
 	UseNativeTransport             *bool   `json:"useNativeTransport" env:"USE_NATIVE_TRANSPORT" default:"false" desc:"Use native transport" input:"checkbox" label:"Use Native Transport"`
 	SimulationDistance             *int    `json:"simulationDistance" env:"SIMULATION_DISTANCE" default:"0" desc:"Simulation distance" input:"number" label:"Simulation Distance"`
+	EnableQuery                    *bool   `json:"enableQuery" env:"ENABLE_QUERY" default:"false" desc:"Enable GameSpy query protocol" input:"checkbox" label:"Enable Query"`
+	QueryPort                      *int    `json:"queryPort" env:"QUERY_PORT" default:"25565" desc:"UDP port for GameSpy query" input:"number" label:"Query Port"`
+	ServerPropertiesEscapeUnicode  *bool   `json:"serverPropertiesEscapeUnicode" env:"SERVER_PROPERTIES_ESCAPE_UNICODE" default:"false" desc:"Escape unicode in server.properties (<1.20 compatibility)" input:"checkbox" label:"Escape Unicode in Server Properties"`
+	AcceptsTransfers               *bool   `json:"acceptsTransfers" env:"ACCEPTS_TRANSFERS" default:"false" desc:"Allow player transfers between servers" input:"checkbox" label:"Accepts Transfers"`
+	BroadcastConsoleToOps          *bool   `json:"broadcastConsoleToOps" env:"BROADCAST_CONSOLE_TO_OPS" default:"true" desc:"Broadcast console messages to ops" input:"checkbox" label:"Broadcast Console to OPs"`
+	BugReportLink                  *string `json:"bugReportLink" env:"BUG_REPORT_LINK" default:"" desc:"Custom bug report URL" input:"text" label:"Bug Report Link"`
+	EnforceSecureProfile           *bool   `json:"enforceSecureProfile" env:"ENFORCE_SECURE_PROFILE" default:"true" desc:"Require secure chat/profile" input:"checkbox" label:"Enforce Secure Profile"`
+	HideOnlinePlayers              *bool   `json:"hideOnlinePlayers" env:"HIDE_ONLINE_PLAYERS" default:"false" desc:"Hide online players from the server list" input:"checkbox" label:"Hide Online Players"`
+	LogIPs                         *bool   `json:"logIps" env:"LOG_IPS" default:"true" desc:"Log connecting player IPs" input:"checkbox" label:"Log Player IPs"`
+	MaxChainedNeighborUpdates      *int    `json:"maxChainedNeighborUpdates" env:"MAX_CHAINED_NEIGHBOR_UPDATES" default:"1000000" desc:"Maximum chained neighbor updates" input:"number" label:"Max Chained Neighbor Updates"`
+	PauseWhenEmptySeconds          *int    `json:"pauseWhenEmptySeconds" env:"PAUSE_WHEN_EMPTY_SECONDS" default:"0" desc:"Pause when server empty (seconds)" input:"number" label:"Pause When Empty"`
+	RateLimit                      *int    `json:"rateLimit" env:"RATE_LIMIT" default:"0" desc:"Rate limit in packets per second" input:"number" label:"Rate Limit"`
+	RegionFileCompression          *string `json:"regionFileCompression" env:"REGION_FILE_COMPRESSION" default:"deflate" desc:"Compression type for region files" input:"text" label:"Region File Compression"`
+	ResourcePackID                 *string `json:"resourcePackId" env:"RESOURCE_PACK_ID" default:"" desc:"Custom resource pack ID" input:"text" label:"Resource Pack ID"`
+	ResourcePackPrompt             *string `json:"resourcePackPrompt" env:"RESOURCE_PACK_PROMPT" default:"" desc:"Prompt shown when resource pack offered" input:"text" label:"Resource Pack Prompt"`
+	StatusHeartbeatInterval        *int    `json:"statusHeartbeatInterval" env:"STATUS_HEARTBEAT_INTERVAL" default:"0" desc:"Status heartbeat interval (ms)" input:"number" label:"Status Heartbeat Interval"`
 	ExecDirectly                   *bool   `json:"execDirectly" env:"EXEC_DIRECTLY" default:"false" desc:"Enable docker attach with color and interactive capabilities" input:"checkbox" label:"Execute Directly"`
 	StopServerAnnounceDelay        *int    `json:"stopServerAnnounceDelay" env:"STOP_SERVER_ANNOUNCE_DELAY" default:"0" desc:"Delay in seconds after shutdown announcement" input:"number" label:"Stop Server Announce Delay"`
 	Proxy                          *string `json:"proxy" env:"PROXY" default:"" desc:"HTTP/HTTPS proxy URL" input:"text" label:"Proxy URL"`
@@ -172,17 +192,36 @@ type ServerConfig struct {
 	SetupOnly                      *bool   `json:"setupOnly" env:"SETUP_ONLY" default:"false" desc:"Setup server files without launching" input:"checkbox" label:"Setup Only"`
 	UseFlareFlags                  *bool   `json:"useFlareFlags" env:"USE_FLARE_FLAGS" default:"false" desc:"Enable JVM flags for Flare profiling suite" input:"checkbox" label:"Use Flare Flags"`
 	UseSimdFlags                   *bool   `json:"useSimdFlags" env:"USE_SIMD_FLAGS" default:"false" desc:"Support for optimized SIMD operations" input:"checkbox" label:"Use SIMD Flags"`
+	CustomServerProperties         *string `json:"customServerProperties" env:"CUSTOM_SERVER_PROPERTIES" default:"" desc:"Extra newline delimited name=value pairs to be added to \"server.properties\"" input:"text" label:"Custom Server Properties"`
 
 	// Custom Resource Pack
 	ResourcePack        *string `json:"resourcePack" env:"RESOURCE_PACK" default:"" desc:"Link to custom resource pack" input:"text" label:"Resource Pack URL"`
 	ResourcePackSHA1    *string `json:"resourcePackSha1" env:"RESOURCE_PACK_SHA1" default:"" desc:"Checksum for custom resource pack" input:"text" label:"Resource Pack SHA1"`
 	ResourcePackEnforce *bool   `json:"resourcePackEnforce" env:"RESOURCE_PACK_ENFORCE" default:"false" desc:"Enforce resource pack on clients" input:"checkbox" label:"Enforce Resource Pack"`
 
+	// Management Server (TODO: We should be the management server...)
+	ManagementServerAllowedOrigins      *string `json:"managementServerAllowedOrigins" env:"MANAGEMENT_SERVER_ALLOWED_ORIGINS" default:"" desc:"Allowed CORS origins for management server" input:"text" label:"Management Server Allowed Origins"`
+	ManagementServerEnabled             *bool   `json:"managementServerEnabled" env:"MANAGEMENT_SERVER_ENABLED" default:"false" desc:"Enable management server interface" input:"checkbox" label:"Enable Management Server"`
+	ManagementServerHost                *string `json:"managementServerHost" env:"MANAGEMENT_SERVER_HOST" default:"0.0.0.0" desc:"Host address for management server" input:"text" label:"Management Server Host"`
+	ManagementServerPort                *int    `json:"managementServerPort" env:"MANAGEMENT_SERVER_PORT" default:"0" desc:"Port for management server" input:"number" label:"Management Server Port"`
+	ManagementServerSecret              *string `json:"managementServerSecret" env:"MANAGEMENT_SERVER_SECRET" default:"" desc:"Shared secret for management server authentication" input:"password" label:"Management Server Secret"`
+	ManagementServerTLSEnabled          *bool   `json:"managementServerTlsEnabled" env:"MANAGEMENT_SERVER_TLS_ENABLED" default:"false" desc:"Enable TLS for management server" input:"checkbox" label:"Management Server TLS Enabled"`
+	ManagementServerTLSKeystore         *string `json:"managementServerTlsKeystore" env:"MANAGEMENT_SERVER_TLS_KEYSTORE" default:"" desc:"Path to TLS keystore" input:"text" label:"Management Server TLS Keystore"`
+	ManagementServerTLSKeystorePassword *string `json:"managementServerTlsKeystorePassword" env:"MANAGEMENT_SERVER_TLS_KEYSTORE_PASSWORD" default:"" desc:"Password for TLS keystore" input:"password" label:"Management Server TLS Keystore Password"`
+
+	// Ops / Admins
+	UserAPIProvider *string `json:"userApiProvider" env:"USER_API_PROVIDER" default:"playerdb" desc:"Username resolution provider (playerdb,mojang)" input:"select" label:"User API Provider"`
+	Ops             *string `json:"ops" env:"OPS" default:"" desc:"Comma-separated list of operator usernames/UUIDs" input:"text" label:"Operators"`
+	OpsFile         *string `json:"opsFile" env:"OPS_FILE" default:"" desc:"Path or URL to ops file" input:"text" label:"Ops File"`
+	ExistingOpsFile *string `json:"existingOpsFile" env:"EXISTING_OPS_FILE" default:"SYNC_FILE_MERGE_LIST" desc:"Behavior when ops file exists (SKIP,SYNCHRONIZE,MERGE,SYNC_FILE_MERGE_LIST)" input:"select" label:"Existing Ops File Behavior"`
+
 	// Whitelist
-	EnableWhitelist   *bool   `json:"enableWhitelist" env:"ENABLE_WHITELIST" default:"false" desc:"Enable server whitelist" input:"checkbox" label:"Enable Whitelist"`
-	Whitelist         *string `json:"whitelist" env:"WHITELIST" default:"" desc:"Comma-separated list of usernames/UUIDs" input:"text" label:"Whitelist Players"`
-	WhitelistFile     *string `json:"whitelistFile" env:"WHITELIST_FILE" default:"" desc:"URL or path to whitelist JSON file" input:"text" label:"Whitelist File"`
-	OverrideWhitelist *bool   `json:"overrideWhitelist" env:"OVERRIDE_WHITELIST" default:"false" desc:"Regenerate whitelist on each startup" input:"checkbox" label:"Override Whitelist"`
+	EnableWhitelist       *bool   `json:"enableWhitelist" env:"ENABLE_WHITELIST" default:"false" desc:"Enable server whitelist" input:"checkbox" label:"Enable Whitelist"`
+	Whitelist             *string `json:"whitelist" env:"WHITELIST" default:"" desc:"Comma-separated list of usernames/UUIDs" input:"text" label:"Whitelist Players"`
+	WhitelistFile         *string `json:"whitelistFile" env:"WHITELIST_FILE" default:"" desc:"URL or path to whitelist JSON file" input:"text" label:"Whitelist File"`
+	OverrideWhitelist     *bool   `json:"overrideWhitelist" env:"OVERRIDE_WHITELIST" default:"false" desc:"Regenerate whitelist on each startup" input:"checkbox" label:"Override Whitelist"`
+	ExistingWhitelistFile *string `json:"existingWhitelistFile" env:"EXISTING_WHITELIST_FILE" default:"SYNC_FILE_MERGE_LIST" desc:"Behavior when whitelist file exists (SKIP,SYNCHRONIZE,MERGE,SYNC_FILE_MERGE_LIST)" input:"select" label:"Existing Whitelist File Behavior"`
+	EnforceWhitelist      *bool   `json:"enforceWhitelist" env:"ENFORCE_WHITELIST" default:"false" desc:"Enforce whitelist changes immediately" input:"checkbox" label:"Enforce Whitelist"`
 
 	// RCON
 	EnableRCON             *bool   `json:"enableRcon" env:"ENABLE_RCON" default:"true" desc:"Enable RCON support" input:"checkbox" label:"Enable RCON"`
@@ -232,6 +271,13 @@ type ServerConfig struct {
 	CFParallelDownloads       *int    `json:"cfParallelDownloads" env:"CF_PARALLEL_DOWNLOADS" default:"4" desc:"Number of parallel mod downloads" input:"number" label:"CurseForge Parallel Downloads"`
 	CFOverridesSkipExisting   *bool   `json:"cfOverridesSkipExisting" env:"CF_OVERRIDES_SKIP_EXISTING" default:"false" desc:"Skip existing files in overrides" input:"checkbox" label:"CurseForge Skip Existing Overrides"`
 	CFForceReinstallModloader *bool   `json:"cfForceReinstallModloader" env:"CF_FORCE_REINSTALL_MODLOADER" default:"false" desc:"Force reinstall modloader (cleared after start)" input:"checkbox" label:"Force Reinstall Modloader" ephemeral:"true"`
+
+	// Modrinth
+	ModrinthProjects                   *string `json:"modrinthProjects" env:"MODRINTH_PROJECTS" default:"" desc:"Comma, newline, or @file list of Modrinth project slugs or IDs" input:"textarea" label:"Modrinth Projects"`
+	ModrinthDownloadDependencies       *string `json:"modrinthDownloadDependencies" env:"MODRINTH_DOWNLOAD_DEPENDENCIES" default:"none" desc:"Dependency download mode (none, required, optional)" input:"select" label:"Modrinth Download Dependencies"`
+	ModrinthProjectsDefaultVersionType *string `json:"modrinthProjectsDefaultVersionType" env:"MODRINTH_PROJECTS_DEFAULT_VERSION_TYPE" default:"release" desc:"Default version type to select (release, beta, alpha)" input:"select" label:"Modrinth Default Version Type"`
+	ModrinthLoader                     *string `json:"modrinthLoader" env:"MODRINTH_LOADER" default:"" desc:"Custom loader type for Modrinth lookups (e.g. fabric, forge, paper)" input:"text" label:"Modrinth Loader"`
+	VersionFromModrinthProjects        *bool   `json:"versionFromModrinthProjects" env:"VERSION_FROM_MODRINTH_PROJECTS" default:"false" desc:"Automatically set VERSION from Modrinth project compatibility" input:"checkbox" label:"Version From Modrinth Projects"`
 }
 
 type Mod struct {

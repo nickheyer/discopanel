@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/nickheyer/discopanel/pkg/files"
 )
 
 type FileInfo struct {
@@ -357,6 +359,70 @@ func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 		"message":  "File renamed successfully",
 		"old_path": filePath,
 		"new_path": newPath,
+	})
+}
+
+func (s *Server) handleExtractArchive(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	serverID := vars["id"]
+	archivePath := vars["path"]
+
+	// Get server
+	server, err := s.store.GetServer(ctx, serverID)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+
+	// Clean and validate archive path
+	fullArchivePath := filepath.Join(server.DataPath, archivePath)
+	if !strings.HasPrefix(fullArchivePath, server.DataPath) {
+		s.respondError(w, http.StatusBadRequest, "Invalid archive path")
+		return
+	}
+
+	// Check if archive exists
+	info, err := os.Stat(fullArchivePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.respondError(w, http.StatusNotFound, "Archive not found")
+		} else {
+			s.respondError(w, http.StatusInternalServerError, "Failed to access archive")
+		}
+		return
+	}
+
+	// Ensure it's not a directory
+	if info.IsDir() {
+		s.respondError(w, http.StatusBadRequest, "Path is a directory, not an archive")
+		return
+	}
+
+	// Determine extraction destination (same directory as archive, folder named after archive without extension)
+	archiveDir := filepath.Dir(fullArchivePath)
+	archiveName := filepath.Base(archivePath)
+
+	// Remove extension(s) to create folder name
+	folderName := strings.TrimSuffix(archiveName, filepath.Ext(archiveName))
+	// Handle double extensions like .tar.gz
+	if strings.HasSuffix(strings.ToLower(folderName), ".tar") {
+		folderName = strings.TrimSuffix(folderName, ".tar")
+	}
+
+	destPath := filepath.Join(archiveDir, folderName)
+
+	// Extract the archive
+	if err := files.ExtractArchive(ctx, fullArchivePath, destPath); err != nil {
+		s.log.Error("Failed to extract archive: %v", err)
+		s.respondError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to extract archive: %v", err))
+		return
+	}
+
+	s.respondJSON(w, http.StatusOK, map[string]string{
+		"message":         "Archive extracted successfully",
+		"archive_path":    archivePath,
+		"extraction_path": filepath.Join(filepath.Dir(archivePath), folderName),
 	})
 }
 

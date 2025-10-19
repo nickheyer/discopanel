@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
-	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw, Plus, FolderPlus, FilePlus, Pencil } from '@lucide/svelte';
+	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw, Plus, FolderPlus, FilePlus, Pencil, Package } from '@lucide/svelte';
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
 	import type { Server, FileInfo } from '$lib/api/types';
@@ -86,7 +86,7 @@
 		const textExts = ['txt', 'md', 'json', 'yml', 'yaml', 'toml', 'properties', 'conf', 'cfg', 'log'];
 		const codeExts = ['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'cpp', 'c', 'h', 'cs', 'go', 'rs', 'php', 'rb', 'lua'];
 		const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp'];
-		const archiveExts = ['zip', 'tar', 'gz', 'rar', '7z', 'bz2'];
+		const archiveExts = ['zip', 'tar', 'gz', 'tgz', 'rar', '7z', 'bz2', 'xz', 'lz', 'zst', 'tbz2', 'txz'];
 		
 		if (textExts.includes(ext)) return FileText;
 		if (codeExts.includes(ext)) return FileCode;
@@ -240,6 +240,16 @@
 		}
 	}
 
+	async function extractArchive(file: FileInfo) {
+		try {
+			const result = await api.extractArchive(server.id, file.path);
+			toast.success(`Archive extracted successfully`);
+			await loadFiles();
+		} catch (error: any) {
+			toast.error(error.message || 'Failed to extract archive');
+		}
+	}
+
 	let flatFiles = $derived(renderFileTree(files));
 </script>
 
@@ -364,6 +374,17 @@
 									title="Edit file"
 								>
 									<FileEdit class="h-3 w-3" />
+								</Button>
+							{/if}
+							{#if !file.is_dir && getFileIcon(file) === Archive}
+								<Button
+									size="icon"
+									variant="ghost"
+									class="h-7 w-7"
+									onclick={() => extractArchive(file)}
+									title="Extract archive"
+								>
+									<Package class="h-3 w-3" />
 								</Button>
 							{/if}
 							{#if !file.is_dir}

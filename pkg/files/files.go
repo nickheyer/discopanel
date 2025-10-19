@@ -1,13 +1,17 @@
 package files
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/mholt/archives"
 )
 
 func FindWorldDir(dataDir string) (string, error) {
@@ -93,4 +97,82 @@ func SanitizePathName(name string) string {
 		safe = "DISCO_GENERIC"
 	}
 	return safe
+}
+
+// Extracts archive file to destination
+func ExtractArchive(ctx context.Context, archivePath string, destPath string) error {
+	archiveFile, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("failed to open archive file: %w", err)
+	}
+	defer archiveFile.Close()
+
+	// Identify archive format
+	format, stream, err := archives.Identify(ctx, archivePath, archiveFile)
+	if err != nil {
+		return fmt.Errorf("failed to identify archive format: %w", err)
+	}
+
+	// Is format extractable?
+	extractor, ok := format.(archives.Extractor)
+	if !ok {
+		return fmt.Errorf("format does not support extraction")
+	}
+
+	// Make dest
+	if err := os.MkdirAll(destPath, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	// Extract and walk while recursively extracting
+	err = extractor.Extract(ctx, stream, func(ctx context.Context, f archives.FileInfo) error {
+		// Build path
+		targetPath := filepath.Join(destPath, f.NameInArchive)
+
+		// No sneaky traversals
+		if !strings.HasPrefix(filepath.Clean(targetPath), filepath.Clean(destPath)) {
+			return fmt.Errorf("illegal file path in archive: %s", f.NameInArchive)
+		}
+
+		if f.IsDir() {
+			return os.MkdirAll(targetPath, 0755)
+		}
+
+		// Make parent(s)
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return fmt.Errorf("failed to create parent directory: %w", err)
+		}
+
+		// Create file
+		outFile, err := os.Create(targetPath)
+		if err != nil {
+			return fmt.Errorf("failed to create file %s: %w", targetPath, err)
+		}
+		defer outFile.Close()
+
+		// Open the file from the archive
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("failed to open file in archive: %w", err)
+		}
+		defer rc.Close()
+
+		// Copy contents
+		if _, err := io.Copy(outFile, rc); err != nil {
+			return fmt.Errorf("failed to extract file %s: %w", targetPath, err)
+		}
+
+		// Set file perms
+		if f.Mode() != 0 {
+			os.Chmod(targetPath, f.Mode())
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to extract archive: %w", err)
+	}
+
+	return nil
 }

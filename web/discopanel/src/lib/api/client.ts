@@ -304,6 +304,12 @@ class ApiClient {
     }
   }
 
+  async extractArchive(serverId: string, path: string): Promise<{ message: string; archive_path: string; extraction_path: string }> {
+    return this.request<{ message: string; archive_path: string; extraction_path: string }>(`/servers/${serverId}/extract/${path}`, {
+      method: 'POST',
+    });
+  }
+
   // Proxy/Routing Management
   async getProxyStatus(): Promise<any> {
     return this.request<any>('/proxy/status');

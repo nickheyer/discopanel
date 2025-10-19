@@ -354,7 +354,7 @@ func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{
-		"message": "File renamed successfully",
+		"message":  "File renamed successfully",
 		"old_path": filePath,
 		"new_path": newPath,
 	})
@@ -374,7 +374,7 @@ func isTextFile(path string) bool {
 	if err != nil && err != io.EOF {
 		return false
 	}
-	
+
 	if n == 0 {
 		// Empty files are considered text
 		return true
@@ -386,7 +386,7 @@ func isTextFile(path string) bool {
 	}
 
 	// Check if it's valid UTF-8 with printable characters
-	for i := 0; i < n; i++ {
+	for i := range n {
 		b := buffer[i]
 		// Allow printable ASCII, tabs, newlines, carriage returns
 		if b < 32 && b != 9 && b != 10 && b != 13 {

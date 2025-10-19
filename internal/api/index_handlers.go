@@ -516,43 +516,31 @@ func (s *Server) handleUploadModpack(w http.ResponseWriter, r *http.Request) {
 	modpackID := uuid.New().String()
 
 	// Determine mod loader from manifest
-	modLoader := ""
+	var modLoader models.ModLoader
 	for _, ml := range manifest.Minecraft.ModLoaders {
-		if strings.Contains(ml.ID, "forge") {
-			modLoader = "forge"
+		if strings.Contains(ml.ID, "neoforge") {
+			modLoader = models.ModLoaderNeoForge
 			break
 		} else if strings.Contains(ml.ID, "fabric") {
-			modLoader = "fabric"
+			modLoader = models.ModLoaderFabric
 			break
-		} else if strings.Contains(ml.ID, "neoforge") {
-			modLoader = "neoforge"
+		} else if strings.Contains(ml.ID, "forge") {
+			modLoader = models.ModLoaderForge
 			break
 		} else if strings.Contains(ml.ID, "quilt") {
-			modLoader = "quilt"
+			modLoader = models.ModLoaderQuilt
 			break
+		} else {
+			modLoader = models.ModLoaderVanilla
 		}
 	}
 
-	// Get Java version and Docker image
-	// Convert manual modpack mod loader string to enum
-	manualModLoader := models.ModLoaderVanilla
-	switch modLoader {
-	case "forge":
-		manualModLoader = models.ModLoaderForge
-	case "fabric":
-		manualModLoader = models.ModLoaderFabric
-	case "neoforge":
-		manualModLoader = models.ModLoaderNeoForge
-	case "quilt":
-		manualModLoader = models.ModLoaderQuilt
-	}
-
-	javaVersion := docker.GetRequiredJavaVersion(manifest.Minecraft.Version, manualModLoader)
-	dockerImage := docker.GetOptimalDockerTag(manifest.Minecraft.Version, manualModLoader, false)
+	javaVersion := docker.GetRequiredJavaVersion(manifest.Minecraft.Version, modLoader)
+	dockerImage := docker.GetOptimalDockerTag(manifest.Minecraft.Version, modLoader, false)
 
 	// Create database entry
 	gameVersionsJSON, _ := json.Marshal([]string{manifest.Minecraft.Version})
-	modLoadersJSON, _ := json.Marshal([]string{modLoader})
+	modLoadersJSON, _ := json.Marshal([]string{string(modLoader)})
 
 	dbModpack := &models.IndexedModpack{
 		ID:             modpackID,
@@ -626,7 +614,7 @@ func (s *Server) handleUploadModpack(w http.ResponseWriter, r *http.Request) {
 		ReleaseType:      "1",      // Release
 		DownloadURL:      destPath, // Store local path
 		GameVersions:     string(gameVersionsJSON),
-		ModLoader:        modLoader,
+		ModLoader:        string(modLoader),
 		ServerPackFileID: nil,
 	}
 

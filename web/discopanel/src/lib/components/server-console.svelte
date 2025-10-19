@@ -98,19 +98,14 @@
 		try {
 			const response = await api.sendServerCommand(server.id, command);
 			if (response.success) {
-				// Command executed successfully
-				if (response.output) {
-					// Add command output to logs temporarily
-					logs += `\n> ${command}\n${response.output}`;
-				}
 				toast.success('Command sent successfully');
 			} else {
 				toast.error(response.error || 'Failed to execute command');
 			}
 			command = '';
 
-			// Refresh logs after command
-			setTimeout(fetchLogs, 3000);
+			// Refresh logs after delay to see cmd output
+			setTimeout(fetchLogs, 1000);
 		} catch (error) {
 			toast.error(
 				'Failed to send command: ' + (error instanceof Error ? error.message : 'Unknown error')
@@ -139,6 +134,16 @@
 	}
 
 	function formatLogLine(line: string): { timestamp: string; level: string; message: string } {
+		// Parse RCON command format: [HH:MM:SS] [Rcon]: message
+		const rconMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]\s*\[Rcon\]:\s*(.+)/);
+		if (rconMatch) {
+			return {
+				timestamp: rconMatch[1],
+				level: 'COMMAND',
+				message: rconMatch[2]
+			};
+		}
+
 		// Parse Minecraft log format: [HH:MM:SS] [Thread/LEVEL]: Message
 		const mcMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]\s*\[([^\/]+)\/([A-Z]+)\]:\s*(.+)/);
 		if (mcMatch) {
@@ -150,12 +155,12 @@
 		}
 
 		// Parse ISO timestamp format from mc-server-runner
-		const isoMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+([A-Z]+)\s+(.+)/);
-		if (isoMatch) {
+		const dockerMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+(.+)/);
+		if (dockerMatch) {
 			return {
-				timestamp: new Date(isoMatch[1]).toLocaleTimeString(),
-				level: isoMatch[2],
-				message: isoMatch[3]
+				timestamp: new Date(dockerMatch[1]).toLocaleTimeString('en-US', { hourCycle: 'h24' }),
+				level: 'INFO',
+				message: dockerMatch[2]
 			};
 		}
 
@@ -169,6 +174,8 @@
 
 	function getLogLevelColor(level: string): string {
 		switch (level.toUpperCase()) {
+			case 'COMMAND':
+				return 'text-green-400';
 			case 'ERROR':
 			case 'FATAL':
 				return 'text-red-400';
@@ -250,7 +257,7 @@
 									<span class="text-zinc-600">[{parsed.timestamp}]</span>
 								{/if}
 								{#if parsed.level !== 'INFO'}
-									<span class={getLogLevelColor(parsed.level)}>[{parsed.level}]</span>
+									<span class={getLogLevelColor(parsed.level)}>{` [${parsed.level}]`}</span>
 								{/if}
 								<span class="text-zinc-300">
 									{parsed.message}

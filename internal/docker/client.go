@@ -193,6 +193,11 @@ func (c *Client) Close() error {
 	return c.docker.Close()
 }
 
+// Get the docker client instance from the client object
+func (c *Client) GetDockerClient() *client.Client {
+	return c.docker
+}
+
 func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerConfig) (string, error) {
 	// Use server's DockerImage if specified, otherwise determine based on version and loader
 	var imageName string
@@ -237,8 +242,13 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	}
 
 	config := &container.Config{
-		Image: imageName,
-		Env:   env,
+		Image:        imageName,
+		Env:          env,
+		Tty:          true,
+		OpenStdin:    true,
+		AttachStdin:  false,
+		AttachStdout: true,
+		AttachStderr: true,
 		ExposedPorts: nat.PortSet{
 			nat.Port(fmt.Sprintf("%d/tcp", minecraftPort)): struct{}{},
 			"25575/tcp": struct{}{}, // RCON port

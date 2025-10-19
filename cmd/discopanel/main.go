@@ -12,7 +12,6 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/api"
 	"github.com/nickheyer/discopanel/internal/config"
-	"github.com/nickheyer/discopanel/internal/db"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
@@ -189,7 +188,7 @@ func main() {
 					return
 				}
 
-				if status == db.StatusStopped {
+				if status == storage.StatusStopped {
 					// Start the container
 					if err := dockerClient.StartContainer(ctx, server.ContainerID); err != nil {
 						log.Error("Failed to start container for auto-start server %s: %v", server.Name, err)
@@ -206,7 +205,7 @@ func main() {
 				}
 
 				// Update proxy route if enabled
-				if cfg.Proxy.Enabled && server.ProxyHostname != "" {
+				if server.ProxyHostname != "" {
 					if err := proxyManager.UpdateServerRoute(server); err != nil {
 						log.Error("Failed to update proxy route for auto-started server %s: %v", server.Name, err)
 					}

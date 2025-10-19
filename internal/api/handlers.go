@@ -184,7 +184,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle proxy configuration
-	if s.config.Proxy.Enabled && req.ProxyHostname != "" {
+	if req.ProxyHostname != "" {
 		// If using base URL, append it to the hostname
 		if req.UseBaseURL {
 			proxyConfig, _, err := s.store.GetProxyConfig(ctx)
@@ -307,7 +307,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	// When using proxy, set the ports correctly:
 	// - ProxyPort: the external port that players connect to (from the listener)
 	// - Port: should be 25565 for container internal port when using proxy
-	if s.config.Proxy.Enabled && server.ProxyHostname != "" && req.ProxyListenerID != "" {
+	if server.ProxyHostname != "" && req.ProxyListenerID != "" {
 		// Get the listener to set the correct proxy port
 		listener, err := s.store.GetProxyListener(ctx, req.ProxyListenerID)
 		if err == nil && listener != nil {
@@ -745,6 +745,11 @@ func (s *Server) handleStartServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start log streaming for this container
+	if err := s.logStreamer.StartStreaming(server.ContainerID); err != nil {
+		s.log.Error("Failed to start log streaming: %v", err)
+	}
+
 	// Update server status
 	now := time.Now()
 	server.Status = models.StatusStarting
@@ -755,7 +760,7 @@ func (s *Server) handleStartServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update proxy route if enabled
-	if s.proxyManager != nil && s.config.Proxy.Enabled {
+	if s.proxyManager != nil && server.ProxyHostname != "" {
 		if err := s.proxyManager.UpdateServerRoute(server); err != nil {
 			s.log.Error("Failed to update proxy route: %v", err)
 			// Not critical, continue
@@ -798,6 +803,9 @@ func (s *Server) handleStopServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Stop log streaming for this container
+	s.logStreamer.StopStreaming(server.ContainerID)
+
 	// Update server status
 	server.Status = models.StatusStopping
 
@@ -806,7 +814,7 @@ func (s *Server) handleStopServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove proxy route if enabled
-	if s.proxyManager != nil && s.config.Proxy.Enabled {
+	if s.proxyManager != nil && server.ProxyHostname != "" {
 		if err := s.proxyManager.RemoveServerRoute(server.ID); err != nil {
 			s.log.Error("Failed to remove proxy route: %v", err)
 			// Not critical, continue
@@ -859,6 +867,11 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Start log streaming for this new container
+		if err := s.logStreamer.StartStreaming(server.ContainerID); err != nil {
+			s.log.Error("Failed to start log streaming: %v", err)
+		}
+
 		// Update server status
 		now := time.Now()
 		server.Status = models.StatusStarting
@@ -876,6 +889,9 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 		s.respondJSON(w, http.StatusOK, map[string]string{"status": "starting"})
 		return
 	}
+
+	// Stop log streaming before restart
+	s.logStreamer.StopStreaming(server.ContainerID)
 
 	// Stop container
 	if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
@@ -898,6 +914,11 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("Failed to start container: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to restart server")
 		return
+	}
+
+	// Restart log streaming
+	if err := s.logStreamer.StartStreaming(server.ContainerID); err != nil {
+		s.log.Error("Failed to restart log streaming: %v", err)
 	}
 
 	// Update server status
@@ -941,11 +962,17 @@ func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logs, err := s.docker.GetContainerLogs(ctx, server.ContainerID, tail)
-	if err != nil {
-		s.log.Error("Failed to get container logs: %v", err)
-		s.respondError(w, http.StatusInternalServerError, "Failed to get server logs")
-		return
+	// Get logs + cmd history
+	logs := s.logStreamer.GetFormattedLogs(server.ContainerID, tail)
+
+	// If no logs in streamer, fall back to docker logs
+	if logs == "" {
+		logs, err = s.docker.GetContainerLogs(ctx, server.ContainerID, tail)
+		if err != nil {
+			s.log.Error("Failed to get container logs: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to get server logs")
+			return
+		}
 	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{"logs": logs})
@@ -971,11 +998,9 @@ func (s *Server) handleGetNextAvailablePort(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Also mark proxy listening ports as used
-	if s.config.Proxy.Enabled {
-		for _, port := range s.config.Proxy.ListenPorts {
-			usedPorts[port] = true
-		}
+	// Mark proxy listening ports as used
+	for _, port := range s.config.Proxy.ListenPorts {
+		usedPorts[port] = true
 	}
 
 	// Find the next available port starting from 25565

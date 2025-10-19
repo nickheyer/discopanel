@@ -202,7 +202,7 @@ func (s *Server) handleCreateProxyListener(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Add the listener to the proxy manager if it's running
-	if s.proxyManager != nil && s.config.Proxy.Enabled {
+	if s.proxyManager != nil {
 		if err := s.proxyManager.AddListener(&req); err != nil {
 			s.log.Error("Failed to add listener to proxy manager: %v", err)
 			// Not critical - proxy can be restarted to pick it up
@@ -246,8 +246,8 @@ func (s *Server) handleUpdateProxyListener(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	oldPort := listener.Port  // Save old port in case it changed
-	listener.Port = req.Port   // Update port if provided
+	oldPort := listener.Port // Save old port in case it changed
+	listener.Port = req.Port // Update port if provided
 
 	if err := s.store.UpdateProxyListener(ctx, listener); err != nil {
 		s.log.Error("Failed to update proxy listener: %v", err)
@@ -256,7 +256,7 @@ func (s *Server) handleUpdateProxyListener(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Handle proxy manager updates if running
-	if s.proxyManager != nil && s.config.Proxy.Enabled {
+	if s.proxyManager != nil {
 		// If port changed, remove old and add new
 		if oldPort != listener.Port {
 			s.proxyManager.RemoveListener(oldPort)
@@ -300,7 +300,7 @@ func (s *Server) handleDeleteProxyListener(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Remove the listener from the proxy manager if it's running
-	if s.proxyManager != nil && s.config.Proxy.Enabled {
+	if s.proxyManager != nil {
 		if err := s.proxyManager.RemoveListener(listener.Port); err != nil {
 			s.log.Error("Failed to remove listener from proxy manager: %v", err)
 			// Not critical - proxy can be restarted to clean it up
@@ -333,7 +333,7 @@ func (s *Server) handleGetServerRouting(w http.ResponseWriter, r *http.Request) 
 		Active   bool   `json:"active"`
 	}
 
-	if s.proxyManager != nil && s.config.Proxy.Enabled {
+	if s.proxyManager != nil {
 		routes := s.proxyManager.GetRoutes()
 		for hostname, route := range routes {
 			if route.ServerID == server.ID {
@@ -412,11 +412,10 @@ func (s *Server) handleUpdateServerRouting(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Update proxy route if server is running
-	if s.proxyManager != nil && s.config.Proxy.Enabled && server.Status == "running" {
+	// Update proxy route
+	if s.proxyManager != nil {
 		if err := s.proxyManager.UpdateServerRoute(server); err != nil {
 			s.log.Error("Failed to update proxy route: %v", err)
-			// Not critical, continue
 		}
 	}
 

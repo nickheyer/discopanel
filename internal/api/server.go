@@ -25,6 +25,7 @@ type Server struct {
 	proxyManager   *proxy.Manager
 	authManager    *auth.Manager
 	authMiddleware *auth.Middleware
+	logStreamer    *LogStreamer
 }
 
 func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
@@ -37,6 +38,9 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		log.Error("Failed to initialize authentication: %v", err)
 	}
 
+	// Initialize log streamer
+	logStreamer := NewLogStreamer(docker.GetDockerClient(), log, 10000)
+
 	s := &Server{
 		store:          store,
 		docker:         docker,
@@ -44,6 +48,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		log:            log,
 		authManager:    authManager,
 		authMiddleware: authMiddleware,
+		logStreamer:    logStreamer,
 	}
 
 	s.setupRoutes()

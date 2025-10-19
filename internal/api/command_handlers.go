@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -54,8 +55,19 @@ func (s *Server) handleSendCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Add command to log stream BEFORE exec
+	commandTime := time.Now()
+	s.logStreamer.AddCommandEntry(server.ContainerID, req.Command, commandTime)
+
 	// Execute command in container
 	output, err := s.docker.ExecCommand(ctx, server.ContainerID, req.Command)
+	success := err == nil
+
+	// Add command out to log stream AFTER exec
+	if output != "" || !success {
+		s.logStreamer.AddCommandOutput(server.ContainerID, output, success, commandTime)
+	}
+
 	if err != nil {
 		s.log.Error("Failed to execute command: %v", err)
 		s.respondJSON(w, http.StatusOK, CommandResponse{

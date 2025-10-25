@@ -125,8 +125,15 @@ export interface ApiError {
   error: string;
 }
 
+export interface LogEntry {
+  Timestamp: string;  // ISO timestamp
+  Content: string;    // The actual log line
+  Type: string;       // "stdout", "stderr", "command", "command_output"
+}
+
 export interface ServerLogsResponse {
-  logs: string;
+  logs: LogEntry[];   // Array of structured log entries
+  total: number;      // Total number of entries
 }
 
 export interface ServerStatusResponse {

@@ -6,11 +6,21 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
 	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw } from '@lucide/svelte';
-	import type { Server } from '$lib/api/types';
+	import AnsiToHtml from 'ansi-to-html';
+	import type { Server, LogEntry } from '$lib/api/types';
+
+	// Create ansi-to-html converter with proper options
+	const ansiConverter = new AnsiToHtml({
+		fg: '#e8e8e8',
+		bg: '#000000',
+		newline: false,
+		escapeXML: true,
+		stream: true
+	});
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
-	let logs = $state('');
+	let logEntries = $state<LogEntry[]>([]);
 	let command = $state('');
 	let loading = $state(false);
 	let autoScroll = $state(true);
@@ -44,7 +54,7 @@
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
-			logs = '';
+			logEntries = [];
 			command = '';
 			if (active) {
 				fetchLogs();
@@ -67,7 +77,7 @@
 
 	// Handle auto-scrolling in a separate effect to avoid scroll-linked positioning issues
 	$effect(() => {
-		if (logs && autoScroll && endOfLogsRef) {
+		if (logEntries.length > 0 && autoScroll && endOfLogsRef) {
 			// Use a microtask to ensure DOM has updated
 			queueMicrotask(() => {
 				endOfLogsRef?.scrollIntoView({ behavior: 'instant', block: 'end' });
@@ -85,7 +95,7 @@
 
 		try {
 			const response = await api.getServerLogs(server.id, tailLines);
-			logs = response.logs;
+			logEntries = response.logs || [];
 		} catch (error) {
 			console.error('Failed to fetch logs:', error);
 		}
@@ -115,13 +125,15 @@
 		}
 	}
 
-	function clearLogs() {
-		logs = '';
+	async function clearLogs() {
+		await api.clearServerLogs(server.id);
+		logEntries = [];
 		toast.success('Console cleared');
 	}
 
 	function downloadLogs() {
-		const blob = new Blob([logs], { type: 'text/plain' });
+		const logText = logEntries.map(entry => entry.Content).join('\n');
+		const blob = new Blob([logText], { type: 'text/plain' });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
@@ -131,64 +143,6 @@
 		document.body.removeChild(a);
 		URL.revokeObjectURL(url);
 		toast.success('Logs downloaded');
-	}
-
-	function formatLogLine(line: string): { timestamp: string; level: string; message: string } {
-		// Parse RCON command format: [HH:MM:SS] [Rcon]: message
-		const rconMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]\s*\[Rcon\]:\s*(.+)/);
-		if (rconMatch) {
-			return {
-				timestamp: rconMatch[1],
-				level: 'COMMAND',
-				message: rconMatch[2]
-			};
-		}
-
-		// Parse Minecraft log format: [HH:MM:SS] [Thread/LEVEL]: Message
-		const mcMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]\s*\[([^\/]+)\/([A-Z]+)\]:\s*(.+)/);
-		if (mcMatch) {
-			return {
-				timestamp: mcMatch[1],
-				level: mcMatch[3],
-				message: mcMatch[4]
-			};
-		}
-
-		// Parse ISO timestamp format from mc-server-runner
-		const dockerMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+(.+)/);
-		if (dockerMatch) {
-			return {
-				timestamp: new Date(dockerMatch[1]).toLocaleTimeString('en-US', { hourCycle: 'h24' }),
-				level: 'INFO',
-				message: dockerMatch[2]
-			};
-		}
-
-		// Default format
-		return {
-			timestamp: '',
-			level: 'INFO',
-			message: line
-		};
-	}
-
-	function getLogLevelColor(level: string): string {
-		switch (level.toUpperCase()) {
-			case 'COMMAND':
-				return 'text-green-400';
-			case 'ERROR':
-			case 'FATAL':
-				return 'text-red-400';
-			case 'WARN':
-			case 'WARNING':
-				return 'text-yellow-400';
-			case 'INFO':
-				return 'text-blue-400';
-			case 'DEBUG':
-				return 'text-gray-400';
-			default:
-				return 'text-zinc-300';
-		}
 	}
 </script>
 
@@ -224,7 +178,7 @@
 						size="sm"
 						variant="ghost"
 						onclick={downloadLogs}
-						disabled={!logs}
+						disabled={logEntries.length === 0}
 						class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
 					>
 						<Download class="h-3 w-3" />
@@ -233,7 +187,7 @@
 						size="sm"
 						variant="ghost"
 						onclick={clearLogs}
-						disabled={!logs}
+						disabled={logEntries.length === 0}
 						class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
 					>
 						<Trash2 class="h-3 w-3" />
@@ -244,24 +198,15 @@
 				class="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-auto bg-black px-4 py-2"
 				bind:this={scrollAreaRef}
 			>
-				<div class="font-mono text-xs">
-					{#if !logs}
+				<div class="font-mono text-xs text-zinc-300">
+					{#if logEntries.length === 0}
 						<div class="py-8 text-center text-zinc-500">
 							No logs available. {['running', 'starting', 'unhealthy'].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
 						</div>
 					{:else}
-						{#each logs.split('\n') as line}
-							{@const parsed = formatLogLine(line)}
-							<div class="py-0.5 hover:bg-zinc-900/50 whitespace-pre-wrap break-all">
-								{#if parsed.timestamp}
-									<span class="text-zinc-600">[{parsed.timestamp}]</span>
-								{/if}
-								{#if parsed.level !== 'INFO'}
-									<span class={getLogLevelColor(parsed.level)}>{` [${parsed.level}]`}</span>
-								{/if}
-								<span class="text-zinc-300">
-									{parsed.message}
-								</span>
+						{#each logEntries as entry}
+							<div class="log-line whitespace-pre-wrap break-all" data-type={entry.Type}>
+								{@html ansiConverter.toHtml(entry.Content)}
 							</div>
 						{/each}
 					{/if}
@@ -317,7 +262,7 @@
 				</div>
 			</div>
 			<div class="font-mono">
-				{logs.split('\n').length} lines
+				{logEntries.length} lines
 			</div>
 		</div>
 	</div>
@@ -346,5 +291,32 @@
 
 	.custom-scrollbar::-webkit-scrollbar-thumb:hover {
 		background-color: hsl(var(--muted-foreground) / 0.5);
+	}
+
+	.log-line {
+		padding: 0.125rem 0;
+		line-height: 1.4;
+	}
+
+	.log-line:hover {
+		background-color: rgba(39, 39, 42, 0.5);
+	}
+
+	/* Visually distinguish command inputs */
+	.log-line[data-type="command"] {
+		color: #4ade80;
+		font-weight: 500;
+	}
+
+	.log-line[data-type="command"]::before {
+		content: '$ ';
+		color: #22c55e;
+		font-weight: bold;
+	}
+
+	/* Style command output differently */
+	.log-line[data-type="command_output"] {
+		opacity: 0.9;
+		padding-left: 1rem;
 	}
 </style>

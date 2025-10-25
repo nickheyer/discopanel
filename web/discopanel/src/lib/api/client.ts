@@ -21,6 +21,10 @@ import type {
 
 const API_BASE = '/api/v1';
 
+function encodeFilePath(path: string): string {
+  return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+}
+
 class ApiClient {
   private async request<T>(
     path: string,
@@ -179,6 +183,10 @@ class ApiClient {
     return this.request<ServerLogsResponse>(`/servers/${id}/logs?tail=${tail}`, { skipLoading: true });
   }
 
+  async clearServerLogs(id: string): Promise<void> {
+    this.request<ServerLogsResponse>(`/servers/${id}/logs`, { skipLoading: true });
+  }
+
   async sendServerCommand(id: string, command: string): Promise<{ success: boolean; output?: string; error?: string }> {
     return this.request<{ success: boolean; output?: string; error?: string }>(`/servers/${id}/command`, {
       method: 'POST',
@@ -252,7 +260,7 @@ class ApiClient {
   // File Management
   async listFiles(serverId: string, path: string = '', tree: boolean = false): Promise<FileInfo[]> {
     const params = new URLSearchParams();
-    if (path) params.append('path', path);
+    if (path && path.length > 0) params.append('path', encodeFilePath(path));
     if (tree) params.append('tree', 'true');
     const query = params.toString() ? `?${params.toString()}` : '';
     return this.request<FileInfo[]>(`/servers/${serverId}/files${query}`);
@@ -261,7 +269,7 @@ class ApiClient {
   async uploadFile(serverId: string, file: File, path: string = ''): Promise<UploadResponse> {
     const formData = new FormData();
     formData.append('file', file);
-    if (path) formData.append('path', path);
+    if (path && path.length > 0) formData.append('path', encodeFilePath(path));
 
     return this.request<UploadResponse>(`/servers/${serverId}/files`, {
       method: 'POST',
@@ -270,11 +278,11 @@ class ApiClient {
   }
 
   async downloadFile(serverId: string, path: string): Promise<Blob> {
-    return this.requestBlob(`/servers/${serverId}/files/${path}`);
+    return this.requestBlob(`/servers/${serverId}/files/${encodeFilePath(path)}`);
   }
 
   async updateFile(serverId: string, path: string, content: string): Promise<UploadResponse> {
-    return this.request<UploadResponse>(`/servers/${serverId}/files/${path}`, {
+    return this.request<UploadResponse>(`/servers/${serverId}/files/${encodeFilePath(path)}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'text/plain',
@@ -284,16 +292,25 @@ class ApiClient {
   }
 
   async deleteFile(serverId: string, path: string): Promise<void> {
-    await fetch(`${API_BASE}/servers/${serverId}/files/${path}`, {
+    const encodedPath = encodeFilePath(path);
+    const response = await fetch(`${API_BASE}/servers/${serverId}/files/${encodedPath}`, {
       method: 'DELETE',
+      headers: authStore.getHeaders(),
     });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to delete file');
+    }
   }
 
   async renameFile(serverId: string, path: string, newName: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/servers/${serverId}/rename/${path}`, {
+    const encodedPath = encodeFilePath(path);
+    const response = await fetch(`${API_BASE}/servers/${serverId}/rename/${encodedPath}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authStore.getHeaders(),
       },
       body: JSON.stringify({ new_name: newName }),
     });
@@ -305,7 +322,7 @@ class ApiClient {
   }
 
   async extractArchive(serverId: string, path: string): Promise<{ message: string; archive_path: string; extraction_path: string }> {
-    return this.request<{ message: string; archive_path: string; extraction_path: string }>(`/servers/${serverId}/extract/${path}`, {
+    return this.request<{ message: string; archive_path: string; extraction_path: string }>(`/servers/${serverId}/extract/${encodeFilePath(path)}`, {
       method: 'POST',
     });
   }

@@ -35,6 +35,9 @@
 	let showModpackDialog = $state(false);
 	let selectedModpack = $state<IndexedModpack | null>(null);
 	let favoriteModpacks = $state<IndexedModpack[]>([]);
+	let modpackVersions = $state<any[]>([]);
+	let selectedVersionId = $state<string>('');
+	let loadingModpackVersions = $state(false);
 
 	let formData = $state<CreateServerRequest>({
 		name: '',
@@ -125,17 +128,36 @@
 		}
 	}
 	
+	async function loadModpackVersions(modpackId: string) {
+		loadingModpackVersions = true;
+		modpackVersions = [];
+		selectedVersionId = '';
+
+		try {
+			const response = await fetch(`/api/v1/modpacks/${modpackId}/versions`);
+			if (!response.ok) throw new Error('Failed to get modpack versions');
+
+			const data = await response.json();
+			modpackVersions = data.versions || [];
+		} catch (error) {
+			console.error('Failed to load modpack versions:', error);
+			modpackVersions = [];
+		} finally {
+			loadingModpackVersions = false;
+		}
+	}
+
 	async function selectModpack(modpack: IndexedModpack) {
 		selectedModpack = modpack;
 		showModpackDialog = false;
-		
+
 		try {
 			// Get configuration from the server
 			const response = await fetch(`/api/v1/modpacks/${modpack.id}/config`);
 			if (!response.ok) throw new Error('Failed to get modpack config');
-			
+
 			const config = await response.json();
-			
+
 			// Populate ALL form fields from server response
 			formData.name = config.name;
 			formData.description = config.description;
@@ -143,6 +165,7 @@
 			formData.mc_version = config.mc_version;
 			formData.memory = config.memory;
 			formData.docker_image = config.docker_image;
+			await loadModpackVersions(modpack.id);
 		} catch (error) {
 			toast.error('Failed to load modpack configuration');
 			console.error(error);
@@ -152,7 +175,8 @@
 	
 	function removeModpack() {
 		selectedModpack = null;
-		// Reset fields that were set by modpack
+		modpackVersions = [];
+		selectedVersionId = '';
 		formData.mod_loader = 'vanilla';
 		formData.mc_version = latestVersion || '';
 		formData.docker_image = '';
@@ -210,10 +234,11 @@
 
 		loading = true;
 		try {
-			// Add modpack ID to the request if selected
+			// Add modpack ID and version to the request if selected
 			const createRequest = {
 				...formData,
 				modpack_id: selectedModpack?.id || '',
+				modpack_version_id: selectedVersionId || '',
 				// When using proxy with hostname, set port to 0 to indicate proxy usage
 				port: useProxyMode ? 0 : formData.port
 			};
@@ -314,8 +339,8 @@
 								<CardContent class="p-5">
 									<div class="flex items-start gap-3">
 										{#if selectedModpack.logo_url}
-											<img 
-												src={selectedModpack.logo_url} 
+											<img
+												src={selectedModpack.logo_url}
 												alt={selectedModpack.name}
 												class="w-12 h-12 rounded-md object-cover"
 											/>
@@ -337,6 +362,46 @@
 													</Badge>
 												{/if}
 											</div>
+
+											{#if modpackVersions.length > 0}
+												<div class="mt-3">
+													<Label for="modpack_version" class="text-xs font-medium text-muted-foreground">Version (optional)</Label>
+													<Select
+														type="single"
+														value={selectedVersionId}
+														onValueChange={(v) => selectedVersionId = v || ''}
+														disabled={loading || loadingModpackVersions}
+													>
+														<SelectTrigger id="modpack_version" class="h-8 mt-1">
+															<span class="text-sm">
+																{selectedVersionId
+																	? modpackVersions.find(v => v.id === selectedVersionId)?.display_name || 'Latest'
+																	: 'Latest version'}
+															</span>
+														</SelectTrigger>
+														<SelectContent>
+															<SelectItem value="">
+																Latest version
+															</SelectItem>
+															{#each modpackVersions as version}
+																<SelectItem value={version.id}>
+																	{version.display_name}
+																	{#if version.release_type}
+																		<Badge variant={version.release_type === 'release' ? 'default' : version.release_type === 'beta' ? 'secondary' : 'outline'} class="ml-2 text-xs">
+																			{version.release_type}
+																		</Badge>
+																	{/if}
+																</SelectItem>
+															{/each}
+														</SelectContent>
+													</Select>
+												</div>
+											{:else if loadingModpackVersions}
+												<div class="mt-3 text-xs text-muted-foreground">
+													<Loader2 class="h-3 w-3 animate-spin inline mr-1" />
+													Loading versions...
+												</div>
+											{/if}
 										</div>
 										<Button
 											type="button"

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -381,6 +382,94 @@ func (s *Server) handleGetModpackConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.respondJSON(w, http.StatusOK, config)
+}
+
+func (s *Server) handleGetModpackVersions(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	modpackID := vars["id"]
+
+	// Get the modpack to determine its type
+	modpack, err := s.store.GetIndexedModpack(ctx, modpackID)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Modpack not found")
+		return
+	}
+
+	// For CurseForge modpacks, call the API directly
+	if modpack.Indexer == "fuego" {
+		// Get API key from global settings
+		globalSettings, _, err := s.store.GetGlobalSettings(ctx)
+		if err != nil || globalSettings == nil {
+			s.respondError(w, http.StatusInternalServerError, "Failed to get global settings")
+			return
+		}
+
+		apiKey := ""
+		if globalSettings.CFAPIKey != nil {
+			apiKey = *globalSettings.CFAPIKey
+		}
+		if apiKey == "" {
+			s.respondError(w, http.StatusBadRequest, "CurseForge API key not configured")
+			return
+		}
+
+		// Call the CurseForge API to get files
+		client := fuego.NewClient(apiKey)
+		modID, err := strconv.Atoi(modpack.IndexerID)
+		if err != nil {
+			s.respondError(w, http.StatusBadRequest, "Invalid modpack ID")
+			return
+		}
+
+		files, err := client.GetModpackFiles(ctx, modID)
+		if err != nil {
+			s.log.Error("Failed to get modpack files from CurseForge: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to get modpack versions")
+			return
+		}
+
+		// Format the response
+		type Version struct {
+			ID          string    `json:"id"`
+			DisplayName string    `json:"display_name"`
+			ReleaseType string    `json:"release_type"`
+			FileDate    time.Time `json:"file_date"`
+		}
+
+		versions := make([]Version, 0, len(files))
+		for _, file := range files {
+			releaseType := "release"
+			switch file.ReleaseType {
+			case 2:
+				releaseType = "beta"
+			case 3:
+				releaseType = "alpha"
+			}
+
+			versions = append(versions, Version{
+				ID:          strconv.Itoa(file.ID),
+				DisplayName: file.DisplayName,
+				ReleaseType: releaseType,
+				FileDate:    file.FileDate,
+			})
+		}
+
+		// Sort by date (newest first)
+		sort.Slice(versions, func(i, j int) bool {
+			return versions[i].FileDate.After(versions[j].FileDate)
+		})
+
+		s.respondJSON(w, http.StatusOK, map[string]any{
+			"versions": versions,
+		})
+		return
+	}
+
+	// For other indexers or manual modpacks, return empty list
+	s.respondJSON(w, http.StatusOK, map[string]any{
+		"versions": []any{},
+	})
 }
 
 func (s *Server) handleGetIndexerStatus(w http.ResponseWriter, r *http.Request) {

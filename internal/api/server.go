@@ -125,6 +125,7 @@ func (s *Server) setupServerRoutes(api *mux.Router) {
 	viewer.HandleFunc("/servers/next-port", s.handleGetNextAvailablePort).Methods("GET")
 	viewer.HandleFunc("/servers/{id}", s.handleGetServer).Methods("GET")
 	viewer.HandleFunc("/servers/{id}/logs", s.handleGetServerLogs).Methods("GET")
+	viewer.HandleFunc("/servers/{id}/logs", s.handleClearServerLogs).Methods("DELETE")
 	viewer.HandleFunc("/servers/{id}/config", s.handleGetServerConfig).Methods("GET")
 	viewer.HandleFunc("/servers/{id}/routing", s.handleGetServerRouting).Methods("GET")
 
@@ -186,6 +187,7 @@ func (s *Server) setupModpackRoutes(api *mux.Router) {
 	viewer.HandleFunc("/{id}", s.handleGetModpack).Methods("GET")
 	viewer.HandleFunc("/{id}/config", s.handleGetModpackConfig).Methods("GET")
 	viewer.HandleFunc("/{id}/files", s.handleGetModpackFiles).Methods("GET")
+	viewer.HandleFunc("/{id}/versions", s.handleGetModpackVersions).Methods("GET")
 
 	// Editor-level modpack routes
 	editor := api.PathPrefix("/modpacks").Subrouter()

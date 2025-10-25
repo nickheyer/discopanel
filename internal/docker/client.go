@@ -245,7 +245,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		Image:        imageName,
 		Env:          env,
 		Tty:          true,
-		OpenStdin:    true,
+		OpenStdin:    false,
 		AttachStdin:  false,
 		AttachStdout: true,
 		AttachStderr: true,
@@ -475,45 +475,6 @@ func (c *Client) GetContainerStats(ctx context.Context, containerID string) (*Co
 		MemoryUsage: memoryUsage,
 		MemoryLimit: memoryLimit,
 	}, nil
-}
-
-func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail int) (string, error) {
-	options := container.LogsOptions{
-		ShowStdout: true,
-		ShowStderr: true,
-		Tail:       fmt.Sprintf("%d", tail),
-		Timestamps: true,
-	}
-
-	reader, err := c.docker.ContainerLogs(ctx, containerID, options)
-	if err != nil {
-		return "", err
-	}
-	defer reader.Close()
-
-	// Docker multiplexes stdout and stderr, we need to demultiplex
-	var buf bytes.Buffer
-	_, err = stdcopy.StdCopy(&buf, &buf, reader)
-	if err != nil {
-		return "", err
-	}
-
-	// Filter out RCON spam
-	lines := strings.Split(buf.String(), "\n")
-	var filtered []string
-	for _, line := range lines {
-		// Filter out RCON thread messages
-		if strings.Contains(line, "Thread RCON Client") && (strings.Contains(line, "started") || strings.Contains(line, "shutting down")) {
-			continue
-		}
-		// Filter out RCON connection messages
-		if strings.Contains(line, "[RCON Listener") && strings.Contains(line, "Rcon connection from") {
-			continue
-		}
-		filtered = append(filtered, line)
-	}
-
-	return strings.Join(filtered, "\n"), nil
 }
 
 // ExecCommand executes a command inside the container and returns the output

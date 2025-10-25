@@ -136,6 +136,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		Detached         bool             `json:"detached"`
 		StartImmediately bool             `json:"start_immediately"`
 		ModpackID        string           `json:"modpack_id,omitempty"`
+		ModpackVersionID string           `json:"modpack_version_id,omitempty"`
 		ProxyHostname    string           `json:"proxy_hostname,omitempty"`
 		ProxyListenerID  string           `json:"proxy_listener_id,omitempty"`
 		UseBaseURL       bool             `json:"use_base_url,omitempty"`
@@ -381,7 +382,13 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else if modpackURL != "" && server.ModLoader == models.ModLoaderAutoCurseForge {
-			serverConfig.CFPageURL = &modpackURL
+			// If version is pinned, append /files/<id> to the URL
+			if req.ModpackVersionID != "" {
+				versionedURL := fmt.Sprintf("%s/files/%s", modpackURL, req.ModpackVersionID)
+				serverConfig.CFPageURL = &versionedURL
+			} else {
+				serverConfig.CFPageURL = &modpackURL
+			}
 		}
 
 		// Ensure config is updated with proper settings
@@ -558,16 +565,18 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		MaxPlayers  int    `json:"max_players"`
-		Memory      int    `json:"memory"`
-		ModLoader   string `json:"mod_loader"`
-		MCVersion   string `json:"mc_version"`
-		DockerImage string `json:"docker_image"`
-		AutoStart   *bool  `json:"auto_start"`
-		Detached    *bool  `json:"detached"`
-		TPSCommand  string `json:"tps_command"`
+		Name             string `json:"name"`
+		Description      string `json:"description"`
+		MaxPlayers       int    `json:"max_players"`
+		Memory           int    `json:"memory"`
+		ModLoader        string `json:"mod_loader"`
+		MCVersion        string `json:"mc_version"`
+		DockerImage      string `json:"docker_image"`
+		AutoStart        *bool  `json:"auto_start"`
+		Detached         *bool  `json:"detached"`
+		TPSCommand       string `json:"tps_command"`
+		ModpackID        string `json:"modpack_id,omitempty"`
+		ModpackVersionID string `json:"modpack_version_id,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -621,6 +630,43 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TPSCommand != "" {
 		server.TPSCommand = req.TPSCommand
+	}
+
+	// Handle modpack version update
+	if req.ModpackID != "" {
+		// Get server config
+		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+		if err != nil {
+			s.log.Error("Failed to get server config: %v", err)
+			serverConfig = s.store.CreateDefaultServerConfig(server.ID)
+		}
+
+		// Get modpack info
+		modpack, err := s.store.GetIndexedModpack(ctx, req.ModpackID)
+		if err == nil {
+			// Update modpack URL
+			modpackURL := modpack.WebsiteURL
+
+			if modpack.Indexer == "fuego" || modpack.Indexer == "manual" {
+				// Update mod loader for CurseForge modpacks
+				server.ModLoader = models.ModLoaderAutoCurseForge
+				needsRecreation = true
+
+				if req.ModpackVersionID != "" {
+					// Version pinning - append file slug to URL
+					versionedURL := fmt.Sprintf("%s/files/%s", modpackURL, req.ModpackVersionID)
+					serverConfig.CFPageURL = &versionedURL
+				} else {
+					// No version pinning - use base URL only
+					serverConfig.CFPageURL = &modpackURL
+				}
+			}
+
+			// Update server config
+			if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
+				s.log.Error("Failed to update server config with modpack settings: %v", err)
+			}
+		}
 	}
 
 	// Save server updates first
@@ -962,20 +1008,36 @@ func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get logs + cmd history
-	logs := s.logStreamer.GetFormattedLogs(server.ContainerID, tail)
+	// Get structured log entries from the log streamer
+	logEntries := s.logStreamer.GetLogs(server.ContainerID, tail)
 
-	// If no logs in streamer, fall back to docker logs
-	if logs == "" {
-		logs, err = s.docker.GetContainerLogs(ctx, server.ContainerID, tail)
-		if err != nil {
-			s.log.Error("Failed to get container logs: %v", err)
-			s.respondError(w, http.StatusInternalServerError, "Failed to get server logs")
-			return
-		}
+	// Return structured log data
+	response := map[string]any{
+		"logs":  logEntries,
+		"total": len(logEntries),
 	}
 
-	s.respondJSON(w, http.StatusOK, map[string]string{"logs": logs})
+	s.respondJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleClearServerLogs(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	id := vars["id"]
+	server, err := s.store.GetServer(ctx, id)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+
+	if server.ContainerID == "" {
+		s.respondError(w, http.StatusBadRequest, "Server container not created")
+		return
+	}
+
+	// Clear structured log entries
+	s.logStreamer.ClearLogs(server.ContainerID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleGetNextAvailablePort(w http.ResponseWriter, r *http.Request) {

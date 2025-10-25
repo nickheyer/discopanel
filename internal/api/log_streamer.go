@@ -3,7 +3,6 @@ package api
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -105,7 +104,7 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,
-		Timestamps: true,
+		Timestamps: false,
 		Tail:       "100", // Start with last 100 lines
 	}
 
@@ -117,7 +116,6 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 	}
 	defer reader.Close()
 
-	// Scanner to read logs line by line
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB buffer for long lines
 
@@ -125,22 +123,19 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 		select {
 		case <-ctx.Done():
 			return
-		default:
-			line := scanner.Text()
+		default: // To get rid of whatever the hell runtime is doing when TTY is enabled
+			line := strings.Replace(scanner.Text(), "> \r", "", 1)
 
-			// Docker multiplexes stdout/stderr with 8-byte header
-			processedLine, streamType := ls.processDockerLogLine(line)
+			// Filter out RCON spam
+			if ls.shouldFilterLine(line) {
+				continue
+			}
 
-			if processedLine != "" {
-				// Filter out RCON spam
-				if ls.shouldFilterLine(processedLine) {
-					continue
-				}
-
+			if line != "" {
 				entry := LogEntry{
 					Timestamp: time.Now(),
-					Content:   processedLine,
-					Type:      streamType,
+					Content:   line,
+					Type:      "stdout",
 				}
 
 				stream.mu.Lock()
@@ -158,11 +153,6 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 	if err := scanner.Err(); err != nil && err != io.EOF {
 		ls.log.Error("Error reading logs for container %s: %v", stream.containerID, err)
 	}
-}
-
-// NOTE: Preserving raw stream text fmt via tty
-func (ls *LogStreamer) processDockerLogLine(line string) (string, string) {
-	return line, "stdout"
 }
 
 // Check if a log line should be filtered
@@ -205,10 +195,10 @@ func (ls *LogStreamer) AddCommandEntry(containerID, command string, timestamp ti
 	stream.mu.Lock()
 	defer stream.mu.Unlock()
 
-	// Add command entry with the provided timestamp
+	// Add command entry with the provided timestamp + ANSI to prevent color bleed
 	stream.logs = append(stream.logs, LogEntry{
 		Timestamp: timestamp,
-		Content:   command,
+		Content:   "\u001b[0m" + command,
 		Type:      "command",
 	})
 
@@ -231,8 +221,9 @@ func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool
 	stream.mu.Lock()
 	defer stream.mu.Unlock()
 
-	// Add output entry if present
+	// Add output entry if present + ANSI to prevent color bleed
 	if output != "" {
+		output = "\u001b[0m" + output + "\u001b[0m"
 		lines := strings.SplitSeq(strings.TrimSpace(output), "\n")
 		for line := range lines {
 			if line != "" {
@@ -295,33 +286,6 @@ func (ls *LogStreamer) GetLogs(containerID string, tail int) []LogEntry {
 	return result
 }
 
-// Get logs as a formatted string
-func (ls *LogStreamer) GetFormattedLogs(containerID string, tail int) string {
-	logs := ls.GetLogs(containerID, tail)
-
-	if len(logs) == 0 {
-		return ""
-	}
-
-	var lines []string
-	for _, entry := range logs { // Format entries
-		var formattedLine string
-
-		switch entry.Type {
-		case "command":
-		case "command_output":
-			timeStr := entry.Timestamp.UTC().Format("15:04:05")
-			formattedLine = fmt.Sprintf("[%s] %s", timeStr, entry.Content)
-		default:
-			formattedLine = entry.Content // Preserve normal log lines
-		}
-
-		lines = append(lines, formattedLine)
-	}
-
-	return strings.Join(lines, "\n")
-}
-
 // Clears logs for a container
 func (ls *LogStreamer) ClearLogs(containerID string) {
 	ls.mu.RLock()
@@ -332,18 +296,5 @@ func (ls *LogStreamer) ClearLogs(containerID string) {
 		stream.mu.Lock()
 		stream.logs = make([]LogEntry, 0, stream.maxEntries)
 		stream.mu.Unlock()
-	}
-}
-
-// Stops all active log streams
-func (ls *LogStreamer) StopAll() {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-
-	for _, stream := range ls.streams {
-		if stream.active {
-			stream.cancelFunc()
-			stream.active = false
-		}
 	}
 }

@@ -25,6 +25,7 @@
 		"@tailwindcss/typography": "^0.5.15",
 		"@tailwindcss/vite": "^4.0.0",
 		"@tanstack/table-core": "^8.21.3",
+		"ansi-to-html": "^0.7.2",
 		"bits-ui": "^2.9.1",
 		"clsx": "^2.1.1",
 		"embla-carousel-svelte": "^8.6.0",

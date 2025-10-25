@@ -124,7 +124,12 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 		case <-ctx.Done():
 			return
 		default: // To get rid of whatever the hell runtime is doing when TTY is enabled
-			line := strings.Replace(scanner.Text(), "> \r", "", 1)
+			line := scanner.Text()
+			// Split on \r carriage and take last chunk
+			if strings.Contains(line, "\r") {
+				parts := strings.Split(line, "\r")
+				line = parts[len(parts)-1]
+			}
 
 			// Filter out RCON spam
 			if ls.shouldFilterLine(line) {

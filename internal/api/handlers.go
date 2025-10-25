@@ -565,18 +565,18 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name             string `json:"name"`
-		Description      string `json:"description"`
-		MaxPlayers       int    `json:"max_players"`
-		Memory           int    `json:"memory"`
-		ModLoader        string `json:"mod_loader"`
-		MCVersion        string `json:"mc_version"`
-		DockerImage      string `json:"docker_image"`
-		AutoStart        *bool  `json:"auto_start"`
-		Detached         *bool  `json:"detached"`
-		TPSCommand       string `json:"tps_command"`
-		ModpackID        string `json:"modpack_id,omitempty"`
-		ModpackVersionID string `json:"modpack_version_id,omitempty"`
+		Name             string  `json:"name"`
+		Description      string  `json:"description"`
+		MaxPlayers       int     `json:"max_players"`
+		Memory           int     `json:"memory"`
+		ModLoader        string  `json:"mod_loader"`
+		MCVersion        string  `json:"mc_version"`
+		DockerImage      string  `json:"docker_image"`
+		AutoStart        *bool   `json:"auto_start"`
+		Detached         *bool   `json:"detached"`
+		TPSCommand       *string `json:"tps_command"`
+		ModpackID        string  `json:"modpack_id,omitempty"`
+		ModpackVersionID string  `json:"modpack_version_id,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -628,8 +628,8 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	if req.Detached != nil {
 		server.Detached = *req.Detached
 	}
-	if req.TPSCommand != "" {
-		server.TPSCommand = req.TPSCommand
+	if req.TPSCommand != nil {
+		server.TPSCommand = *req.TPSCommand
 	}
 
 	// Handle modpack version update
@@ -681,7 +681,9 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		// Check if server was running
 		wasRunning := false
 		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
-		if err == nil && (status == models.StatusRunning || status == models.StatusUnhealthy) {
+		if err != nil {
+			s.log.Debug("Container %s not found during update, will create new one: %v", server.ContainerID, err)
+		} else if status == models.StatusRunning || status == models.StatusUnhealthy {
 			wasRunning = true
 			// Stop the container
 			if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
@@ -691,7 +693,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 
 		// Remove old container
 		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
-			s.log.Error("Failed to remove old container: %v", err)
+			s.log.Debug("Could not remove old container (may not exist): %v", err)
 		}
 
 		// Get server config for container creation

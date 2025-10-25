@@ -194,6 +194,7 @@ func (s *Server) setupModpackRoutes(api *mux.Router) {
 	editor.Use(s.authMiddleware.RequireAuth(storage.RoleEditor))
 	editor.HandleFunc("/sync", s.handleSyncModpacks).Methods("POST")
 	editor.HandleFunc("/upload", s.handleUploadModpack).Methods("POST")
+	editor.HandleFunc("/{id}", s.handleDeleteModpack).Methods("DELETE")
 	editor.HandleFunc("/{id}/favorite", s.handleToggleFavorite).Methods("POST")
 	editor.HandleFunc("/{id}/files/sync", s.handleSyncModpackFiles).Methods("POST")
 }

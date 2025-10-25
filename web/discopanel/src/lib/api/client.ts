@@ -394,6 +394,12 @@ class ApiClient {
       body: JSON.stringify({ proxy_hostname: hostname }),
     });
   }
+
+  async deleteModpack(id: string): Promise<{ message: string; id: string }> {
+    return this.request<{ message: string; id: string }>(`/modpacks/${id}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const api = new ApiClient();

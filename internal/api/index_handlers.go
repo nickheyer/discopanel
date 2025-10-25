@@ -719,3 +719,70 @@ func (s *Server) handleUploadModpack(w http.ResponseWriter, r *http.Request) {
 		"author":  manifest.Author,
 	})
 }
+
+func (s *Server) handleDeleteModpack(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	modpackID := vars["id"]
+
+	// Get the modpack to verify it exists and is a manual modpack
+	modpack, err := s.store.GetIndexedModpack(ctx, modpackID)
+	if err != nil {
+		s.log.Error("Failed to get modpack: %v", err)
+		s.respondError(w, http.StatusNotFound, "Modpack not found")
+		return
+	}
+
+	// Only allow deletion of manual modpacks
+	if modpack.Indexer != "manual" {
+		s.respondError(w, http.StatusBadRequest, "Only custom uploaded modpacks can be deleted")
+		return
+	}
+
+	// Check if any servers are using this modpack
+	serversInUse, err := s.store.CheckModpackInUse(ctx, modpackID)
+	if err != nil {
+		s.log.Error("Failed to check modpack usage: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to check modpack usage")
+		return
+	}
+
+	if len(serversInUse) > 0 {
+		serverNames := make([]string, len(serversInUse))
+		for i, srv := range serversInUse {
+			serverNames[i] = srv.Name
+		}
+		s.respondError(w, http.StatusConflict, fmt.Sprintf("Cannot delete modpack: currently in use by servers: %s", strings.Join(serverNames, ", ")))
+		return
+	}
+
+	// Get modpack files
+	files, err := s.store.GetIndexedModpackFiles(ctx, modpackID)
+	if err != nil {
+		s.log.Error("Failed to get modpack files: %v", err)
+	}
+
+	// Delete the physical ZIP file
+	if len(files) > 0 && files[0].DownloadURL != "" {
+		filePath := files[0].DownloadURL
+		if err := os.Remove(filePath); err != nil {
+			s.log.Error("Failed to delete modpack file %s: %v", filePath, err)
+			// Continue with database deletion even if file deletion fails
+		} else {
+			s.log.Info("Deleted modpack file: %s", filePath)
+		}
+	}
+
+	// Delete from database
+	if err := s.store.DeleteIndexedModpack(ctx, modpackID); err != nil {
+		s.log.Error("Failed to delete modpack from database: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to delete modpack")
+		return
+	}
+
+	s.log.Info("Successfully deleted modpack %s (%s)", modpack.Name, modpackID)
+	s.respondJSON(w, http.StatusOK, map[string]any{
+		"message": "Modpack deleted successfully",
+		"id":      modpackID,
+	})
+}

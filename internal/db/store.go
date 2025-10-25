@@ -433,6 +433,51 @@ func (s *Store) GetIndexedModpackFiles(ctx context.Context, modpackID string) ([
 	return files, err
 }
 
+// Checks if any servers are using the specified modpack
+func (s *Store) CheckModpackInUse(ctx context.Context, modpackID string) ([]*Server, error) {
+	var servers []*Server
+	var configs []*ServerConfig
+
+	// For manual modpacks, the CFSlug is set to "manual-{modpackID}"
+	cfSlug := "manual-" + modpackID
+
+	// Find all configs that reference this modpack
+	if err := s.db.WithContext(ctx).Where("cf_slug = ?", cfSlug).Find(&configs).Error; err != nil {
+		return nil, err
+	}
+
+	// Get the associated servers
+	if len(configs) > 0 {
+		serverIDs := make([]string, 0, len(configs))
+		for _, config := range configs {
+			serverIDs = append(serverIDs, config.ServerID)
+		}
+		if err := s.db.WithContext(ctx).Where("id IN ?", serverIDs).Find(&servers).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	return servers, nil
+}
+
+// Deletes a modpack and all related records
+func (s *Store) DeleteIndexedModpack(ctx context.Context, modpackID string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete modpack files
+		if err := tx.Where("modpack_id = ?", modpackID).Delete(&IndexedModpackFile{}).Error; err != nil {
+			return err
+		}
+
+		// Delete favorites
+		if err := tx.Where("modpack_id = ?", modpackID).Delete(&ModpackFavorite{}).Error; err != nil {
+			return err
+		}
+
+		// Delete the modpack itself
+		return tx.Delete(&IndexedModpack{}, "id = ?", modpackID).Error
+	})
+}
+
 // Modpack Favorite operations
 func (s *Store) AddModpackFavorite(ctx context.Context, modpackID string) error {
 	favorite := &ModpackFavorite{

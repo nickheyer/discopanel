@@ -8,7 +8,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
 	import { toast } from 'svelte-sonner';
-	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload, Package, ArrowLeft } from '@lucide/svelte';
+	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload, Package, ArrowLeft, Trash2 } from '@lucide/svelte';
 	import type { IndexedModpack, ModpackSearchParams, ModpackSearchResponse } from '$lib/api/types';
 	
 	let searchParams = $state<ModpackSearchParams>({
@@ -275,6 +275,36 @@
 			input.value = '';
 		}
 	}
+
+	async function deleteModpack(modpack: IndexedModpack) {
+		if (!confirm(`Are you sure you want to delete "${modpack.name}"? This action cannot be undone.`)) {
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/v1/modpacks/${modpack.id}`, {
+				method: 'DELETE'
+			});
+
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(error.error || 'Failed to delete modpack');
+			}
+
+			toast.success(`Modpack "${modpack.name}" deleted successfully`);
+
+			// Remove from local state
+			uploadedPacks = uploadedPacks.filter(m => m.id !== modpack.id);
+			favorites = favorites.filter(m => m.id !== modpack.id);
+
+			// Refresh search results if showing
+			if (!showFavorites && !showUploaded) {
+				await searchModpacks();
+			}
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : 'Failed to delete modpack');
+		}
+	}
 	
 	onMount(async () => {
 		await Promise.all([
@@ -494,17 +524,28 @@
 						{/if}
 					</div>
 					
-					<div class="flex items-center justify-between mt-4">
-						{#if modpack.website_url}
-							<a href={modpack.website_url} target="_blank" rel="noopener noreferrer">
-								<Button variant="outline" size="sm">
-									<ExternalLink class="h-3 w-3 mr-1" />
-									View
+					<div class="flex items-center justify-between mt-4 gap-2">
+						<div class="flex items-center gap-2">
+							{#if modpack.website_url}
+								<a href={modpack.website_url} target="_blank" rel="noopener noreferrer">
+									<Button variant="outline" size="sm">
+										<ExternalLink class="h-3 w-3 mr-1" />
+										View
+									</Button>
+								</a>
+							{/if}
+							{#if modpack.indexer === 'manual'}
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => deleteModpack(modpack)}
+									class="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+								>
+									<Trash2 class="h-3 w-3 mr-1" />
+									Delete
 								</Button>
-							</a>
-						{:else}
-							<div></div>
-						{/if}
+							{/if}
+						</div>
 						<Button size="sm" onclick={() => goto(`/servers/new?modpack=${modpack.id}`)} class="font-semibold shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
 							Use in Server
 						</Button>

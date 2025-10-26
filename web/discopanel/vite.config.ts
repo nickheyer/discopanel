@@ -1,9 +1,23 @@
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { execSync } from 'child_process';
+
+// Get version from git tag at build time
+function getVersion() {
+	try {
+		return execSync('git describe --tags --always').toString().trim();
+	} catch (error) {
+		console.warn('Failed to get git version, using default');
+		return 'dev';
+	}
+}
 
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
+	define: {
+		__APP_VERSION__: JSON.stringify(getVersion())
+	},
 	server: {
 		proxy: {
 			'/api': {

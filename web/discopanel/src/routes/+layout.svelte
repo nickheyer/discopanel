@@ -284,7 +284,7 @@
 					{/if}
 					<Separator orientation="horizontal" class="mb-2" />
 					<div class="ml-auto flex items-center gap-2">
-						<span class="text-muted-foreground text-xs group-data-[collapsible=icon]:hidden">v0.0.1</span>
+						<span class="text-muted-foreground text-xs group-data-[collapsible=icon]:hidden">{__APP_VERSION__}</span>
 						<SidebarTrigger />
 					</div>
 				</SidebarFooter>

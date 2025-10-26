@@ -19,6 +19,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/indexers"
 	"github.com/nickheyer/discopanel/internal/indexers/fuego"
+	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
 )
 
 func (s *Server) handleSearchModpacks(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +111,9 @@ func (s *Server) handleSyncModpacks(w http.ResponseWriter, r *http.Request) {
 		}
 
 		indexerClient = fuego.NewIndexer(apiKey)
+	case "modrinth":
+		// Modrinth doesn't require an API key for public operations
+		indexerClient = modrinth.NewIndexer()
 	default:
 		s.respondError(w, http.StatusBadRequest, "Unknown indexer: "+req.Indexer)
 		return
@@ -287,6 +291,9 @@ func (s *Server) handleSyncModpackFiles(w http.ResponseWriter, r *http.Request) 
 		}
 
 		indexerClient = fuego.NewIndexer(apiKey)
+	case "modrinth":
+		// Modrinth doesn't require an API key for public operations
+		indexerClient = modrinth.NewIndexer()
 	default:
 		s.respondError(w, http.StatusBadRequest, "Unknown indexer: "+modpack.Indexer)
 		return
@@ -360,15 +367,17 @@ func (s *Server) handleGetModpackConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Return configuration from the modpack's computed fields
-	modLoader := "auto_curseforge" // Default for fuego modpacks
-	if modpack.Indexer == "manual" {
+	modLoader := modpack.Indexer
+	switch modpack.Indexer {
+	case "manual":
 		// For manual uploads, use the actual mod loader from the modpack
 		var modLoaders []string
 		if err := json.Unmarshal([]byte(modpack.ModLoaders), &modLoaders); err == nil && len(modLoaders) > 0 {
 			// Use first mod loader from the list
 			modLoader = modLoaders[0]
 		}
+	case "fuego":
+		modLoader = "auto_curseforge"
 	}
 
 	config := map[string]any{
@@ -495,6 +504,12 @@ func (s *Server) handleGetIndexerStatus(w http.ResponseWriter, r *http.Request) 
 				"enabled":          apiKeyConfigured,
 				"apiKeyConfigured": apiKeyConfigured,
 				"apiKeyUrl":        "https://console.curseforge.com/#/api-keys",
+			},
+			"modrinth": map[string]any{
+				"name":             "Modrinth",
+				"enabled":          true, // Modrinth doesn't require API key
+				"apiKeyConfigured": true, // Always true since no key needed
+				"apiKeyUrl":        "",   // No API key URL needed
 			},
 		},
 	}

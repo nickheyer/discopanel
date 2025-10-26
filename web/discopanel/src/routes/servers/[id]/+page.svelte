@@ -27,7 +27,7 @@
 	let activeTab = $state('overview');
 	let routingInfo = $state<any>(null);
 
-	let interval: number;
+	let interval: number|NodeJS.Timeout;
 
 	onMount(() => {
 		return () => {
@@ -37,12 +37,8 @@
 
 	$effect(() => {
 		if (serverId) {
-			// Clear existing interval
 			if (interval) clearInterval(interval);
-			// Load server immediately
 			loadServer();
-			
-			// Set up new interval
 			interval = setInterval(() => loadServer(true), 5000); // Poll every 5 seconds
 		}
 	});

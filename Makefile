@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image
 
 # Variables
 DATA_DIR := ./data
@@ -35,6 +35,11 @@ build-frontend:
 build: build-frontend
 	@echo "Building backend with embedded frontend..."
 	go build -o $(DISCOPANEL_BIN) cmd/discopanel/main.go
+
+# Build and push Docker image to :dev tag
+image:
+	@echo "Building and pushing Docker image..."
+	@bash scripts/build.sh
 
 # Clean development data
 clean:
@@ -97,6 +102,7 @@ help:
 	@echo "  make dev          - Run in development mode (frontend + backend)"
 	@echo "  make build        - Build standalone binary with embedded frontend"
 	@echo "  make prod         - Build and run in production mode"
+	@echo "  make image        - Build and push Docker image to :dev tag"
 	@echo "  make clean        - Remove data directory and build artifacts"
 	@echo "  make kill-dev     - Kill any orphaned dev processes"
 	@echo "  make deps         - Install all dependencies"

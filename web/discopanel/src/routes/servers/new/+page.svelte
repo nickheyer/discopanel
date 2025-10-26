@@ -157,8 +157,6 @@
 			if (!response.ok) throw new Error('Failed to get modpack config');
 
 			const config = await response.json();
-
-			// Populate ALL form fields from server response
 			formData.name = config.name;
 			formData.description = config.description;
 			formData.mod_loader = config.mod_loader;
@@ -473,7 +471,7 @@
 
 					<div class="space-y-2">
 						<Label for="mod_loader" class="text-sm font-medium">Mod Loader</Label>
-						<Select type="single" value={formData.mod_loader} onValueChange={(v: string | undefined) => formData.mod_loader = (v as ModLoader) ?? 'vanilla'} disabled={loading}>
+						<Select type="single" value={formData.mod_loader} onValueChange={(v: string | undefined) => formData.mod_loader = (v as ModLoader) ?? 'vanilla'} disabled={loading || !!selectedModpack}>
 							<SelectTrigger id="mod_loader">
 								<span>{modLoaders.find(l => l.Name === formData.mod_loader)?.DisplayName || 'Select a mod loader'}</span>
 							</SelectTrigger>
@@ -485,7 +483,11 @@
 								{/each}
 							</SelectContent>
 						</Select>
-						{#if formData.mod_loader === 'vanilla'}
+						{#if selectedModpack}
+							<p class="text-sm text-muted-foreground">
+								Mod loader auto-determined from modpack
+							</p>
+						{:else if formData.mod_loader === 'vanilla'}
 							<p class="text-sm text-muted-foreground">
 								No mod support - vanilla Minecraft server
 							</p>

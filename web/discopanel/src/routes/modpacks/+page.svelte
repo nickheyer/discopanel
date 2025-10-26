@@ -28,7 +28,9 @@
 	let indexerStatus = $state<any>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let uploading = $state(false);
-	
+	let selectedIndexer = $state('modrinth'); // Default Modrinth since no API key initially
+	let indexerName = $derived(selectedIndexer === 'fuego' ? 'CurseForge' : 'Modrinth');
+
 	// Dynamic game versions and mod loaders from API
 	let gameVersions = $state<string[]>([]);
 	let modLoaders = $state<Array<{ value: string; label: string }>>([
@@ -94,16 +96,14 @@
 			if (resetPage) {
 				searchParams.page = 1;
 			}
-			
 			const params = new URLSearchParams();
 			if (searchParams.q) params.append('q', searchParams.q);
 			if (searchParams.gameVersion) params.append('gameVersion', searchParams.gameVersion);
 			if (searchParams.modLoader) params.append('modLoader', searchParams.modLoader);
+			params.append('indexer', selectedIndexer);
 			params.append('page', searchParams.page?.toString() || '1');
-			
 			const response = await fetch(`/api/v1/modpacks?${params}`);
 			if (!response.ok) throw new Error('Failed to search modpacks');
-			
 			searchResults = await response.json();
 		} catch (error) {
 			toast.error('Failed to search modpacks');
@@ -123,18 +123,15 @@
 					query: searchParams.q || '',
 					gameVersion: searchParams.gameVersion || '',
 					modLoader: searchParams.modLoader || '',
-					indexer: 'fuego'
+					indexer: selectedIndexer
 				})
 			});
-			
 			if (!response.ok) {
 				const error = await response.json();
 				throw new Error(error.error || 'Failed to sync modpacks');
 			}
-			
 			const result = await response.json();
-			toast.success(`Synced ${result.synced} modpacks`);
-			
+			toast.success(`Synced ${result.synced} modpacks from ${indexerName}`);
 			// Refresh search results
 			await searchModpacks();
 		} catch (error) {
@@ -317,7 +314,7 @@
 			syncModpacks();
 		}
 	});
-	
+
 	// Computed display list with uploaded packs first
 	let displayModpacks = $derived(
 		showFavorites ? favorites :
@@ -379,13 +376,13 @@
 		</div>
 	</div>
 	
-	{#if indexerStatus?.indexers?.fuego && !indexerStatus.indexers.fuego.apiKeyConfigured}
+	{#if selectedIndexer === 'fuego' && indexerStatus?.indexers?.fuego && !indexerStatus.indexers.fuego.apiKeyConfigured}
 		<Alert>
 			<AlertCircle class="h-4 w-4" />
 			<AlertTitle>CurseForge API Key Required</AlertTitle>
 			<AlertDescription>
 				<div class="space-y-2">
-					<p>To search and install CurseForge modpacks, you need to configure a CurseForge API key.</p>
+					<p>To sync modpacks from CurseForge, you need to configure a CurseForge API key.</p>
 					<div class="flex items-center gap-2 mt-2">
 						<Button size="sm" href={indexerStatus.indexers.fuego.apiKeyUrl} target="_blank">
 							<ExternalLink class="h-4 w-4 mr-2" />
@@ -393,7 +390,7 @@
 						</Button>
 						<Button size="sm" variant="outline" href="/settings#curseforge">
 							<Settings class="h-4 w-4 mr-2" />
-							Configure API keys in Settings
+							Configure in Settings
 						</Button>
 					</div>
 				</div>
@@ -431,13 +428,25 @@
 						{/each}
 					</SelectContent>
 				</Select>
+				<Select type="single" value={selectedIndexer} onValueChange={(v: string | undefined) => {
+					selectedIndexer = v || 'modrinth';
+					syncModpacks();
+				}} disabled={syncing}>
+					<SelectTrigger class="w-[180px]">
+						<span>{indexerName}</span>
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="modrinth">Modrinth</SelectItem>
+						<SelectItem value="fuego">CurseForge</SelectItem>
+					</SelectContent>
+				</Select>
 				<Button onclick={() => searchModpacks(true)} disabled={loading} class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-md hover:shadow-lg transition-all hover:scale-[1.02]">
 					<Search class="h-5 w-5 mr-2" />
 					Search
 				</Button>
-				<Button onclick={syncModpacks} disabled={syncing} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
+				<Button onclick={syncModpacks} disabled={syncing || (selectedIndexer === 'fuego' && !indexerStatus?.indexers?.fuego?.apiKeyConfigured)} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
 					<RefreshCw class={`h-5 w-5 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-					Sync
+					Sync {indexerName}
 				</Button>
 				<Button onclick={() => fileInput?.click()} disabled={uploading} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
 					<Upload class="h-5 w-5 mr-2" />

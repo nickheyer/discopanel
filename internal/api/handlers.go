@@ -160,8 +160,11 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		modpackURL = modpack.WebsiteURL
 
 		// Override mod loader based on indexer
-		if modpack.Indexer == "fuego" || modpack.Indexer == "manual" {
+		switch modpack.Indexer {
+		case "fuego", "manual":
 			req.ModLoader = models.ModLoaderAutoCurseForge
+		case "modrinth":
+			req.ModLoader = models.ModLoaderModrinth
 		}
 
 		// Get MC version from modpack if not explicitly set
@@ -389,6 +392,18 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 			} else {
 				serverConfig.CFPageURL = &modpackURL
 			}
+		} else if modpack != nil && modpack.Indexer == "modrinth" {
+			projectSpec := modpack.IndexerID
+			if req.ModpackVersionID != "" {
+				projectSpec = fmt.Sprintf("%s:%s", modpack.IndexerID, req.ModpackVersionID)
+			}
+			serverConfig.ModrinthModpack = &projectSpec
+
+			downloadDeps := "required"
+			serverConfig.ModrinthDownloadDependencies = &downloadDeps
+
+			versionType := "release"
+			serverConfig.ModrinthModpackVersionType = &versionType
 		}
 
 		// Ensure config is updated with proper settings
@@ -647,7 +662,8 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 			// Update modpack URL
 			modpackURL := modpack.WebsiteURL
 
-			if modpack.Indexer == "fuego" || modpack.Indexer == "manual" {
+			switch modpack.Indexer {
+			case "fuego", "manual":
 				// Update mod loader for CurseForge modpacks
 				server.ModLoader = models.ModLoaderAutoCurseForge
 				needsRecreation = true
@@ -660,6 +676,21 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 					// No version pinning - use base URL only
 					serverConfig.CFPageURL = &modpackURL
 				}
+			case "modrinth":
+				server.ModLoader = models.ModLoaderModrinth
+				needsRecreation = true
+
+				projectSpec := modpack.IndexerID
+				if req.ModpackVersionID != "" {
+					projectSpec = fmt.Sprintf("%s:%s", modpack.IndexerID, req.ModpackVersionID)
+				}
+				serverConfig.ModrinthModpack = &projectSpec
+
+				downloadDeps := "required"
+				serverConfig.ModrinthDownloadDependencies = &downloadDeps
+
+				versionType := "release"
+				serverConfig.ModrinthModpackVersionType = &versionType
 			}
 
 			// Update server config
@@ -1005,8 +1036,12 @@ func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If container not created yet, return empty logs
 	if server.ContainerID == "" {
-		s.respondError(w, http.StatusBadRequest, "Server container not created")
+		s.respondJSON(w, http.StatusOK, map[string]any{
+			"logs":  []LogEntry{},
+			"total": 0,
+		})
 		return
 	}
 

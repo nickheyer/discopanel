@@ -273,6 +273,8 @@ type ServerConfig struct {
 	CFForceReinstallModloader *bool   `json:"cfForceReinstallModloader" env:"CF_FORCE_REINSTALL_MODLOADER" default:"false" desc:"Force reinstall modloader (cleared after start)" input:"checkbox" label:"Force Reinstall Modloader" ephemeral:"true"`
 
 	// Modrinth
+	ModrinthModpack                    *string `json:"modrinthModpack" env:"MODRINTH_MODPACK" default:"" desc:"Modrinth modpack project slug, ID, URL, or local mrpack file path" input:"text" label:"Modrinth Modpack"`
+	ModrinthModpackVersionType         *string `json:"modrinthModpackVersionType" env:"MODRINTH_MODPACK_VERSION_TYPE" default:"release" desc:"Version type for modpack (release, beta, alpha)" input:"select" label:"Modrinth Modpack Version Type"`
 	ModrinthProjects                   *string `json:"modrinthProjects" env:"MODRINTH_PROJECTS" default:"" desc:"Comma, newline, or @file list of Modrinth project slugs or IDs" input:"textarea" label:"Modrinth Projects"`
 	ModrinthDownloadDependencies       *string `json:"modrinthDownloadDependencies" env:"MODRINTH_DOWNLOAD_DEPENDENCIES" default:"none" desc:"Dependency download mode (none, required, optional)" input:"select" label:"Modrinth Download Dependencies"`
 	ModrinthProjectsDefaultVersionType *string `json:"modrinthProjectsDefaultVersionType" env:"MODRINTH_PROJECTS_DEFAULT_VERSION_TYPE" default:"release" desc:"Default version type to select (release, beta, alpha)" input:"select" label:"Modrinth Default Version Type"`

@@ -10,6 +10,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -99,6 +100,13 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 		stream.mu.Unlock()
 	}()
 
+	// Check if container has TTY enabled
+	inspect, err := ls.docker.ContainerInspect(ctx, stream.containerID)
+	if err != nil {
+		ls.log.Error("Failed to inspect container %s: %v", stream.containerID, err)
+		return
+	}
+
 	// Log streaming config
 	options := container.LogsOptions{
 		ShowStdout: true,
@@ -116,7 +124,24 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 	}
 	defer reader.Close()
 
-	scanner := bufio.NewScanner(reader)
+	// If TTY is disabled, Docker sends multiplexed stream demultiplexed
+	var logReader io.Reader
+	if !inspect.Config.Tty {
+		pr, pw := io.Pipe()
+		go func() {
+			defer pw.Close()
+			_, err := stdcopy.StdCopy(pw, pw, reader)
+			if err != nil && err != io.EOF {
+				ls.log.Error("Error demultiplexing logs for container %s: %v", stream.containerID, err)
+			}
+		}()
+		logReader = pr
+	} else {
+		// TTY enabled: raw stream, no headers
+		logReader = reader
+	}
+
+	scanner := bufio.NewScanner(logReader)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB buffer for long lines
 
 	for scanner.Scan() {

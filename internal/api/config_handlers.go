@@ -270,7 +270,7 @@ func buildConfigCategories(config any) []ConfigCategory {
 		value := fieldValue.Interface()
 
 		// Handle pointer types - if nil, leave as nil, otherwise dereference
-		if fieldValue.Kind() == reflect.Ptr {
+		if fieldValue.Kind() == reflect.Pointer {
 			if fieldValue.IsNil() {
 				value = nil
 			} else {
@@ -437,7 +437,7 @@ func getCategoryIndex(key string) int {
 		return 11
 
 	// Modrinth (12)
-	case "modrinthProjects", "modrinthDownloadDependencies", "modrinthProjectsDefaultVersionType",
+	case "modrinthModpack", "modrinthProjects", "modrinthDownloadDependencies", "modrinthProjectsDefaultVersionType",
 		"modrinthLoader", "versionFromModrinthProjects":
 		return 12
 

@@ -3,8 +3,12 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { execSync } from 'child_process';
 
-// Get version from git tag at build time
+// Get version from env for CI builds || git tag for local
 function getVersion() {
+	if (process.env.APP_VERSION) {
+		return process.env.APP_VERSION;
+	}
+
 	try {
 		return execSync('git describe --tags --always').toString().trim();
 	} catch (error) {

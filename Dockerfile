@@ -1,11 +1,17 @@
 FROM node:22-alpine AS frontend-builder
 
+# Accept version as build argument
+ARG APP_VERSION=dev
+
 WORKDIR /app/web/discopanel
 
 COPY web/discopanel/package*.json ./
 RUN npm ci
 
 COPY web/discopanel/ ./
+
+# Set version environment variable for the build
+ENV APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 FROM golang:1.24.5-alpine AS backend-builder

@@ -75,7 +75,6 @@ docker run -d \
 
 services:
   discopanel:
-    # build: .
     image: nickheyer/discopanel:latest
     container_name: discopanel
     restart: unless-stopped
@@ -84,6 +83,10 @@ services:
     network_mode: host
 
     # Option 2 (MORE COMPLICATED, ONLY USE IF YOU NEEDED): Use bridge mode with port mapping (default)
+    #
+    # NOTE: Only specify minecraft server ports (25565 ... etc) for proxied minecraft servers using a hostname. 
+    #       Discopanel will automatically expose ports needed on the managed minecraft server instances. In other
+    #       words, only the discopanel web port is needed + proxy port(s).
     # ports:
     #   - "8080:8080"         # DiscoPanel web interface
     #   - "25565:25565"       # Minecraft port/proxy-port
@@ -105,8 +108,8 @@ services:
       - ./backups:/app/backups
       - ./tmp:/app/tmp
       
-      # Configuration file (optional, see config.example.yaml for all available options).
-      - ./config.yaml:/app/config.yaml:ro
+      # Configuration file, uncomment if you are using a config file (optional, see config.example.yaml for all available options).
+      #- ./config.yaml:/app/config.yaml:ro
     environment:
       - DISCOPANEL_DATA_DIR=/app/data
 
@@ -117,6 +120,7 @@ services:
     # DONT FORGET THIS
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
 ```
 
 >> NOTE: Prebuilt binaries coming soon... but just use docker, you'll need it anyways. Ask for help in discord, we'd love to help.

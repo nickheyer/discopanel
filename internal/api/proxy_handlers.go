@@ -246,8 +246,10 @@ func (s *Server) handleUpdateProxyListener(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	oldPort := listener.Port // Save old port in case it changed
-	listener.Port = req.Port // Update port if provided
+	oldPort := listener.Port
+	if req.Port != 0 && req.Port != oldPort {
+		listener.Port = req.Port // Update port if provided
+	}
 
 	if err := s.store.UpdateProxyListener(ctx, listener); err != nil {
 		s.log.Error("Failed to update proxy listener: %v", err)

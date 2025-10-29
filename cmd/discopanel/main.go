@@ -22,14 +22,24 @@ func main() {
 	var configPath = flag.String("config", "./config.yaml", "Path to configuration file")
 	flag.Parse()
 
-	// Initialize logger
-	log := logger.New()
-
 	// Load configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatal("Failed to load configuration: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+		os.Exit(1)
 	}
+
+	// Init logger
+	logConfig := &logger.Config{
+		Enabled:    cfg.Logging.Enabled,
+		FilePath:   cfg.Logging.FilePath,
+		MaxSize:    cfg.Logging.MaxSize,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAge:     cfg.Logging.MaxAge,
+		Compress:   cfg.Logging.Compress,
+	}
+	log := logger.NewWithConfig(logConfig)
+	defer log.Close()
 
 	// Create required directories
 	dirs := []string{

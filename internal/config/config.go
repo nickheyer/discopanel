@@ -16,6 +16,7 @@ type Config struct {
 	Storage   StorageConfig   `mapstructure:"storage"`
 	Proxy     ProxyConfig     `mapstructure:"proxy"`
 	Minecraft MinecraftConfig `mapstructure:"minecraft"`
+	Logging   LoggingConfig   `mapstructure:"logging"`
 }
 
 type ServerConfig struct {
@@ -61,6 +62,15 @@ type ProxyConfig struct {
 type MinecraftConfig struct {
 	ResetGlobal  bool            `mapstructure:"reset_global"`
 	GlobalConfig db.ServerConfig `mapstructure:"global_config"`
+}
+
+type LoggingConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
+	FilePath   string `mapstructure:"file_path"`
+	MaxSize    int    `mapstructure:"max_size"`
+	MaxBackups int    `mapstructure:"max_backups"`
+	MaxAge     int    `mapstructure:"max_age"`
+	Compress   bool   `mapstructure:"compress"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -148,6 +158,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("proxy.port_range_max", 25665)
 
 	v.SetDefault("minecraft.reset_global", false)
+
+	// Logging defaults
+	v.SetDefault("logging.enabled", true)
+	v.SetDefault("logging.file_path", "./data/discopanel.log")
+	v.SetDefault("logging.max_size", 10)   // 10 MB
+	v.SetDefault("logging.max_backups", 5) // keep 5
+	v.SetDefault("logging.max_age", 30)    // 30 days
+	v.SetDefault("logging.compress", true) // compress rotated
 }
 
 func validateConfig(cfg *Config) error {

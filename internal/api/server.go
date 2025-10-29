@@ -75,6 +75,7 @@ func (s *Server) setupRoutes() {
 	s.setupProxyRoutes(api)
 	s.setupModpackRoutes(api)
 	s.setupSettingsRoutes(api)
+	s.setupSupportRoutes(api)
 
 	// Setup frontend serving
 	s.setupFrontend(r)
@@ -202,6 +203,14 @@ func (s *Server) setupModpackRoutes(api *mux.Router) {
 func (s *Server) setupSettingsRoutes(api *mux.Router) {
 	api.Handle("/settings", s.authMiddleware.OptionalAuth()(http.HandlerFunc(s.handleGetGlobalSettings))).Methods("GET")
 	api.Handle("/settings", s.authMiddleware.OptionalAuth()(http.HandlerFunc(s.handleUpdateGlobalSettings))).Methods("PUT")
+}
+
+func (s *Server) setupSupportRoutes(api *mux.Router) {
+	// Support routes - requires admin role to gen support bundles
+	support := api.PathPrefix("/support").Subrouter()
+	support.Use(s.authMiddleware.RequireAuth(storage.RoleAdmin))
+	support.HandleFunc("/bundle", s.handleGenerateSupportBundle).Methods("POST")
+	support.HandleFunc("/bundle/download", s.handleDownloadSupportBundle).Methods("GET")
 }
 
 func (s *Server) setupFrontend(r *mux.Router) {

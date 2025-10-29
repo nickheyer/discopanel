@@ -400,6 +400,45 @@ class ApiClient {
       method: 'DELETE',
     });
   }
+
+  // Support helpers
+  async generateSupportBundle(uploadToSupport: boolean = false): Promise<{
+    success: boolean;
+    message: string;
+    bundle_path?: string;
+    reference_id?: string;
+  }> {
+    const url = uploadToSupport ? '/support/bundle?upload=true' : '/support/bundle';
+    return this.request<{
+      success: boolean;
+      message: string;
+      bundle_path?: string;
+      reference_id?: string;
+    }>(url, {
+      method: 'POST',
+    });
+  }
+
+  async downloadSupportBundle(path: string): Promise<void> {
+    const response = await fetch(`${API_BASE}/support/bundle/download?path=${encodeURIComponent(path)}`, {
+      headers: authStore.getHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to download support bundle: ${response.statusText}`);
+    }
+
+    // Trigger browser download
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = path.split('/').pop() || 'support-bundle.tar.gz';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }
 }
 
 export const api = new ApiClient();

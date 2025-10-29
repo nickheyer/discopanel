@@ -1,7 +1,9 @@
+ARG APP_VERSION=dev
+
 FROM node:22-alpine AS frontend-builder
 
-# Accept version as build argument
-ARG APP_VERSION=dev
+ARG APP_VERSION
+ENV APP_VERSION=${APP_VERSION}
 
 WORKDIR /app/web/discopanel
 
@@ -10,11 +12,12 @@ RUN npm ci
 
 COPY web/discopanel/ ./
 
-# Set version environment variable for the build
-ENV APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 FROM golang:1.24.5-alpine AS backend-builder
+
+ARG APP_VERSION
+ENV APP_VERSION=${APP_VERSION}
 
 RUN apk add --no-cache gcc musl-dev sqlite-dev
 
@@ -29,6 +32,9 @@ COPY --from=frontend-builder /app/web/discopanel/build ./web/discopanel/build
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o discopanel ./cmd/discopanel
 
 FROM alpine:latest
+
+ARG APP_VERSION
+ENV APP_VERSION=${APP_VERSION}
 
 RUN apk --no-cache add ca-certificates sqlite-libs
 

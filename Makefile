@@ -5,6 +5,7 @@ DATA_DIR := ./data
 DB_FILE := $(DATA_DIR)/discopanel.db
 FRONTEND_DIR := web/discopanel
 DISCOPANEL_BIN:= build/discopanel
+#DISCOSUPPORT_URL := http://localhost:8911
 
 # Development mode - runs backend and frontend concurrently
 run:

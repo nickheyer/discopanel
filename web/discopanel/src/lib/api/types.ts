@@ -17,6 +17,42 @@ export interface DockerImageInfo {
   jdk: boolean;
 }
 
+export interface AdditionalPort {
+  name: string;           // User-friendly name for the port (e.g., "BlueMap Web")
+  container_port: number; // Port inside the container
+  host_port: number;      // Port on the host machine
+  protocol: 'tcp' | 'udp'; // Protocol (defaults to 'tcp' if empty)
+}
+
+export interface VolumeMount {
+  source: string;           // Host path or volume name
+  target: string;           // Container path
+  read_only?: boolean;      // Mount as read-only
+  type?: 'bind' | 'volume'; // Mount type (defaults to 'bind')
+}
+
+export interface DockerOverrides {
+  environment?: Record<string, string>;    // Additional environment variables
+  volumes?: VolumeMount[];                 // Additional volume mounts
+  network_mode?: string;                   // Override network mode
+  restart_policy?: string;                 // Override restart policy
+  cpu_limit?: number;                      // CPU limit (e.g., 1.5 for 1.5 cores)
+  memory_override?: number;                // Override memory limit in MB
+  labels?: Record<string, string>;         // Additional labels
+  cap_add?: string[];                      // Linux capabilities to add
+  cap_drop?: string[];                     // Linux capabilities to drop
+  devices?: string[];                      // Device mappings (e.g., "/dev/ttyUSB0:/dev/ttyUSB0")
+  extra_hosts?: string[];                  // Extra entries for /etc/hosts
+  privileged?: boolean;                    // Run container in privileged mode
+  read_only?: boolean;                     // Mount root filesystem as read-only
+  security_opt?: string[];                 // Security options
+  shm_size?: number;                       // Size of /dev/shm in bytes
+  user?: string;                           // User to run commands as
+  working_dir?: string;                    // Working directory inside container
+  entrypoint?: string[];                   // Override default entrypoint
+  command?: string[];                      // Override default command
+}
+
 export interface Server {
   id: string;
   name: string;
@@ -45,6 +81,8 @@ export interface Server {
   data_path: string;
   detached?: boolean;
   auto_start?: boolean;
+  additional_ports?: string;  // JSON string of AdditionalPort[]
+  docker_overrides?: string;  // JSON string of DockerOverrides
 }
 
 export interface CreateServerRequest {
@@ -62,6 +100,8 @@ export interface CreateServerRequest {
   proxy_hostname?: string;
   proxy_listener_id?: string;
   use_base_url?: boolean;
+  additional_ports?: AdditionalPort[];
+  docker_overrides?: DockerOverrides;
 }
 
 export interface UpdateServerRequest {
@@ -75,6 +115,8 @@ export interface UpdateServerRequest {
   detached?: boolean;
   auto_start?: boolean;
   tps_command?: string;
+  additional_ports?: AdditionalPort[];
+  docker_overrides?: DockerOverrides;
 }
 
 export interface Mod {

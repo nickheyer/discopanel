@@ -124,22 +124,24 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var req struct {
-		Name             string           `json:"name"`
-		Description      string           `json:"description"`
-		ModLoader        models.ModLoader `json:"mod_loader"`
-		MCVersion        string           `json:"mc_version"`
-		Port             int              `json:"port"`
-		MaxPlayers       int              `json:"max_players"`
-		Memory           int              `json:"memory"`
-		DockerImage      string           `json:"docker_image"`
-		AutoStart        bool             `json:"auto_start"`
-		Detached         bool             `json:"detached"`
-		StartImmediately bool             `json:"start_immediately"`
-		ModpackID        string           `json:"modpack_id,omitempty"`
-		ModpackVersionID string           `json:"modpack_version_id,omitempty"`
-		ProxyHostname    string           `json:"proxy_hostname,omitempty"`
-		ProxyListenerID  string           `json:"proxy_listener_id,omitempty"`
-		UseBaseURL       bool             `json:"use_base_url,omitempty"`
+		Name             string                      `json:"name"`
+		Description      string                      `json:"description"`
+		ModLoader        models.ModLoader            `json:"mod_loader"`
+		MCVersion        string                      `json:"mc_version"`
+		Port             int                         `json:"port"`
+		MaxPlayers       int                         `json:"max_players"`
+		Memory           int                         `json:"memory"`
+		DockerImage      string                      `json:"docker_image"`
+		AutoStart        bool                        `json:"auto_start"`
+		Detached         bool                        `json:"detached"`
+		StartImmediately bool                        `json:"start_immediately"`
+		ModpackID        string                      `json:"modpack_id,omitempty"`
+		ModpackVersionID string                      `json:"modpack_version_id,omitempty"`
+		ProxyHostname    string                      `json:"proxy_hostname,omitempty"`
+		ProxyListenerID  string                      `json:"proxy_listener_id,omitempty"`
+		UseBaseURL       bool                        `json:"use_base_url,omitempty"`
+		AdditionalPorts  []docker.AdditionalPort     `json:"additional_ports,omitempty"`
+		DockerOverrides  *docker.DockerOverrides     `json:"docker_overrides,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -273,6 +275,68 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		req.DockerImage = docker.GetOptimalDockerTag(req.MCVersion, req.ModLoader, false)
 	}
 
+	// Validate additional ports
+	usedPorts := make(map[string]bool)
+	for i, port := range req.AdditionalPorts {
+		// Validate port range
+		if port.ContainerPort < 1 || port.ContainerPort > 65535 {
+			s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid container port %d", port.ContainerPort))
+			return
+		}
+		if port.HostPort < 1 || port.HostPort > 65535 {
+			s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid host port %d", port.HostPort))
+			return
+		}
+
+		// Default protocol to TCP
+		if port.Protocol == "" {
+			req.AdditionalPorts[i].Protocol = "tcp"
+		} else if port.Protocol != "tcp" && port.Protocol != "udp" {
+			s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid protocol %s (must be tcp or udp)", port.Protocol))
+			return
+		}
+
+		// Check for duplicate ports in the same request
+		portKey := fmt.Sprintf("%d/%s", port.HostPort, req.AdditionalPorts[i].Protocol)
+		if usedPorts[portKey] {
+			s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Duplicate host port %d/%s", port.HostPort, req.AdditionalPorts[i].Protocol))
+			return
+		}
+		usedPorts[portKey] = true
+
+		// Check if port conflicts with main server port or proxy ports
+		if port.HostPort == req.Port {
+			s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Additional port %d conflicts with main server port", port.HostPort))
+			return
+		}
+		if s.config.Proxy.Enabled && slices.Contains(s.config.Proxy.ListenPorts, port.HostPort) {
+			s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Port %d is already in use by the proxy server", port.HostPort))
+			return
+		}
+	}
+
+	// Convert additional ports to JSON string for storage
+	additionalPortsJSON := ""
+	if len(req.AdditionalPorts) > 0 {
+		portsBytes, err := json.Marshal(req.AdditionalPorts)
+		if err != nil {
+			s.respondError(w, http.StatusInternalServerError, "Failed to process additional ports")
+			return
+		}
+		additionalPortsJSON = string(portsBytes)
+	}
+
+	// Convert docker overrides to JSON string for storage
+	dockerOverridesJSON := ""
+	if req.DockerOverrides != nil {
+		overridesBytes, err := json.Marshal(req.DockerOverrides)
+		if err != nil {
+			s.respondError(w, http.StatusInternalServerError, "Failed to process docker overrides")
+			return
+		}
+		dockerOverridesJSON = string(overridesBytes)
+	}
+
 	// Create server object
 	serverUUID := uuid.New().String()
 	serverDataDir := fmt.Sprintf("%s_%s", files.SanitizePathName(req.Name), serverUUID)
@@ -295,6 +359,8 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		AutoStart:       req.AutoStart,
 		Detached:        req.Detached,
 		TPSCommand:      minecraft.GetTPSCommand(req.ModLoader),
+		AdditionalPorts: additionalPortsJSON,
+		DockerOverrides: dockerOverridesJSON,
 	}
 
 	// Set defaults
@@ -586,18 +652,20 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name             string  `json:"name"`
-		Description      string  `json:"description"`
-		MaxPlayers       int     `json:"max_players"`
-		Memory           int     `json:"memory"`
-		ModLoader        string  `json:"mod_loader"`
-		MCVersion        string  `json:"mc_version"`
-		DockerImage      string  `json:"docker_image"`
-		AutoStart        *bool   `json:"auto_start"`
-		Detached         *bool   `json:"detached"`
-		TPSCommand       *string `json:"tps_command"`
-		ModpackID        string  `json:"modpack_id,omitempty"`
-		ModpackVersionID string  `json:"modpack_version_id,omitempty"`
+		Name             string                   `json:"name"`
+		Description      string                   `json:"description"`
+		MaxPlayers       int                      `json:"max_players"`
+		Memory           int                      `json:"memory"`
+		ModLoader        string                   `json:"mod_loader"`
+		MCVersion        string                   `json:"mc_version"`
+		DockerImage      string                   `json:"docker_image"`
+		AutoStart        *bool                    `json:"auto_start"`
+		Detached         *bool                    `json:"detached"`
+		TPSCommand       *string                  `json:"tps_command"`
+		ModpackID        string                   `json:"modpack_id,omitempty"`
+		ModpackVersionID string                   `json:"modpack_version_id,omitempty"`
+		AdditionalPorts  *[]docker.AdditionalPort `json:"additional_ports,omitempty"`
+		DockerOverrides  *docker.DockerOverrides  `json:"docker_overrides,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -651,6 +719,70 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TPSCommand != nil {
 		server.TPSCommand = *req.TPSCommand
+	}
+
+	// Handle additional ports update
+	if req.AdditionalPorts != nil {
+		// Validate additional ports
+		usedPorts := make(map[string]bool)
+		for i, port := range *req.AdditionalPorts {
+			// Validate port range
+			if port.ContainerPort < 1 || port.ContainerPort > 65535 {
+				s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid container port %d", port.ContainerPort))
+				return
+			}
+			if port.HostPort < 1 || port.HostPort > 65535 {
+				s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid host port %d", port.HostPort))
+				return
+			}
+
+			// Default protocol to TCP
+			if port.Protocol == "" {
+				(*req.AdditionalPorts)[i].Protocol = "tcp"
+			} else if port.Protocol != "tcp" && port.Protocol != "udp" {
+				s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid protocol %s (must be tcp or udp)", port.Protocol))
+				return
+			}
+
+			// Check for duplicate ports in the same request
+			portKey := fmt.Sprintf("%d/%s", port.HostPort, (*req.AdditionalPorts)[i].Protocol)
+			if usedPorts[portKey] {
+				s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Duplicate host port %d/%s", port.HostPort, (*req.AdditionalPorts)[i].Protocol))
+				return
+			}
+			usedPorts[portKey] = true
+
+			// Check if port conflicts with main server port
+			if port.HostPort == server.Port {
+				s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Additional port %d conflicts with main server port", port.HostPort))
+				return
+			}
+			// Check if port conflicts with proxy ports
+			if s.config.Proxy.Enabled && slices.Contains(s.config.Proxy.ListenPorts, port.HostPort) {
+				s.respondError(w, http.StatusBadRequest, fmt.Sprintf("Port %d is already in use by the proxy server", port.HostPort))
+				return
+			}
+		}
+
+		// Convert additional ports to JSON string for storage
+		portsBytes, err := json.Marshal(*req.AdditionalPorts)
+		if err != nil {
+			s.respondError(w, http.StatusInternalServerError, "Failed to process additional ports")
+			return
+		}
+		server.AdditionalPorts = string(portsBytes)
+		needsRecreation = true // Container needs to be recreated for port changes
+	}
+
+	// Handle docker overrides update
+	if req.DockerOverrides != nil {
+		overridesBytes, err := json.Marshal(req.DockerOverrides)
+		if err != nil {
+			s.respondError(w, http.StatusInternalServerError, "Failed to process docker overrides")
+			return
+		}
+		server.DockerOverrides = string(overridesBytes)
+		needsRecreation = true // Container needs to be recreated for docker overrides
 	}
 
 	// Handle modpack version update

@@ -8,8 +8,10 @@
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
-	import type { Server, UpdateServerRequest, MinecraftVersion, ModLoaderInfo, DockerImageInfo } from '$lib/api/types';
+	import type { Server, UpdateServerRequest, MinecraftVersion, ModLoaderInfo, DockerImageInfo, AdditionalPort, DockerOverrides } from '$lib/api/types';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
+	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
+	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 
 	interface Props {
 		server: Server;
@@ -21,6 +23,27 @@
 	let saving = $state(false);
 	let isDirty = $state(false);
 	
+	// Parse additional ports and docker overrides from JSON strings
+	function parseAdditionalPorts(jsonStr?: string): AdditionalPort[] {
+		if (!jsonStr) return [];
+		try {
+			return JSON.parse(jsonStr);
+		} catch (e) {
+			console.error('Failed to parse additional_ports:', e);
+			return [];
+		}
+	}
+
+	function parseDockerOverrides(jsonStr?: string): DockerOverrides | undefined {
+		if (!jsonStr) return undefined;
+		try {
+			return JSON.parse(jsonStr);
+		} catch (e) {
+			console.error('Failed to parse docker_overrides:', e);
+			return undefined;
+		}
+	}
+
 	// Form state using UpdateServerRequest type
 	let formData = $state<UpdateServerRequest>({
 		name: server.name,
@@ -32,7 +55,9 @@
 		docker_image: server.docker_image,
 		detached: !!(server.detached),
 		auto_start: !!(server.auto_start),
-		tps_command: server.tps_command || ''
+		tps_command: server.tps_command || '',
+		additional_ports: parseAdditionalPorts(server.additional_ports),
+		docker_overrides: parseDockerOverrides(server.docker_overrides)
 	});
 
 
@@ -47,6 +72,8 @@
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
+
+
 			// Reset form data to match new server
 			formData = {
 				name: server.name,
@@ -58,7 +85,9 @@
 				docker_image: server.docker_image,
 				detached: !!(server.detached),
 				auto_start: !!(server.auto_start),
-				tps_command: server.tps_command || ''
+				tps_command: server.tps_command || '',
+				additional_ports: parseAdditionalPorts(server.additional_ports),
+				docker_overrides: parseDockerOverrides(server.docker_overrides)
 			};
 			saving = false;
 			isDirty = false;
@@ -74,7 +103,7 @@
 
 	// Watch for changes
 	$effect(() => {
-		isDirty = 
+		isDirty =
 			formData.name !== server.name ||
 			formData.description !== (server.description || '') ||
 			formData.max_players !== server.max_players ||
@@ -84,7 +113,9 @@
 			formData.docker_image !== server.docker_image ||
 			formData.detached !== !!(server.detached) ||
 			formData.auto_start !== !!(server.auto_start) ||
-			formData.tps_command !== (server.tps_command || '');
+			formData.tps_command !== (server.tps_command || '') ||
+			JSON.stringify(formData.additional_ports) !== JSON.stringify(parseAdditionalPorts(server.additional_ports)) ||
+			JSON.stringify(formData.docker_overrides) !== JSON.stringify(parseDockerOverrides(server.docker_overrides));
 	});
 
 	async function loadOptions() {
@@ -346,7 +377,21 @@
 
 	<Separator class="my-4" />
 
+	<div class="space-y-4">
+		<AdditionalPortsEditor
+			bind:ports={formData.additional_ports}
+			disabled={saving}
+			onchange={(ports) => formData.additional_ports = ports}
+		/>
 
+		<DockerOverridesEditor
+			bind:overrides={formData.docker_overrides}
+			disabled={saving}
+			onchange={(overrides) => formData.docker_overrides = overrides}
+		/>
+	</div>
+
+	<Separator class="my-4" />
 
 	<div class="flex justify-end pt-2">
 		<Button 

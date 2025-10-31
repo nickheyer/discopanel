@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,6 +25,45 @@ import (
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 )
+
+// AdditionalPort represents a single additional port configuration
+type AdditionalPort struct {
+	Name          string `json:"name"`           // User-friendly name for the port (e.g., "BlueMap Web")
+	ContainerPort int    `json:"container_port"` // Port inside the container
+	HostPort      int    `json:"host_port"`      // Port on the host machine
+	Protocol      string `json:"protocol"`       // Protocol: "tcp" or "udp" (defaults to "tcp" if empty)
+}
+
+// DockerOverrides represents user-defined docker container overrides
+type DockerOverrides struct {
+	Environment    map[string]string `json:"environment,omitempty"`     // Additional environment variables
+	Volumes        []VolumeMount     `json:"volumes,omitempty"`         // Additional volume mounts
+	NetworkMode    string            `json:"network_mode,omitempty"`    // Override network mode
+	RestartPolicy  string            `json:"restart_policy,omitempty"`  // Override restart policy
+	CPULimit       float64           `json:"cpu_limit,omitempty"`       // CPU limit (e.g., 1.5 for 1.5 cores)
+	MemoryOverride int64             `json:"memory_override,omitempty"` // Override memory limit in MB
+	Labels         map[string]string `json:"labels,omitempty"`          // Additional labels
+	CapAdd         []string          `json:"cap_add,omitempty"`         // Linux capabilities to add
+	CapDrop        []string          `json:"cap_drop,omitempty"`        // Linux capabilities to drop
+	Devices        []string          `json:"devices,omitempty"`         // Device mappings (e.g., "/dev/ttyUSB0:/dev/ttyUSB0")
+	ExtraHosts     []string          `json:"extra_hosts,omitempty"`     // Extra entries for /etc/hosts
+	Privileged     bool              `json:"privileged,omitempty"`      // Run container in privileged mode
+	ReadOnly       bool              `json:"read_only,omitempty"`       // Mount root filesystem as read-only
+	SecurityOpt    []string          `json:"security_opt,omitempty"`    // Security options
+	ShmSize        int64             `json:"shm_size,omitempty"`        // Size of /dev/shm in bytes
+	User           string            `json:"user,omitempty"`            // User to run commands as
+	WorkingDir     string            `json:"working_dir,omitempty"`     // Working directory inside container
+	Entrypoint     []string          `json:"entrypoint,omitempty"`      // Override default entrypoint
+	Command        []string          `json:"command,omitempty"`         // Override default command
+}
+
+// VolumeMount represents a volume mount configuration
+type VolumeMount struct {
+	Source   string `json:"source"`              // Host path or volume name
+	Target   string `json:"target"`              // Container path
+	ReadOnly bool   `json:"read_only,omitempty"` // Mount as read-only
+	Type     string `json:"type,omitempty"`      // Mount type: "bind" or "volume" (defaults to "bind")
+}
 
 const (
 	// Docker images manifest URL from itzg/docker-minecraft-server repo
@@ -241,6 +281,31 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		minecraftPort = 25565 // Proxy servers always use 25565 internally
 	}
 
+	// Parse additional ports
+	var additionalPorts []AdditionalPort
+	if server.AdditionalPorts != "" {
+		if err := json.Unmarshal([]byte(server.AdditionalPorts), &additionalPorts); err != nil {
+			fmt.Printf("Warning: Failed to parse additional ports: %v\n", err)
+			additionalPorts = []AdditionalPort{}
+		}
+	}
+
+	// Build exposed ports including additional ports
+	exposedPorts := nat.PortSet{
+		nat.Port(fmt.Sprintf("%d/tcp", minecraftPort)): struct{}{},
+		"25575/tcp": struct{}{}, // RCON port
+	}
+
+	// Add additional ports to exposed ports
+	for _, port := range additionalPorts {
+		protocol := port.Protocol
+		if protocol == "" {
+			protocol = "tcp" // Default to TCP if not specified
+		}
+		portKey := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, protocol))
+		exposedPorts[portKey] = struct{}{}
+	}
+
 	config := &container.Config{
 		Image:        imageName,
 		Env:          env,
@@ -249,10 +314,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		AttachStdin:  false,
 		AttachStdout: true,
 		AttachStderr: true,
-		ExposedPorts: nat.PortSet{
-			nat.Port(fmt.Sprintf("%d/tcp", minecraftPort)): struct{}{},
-			"25575/tcp": struct{}{}, // RCON port
-		},
+		ExposedPorts: exposedPorts,
 		Labels: map[string]string{
 			"discopanel.server.id":      server.ID,
 			"discopanel.server.name":    server.Name,
@@ -297,6 +359,22 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	// Set RCON port binding based on proxy configuration
 	if len(rconPortBinding) > 0 {
 		portBindings["25575/tcp"] = rconPortBinding
+	}
+
+	// Add additional port bindings
+	for _, port := range additionalPorts {
+		protocol := port.Protocol
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		portKey := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, protocol))
+		portBindings[portKey] = []nat.PortBinding{
+			{
+				HostIP:   "0.0.0.0",
+				HostPort: fmt.Sprintf("%d", port.HostPort),
+			},
+		}
+		fmt.Printf("Adding additional port: %s - %d:%d/%s\n", port.Name, port.HostPort, port.ContainerPort, protocol)
 	}
 
 	// Handle path translation when DiscoPanel is running in a container
@@ -346,9 +424,128 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		},
 	}
 
+	// Parse and apply docker overrides if present
+	if server.DockerOverrides != "" {
+		var overrides DockerOverrides
+		if err := json.Unmarshal([]byte(server.DockerOverrides), &overrides); err != nil {
+			fmt.Printf("Warning: Failed to parse docker overrides: %v\n", err)
+		} else {
+			// Apply environment variable overrides
+			if len(overrides.Environment) > 0 {
+				for key, value := range overrides.Environment {
+					// Add or override environment variables
+					env = append(env, fmt.Sprintf("%s=%s", key, value))
+				}
+				config.Env = env
+			}
+
+			// Apply additional volume mounts
+			if len(overrides.Volumes) > 0 {
+				for _, vol := range overrides.Volumes {
+					mountType := mount.Type(vol.Type)
+					if mountType == "" {
+						mountType = mount.TypeBind
+					}
+					hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
+						Type:     mountType,
+						Source:   vol.Source,
+						Target:   vol.Target,
+						ReadOnly: vol.ReadOnly,
+					})
+				}
+			}
+
+			// Apply restart policy override
+			if overrides.RestartPolicy != "" {
+				hostConfig.RestartPolicy = container.RestartPolicy{
+					Name: container.RestartPolicyMode(overrides.RestartPolicy),
+				}
+			}
+
+			// Apply resource limits
+			if overrides.CPULimit > 0 {
+				hostConfig.Resources.NanoCPUs = int64(overrides.CPULimit * 1e9) // Convert cores to nanocpus
+			}
+			if overrides.MemoryOverride > 0 {
+				hostConfig.Resources.Memory = overrides.MemoryOverride * 1024 * 1024
+				hostConfig.Resources.MemorySwap = overrides.MemoryOverride * 1024 * 1024
+			}
+
+			// Apply additional labels
+			if len(overrides.Labels) > 0 {
+				maps.Copy(config.Labels, overrides.Labels)
+			}
+
+			// Apply capabilities
+			if len(overrides.CapAdd) > 0 {
+				hostConfig.CapAdd = overrides.CapAdd
+			}
+			if len(overrides.CapDrop) > 0 {
+				hostConfig.CapDrop = overrides.CapDrop
+			}
+
+			// Apply devices
+			if len(overrides.Devices) > 0 {
+				hostConfig.Devices = []container.DeviceMapping{}
+				for _, device := range overrides.Devices {
+					parts := strings.Split(device, ":")
+					if len(parts) >= 2 {
+						hostConfig.Devices = append(hostConfig.Devices, container.DeviceMapping{
+							PathOnHost:        parts[0],
+							PathInContainer:   parts[1],
+							CgroupPermissions: "rwm",
+						})
+					}
+				}
+			}
+
+			// Apply extra hosts
+			if len(overrides.ExtraHosts) > 0 {
+				hostConfig.ExtraHosts = overrides.ExtraHosts
+			}
+
+			// Apply security settings
+			hostConfig.Privileged = overrides.Privileged
+			hostConfig.ReadonlyRootfs = overrides.ReadOnly
+			if len(overrides.SecurityOpt) > 0 {
+				hostConfig.SecurityOpt = overrides.SecurityOpt
+			}
+
+			// Apply SHM size
+			if overrides.ShmSize > 0 {
+				hostConfig.ShmSize = overrides.ShmSize
+			}
+
+			// Apply user
+			if overrides.User != "" {
+				config.User = overrides.User
+			}
+
+			// Apply working directory
+			if overrides.WorkingDir != "" {
+				config.WorkingDir = overrides.WorkingDir
+			}
+
+			// Apply entrypoint
+			if len(overrides.Entrypoint) > 0 {
+				config.Entrypoint = overrides.Entrypoint
+			}
+
+			// Apply command
+			if len(overrides.Command) > 0 {
+				config.Cmd = overrides.Command
+			}
+
+			// Apply network mode override
+			if overrides.NetworkMode != "" {
+				hostConfig.NetworkMode = container.NetworkMode(overrides.NetworkMode)
+			}
+		}
+	}
+
 	// Network configuration - use custom network if available
 	networkConfig := &network.NetworkingConfig{}
-	if c.config.NetworkName != "" {
+	if c.config.NetworkName != "" && hostConfig.NetworkMode == "" {
 		networkConfig.EndpointsConfig = map[string]*network.EndpointSettings{
 			c.config.NetworkName: {},
 		}

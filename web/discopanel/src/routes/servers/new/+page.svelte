@@ -17,6 +17,9 @@
 	import type { CreateServerRequest, ModLoader, MinecraftVersion, ModLoaderInfo, DockerImageInfo, IndexedModpack } from '$lib/api/types';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
+	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
+	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
+	import type { AdditionalPort, DockerOverrides } from '$lib/api/types';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
@@ -53,7 +56,9 @@
 		start_immediately: false,
 		proxy_hostname: '',
 		proxy_listener_id: '',
-		use_base_url: false
+		use_base_url: false,
+		additional_ports: [],
+		docker_overrides: undefined
 	});
 
 	onMount(async () => {
@@ -731,6 +736,15 @@
 
 					<Separator />
 
+					<AdditionalPortsEditor
+						bind:ports={formData.additional_ports}
+						disabled={loading}
+						usedPorts={usedPorts}
+						onchange={(ports) => formData.additional_ports = ports}
+					/>
+
+					<Separator />
+
 					<div class="space-y-2">
 						<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
 						<Select type="single" value={formData.docker_image} onValueChange={(v: string | undefined) => formData.docker_image = v ?? ''} disabled={loading || loadingVersions}>
@@ -823,6 +837,15 @@
 					</div>
 				</CardContent>
 			</Card>
+
+			<!-- Docker Overrides - Advanced Configuration -->
+			<div class="lg:col-span-2">
+				<DockerOverridesEditor
+					bind:overrides={formData.docker_overrides}
+					disabled={loading}
+					onchange={(overrides) => formData.docker_overrides = overrides}
+				/>
+			</div>
 		</div>
 
 		<div class="flex justify-end gap-3 mt-8">

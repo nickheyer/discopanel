@@ -87,6 +87,8 @@ type Server struct {
 	Detached        bool         `json:"detached" gorm:"default:false;column:detached"`     // Detach server container from DiscoPanel lifecycle (default: false)
 	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
 	TPSCommand      string       `json:"tps_command" gorm:"column:tps_command"`             // The TPS command for this server (empty if not supported)
+	AdditionalPorts string       `json:"additional_ports" gorm:"column:additional_ports"`   // JSON array of additional port configurations
+	DockerOverrides string       `json:"docker_overrides" gorm:"column:docker_overrides;type:text"` // JSON object with docker container overrides
 
 	// Runtime stats (not persisted to DB)
 	MemoryUsage   float64 `json:"memory_usage" gorm:"-"`   // Current memory usage in MB

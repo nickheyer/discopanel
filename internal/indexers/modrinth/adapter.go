@@ -9,15 +9,15 @@ import (
 	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
-// Ensure ModrinthIndexer implements ModpackIndexer
+// Implements ModpackIndexer
 var _ indexers.ModpackIndexer = (*ModrinthIndexer)(nil)
 
-// ModrinthIndexer adapts the Modrinth client to the ModpackIndexer interface
+// Adapts the Modrinth client to the ModpackIndexer interface
 type ModrinthIndexer struct {
 	client *Client
 }
 
-// NewIndexer creates a new Modrinth indexer
+// Creates a new Modrinth indexer
 // Note: Modrinth API does not require an API key for public operations
 func NewIndexer() *ModrinthIndexer {
 	return &ModrinthIndexer{
@@ -25,12 +25,12 @@ func NewIndexer() *ModrinthIndexer {
 	}
 }
 
-// GetIndexerName returns the name of this indexer
+// Get the name of this indexer
 func (m *ModrinthIndexer) GetIndexerName() string {
 	return "modrinth"
 }
 
-// SearchModpacks searches for modpacks
+// Search for modpacks
 func (m *ModrinthIndexer) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*indexers.SearchResult, error) {
 	// Search using Modrinth API
 	resp, err := m.client.SearchModpacks(ctx, query, gameVersion, modLoader, offset, limit)
@@ -52,7 +52,7 @@ func (m *ModrinthIndexer) SearchModpacks(ctx context.Context, query string, game
 	}, nil
 }
 
-// GetModpack retrieves a specific modpack
+// Get a specific modpack
 func (m *ModrinthIndexer) GetModpack(ctx context.Context, modpackID string) (*indexers.Modpack, error) {
 	// Get full project details
 	project, err := m.client.GetModpack(ctx, modpackID)
@@ -64,7 +64,7 @@ func (m *ModrinthIndexer) GetModpack(ctx context.Context, modpackID string) (*in
 	return &result, nil
 }
 
-// GetModpackFiles retrieves files for a modpack
+// Get files for a modpack
 func (m *ModrinthIndexer) GetModpackFiles(ctx context.Context, modpackID string) ([]indexers.ModpackFile, error) {
 	versions, err := m.client.GetModpackVersions(ctx, modpackID)
 	if err != nil {
@@ -73,8 +73,9 @@ func (m *ModrinthIndexer) GetModpackFiles(ctx context.Context, modpackID string)
 
 	// Convert Modrinth versions to generic files
 	// Each version can have multiple files, but we treat the primary file as the main one
+	// IMPORTANT: Modrinth API returns versions in newest-first order, we preserve this ordering
 	result := make([]indexers.ModpackFile, 0, len(versions))
-	for _, version := range versions {
+	for versionIndex, version := range versions {
 		if len(version.Files) > 0 {
 			// Find primary file or use first one
 			var primaryFile *File
@@ -88,14 +89,16 @@ func (m *ModrinthIndexer) GetModpackFiles(ctx context.Context, modpackID string)
 				primaryFile = &version.Files[0]
 			}
 
-			result = append(result, m.convertVersionToFile(version, *primaryFile, modpackID))
+			file := m.convertVersionToFile(version, *primaryFile, modpackID)
+			file.SortIndex = versionIndex
+			result = append(result, file)
 		}
 	}
 
 	return result, nil
 }
 
-// convertSearchProject converts a Modrinth search project to a generic modpack
+// Converts a Modrinth search project to a generic modpack
 func (m *ModrinthIndexer) convertSearchProject(project Project) indexers.Modpack {
 	// Parse dates
 	dateCreated, _ := time.Parse(time.RFC3339, project.DateCreated)
@@ -137,7 +140,7 @@ func (m *ModrinthIndexer) convertSearchProject(project Project) indexers.Modpack
 	}
 }
 
-// convertProject converts a full Modrinth project to a generic modpack
+// Converts a full Modrinth project to a generic modpack
 func (m *ModrinthIndexer) convertProject(project ProjectDetails) indexers.Modpack {
 	// Parse dates
 	dateCreated, _ := time.Parse(time.RFC3339, project.Published)
@@ -189,7 +192,7 @@ func (m *ModrinthIndexer) convertProject(project ProjectDetails) indexers.Modpac
 	}
 }
 
-// convertVersionToFile converts a Modrinth version to a generic modpack file
+// Converts a Modrinth version to a generic modpack file
 func (m *ModrinthIndexer) convertVersionToFile(version Version, file File, modpackID string) indexers.ModpackFile {
 	// Parse date
 	fileDate, _ := time.Parse(time.RFC3339, version.DatePublished)
@@ -225,5 +228,6 @@ func (m *ModrinthIndexer) convertVersionToFile(version Version, file File, modpa
 		GameVersions:     version.GameVersions,
 		ModLoader:        modLoader,
 		ServerPackFileID: serverPackID,
+		VersionNumber:    version.VersionNumber, // Use human-readable version number
 	}
 }

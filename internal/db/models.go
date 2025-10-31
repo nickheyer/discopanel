@@ -275,10 +275,17 @@ type ServerConfig struct {
 	// Modrinth
 	ModrinthModpack                    *string `json:"modrinthModpack" env:"MODRINTH_MODPACK" default:"" desc:"Modrinth modpack project slug, ID, URL, or local mrpack file path" input:"text" label:"Modrinth Modpack"`
 	ModrinthModpackVersionType         *string `json:"modrinthModpackVersionType" env:"MODRINTH_MODPACK_VERSION_TYPE" default:"release" desc:"Version type for modpack (release, beta, alpha)" input:"select" label:"Modrinth Modpack Version Type"`
-	ModrinthProjects                   *string `json:"modrinthProjects" env:"MODRINTH_PROJECTS" default:"" desc:"Comma, newline, or @file list of Modrinth project slugs or IDs" input:"textarea" label:"Modrinth Projects"`
+	ModrinthVersion                    *string `json:"modrinthVersion" env:"MODRINTH_VERSION" default:"" desc:"Specific version ID or number from the Metadata section" input:"text" label:"Modrinth Version"`
+	ModrinthLoader                     *string `json:"modrinthLoader" env:"MODRINTH_LOADER" default:"" desc:"Mod loader for narrowing versions (forge, fabric, quilt)" input:"select" label:"Modrinth Loader"`
+	ModrinthIgnoreMissingFiles         *string `json:"modrinthIgnoreMissingFiles" env:"MODRINTH_IGNORE_MISSING_FILES" default:"" desc:"Comma or newline delimited list of files to ignore if missing" input:"text" label:"Ignore Missing Files"`
+	ModrinthExcludeFiles               *string `json:"modrinthExcludeFiles" env:"MODRINTH_EXCLUDE_FILES" default:"" desc:"Comma or newline delimited list of partial file names to exclude" input:"text" label:"Exclude Files"`
+	ModrinthForceIncludeFiles          *string `json:"modrinthForceIncludeFiles" env:"MODRINTH_FORCE_INCLUDE_FILES" default:"" desc:"Comma or newline delimited list of partial file names to force include" input:"text" label:"Force Include Files"`
+	ModrinthForceSynchronize           *bool   `json:"modrinthForceSynchronize" env:"MODRINTH_FORCE_SYNCHRONIZE" default:"false" desc:"Force re-evaluation of excludes/includes" input:"checkbox" label:"Force Synchronize"`
+	ModrinthDefaultExcludeIncludes     *string `json:"modrinthDefaultExcludeIncludes" env:"MODRINTH_DEFAULT_EXCLUDE_INCLUDES" default:"" desc:"Set to empty string to disable default exclude/includes" input:"text" label:"Default Exclude/Includes"`
+	ModrinthOverridesExclusions        *string `json:"modrinthOverridesExclusions" env:"MODRINTH_OVERRIDES_EXCLUSIONS" default:"" desc:"Comma or newline delimited list of ant-style paths to exclude from overrides" input:"text" label:"Overrides Exclusions"`
+	ModrinthProjects                   *string `json:"modrinthProjects" env:"MODRINTH_PROJECTS" default:"" desc:"Comma, newline, or @file list of Modrinth project slugs or IDs" input:"text" label:"Modrinth Projects"`
 	ModrinthDownloadDependencies       *string `json:"modrinthDownloadDependencies" env:"MODRINTH_DOWNLOAD_DEPENDENCIES" default:"none" desc:"Dependency download mode (none, required, optional)" input:"select" label:"Modrinth Download Dependencies"`
 	ModrinthProjectsDefaultVersionType *string `json:"modrinthProjectsDefaultVersionType" env:"MODRINTH_PROJECTS_DEFAULT_VERSION_TYPE" default:"release" desc:"Default version type to select (release, beta, alpha)" input:"select" label:"Modrinth Default Version Type"`
-	ModrinthLoader                     *string `json:"modrinthLoader" env:"MODRINTH_LOADER" default:"" desc:"Custom loader type for Modrinth lookups (e.g. fabric, forge, paper)" input:"text" label:"Modrinth Loader"`
 	VersionFromModrinthProjects        *bool   `json:"versionFromModrinthProjects" env:"VERSION_FROM_MODRINTH_PROJECTS" default:"false" desc:"Automatically set VERSION from Modrinth project compatibility" input:"checkbox" label:"Version From Modrinth Projects"`
 }
 

@@ -342,6 +342,10 @@ func buildConfigCategories(config any) []ConfigCategory {
 				prop.Options = []string{"none", "required", "optional"}
 			case "modrinthProjectsDefaultVersionType":
 				prop.Options = []string{"release", "beta", "alpha"}
+			case "modrinthModpackVersionType":
+				prop.Options = []string{"release", "beta", "alpha"}
+			case "modrinthLoader":
+				prop.Options = []string{"forge", "fabric", "quilt"}
 			}
 		}
 
@@ -437,8 +441,11 @@ func getCategoryIndex(key string) int {
 		return 11
 
 	// Modrinth (12)
-	case "modrinthModpack", "modrinthProjects", "modrinthDownloadDependencies", "modrinthProjectsDefaultVersionType",
-		"modrinthLoader", "versionFromModrinthProjects":
+	case "modrinthModpack", "modrinthModpackVersionType", "modrinthVersion", "modrinthLoader",
+		"modrinthIgnoreMissingFiles", "modrinthExcludeFiles", "modrinthForceIncludeFiles",
+		"modrinthForceSynchronize", "modrinthDefaultExcludeIncludes", "modrinthOverridesExclusions",
+		"modrinthProjects", "modrinthDownloadDependencies", "modrinthProjectsDefaultVersionType",
+		"versionFromModrinthProjects":
 		return 12
 
 	default:

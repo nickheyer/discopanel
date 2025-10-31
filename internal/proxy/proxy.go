@@ -221,13 +221,26 @@ func (p *Proxy) handleConnection(clientConn net.Conn) {
 
 	// Modify handshake packet to use backend's expected hostname
 	// For Forge servers, we need to preserve any FML data in the address field
-	// The address field may contain: hostname\0FML\0<mod_data>
+	// The address field may contain: hostname\0FML\0<mod_data> or hostname\0FML2\0<mod_data> or hostname\0FML3\0<mod_data>
 	addressParts := strings.Split(handshake.ServerAddress, "\x00")
 	if len(addressParts) > 1 {
-		// Forge client - preserve FML data but change hostname
+		// Forge client detected - preserve all FML protocol data
+		originalHost := addressParts[0]
 		addressParts[0] = "localhost"
+
+		// Check for FML protocol version
+		if len(addressParts) >= 2 {
+			fmlVersion := addressParts[1]
+			p.logger.Debug("Forge handshake detected - FML version: %s, original host: %s", fmlVersion, originalHost)
+
+			// For FML2 and FML3, there may be additional mod data we must preserve
+			if len(addressParts) > 2 {
+				p.logger.Debug("Additional FML data segments: %d", len(addressParts)-2)
+			}
+		}
+
+		// Reconstruct the address with all FML data intact
 		handshake.ServerAddress = strings.Join(addressParts, "\x00")
-		p.logger.Debug("Forge handshake detected, preserving FML data")
 	} else {
 		// Vanilla client - just change hostname
 		handshake.ServerAddress = "localhost"

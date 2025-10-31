@@ -171,7 +171,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		if req.MCVersion == "" {
 			var gameVersions []string
 			if err := json.Unmarshal([]byte(modpack.GameVersions), &gameVersions); err == nil && len(gameVersions) > 0 {
-				req.MCVersion = gameVersions[0]
+				req.MCVersion = findMostRecentMinecraftVersion(gameVersions) // Use the most recent MC version
 			}
 		}
 
@@ -393,17 +393,23 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 				serverConfig.CFPageURL = &modpackURL
 			}
 		} else if modpack != nil && modpack.Indexer == "modrinth" {
-			projectSpec := modpack.IndexerID
-			if req.ModpackVersionID != "" {
+			var projectSpec string // For Modrinth, use projectID alone for latest, or projectID:versionID
+			if req.ModpackVersionID != "" && req.ModpackVersionID != "latest" {
 				projectSpec = fmt.Sprintf("%s:%s", modpack.IndexerID, req.ModpackVersionID)
+				s.log.Info("Using specific Modrinth version: %s", projectSpec)
+			} else { // Use latest
+				projectSpec = modpack.IndexerID
+				s.log.Info("Using latest Modrinth version for project: %s", projectSpec)
 			}
 			serverConfig.ModrinthModpack = &projectSpec
-
 			downloadDeps := "required"
 			serverConfig.ModrinthDownloadDependencies = &downloadDeps
 
-			versionType := "release"
-			serverConfig.ModrinthModpackVersionType = &versionType
+			// Only set version type when using latest (no specific version)
+			if req.ModpackVersionID == "" || req.ModpackVersionID == "latest" {
+				versionType := "release"
+				serverConfig.ModrinthModpackVersionType = &versionType
+			}
 		}
 
 		// Ensure config is updated with proper settings
@@ -680,17 +686,24 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 				server.ModLoader = models.ModLoaderModrinth
 				needsRecreation = true
 
-				projectSpec := modpack.IndexerID
-				if req.ModpackVersionID != "" {
+				var projectSpec string
+				if req.ModpackVersionID != "" && req.ModpackVersionID != "latest" {
 					projectSpec = fmt.Sprintf("%s:%s", modpack.IndexerID, req.ModpackVersionID)
+					s.log.Info("Updating server with specific Modrinth version: %s", projectSpec)
+				} else {
+					projectSpec = modpack.IndexerID
+					s.log.Info("Updating server with latest Modrinth version for project: %s", projectSpec)
 				}
 				serverConfig.ModrinthModpack = &projectSpec
 
 				downloadDeps := "required"
 				serverConfig.ModrinthDownloadDependencies = &downloadDeps
 
-				versionType := "release"
-				serverConfig.ModrinthModpackVersionType = &versionType
+				// Only set version type when using latest (no specific version)
+				if req.ModpackVersionID == "" || req.ModpackVersionID == "latest" {
+					versionType := "release"
+					serverConfig.ModrinthModpackVersionType = &versionType
+				}
 			}
 
 			// Update server config

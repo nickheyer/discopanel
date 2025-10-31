@@ -9,15 +9,15 @@ import (
 	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
-// Ensure FuegoIndexer implements ModpackIndexer
+// Implements ModpackIndexer
 var _ indexers.ModpackIndexer = (*FuegoIndexer)(nil)
 
-// FuegoIndexer adapts the Fuego client to the ModpackIndexer interface
+// Adapts the Fuego client to the ModpackIndexer interface
 type FuegoIndexer struct {
 	client *Client
 }
 
-// NewIndexer creates a new Fuego indexer
+// Creates a new Fuego indexer
 func NewIndexer(apiKey string) *FuegoIndexer {
 	return &FuegoIndexer{
 		client: NewClient(apiKey),
@@ -29,7 +29,7 @@ func (f *FuegoIndexer) GetIndexerName() string {
 	return "fuego"
 }
 
-// SearchModpacks searches for modpacks
+// Search for modpacks
 func (f *FuegoIndexer) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*indexers.SearchResult, error) {
 	// Convert mod loader string to Fuego type
 	modLoaderType := ModLoaderAny
@@ -67,7 +67,7 @@ func (f *FuegoIndexer) SearchModpacks(ctx context.Context, query string, gameVer
 	}, nil
 }
 
-// GetModpack retrieves a specific modpack
+// Get a specific modpack
 func (f *FuegoIndexer) GetModpack(ctx context.Context, modpackID string) (*indexers.Modpack, error) {
 	// Convert string ID to int
 	id, err := strconv.Atoi(modpackID)
@@ -84,7 +84,7 @@ func (f *FuegoIndexer) GetModpack(ctx context.Context, modpackID string) (*index
 	return &result, nil
 }
 
-// GetModpackFiles retrieves files for a modpack
+// Get files for a modpack
 func (f *FuegoIndexer) GetModpackFiles(ctx context.Context, modpackID string) ([]indexers.ModpackFile, error) {
 	// Convert string ID to int
 	id, err := strconv.Atoi(modpackID)
@@ -100,13 +100,15 @@ func (f *FuegoIndexer) GetModpackFiles(ctx context.Context, modpackID string) ([
 	// Convert Fuego files to generic files
 	result := make([]indexers.ModpackFile, len(files))
 	for i, file := range files {
-		result[i] = f.convertFile(file, modpackID)
+		converted := f.convertFile(file, modpackID)
+		converted.SortIndex = i
+		result[i] = converted
 	}
 
 	return result, nil
 }
 
-// convertModpack converts a Fuego modpack to a generic modpack
+// Convert a Fuego modpack to a generic modpack
 func (f *FuegoIndexer) convertModpack(fm Modpack) indexers.Modpack {
 	// Extract categories
 	categories := make([]string, len(fm.Categories))
@@ -117,11 +119,11 @@ func (f *FuegoIndexer) convertModpack(fm Modpack) indexers.Modpack {
 	// Extract game versions and mod loaders from files
 	gameVersions := []string{}
 	modLoaders := []string{}
-	
+
 	for _, file := range fm.LatestFiles {
 		gameVersions = append(gameVersions, file.GameVersions...)
 	}
-	
+
 	for _, fileIndex := range fm.LatestFilesIndexes {
 		if fileIndex.ModLoader != nil {
 			switch *fileIndex.ModLoader {
@@ -147,27 +149,27 @@ func (f *FuegoIndexer) convertModpack(fm Modpack) indexers.Modpack {
 	}
 
 	return indexers.Modpack{
-		ID:              fmt.Sprintf("fuego-%d", fm.ID),
-		IndexerID:       strconv.Itoa(fm.ID),
-		Indexer:         "fuego",
-		Name:            fm.Name,
-		Slug:            fm.Slug,
-		Summary:         fm.Summary,
-		Description:     fm.Summary, // Fuego doesn't provide separate description in search
-		LogoURL:         logoURL,
-		WebsiteURL:      fm.Links.WebsiteURL,
-		DownloadCount:   int64(fm.DownloadCount),
-		Categories:      categories,
-		GameVersions:    gameVersions,
-		ModLoaders:      modLoaders,
-		LatestFileID:    strconv.Itoa(fm.MainFileID),
-		DateCreated:     fm.DateCreated,
-		DateModified:    fm.DateModified,
-		DateReleased:    fm.DateReleased,
+		ID:            fmt.Sprintf("fuego-%d", fm.ID),
+		IndexerID:     strconv.Itoa(fm.ID),
+		Indexer:       "fuego",
+		Name:          fm.Name,
+		Slug:          fm.Slug,
+		Summary:       fm.Summary,
+		Description:   fm.Summary, // Fuego doesn't provide separate description in search
+		LogoURL:       logoURL,
+		WebsiteURL:    fm.Links.WebsiteURL,
+		DownloadCount: int64(fm.DownloadCount),
+		Categories:    categories,
+		GameVersions:  gameVersions,
+		ModLoaders:    modLoaders,
+		LatestFileID:  strconv.Itoa(fm.MainFileID),
+		DateCreated:   fm.DateCreated,
+		DateModified:  fm.DateModified,
+		DateReleased:  fm.DateReleased,
 	}
 }
 
-// convertFile converts a Fuego file to a generic file
+// Converts a Fuego file to a generic file
 func (f *FuegoIndexer) convertFile(file File, modpackID string) indexers.ModpackFile {
 	// Determine release type
 	releaseType := "release"
@@ -211,13 +213,13 @@ func (f *FuegoIndexer) convertFile(file File, modpackID string) indexers.Modpack
 func deduplicateStrings(strings []string) []string {
 	seen := make(map[string]bool)
 	result := []string{}
-	
+
 	for _, str := range strings {
 		if !seen[str] {
 			seen[str] = true
 			result = append(result, str)
 		}
 	}
-	
+
 	return result
 }

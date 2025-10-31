@@ -9,13 +9,13 @@ import (
 type ModpackIndexer interface {
 	// SearchModpacks searches for modpacks with the given criteria
 	SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*SearchResult, error)
-	
+
 	// GetModpack retrieves detailed information about a specific modpack
 	GetModpack(ctx context.Context, modpackID string) (*Modpack, error)
-	
+
 	// GetModpackFiles retrieves all available files for a modpack
 	GetModpackFiles(ctx context.Context, modpackID string) ([]ModpackFile, error)
-	
+
 	// GetIndexerName returns the name of this indexer (e.g., "fuego", "modrinth")
 	GetIndexerName() string
 }
@@ -30,23 +30,23 @@ type SearchResult struct {
 
 // Modpack represents a modpack from any indexer
 type Modpack struct {
-	ID              string    `json:"id"`
-	IndexerID       string    `json:"indexer_id"` // Original ID from the indexer
-	Indexer         string    `json:"indexer"`    // Which indexer this came from
-	Name            string    `json:"name"`
-	Slug            string    `json:"slug"`
-	Summary         string    `json:"summary"`
-	Description     string    `json:"description"`
-	LogoURL         string    `json:"logo_url"`
-	WebsiteURL      string    `json:"website_url"`
-	DownloadCount   int64     `json:"download_count"`
-	Categories      []string  `json:"categories"`
-	GameVersions    []string  `json:"game_versions"`
-	ModLoaders      []string  `json:"mod_loaders"`
-	LatestFileID    string    `json:"latest_file_id"`
-	DateCreated     time.Time `json:"date_created"`
-	DateModified    time.Time `json:"date_modified"`
-	DateReleased    time.Time `json:"date_released"`
+	ID            string    `json:"id"`
+	IndexerID     string    `json:"indexer_id"` // Original ID from the indexer
+	Indexer       string    `json:"indexer"`    // Which indexer this came from
+	Name          string    `json:"name"`
+	Slug          string    `json:"slug"`
+	Summary       string    `json:"summary"`
+	Description   string    `json:"description"`
+	LogoURL       string    `json:"logo_url"`
+	WebsiteURL    string    `json:"website_url"`
+	DownloadCount int64     `json:"download_count"`
+	Categories    []string  `json:"categories"`
+	GameVersions  []string  `json:"game_versions"`
+	ModLoaders    []string  `json:"mod_loaders"`
+	LatestFileID  string    `json:"latest_file_id"`
+	DateCreated   time.Time `json:"date_created"`
+	DateModified  time.Time `json:"date_modified"`
+	DateReleased  time.Time `json:"date_released"`
 }
 
 // ModpackFile represents a downloadable file for a modpack
@@ -62,4 +62,6 @@ type ModpackFile struct {
 	GameVersions     []string  `json:"game_versions"`
 	ModLoader        string    `json:"mod_loader"`
 	ServerPackFileID *string   `json:"server_pack_file_id,omitempty"`
+	SortIndex        int       `json:"sort_index"`
+	VersionNumber    string    `json:"version_number"` // Human-readable version for Modrinth
 }

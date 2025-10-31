@@ -22,6 +22,32 @@ import (
 	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
 )
 
+type Version struct {
+	ID            string    `json:"id"`
+	DisplayName   string    `json:"display_name"`
+	ReleaseType   string    `json:"release_type"`
+	FileDate      time.Time `json:"file_date"`
+	SortIndex     int       `json:"sort_index"`
+	VersionNumber string    `json:"version_number"` // Human-readable version for Modrinth
+}
+
+// Iterates from the end of the list backwards to find latest mc semver (no prefix/suffix/alpha, ie: 1.12.0)
+func findMostRecentMinecraftVersion(versions []string) string {
+	for i := len(versions) - 1; i >= 0; i-- {
+		hasLetter := false
+		for _, ch := range versions[i] {
+			if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
+				hasLetter = true
+				break
+			}
+		}
+		if !hasLetter {
+			return versions[i]
+		}
+	}
+	return versions[len(versions)-1] // But return last because obviously we dont have a choice now
+}
+
 func (s *Server) handleSearchModpacks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -135,15 +161,8 @@ func (s *Server) handleSyncModpacks(w http.ResponseWriter, r *http.Request) {
 		gameVersionsJSON, _ := json.Marshal(modpack.GameVersions)
 		modLoadersJSON, _ := json.Marshal(modpack.ModLoaders)
 
-		// Find the actual Minecraft version from the game versions list
-		mcVersion := ""
-		for _, version := range modpack.GameVersions {
-			// Check if it's a valid Minecraft version (starts with digit)
-			if len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
-				mcVersion = version
-				break
-			}
-		}
+		// Find the most recent Minecraft version from the game versions list
+		mcVersion := findMostRecentMinecraftVersion(modpack.GameVersions)
 
 		modLoader := models.ModLoaderVanilla
 		if len(modpack.ModLoaders) > 0 {
@@ -405,8 +424,10 @@ func (s *Server) handleGetModpackVersions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// For CurseForge modpacks, call the API directly
-	if modpack.Indexer == "fuego" {
+	// Get appropriate indexer client
+	var indexerClient indexers.ModpackIndexer
+	switch modpack.Indexer {
+	case "fuego":
 		// Get API key from global settings
 		globalSettings, _, err := s.store.GetGlobalSettings(ctx)
 		if err != nil || globalSettings == nil {
@@ -422,62 +443,48 @@ func (s *Server) handleGetModpackVersions(w http.ResponseWriter, r *http.Request
 			s.respondError(w, http.StatusBadRequest, "CurseForge API key not configured")
 			return
 		}
-
-		// Call the CurseForge API to get files
-		client := fuego.NewClient(apiKey)
-		modID, err := strconv.Atoi(modpack.IndexerID)
-		if err != nil {
-			s.respondError(w, http.StatusBadRequest, "Invalid modpack ID")
-			return
-		}
-
-		files, err := client.GetModpackFiles(ctx, modID)
-		if err != nil {
-			s.log.Error("Failed to get modpack files from CurseForge: %v", err)
-			s.respondError(w, http.StatusInternalServerError, "Failed to get modpack versions")
-			return
-		}
-
-		// Format the response
-		type Version struct {
-			ID          string    `json:"id"`
-			DisplayName string    `json:"display_name"`
-			ReleaseType string    `json:"release_type"`
-			FileDate    time.Time `json:"file_date"`
-		}
-
-		versions := make([]Version, 0, len(files))
-		for _, file := range files {
-			releaseType := "release"
-			switch file.ReleaseType {
-			case 2:
-				releaseType = "beta"
-			case 3:
-				releaseType = "alpha"
-			}
-
-			versions = append(versions, Version{
-				ID:          strconv.Itoa(file.ID),
-				DisplayName: file.DisplayName,
-				ReleaseType: releaseType,
-				FileDate:    file.FileDate,
-			})
-		}
-
-		// Sort by date (newest first)
-		sort.Slice(versions, func(i, j int) bool {
-			return versions[i].FileDate.After(versions[j].FileDate)
-		})
-
+		indexerClient = fuego.NewIndexer(apiKey)
+	case "modrinth":
+		indexerClient = modrinth.NewIndexer()
+	case "manual":
+		// For manual modpacks, return empty list
 		s.respondJSON(w, http.StatusOK, map[string]any{
-			"versions": versions,
+			"versions": []any{},
 		})
+		return
+	default:
+		s.respondError(w, http.StatusBadRequest, "Unknown indexer: "+modpack.Indexer)
 		return
 	}
 
-	// For other indexers or manual modpacks, return empty list
+	// Get files from the indexer
+	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerID)
+	if err != nil {
+		s.log.Error("Failed to get modpack files from %s: %v", modpack.Indexer, err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to get modpack versions")
+		return
+	}
+
+	// Convert files to versions
+	versions := make([]Version, 0, len(files))
+	for _, file := range files {
+		versions = append(versions, Version{
+			ID:            file.ID,
+			DisplayName:   file.DisplayName,
+			ReleaseType:   file.ReleaseType,
+			FileDate:      file.FileDate,
+			SortIndex:     file.SortIndex,
+			VersionNumber: file.VersionNumber,
+		})
+	}
+
+	// Sort by SortIndex to maintain API order (lower index = newer version)
+	sort.Slice(versions, func(i, j int) bool {
+		return versions[i].SortIndex < versions[j].SortIndex
+	})
+
 	s.respondJSON(w, http.StatusOK, map[string]any{
-		"versions": []any{},
+		"versions": versions,
 	})
 }
 

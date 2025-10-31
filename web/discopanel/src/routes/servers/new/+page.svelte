@@ -233,10 +233,16 @@
 		loading = true;
 		try {
 			// Add modpack ID and version to the request if selected
+			// For Modrinth, we need to send version_number instead of ID for better compatibility
+			const selectedVersion = modpackVersions.find(v => v.id === selectedVersionId);
+			const versionToSend = selectedModpack?.indexer === 'modrinth' && selectedVersion?.version_number
+				? selectedVersion.version_number
+				: selectedVersionId;
+
 			const createRequest = {
 				...formData,
 				modpack_id: selectedModpack?.id || '',
-				modpack_version_id: selectedVersionId || '',
+				modpack_version_id: versionToSend || '',
 				// When using proxy with hostname, set port to 0 to indicate proxy usage
 				port: useProxyMode ? 0 : formData.port
 			};

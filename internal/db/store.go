@@ -237,11 +237,7 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 	intPtr := func(i int) *int { return &i }
 	config.Type = stringPtr(string(server.ModLoader))
 	config.Version = stringPtr(server.MCVersion)
-	if server.ProxyPort != 0 && server.ProxyHostname != "" {
-		config.ServerPort = intPtr(0)
-	} else {
-		config.ServerPort = intPtr(server.Port)
-	}
+	config.ServerPort = intPtr(server.Port)
 
 	return s.SaveServerConfig(ctx, config)
 }

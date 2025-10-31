@@ -194,7 +194,6 @@ func (p *Proxy) handleConnection(clientConn net.Conn) {
 		p.logger.Debug("Null byte(s) detected, trimmed suffix null termination: %s\n", hostname)
 	}
 
-
 	// Find the route
 	p.routesMutex.RLock()
 	route, exists := p.routes[hostname]
@@ -202,6 +201,12 @@ func (p *Proxy) handleConnection(clientConn net.Conn) {
 
 	if !exists || !route.Active {
 		p.logger.Debug("No active route found for hostname: %s", hostname)
+		p.routesMutex.RLock()
+		p.logger.Debug("Available routes:")
+		for r := range p.routes {
+			p.logger.Debug("%s", r)
+		}
+		p.routesMutex.RUnlock()
 		return
 	}
 

@@ -156,7 +156,7 @@ type ServerConfig struct {
 	OnlineMode                     *bool   `json:"onlineMode" env:"ONLINE_MODE" default:"true" desc:"Authenticate players against Minecraft account database" input:"checkbox" label:"Online Mode"`
 	AllowFlight                    *bool   `json:"allowFlight" env:"ALLOW_FLIGHT" default:"false" desc:"Allow flight in survival mode with mods" input:"checkbox" label:"Allow Flight"`
 	ServerName                     *string `json:"serverName" env:"SERVER_NAME" default:"" desc:"The server name" input:"text" label:"Server Name"`
-	ServerPort                     *int    `json:"serverPort" env:"SERVER_PORT" default:"0" desc:"Server port (only change if using host networking)" input:"number" label:"Server Port" system:"true"`
+	ServerPort                     *int    `json:"serverPort" env:"SERVER_PORT" default:"25565" desc:"Server port (only change if using host networking)" input:"number" label:"Server Port" system:"true"`
 	PlayerIdleTimeout              *int    `json:"playerIdleTimeout" env:"PLAYER_IDLE_TIMEOUT" default:"0" desc:"Player idle timeout" input:"number" label:"Player Idle Timeout"`
 	SyncChunkWrites                *bool   `json:"syncChunkWrites" env:"SYNC_CHUNK_WRITES" default:"false" desc:"Sync chunk writes" input:"checkbox" label:"Sync Chunk Writes"`
 	EnableStatus                   *bool   `json:"enableStatus" env:"ENABLE_STATUS" default:"false" desc:"Enable server status" input:"checkbox" label:"Enable Status"`

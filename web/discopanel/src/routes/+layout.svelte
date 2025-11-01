@@ -36,7 +36,7 @@
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
-	import { Server, Home, Settings, Package, User, Users, Shield, LogOut } from '@lucide/svelte';
+	import { Server, Home, Settings, Package, User, Users, LogOut } from '@lucide/svelte';
 
 	let { children } = $props();
 
@@ -56,52 +56,53 @@
 		await authStore.logout();
 	}
 
-	onMount(async () => {
-		const authStatus = await authStore.checkAuthStatus();
-		loading = false;
-		if (authStatus.enabled) {
-			if (authStatus.firstUserSetup) {
-				goto('/login');
-				return;
-			}
-			const isValid = await authStore.validateSession();
-			if (!isValid) {
-				goto('/login');
-				return;
-			}
-		}
-
-		// Fetch servers after auth check (show loading for initial load)
-		if (page.url.pathname !== '/login') {
-			await serversStore.fetchServers(false);
-		}
-	});
-	
-	// Set up global status polling - always poll all servers
 	let statusPollingInterval: ReturnType<typeof setInterval> | null = null;
-	
-	$effect(() => {
-		// Clean up previous interval
-		if (statusPollingInterval) {
-			clearInterval(statusPollingInterval);
-			statusPollingInterval = null;
-		}
-		
-		// Always poll for all servers to keep sidebar in sync
-		if (!loading) {
-			statusPollingInterval = setInterval(() => {
-				if (page.url.pathname !== '/login') {
-					serversStore.fetchServers(true);
+
+	onMount(() => {
+		return new Promise((resolve, reject) => {
+			authStore.checkAuthStatus().then(async (authStatus) => {
+				loading = false;
+				if (authStatus.enabled) {
+					if (authStatus.firstUserSetup) {
+						goto('/login');
+						return;
+					}
+					const isValid = await authStore.validateSession();
+					if (!isValid) {
+						goto('/login');
+						return;
+					}
 				}
-			}, 10000);
-		}
-		
-		return () => {
-			if (statusPollingInterval) {
-				clearInterval(statusPollingInterval);
-				statusPollingInterval = null;
-			}
-		};
+			}).then(() => {
+				// Fetch servers immediately after auth check
+				if (page.url.pathname !== '/login') {
+					// Start fetching without awaiting - reduces perceived load time
+					serversStore.fetchServers(false).catch(err => {
+						console.error('Failed to fetch initial servers:', err);
+					});
+
+					// Start polling immediately, don't wait for first fetch to complete
+					if (!statusPollingInterval) {
+						statusPollingInterval = setInterval(() => {
+							if (page.url.pathname !== '/login') {
+								serversStore.fetchServers(true);
+							}
+						}, 10000);
+					}
+				}
+
+				// Clean up on unmount
+				resolve(() => {
+					if (statusPollingInterval) {
+						clearInterval(statusPollingInterval);
+						statusPollingInterval = null;
+					}
+				});
+			}).catch((err) => {
+				console.debug(`Discopanel caught a polling error: ${err}`);
+				reject(err);
+			});
+		});
 	});
 
 </script>

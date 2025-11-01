@@ -6,6 +6,7 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { formatBytes } from '$lib/utils';
+	import { serversStore } from '$lib/stores/servers';
 	import { onMount } from 'svelte';
 	import { 
 		Server, MemoryStick, Plus, LayoutDashboard, 

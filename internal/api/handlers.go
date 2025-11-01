@@ -519,6 +519,10 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 				server.Status = models.StatusError
 			} else {
 				server.Status = models.StatusStarting
+				// Start log streaming for this container
+				if err := s.logStreamer.StartStreaming(containerID); err != nil {
+					s.log.Error("Failed to start log streaming: %v", err)
+				}
 				// Update last started time
 				now := time.Now()
 				server.LastStarted = &now

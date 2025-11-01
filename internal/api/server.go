@@ -283,6 +283,11 @@ func (s *Server) SetProxyManager(pm *proxy.Manager) {
 	s.proxyManager = pm
 }
 
+// StartLogStreaming starts log streaming for a container
+func (s *Server) StartLogStreaming(containerID string) error {
+	return s.logStreamer.StartStreaming(containerID)
+}
+
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip polling endpoints to reduce noise

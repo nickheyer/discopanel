@@ -10,9 +10,9 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { toast } from 'svelte-sonner';
 	import { 
-		Save, Plus, Trash2, Loader2, Globe, AlertCircle, 
+		Save, Plus, Trash2, Loader2, AlertCircle, 
 		Server, Activity, CheckCircle2, XCircle, Network,
-		Settings, Info, Edit, Star
+		Info, Edit, Star
 	} from '@lucide/svelte';
 
 	interface ProxyListener {

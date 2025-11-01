@@ -206,6 +206,13 @@ func main() {
 					}
 				}
 
+				// Start log streaming for this container (whether it was just started or already running)
+				if status == storage.StatusRunning || status == storage.StatusStopped {
+					if err := apiServer.StartLogStreaming(server.ContainerID); err != nil {
+						log.Error("Failed to start log streaming for auto-started server %s: %v", server.Name, err)
+					}
+				}
+
 				// Update server status
 				server.Status = storage.StatusRunning
 				now := time.Now()

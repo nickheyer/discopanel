@@ -12,6 +12,7 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
+	import { getUniqueDockerImages } from '$lib/utils';
 
 	interface Props {
 		server: Server;
@@ -44,7 +45,6 @@
 		}
 	}
 
-	// Form state using UpdateServerRequest type
 	let formData = $state<UpdateServerRequest>({
 		name: server.name,
 		description: server.description || '',
@@ -176,8 +176,8 @@
 	}
 
 	function getCompatibleModLoaders(mcVersion: string): ModLoaderInfo[] {
-		return modLoaders.filter(loader => 
-			!loader.SupportedVersions || 
+		return modLoaders.filter(loader =>
+			!loader.SupportedVersions ||
 			loader.SupportedVersions.length === 0 ||
 			loader.SupportedVersions.includes(mcVersion)
 		);
@@ -257,7 +257,7 @@
 				</SelectTrigger>
 				<SelectContent>
 					{#if minecraftVersions}
-						{#each minecraftVersions.versions as version}
+						{#each minecraftVersions.versions as version (version)}
 							<SelectItem value={version}>{version}</SelectItem>
 						{/each}
 					{/if}
@@ -278,7 +278,7 @@
 				</SelectTrigger>
 				<SelectContent>
 					{#if formData.mc_version}
-						{#each getCompatibleModLoaders(formData.mc_version || '') as loader}
+						{#each getCompatibleModLoaders(formData.mc_version || '') as loader (loader.Name)}
 							<SelectItem value={loader.Name}>
 								{loader.DisplayName}
 							</SelectItem>
@@ -300,7 +300,7 @@
 					<span>{formData.docker_image || 'Select Docker image'}</span>
 				</SelectTrigger>
 				<SelectContent>
-					{#each dockerImages as image}
+					{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
 						<SelectItem value={image.tag}>
 							{image.tag} - Java {image.java} ({image.distribution})
 						</SelectItem>

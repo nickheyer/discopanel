@@ -11,15 +11,14 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
 	import { api } from '$lib/api/client';
-	import { serversStore } from '$lib/stores/servers';
 	import { toast } from 'svelte-sonner';
-	import { ArrowLeft, Loader2, Package, Heart, Settings, HardDrive } from '@lucide/svelte';
-	import type { CreateServerRequest, ModLoader, MinecraftVersion, ModLoaderInfo, DockerImageInfo, IndexedModpack } from '$lib/api/types';
+	import { ArrowLeft, Loader2, Package, Settings, HardDrive } from '@lucide/svelte';
+	import type { CreateServerRequest, ModLoader, ModLoaderInfo, DockerImageInfo, IndexedModpack } from '$lib/api/types';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
-	import type { AdditionalPort, DockerOverrides } from '$lib/api/types';
+	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
@@ -263,22 +262,6 @@
 		}
 	}
 
-	function getDockerImageDisplayName(tagOrImage: string | DockerImageInfo): string {
-		const image = typeof tagOrImage === 'string' 
-			? dockerImages.find(img => img.tag === tagOrImage)
-			: tagOrImage;
-		
-		if (!image) return tagOrImage as string;
-		
-		let displayName = `Java ${image.java} (${image.tag})`;
-		if (image.distribution !== 'Ubuntu') {
-			displayName = `Java ${image.java} ${image.distribution} (${image.tag})`;
-		}
-		if (image.jvm !== 'Hotspot') {
-			displayName = `Java ${image.java} ${image.jvm} (${image.tag})`;
-		}
-		return displayName;
-	}
 </script>
 
 <div class="h-full overflow-y-auto bg-gradient-to-br from-background to-muted/10">
@@ -392,7 +375,7 @@
 															<SelectItem value="">
 																Latest version
 															</SelectItem>
-															{#each modpackVersions as version}
+															{#each modpackVersions as version (version.id)}
 																<SelectItem value={version.id}>
 																	{version.display_name}
 																	{#if version.release_type}
@@ -470,7 +453,7 @@
 									<span>{formData.mc_version || 'Select a version'}</span>
 								</SelectTrigger>
 								<SelectContent>
-									{#each minecraftVersions as version}
+									{#each minecraftVersions as version (version)}
 										<SelectItem value={version}>
 											{version} {version === latestVersion ? '(Latest)' : ''}
 										</SelectItem>
@@ -487,7 +470,7 @@
 								<span>{modLoaders.find(l => l.Name === formData.mod_loader)?.DisplayName || 'Select a mod loader'}</span>
 							</SelectTrigger>
 							<SelectContent>
-								{#each modLoaders as loader}
+								{#each modLoaders as loader (loader.Name)}
 									<SelectItem value={loader.Name}>
 										{loader.DisplayName}
 									</SelectItem>
@@ -585,7 +568,7 @@
 													</span>
 												</SelectTrigger>
 												<SelectContent>
-													{#each proxyListeners as listener}
+													{#each proxyListeners as listener (listener.id)}
 														<SelectItem value={listener.id}>
 															{listener.name} (Port {listener.port})
 															{#if listener.is_default}
@@ -753,7 +736,7 @@
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="">Auto-select (Recommended)</SelectItem>
-								{#each dockerImages.filter(img => !img.deprecated) as image}
+								{#each getUniqueDockerImages(dockerImages.filter(img => !img.deprecated)) as image (image.tag)}
 									<SelectItem value={image.tag}>
 										{getDockerImageDisplayName(image)}
 										{#if image.notes}

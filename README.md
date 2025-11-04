@@ -18,7 +18,7 @@ DiscoPanel is a web-based Minecraft server + proxy + modpack manager. Built by s
 
 Because managing Minecraft servers shouldn't be difficult:
 
-- **Docker-powered** - Each server runs in its own container. No more "works on my machine" disasters
+- **Container-powered** - Each server runs in its own container. No more "works on my machine" disasters. Supports docker + podman!
 - **Multi-server** - Run vanilla, modded, different versions, whatever. They won't fight each other
 - **Smart Proxy** - Players connect through custom hostnames. No more port gymnastics (though basic ports assignment is still available)
 - **Modpack Support** - Native CurseForge integration that actually downloads the mods/modpacks you tell it to
@@ -184,7 +184,7 @@ proxy:
 
 ## Requirements
 
-- Docker (obviously)
+- Docker or Podman (obviously)
 - Go 1.21+ (only if building from source)
 - A functioning brain (optional but recommended)
 

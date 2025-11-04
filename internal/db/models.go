@@ -65,30 +65,30 @@ const (
 )
 
 type Server struct {
-	ID              string       `json:"id" gorm:"primaryKey"`
-	Name            string       `json:"name" gorm:"not null"`
-	Description     string       `json:"description"`
-	ModLoader       ModLoader    `json:"mod_loader" gorm:"not null"`
-	MCVersion       string       `json:"mc_version" gorm:"not null;column:mc_version"`
-	ContainerID     string       `json:"container_id" gorm:"column:container_id"`
-	Status          ServerStatus `json:"status" gorm:"not null"`
-	Port            int          `json:"port"`
-	ProxyPort       int          `json:"proxy_port" gorm:"column:proxy_port"`
-	ProxyHostname   string       `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
-	ProxyListenerID string       `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
-	MaxPlayers      int          `json:"max_players" gorm:"default:20;column:max_players"`
-	Memory          int          `json:"memory" gorm:"default:4096"` // in MB (allocated) - IMPORTANT: This applies to the container's memory allocation first, then used to calc the JVM min/max for mc server proc inside w/ overhead
-	CreatedAt       time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt       time.Time    `json:"updated_at" gorm:"autoUpdateTime"`
-	LastStarted     *time.Time   `json:"last_started" gorm:"column:last_started"`
-	JavaVersion     string       `json:"java_version" gorm:"column:java_version"`
-	DockerImage     string       `json:"docker_image" gorm:"column:docker_image"`
-	DataPath        string       `json:"data_path" gorm:"not null;column:data_path"`
-	Detached        bool         `json:"detached" gorm:"default:false;column:detached"`     // Detach server container from DiscoPanel lifecycle (default: false)
-	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
-	TPSCommand      string       `json:"tps_command" gorm:"column:tps_command"`             // The TPS command for this server (empty if not supported)
-	AdditionalPorts string       `json:"additional_ports" gorm:"column:additional_ports"`   // JSON array of additional port configurations
-	DockerOverrides string       `json:"docker_overrides" gorm:"column:docker_overrides;type:text"` // JSON object with docker container overrides
+	ID                 string       `json:"id" gorm:"primaryKey"`
+	Name               string       `json:"name" gorm:"not null"`
+	Description        string       `json:"description"`
+	ModLoader          ModLoader    `json:"mod_loader" gorm:"not null"`
+	MCVersion          string       `json:"mc_version" gorm:"not null;column:mc_version"`
+	ContainerID        string       `json:"container_id" gorm:"column:container_id"`
+	Status             ServerStatus `json:"status" gorm:"not null"`
+	Port               int          `json:"port"`
+	ProxyPort          int          `json:"proxy_port" gorm:"column:proxy_port"`
+	ProxyHostname      string       `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
+	ProxyListenerID    string       `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
+	MaxPlayers         int          `json:"max_players" gorm:"default:20;column:max_players"`
+	Memory             int          `json:"memory" gorm:"default:4096"` // in MB (allocated) - IMPORTANT: This applies to the container's memory allocation first, then used to calc the JVM min/max for mc server proc inside w/ overhead
+	CreatedAt          time.Time    `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt          time.Time    `json:"updated_at" gorm:"autoUpdateTime"`
+	LastStarted        *time.Time   `json:"last_started" gorm:"column:last_started"`
+	JavaVersion        string       `json:"java_version" gorm:"column:java_version"`
+	ContainerImage     string       `json:"container_image" gorm:"column:container_image"`
+	DataPath           string       `json:"data_path" gorm:"not null;column:data_path"`
+	Detached           bool         `json:"detached" gorm:"default:false;column:detached"`                   // Detach server container from DiscoPanel lifecycle (default: false)
+	AutoStart          bool         `json:"auto_start" gorm:"default:false;column:auto_start"`               // Start server when DiscoPanel starts (default: false)
+	TPSCommand         string       `json:"tps_command" gorm:"column:tps_command"`                           // The TPS command for this server (empty if not supported)
+	AdditionalPorts    string       `json:"additional_ports" gorm:"column:additional_ports"`                 // JSON array of additional port configurations
+	ContainerOverrides string       `json:"container_overrides" gorm:"column:container_overrides;type:text"` // JSON object with container container overrides
 
 	// Runtime stats (not persisted to DB)
 	MemoryUsage   float64 `json:"memory_usage" gorm:"-"`   // Current memory usage in MB
@@ -114,7 +114,7 @@ type ServerConfig struct {
 	TZ                     *string `json:"tz" env:"TZ" default:"UTC" desc:"Timezone configuration" input:"text" label:"Timezone"`
 	EnableRollingLogs      *bool   `json:"enableRollingLogs" env:"ENABLE_ROLLING_LOGS" default:"false" desc:"Enable rolling log files strategy" input:"checkbox" label:"Enable Rolling Logs"`
 	EnableJMX              *bool   `json:"enableJmx" env:"ENABLE_JMX" default:"false" desc:"Enable remote JMX for profiling" input:"checkbox" label:"Enable JMX"`
-	JMXHost                *string `json:"jmxHost" env:"JMX_HOST" default:"" desc:"IP/host running the Docker container for JMX" input:"text" label:"JMX Host"`
+	JMXHost                *string `json:"jmxHost" env:"JMX_HOST" default:"" desc:"IP/host running the Container container for JMX" input:"text" label:"JMX Host"`
 	UseAikarFlags          *bool   `json:"useAikarFlags" env:"USE_AIKAR_FLAGS" default:"false" desc:"Use Aikar's optimized JVM flags for GC tuning" input:"checkbox" label:"Use Aikar Flags"`
 	UseMeowiceFlags        *bool   `json:"useMeowiceFlags" env:"USE_MEOWICE_FLAGS" default:"false" desc:"Use MeowIce's JVM flags optimized for Java 17+" input:"checkbox" label:"Use MeowIce Flags"`
 	UseMeowiceGraalVMFlags *bool   `json:"useMeowiceGraalvmFlags" env:"USE_MEOWICE_GRAALVM_FLAGS" default:"true" desc:"Enable MeowIce's flags for GraalVM" input:"checkbox" label:"Use MeowIce GraalVM Flags"`
@@ -185,7 +185,7 @@ type ServerConfig struct {
 	ResourcePackID                 *string `json:"resourcePackId" env:"RESOURCE_PACK_ID" default:"" desc:"Custom resource pack ID" input:"text" label:"Resource Pack ID"`
 	ResourcePackPrompt             *string `json:"resourcePackPrompt" env:"RESOURCE_PACK_PROMPT" default:"" desc:"Prompt shown when resource pack offered" input:"text" label:"Resource Pack Prompt"`
 	StatusHeartbeatInterval        *int    `json:"statusHeartbeatInterval" env:"STATUS_HEARTBEAT_INTERVAL" default:"0" desc:"Status heartbeat interval (ms)" input:"number" label:"Status Heartbeat Interval"`
-	ExecDirectly                   *bool   `json:"execDirectly" env:"EXEC_DIRECTLY" default:"false" desc:"Enable docker attach with color and interactive capabilities" input:"checkbox" label:"Execute Directly"`
+	ExecDirectly                   *bool   `json:"execDirectly" env:"EXEC_DIRECTLY" default:"false" desc:"Enable container attach with color and interactive capabilities" input:"checkbox" label:"Execute Directly"`
 	StopServerAnnounceDelay        *int    `json:"stopServerAnnounceDelay" env:"STOP_SERVER_ANNOUNCE_DELAY" default:"0" desc:"Delay in seconds after shutdown announcement" input:"number" label:"Stop Server Announce Delay"`
 	Proxy                          *string `json:"proxy" env:"PROXY" default:"" desc:"HTTP/HTTPS proxy URL" input:"text" label:"Proxy URL"`
 	Console                        *bool   `json:"console" env:"CONSOLE" default:"true" desc:"Console setting for older Spigot versions" input:"checkbox" label:"Enable Console"`
@@ -328,7 +328,7 @@ type IndexedModpack struct {
 	// Computed fields for server creation
 	MCVersion      string `json:"mc_version" gorm:"column:mc_version"`           // Primary MC version
 	JavaVersion    string `json:"java_version" gorm:"column:java_version"`       // Required Java version
-	DockerImage    string `json:"docker_image" gorm:"column:docker_image"`       // Recommended Docker image
+	ContainerImage string `json:"container_image" gorm:"column:container_image"` // Recommended Container image
 	RecommendedRAM int    `json:"recommended_ram" gorm:"column:recommended_ram"` // Recommended RAM in MB
 }
 

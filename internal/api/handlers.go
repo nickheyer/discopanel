@@ -16,8 +16,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	models "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/containers"
 	"github.com/nickheyer/discopanel/pkg/files"
 )
 
@@ -53,7 +53,7 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		diskTotal = 0
 	}
 
-	// Update status from Docker
+	// Update status from Container
 	for _, server := range servers {
 		// If server uses proxy, ensure ProxyPort is populated from the listener
 		// ProxyPort is the external port players connect to
@@ -64,15 +64,15 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if server.ContainerID != "" {
-			status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+			statusStr, err := s.containerProvider.GetContainerStatus(ctx, server.ContainerID)
 			if err == nil {
-				server.Status = status
+				server.Status = minecraft.MapContainerStatus(statusStr)
 			}
 
 			// Only get expensive stats if requested (dashboard refresh)
-			if fullStats && (status == models.StatusRunning || status == models.StatusUnhealthy) {
+			if fullStats && (server.Status == models.StatusRunning || server.Status == models.StatusUnhealthy) {
 				// Get container stats
-				stats, err := s.docker.GetContainerStats(ctx, server.ContainerID)
+				stats, err := s.containerProvider.GetContainerStats(ctx, server.ContainerID)
 				if err == nil {
 					server.MemoryUsage = stats.MemoryUsage
 					server.CPUPercent = stats.CPUPercent
@@ -90,7 +90,7 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 				server.DiskTotal = diskTotal
 
 				// Get player count using rcon-cli
-				output, err := s.docker.ExecCommand(ctx, server.ContainerID, "list")
+				output, err := minecraft.ExecCommand(ctx, s.containerProvider, server.ContainerID, "list")
 				if err == nil && output != "" {
 					count, _ := minecraft.ParsePlayerListFromOutput(output)
 					server.PlayersOnline = count
@@ -103,7 +103,7 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 						if cmd == "" {
 							continue
 						}
-						output, err := s.docker.ExecCommand(ctx, server.ContainerID, cmd)
+						output, err := minecraft.ExecCommand(ctx, s.containerProvider, server.ContainerID, cmd)
 						if err == nil && output != "" {
 							tps := minecraft.ParseTPSFromOutput(output)
 							if tps > 0 {
@@ -124,24 +124,24 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var req struct {
-		Name             string                      `json:"name"`
-		Description      string                      `json:"description"`
-		ModLoader        models.ModLoader            `json:"mod_loader"`
-		MCVersion        string                      `json:"mc_version"`
-		Port             int                         `json:"port"`
-		MaxPlayers       int                         `json:"max_players"`
-		Memory           int                         `json:"memory"`
-		DockerImage      string                      `json:"docker_image"`
-		AutoStart        bool                        `json:"auto_start"`
-		Detached         bool                        `json:"detached"`
-		StartImmediately bool                        `json:"start_immediately"`
-		ModpackID        string                      `json:"modpack_id,omitempty"`
-		ModpackVersionID string                      `json:"modpack_version_id,omitempty"`
-		ProxyHostname    string                      `json:"proxy_hostname,omitempty"`
-		ProxyListenerID  string                      `json:"proxy_listener_id,omitempty"`
-		UseBaseURL       bool                        `json:"use_base_url,omitempty"`
-		AdditionalPorts  []docker.AdditionalPort     `json:"additional_ports,omitempty"`
-		DockerOverrides  *docker.DockerOverrides     `json:"docker_overrides,omitempty"`
+		Name               string                         `json:"name"`
+		Description        string                         `json:"description"`
+		ModLoader          models.ModLoader               `json:"mod_loader"`
+		MCVersion          string                         `json:"mc_version"`
+		Port               int                            `json:"port"`
+		MaxPlayers         int                            `json:"max_players"`
+		Memory             int                            `json:"memory"`
+		ContainerImage     string                         `json:"container_image"`
+		AutoStart          bool                           `json:"auto_start"`
+		Detached           bool                           `json:"detached"`
+		StartImmediately   bool                           `json:"start_immediately"`
+		ModpackID          string                         `json:"modpack_id,omitempty"`
+		ModpackVersionID   string                         `json:"modpack_version_id,omitempty"`
+		ProxyHostname      string                         `json:"proxy_hostname,omitempty"`
+		ProxyListenerID    string                         `json:"proxy_listener_id,omitempty"`
+		UseBaseURL         bool                           `json:"use_base_url,omitempty"`
+		AdditionalPorts    []containers.AdditionalPort    `json:"additional_ports,omitempty"`
+		ContainerOverrides *containers.ContainerOverrides `json:"container_overrides,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -270,9 +270,9 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Determine Docker image based on MC version and mod loader if not specified
-	if req.DockerImage == "" {
-		req.DockerImage = docker.GetOptimalDockerTag(req.MCVersion, req.ModLoader, false)
+	// Determine Container image based on MC version and mod loader if not specified
+	if req.ContainerImage == "" {
+		req.ContainerImage = minecraft.GetOptimalImageTag(req.MCVersion, req.ModLoader, false)
 	}
 
 	// Validate additional ports
@@ -326,15 +326,15 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		additionalPortsJSON = string(portsBytes)
 	}
 
-	// Convert docker overrides to JSON string for storage
-	dockerOverridesJSON := ""
-	if req.DockerOverrides != nil {
-		overridesBytes, err := json.Marshal(req.DockerOverrides)
+	// Convert container overrides to JSON string for storage
+	ContainerOverridesJSON := ""
+	if req.ContainerOverrides != nil {
+		overridesBytes, err := json.Marshal(req.ContainerOverrides)
 		if err != nil {
-			s.respondError(w, http.StatusInternalServerError, "Failed to process docker overrides")
+			s.respondError(w, http.StatusInternalServerError, "Failed to process container overrides")
 			return
 		}
-		dockerOverridesJSON = string(overridesBytes)
+		ContainerOverridesJSON = string(overridesBytes)
 	}
 
 	// Create server object
@@ -342,25 +342,25 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	serverDataDir := fmt.Sprintf("%s_%s", files.SanitizePathName(req.Name), serverUUID)
 	serverDataPath := filepath.Join(s.config.Storage.DataDir, "servers", serverDataDir)
 	server := &models.Server{
-		ID:              serverUUID,
-		Name:            req.Name,
-		Description:     req.Description,
-		ModLoader:       req.ModLoader,
-		MCVersion:       req.MCVersion,
-		Status:          models.StatusCreating, // Set initial status to creating
-		Port:            req.Port,
-		ProxyHostname:   req.ProxyHostname,
-		ProxyListenerID: req.ProxyListenerID,
-		MaxPlayers:      req.MaxPlayers,
-		Memory:          req.Memory,
-		DataPath:        serverDataPath,
-		JavaVersion:     docker.GetRequiredJavaVersion(req.MCVersion, req.ModLoader),
-		DockerImage:     req.DockerImage,
-		AutoStart:       req.AutoStart,
-		Detached:        req.Detached,
-		TPSCommand:      minecraft.GetTPSCommand(req.ModLoader),
-		AdditionalPorts: additionalPortsJSON,
-		DockerOverrides: dockerOverridesJSON,
+		ID:                 serverUUID,
+		Name:               req.Name,
+		Description:        req.Description,
+		ModLoader:          req.ModLoader,
+		MCVersion:          req.MCVersion,
+		Status:             models.StatusCreating, // Set initial status to creating
+		Port:               req.Port,
+		ProxyHostname:      req.ProxyHostname,
+		ProxyListenerID:    req.ProxyListenerID,
+		MaxPlayers:         req.MaxPlayers,
+		Memory:             req.Memory,
+		DataPath:           serverDataPath,
+		JavaVersion:        minecraft.GetRequiredJavaVersion(req.MCVersion, req.ModLoader),
+		ContainerImage:     req.ContainerImage,
+		AutoStart:          req.AutoStart,
+		Detached:           req.Detached,
+		TPSCommand:         minecraft.GetTPSCommand(req.ModLoader),
+		AdditionalPorts:    additionalPortsJSON,
+		ContainerOverrides: ContainerOverridesJSON,
 	}
 
 	// Set defaults
@@ -484,15 +484,15 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create Docker container asynchronously to prevent request timeout
+	// Create Container container asynchronously to prevent request timeout
 	// The container creation includes image pulling which can take minutes
 	go func() {
 		// Create a new context for the background operation
 		bgCtx := context.Background()
 
-		s.log.Info("Starting async Docker container creation for server %s", server.ID)
+		s.log.Info("Starting async Container container creation for server %s", server.ID)
 
-		containerID, err := s.docker.CreateContainer(bgCtx, server, serverConfig)
+		containerID, err := minecraft.CreateContainer(bgCtx, s.containerProvider, server, serverConfig)
 		if err != nil {
 			s.log.Error("Failed to create container: %v", err)
 			// Update server status to error
@@ -514,7 +514,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 
 		// Start the container immediately if requested
 		if req.StartImmediately {
-			if err := s.docker.StartContainer(bgCtx, containerID); err != nil {
+			if err := s.containerProvider.Start(bgCtx, containerID); err != nil {
 				s.log.Error("Failed to start container: %v", err)
 				server.Status = models.StatusError
 			} else {
@@ -570,24 +570,22 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Update status and stats from Docker
+	// Update status and stats from Container
 	if server.ContainerID != "" {
-		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+		statusStr, err := s.containerProvider.GetContainerStatus(ctx, server.ContainerID)
+		status := minecraft.MapContainerStatus(statusStr)
 		if err == nil {
 			server.Status = status
 
 			// Only get stats if server is running or unhealthy
-			if status == models.StatusRunning || status == models.StatusUnhealthy {
-				stats, err := s.docker.GetContainerStats(ctx, server.ContainerID)
+			if r.URL.Query().Get("full_stats") == "true" && (status == models.StatusRunning || status == models.StatusUnhealthy) {
+				stats, err := s.containerProvider.GetContainerStats(ctx, server.ContainerID)
 				if err == nil {
 					server.MemoryUsage = stats.MemoryUsage
 					server.CPUPercent = stats.CPUPercent
 				} else {
 					s.log.Debug("Failed to get container stats for %s: %v", server.ContainerID, err)
 				}
-			}
-
-			if status == models.StatusRunning {
 
 				// Calculate world directory size
 				worldPath, err := files.FindWorldDir(server.DataPath)
@@ -611,7 +609,7 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 				}
 
 				// Get Minecraft server status (player count) using rcon-cli
-				output, err := s.docker.ExecCommand(ctx, server.ContainerID, "list")
+				output, err := minecraft.ExecCommand(ctx, s.containerProvider, server.ContainerID, "list")
 				if err == nil && output != "" {
 					count, _ := minecraft.ParsePlayerListFromOutput(output)
 					server.PlayersOnline = count
@@ -625,7 +623,7 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 							continue
 						}
 
-						output, err := s.docker.ExecCommand(ctx, server.ContainerID, cmd)
+						output, err := minecraft.ExecCommand(ctx, s.containerProvider, server.ContainerID, cmd)
 						if err == nil && output != "" {
 							tps := minecraft.ParseTPSFromOutput(output)
 							if tps > 0 {
@@ -656,20 +654,20 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name             string                   `json:"name"`
-		Description      string                   `json:"description"`
-		MaxPlayers       int                      `json:"max_players"`
-		Memory           int                      `json:"memory"`
-		ModLoader        string                   `json:"mod_loader"`
-		MCVersion        string                   `json:"mc_version"`
-		DockerImage      string                   `json:"docker_image"`
-		AutoStart        *bool                    `json:"auto_start"`
-		Detached         *bool                    `json:"detached"`
-		TPSCommand       *string                  `json:"tps_command"`
-		ModpackID        string                   `json:"modpack_id,omitempty"`
-		ModpackVersionID string                   `json:"modpack_version_id,omitempty"`
-		AdditionalPorts  *[]docker.AdditionalPort `json:"additional_ports,omitempty"`
-		DockerOverrides  *docker.DockerOverrides  `json:"docker_overrides,omitempty"`
+		Name               string                         `json:"name"`
+		Description        string                         `json:"description"`
+		MaxPlayers         int                            `json:"max_players"`
+		Memory             int                            `json:"memory"`
+		ModLoader          string                         `json:"mod_loader"`
+		MCVersion          string                         `json:"mc_version"`
+		ContainerImage     string                         `json:"container_image"`
+		AutoStart          *bool                          `json:"auto_start"`
+		Detached           *bool                          `json:"detached"`
+		TPSCommand         *string                        `json:"tps_command"`
+		ModpackID          string                         `json:"modpack_id,omitempty"`
+		ModpackVersionID   string                         `json:"modpack_version_id,omitempty"`
+		AdditionalPorts    *[]containers.AdditionalPort   `json:"additional_ports,omitempty"`
+		ContainerOverrides *containers.ContainerOverrides `json:"container_overrides,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -682,7 +680,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	originalMemory := server.Memory
 	originalModLoader := server.ModLoader
 	originalMCVersion := server.MCVersion
-	originalDockerImage := server.DockerImage
+	originalContainerImage := server.ContainerImage
 
 	// Update fields
 	if req.Name != "" {
@@ -711,8 +709,8 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		server.MCVersion = req.MCVersion
 		needsRecreation = true
 	}
-	if req.DockerImage != "" && req.DockerImage != originalDockerImage {
-		server.DockerImage = req.DockerImage
+	if req.ContainerImage != "" && req.ContainerImage != originalContainerImage {
+		server.ContainerImage = req.ContainerImage
 		needsRecreation = true
 	}
 	if req.AutoStart != nil {
@@ -778,15 +776,15 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		needsRecreation = true // Container needs to be recreated for port changes
 	}
 
-	// Handle docker overrides update
-	if req.DockerOverrides != nil {
-		overridesBytes, err := json.Marshal(req.DockerOverrides)
+	// Handle container overrides update
+	if req.ContainerOverrides != nil {
+		overridesBytes, err := json.Marshal(req.ContainerOverrides)
 		if err != nil {
-			s.respondError(w, http.StatusInternalServerError, "Failed to process docker overrides")
+			s.respondError(w, http.StatusInternalServerError, "Failed to process container overrides")
 			return
 		}
-		server.DockerOverrides = string(overridesBytes)
-		needsRecreation = true // Container needs to be recreated for docker overrides
+		server.ContainerOverrides = string(overridesBytes)
+		needsRecreation = true // Container needs to be recreated for container overrides
 	}
 
 	// Handle modpack version update
@@ -860,19 +858,21 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	if needsRecreation && server.ContainerID != "" {
 		// Check if server was running
 		wasRunning := false
-		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+		statusStr, err := s.containerProvider.GetContainerStatus(ctx, server.ContainerID)
+		status := minecraft.MapContainerStatus(statusStr)
 		if err != nil {
 			s.log.Debug("Container %s not found during update, will create new one: %v", server.ContainerID, err)
 		} else if status == models.StatusRunning || status == models.StatusUnhealthy {
 			wasRunning = true
 			// Stop the container
-			if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+			timeout := 30 * time.Second
+			if err := s.containerProvider.Stop(ctx, server.ContainerID, &timeout); err != nil {
 				s.log.Error("Failed to stop container for recreation: %v", err)
 			}
 		}
 
 		// Remove old container
-		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
+		if err := s.containerProvider.Remove(ctx, server.ContainerID); err != nil {
 			s.log.Debug("Could not remove old container (may not exist): %v", err)
 		}
 
@@ -885,7 +885,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Create new container with updated settings
-		newContainerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+		newContainerID, err := minecraft.CreateContainer(ctx, s.containerProvider, server, serverConfig)
 		if err != nil {
 			s.log.Error("Failed to create new container: %v", err)
 			server.Status = models.StatusError
@@ -896,7 +896,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 
 			// Start container if it was running before
 			if wasRunning {
-				if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
+				if err := s.containerProvider.Start(ctx, newContainerID); err != nil {
 					s.log.Error("Failed to restart container after recreation: %v", err)
 					server.Status = models.StatusError
 				} else {
@@ -927,10 +927,11 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 
 	// Stop and remove container
 	if server.ContainerID != "" {
-		if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+		timeout := 30 * time.Second
+		if err := s.containerProvider.Stop(ctx, server.ContainerID, &timeout); err != nil {
 			s.log.Error("Failed to stop container: %v", err)
 		}
-		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
+		if err := s.containerProvider.Remove(ctx, server.ContainerID); err != nil {
 			s.log.Error("Failed to remove container: %v", err)
 		}
 	}
@@ -967,7 +968,7 @@ func (s *Server) handleStartServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Start container
-	if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
+	if err := s.containerProvider.Start(ctx, server.ContainerID); err != nil {
 		s.log.Error("Failed to start container: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to start server")
 		return
@@ -1025,7 +1026,8 @@ func (s *Server) handleStopServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Stop container
-	if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+	timeout := 30 * time.Second
+	if err := s.containerProvider.Stop(ctx, server.ContainerID, &timeout); err != nil {
 		s.log.Error("Failed to stop container: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to stop server")
 		return
@@ -1074,7 +1076,7 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Create container
-		containerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+		containerID, err := minecraft.CreateContainer(ctx, s.containerProvider, server, serverConfig)
 		if err != nil {
 			s.log.Error("Failed to create container: %v", err)
 			s.respondError(w, http.StatusInternalServerError, "Failed to create server container")
@@ -1089,7 +1091,7 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Now start the container
-		if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
+		if err := s.containerProvider.Start(ctx, server.ContainerID); err != nil {
 			s.log.Error("Failed to start container: %v", err)
 			s.respondError(w, http.StatusInternalServerError, "Failed to start server")
 			return
@@ -1122,7 +1124,8 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 	s.logStreamer.StopStreaming(server.ContainerID)
 
 	// Stop container
-	if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+	timeout := 30 * time.Second
+	if err := s.containerProvider.Stop(ctx, server.ContainerID, &timeout); err != nil {
 		s.log.Error("Failed to stop container: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to stop server")
 		return
@@ -1138,7 +1141,7 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(2 * time.Second)
 
 	// Start container
-	if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
+	if err := s.containerProvider.Start(ctx, server.ContainerID); err != nil {
 		s.log.Error("Failed to start container: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to restart server")
 		return
@@ -1188,7 +1191,7 @@ func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {
 	// If container not created yet, return empty logs
 	if server.ContainerID == "" {
 		s.respondJSON(w, http.StatusOK, map[string]any{
-			"logs":  []LogEntry{},
+			"logs":  []containers.LogEntry{},
 			"total": 0,
 		})
 		return

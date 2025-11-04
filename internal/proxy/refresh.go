@@ -61,7 +61,7 @@ func (m *Manager) RefreshRoutes() error {
 			}
 
 			// Get container IP address
-			containerIP, err := getContainerIP(server.ContainerID, m.networkName)
+			containerIP, err := m.containerProvider.GetIP(proxy.ctx, server.ContainerID, m.networkName)
 			if err != nil {
 				m.logger.Error("Failed to get container IP for server %s: %v", server.Name, err)
 				continue

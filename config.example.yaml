@@ -16,8 +16,9 @@ database:
   max_idle_conns: 5
   conn_max_lifetime: 300
 
-# Docker configuration
-docker:
+# Container provider configuration
+containers:
+  provider: "docker"
   host: "unix:///var/run/docker.sock"
   version: "1.41"
   network_name: "discopanel-network"

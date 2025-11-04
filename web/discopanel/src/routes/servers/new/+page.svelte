@@ -13,18 +13,18 @@
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
 	import { ArrowLeft, Loader2, Package, Settings, HardDrive } from '@lucide/svelte';
-	import type { CreateServerRequest, ModLoader, ModLoaderInfo, DockerImageInfo, IndexedModpack } from '$lib/api/types';
+	import type { CreateServerRequest, ModLoader, ModLoaderInfo, ContainerImageInfo, IndexedModpack } from '$lib/api/types';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
-	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
-	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
+	import ContainerOverridesEditor from '$lib/components/container-overrides-editor.svelte';
+	import { getUniqueImages, getContainerImageDisplayName } from '$lib/utils';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
 	let minecraftVersions = $state<string[]>([]);
 	let modLoaders = $state<ModLoaderInfo[]>([]);
-	let dockerImages = $state<DockerImageInfo[]>([]);
+	let containerImages = $state<ContainerImageInfo[]>([]);
 	let latestVersion = $state('');
 	let proxyEnabled = $state(false);
 	let proxyBaseURL = $state('');
@@ -49,7 +49,7 @@
 		port: 25565,
 		max_players: 20,
 		memory: 2048,
-		docker_image: '',
+		container_image: '',
 		auto_start: false,
 		detached: false,
 		start_immediately: false,
@@ -57,7 +57,7 @@
 		proxy_listener_id: '',
 		use_base_url: false,
 		additional_ports: [],
-		docker_overrides: undefined
+		container_overrides: undefined
 	});
 
 	onMount(async () => {
@@ -65,7 +65,7 @@
 			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners] = await Promise.all([
 				api.getMinecraftVersions(),
 				api.getModLoaders(),
-				api.getDockerImages(),
+				api.getContainerImages(),
 				api.getProxyStatus(),
 				api.getNextAvailablePort(),
 				api.getProxyListeners()
@@ -74,7 +74,7 @@
 			minecraftVersions = versionsData.versions;
 			latestVersion = versionsData.latest;
 			modLoaders = loadersData.modloaders;
-			dockerImages = imagesData.images;
+			containerImages = imagesData.images;
 			proxyEnabled = proxyStatus.enabled;
 			proxyBaseURL = proxyStatus.base_url || '';
 			proxyListeners = listeners.filter((l: any) => l.enabled);
@@ -166,7 +166,7 @@
 			formData.mod_loader = config.mod_loader;
 			formData.mc_version = config.mc_version;
 			formData.memory = config.memory;
-			formData.docker_image = config.docker_image;
+			formData.container_image = config.container_image;
 			await loadModpackVersions(modpack.id);
 		} catch (error) {
 			toast.error('Failed to load modpack configuration');
@@ -181,7 +181,7 @@
 		selectedVersionId = '';
 		formData.mod_loader = 'vanilla';
 		formData.mc_version = latestVersion || '';
-		formData.docker_image = '';
+		formData.container_image = '';
 		formData.memory = 2048;
 	}
 	
@@ -729,16 +729,16 @@
 					<Separator />
 
 					<div class="space-y-2">
-						<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
-						<Select type="single" value={formData.docker_image} onValueChange={(v: string | undefined) => formData.docker_image = v ?? ''} disabled={loading || loadingVersions}>
-							<SelectTrigger id="docker_image">
-								<span>{formData.docker_image ? getDockerImageDisplayName(formData.docker_image) : 'Auto-select (Recommended)'}</span>
+						<Label for="container_image" class="text-sm font-medium">Container Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
+						<Select type="single" value={formData.container_image} onValueChange={(v: string | undefined) => formData.container_image = v ?? ''} disabled={loading || loadingVersions}>
+							<SelectTrigger id="container_image">
+								<span>{formData.container_image ? getContainerImageDisplayName(formData.container_image) : 'Auto-select (Recommended)'}</span>
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="">Auto-select (Recommended)</SelectItem>
-								{#each getUniqueDockerImages(dockerImages.filter(img => !img.deprecated)) as image (image.tag)}
+								{#each getUniqueImages(containerImages.filter(img => !img.deprecated)) as image (image.tag)}
 									<SelectItem value={image.tag}>
-										{getDockerImageDisplayName(image)}
+										{getContainerImageDisplayName(image)}
 										{#if image.notes}
 											<span class="text-xs text-muted-foreground ml-2">({image.notes})</span>
 										{/if}
@@ -821,12 +821,12 @@
 				</CardContent>
 			</Card>
 
-			<!-- Docker Overrides - Advanced Configuration -->
+			<!-- Container Overrides - Advanced Configuration -->
 			<div class="lg:col-span-2">
-				<DockerOverridesEditor
-					bind:overrides={formData.docker_overrides}
+				<ContainerOverridesEditor
+					bind:overrides={formData.container_overrides}
 					disabled={loading}
-					onchange={(overrides) => formData.docker_overrides = overrides}
+					onchange={(overrides) => formData.container_overrides = overrides}
 				/>
 			</div>
 		</div>

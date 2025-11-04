@@ -10,7 +10,7 @@ import type {
   FileInfo,
   MinecraftVersion,
   ModLoaderInfo,
-  DockerImageInfo,
+  ContainerImageInfo,
   ServerLogsResponse,
   ServerStatusResponse,
   UploadResponse,
@@ -117,8 +117,8 @@ class ApiClient {
     return this.request<{ modloaders: ModLoaderInfo[] }>('/minecraft/modloaders');
   }
 
-  async getDockerImages(): Promise<{ images: DockerImageInfo[] }> {
-    return this.request<{ images: DockerImageInfo[] }>('/minecraft/docker-images');
+  async getContainerImages(): Promise<{ images: ContainerImageInfo[] }> {
+    return this.request<{ images: ContainerImageInfo[] }>('/minecraft/images');
   }
 
   // Server Management

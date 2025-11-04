@@ -5,7 +5,7 @@ export type ModLoader = 'vanilla' | 'forge' | 'fabric' | 'neoforge' | 'paper' | 
   'auto_curseforge' | 'curseforge' | 'ftba' | 'modrinth' | 'purpur';
 export type ServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'unhealthy' | 'creating';
 
-export interface DockerImageInfo {
+export interface ContainerImageInfo {
   tag: string;
   java: string;
   distribution: string;
@@ -31,7 +31,7 @@ export interface VolumeMount {
   type?: 'bind' | 'volume'; // Mount type (defaults to 'bind')
 }
 
-export interface DockerOverrides {
+export interface ContainerOverrides {
   environment?: Record<string, string>;    // Additional environment variables
   volumes?: VolumeMount[];                 // Additional volume mounts
   network_mode?: string;                   // Override network mode
@@ -77,12 +77,12 @@ export interface Server {
   updated_at: string;
   last_started: string | null;
   java_version?: string;
-  docker_image: string;
+  container_image: string;
   data_path: string;
   detached?: boolean;
   auto_start?: boolean;
   additional_ports?: string;  // JSON string of AdditionalPort[]
-  docker_overrides?: string;  // JSON string of DockerOverrides
+  container_overrides?: string;  // JSON string of ContainerOverrides
 }
 
 export interface CreateServerRequest {
@@ -93,7 +93,7 @@ export interface CreateServerRequest {
   port: number;
   max_players: number;
   memory: number;
-  docker_image?: string;
+  container_image?: string;
   auto_start?: boolean;
   detached?: boolean;
   start_immediately?: boolean;
@@ -101,7 +101,7 @@ export interface CreateServerRequest {
   proxy_listener_id?: string;
   use_base_url?: boolean;
   additional_ports?: AdditionalPort[];
-  docker_overrides?: DockerOverrides;
+  container_overrides?: ContainerOverrides;
 }
 
 export interface UpdateServerRequest {
@@ -111,12 +111,12 @@ export interface UpdateServerRequest {
   memory?: number;
   mod_loader?: string;
   mc_version?: string;
-  docker_image?: string;
+  container_image?: string;
   detached?: boolean;
   auto_start?: boolean;
   tps_command?: string;
   additional_ports?: AdditionalPort[];
-  docker_overrides?: DockerOverrides;
+  container_overrides?: ContainerOverrides;
 }
 
 export interface Mod {

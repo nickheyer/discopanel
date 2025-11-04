@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 )
 
 type CommandRequest struct {
@@ -37,7 +38,8 @@ func (s *Server) handleSendCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+	statusStr, err := s.containerProvider.GetContainerStatus(ctx, server.ContainerID)
+	status := minecraft.MapContainerStatus(statusStr)
 	if err != nil || status != "running" {
 		s.respondError(w, http.StatusBadRequest, "Server is not running")
 		return
@@ -60,7 +62,7 @@ func (s *Server) handleSendCommand(w http.ResponseWriter, r *http.Request) {
 	s.logStreamer.AddCommandEntry(server.ContainerID, req.Command, commandTime)
 
 	// Execute command in container
-	output, err := s.docker.ExecCommand(ctx, server.ContainerID, req.Command)
+	output, err := minecraft.ExecCommand(ctx, s.containerProvider, server.ContainerID, req.Command)
 	success := err == nil
 
 	// Add command out to log stream AFTER exec

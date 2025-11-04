@@ -23,10 +23,10 @@ func (s *Server) handleGetModLoaders(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleGetDockerImages(w http.ResponseWriter, r *http.Request) {
-	dockerImages := s.docker.GetDockerImages()
+func (s *Server) handleGetImages(w http.ResponseWriter, r *http.Request) {
+	containerImages := minecraft.GetContainerImages()
 
 	s.respondJSON(w, http.StatusOK, map[string]any{
-		"images": dockerImages,
+		"images": containerImages,
 	})
 }

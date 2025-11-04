@@ -13,8 +13,8 @@ import (
 	"github.com/nickheyer/discopanel/internal/api"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/containers"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -84,21 +84,20 @@ func main() {
 		log.Info("Initialized global settings from config file")
 	}
 
-	// Initialize Docker client with configuration
-	dockerClient, err := docker.NewClient(cfg.Docker.Host, docker.ClientConfig{
-		APIVersion:    cfg.Docker.Version,
-		NetworkName:   cfg.Docker.NetworkName,
-		NetworkSubnet: cfg.Docker.NetworkSubnet,
-		RegistryURL:   cfg.Docker.RegistryURL,
-	})
+	// Initialize container provider
+	containerProvider, err := containers.NewProvider(ctx, cfg.Containers.Provider)
 	if err != nil {
-		log.Fatal("Failed to initialize Docker client: %v", err)
+		log.Fatal("Failed to initialize container provider: %v", err)
 	}
-	defer dockerClient.Close()
+	defer containerProvider.Close()
 
-	// Ensure Docker network exists
-	if err := dockerClient.EnsureNetwork(); err != nil {
-		log.Error("Failed to ensure Docker network: %v", err)
+	// Ensure network exists
+	networkName := cfg.Containers.NetworkName
+	if networkName == "" {
+		networkName = "discopanel-network"
+	}
+	if err := containerProvider.EnsureNetwork(ctx, networkName); err != nil {
+		log.Error("Failed to ensure network: %v", err)
 	}
 
 	// Clean up orphaned containers on startup
@@ -116,7 +115,7 @@ func main() {
 		}
 
 		// Clean up orphaned containers
-		if err := dockerClient.CleanupOrphanedContainers(ctx, trackedIDs, log); err != nil {
+		if err := containerProvider.CleanupOrphanedContainers(ctx, trackedIDs); err != nil {
 			log.Error("Failed to cleanup orphaned containers: %v", err)
 		}
 	}
@@ -158,7 +157,7 @@ func main() {
 	}
 
 	// Initialize proxy manager
-	proxyManager := proxy.NewManager(store, &cfg.Proxy, log)
+	proxyManager := proxy.NewManager(store, &cfg.Proxy, log, containerProvider)
 
 	// Start proxy if enabled
 	if err := proxyManager.Start(); err != nil {
@@ -167,7 +166,7 @@ func main() {
 	defer proxyManager.Stop()
 
 	// Initialize API server with full configuration
-	apiServer := api.NewServer(store, dockerClient, cfg, log)
+	apiServer := api.NewServer(store, containerProvider, cfg, log)
 	apiServer.SetProxyManager(proxyManager)
 
 	// Auto-start servers that have auto_start enabled
@@ -192,15 +191,16 @@ func main() {
 					return
 				}
 
-				status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID)
+				statusStr, err := containerProvider.GetContainerStatus(ctx, server.ContainerID)
 				if err != nil {
 					log.Error("Failed to find existing container for auto-start server %s: %v", server.Name, err)
 					return
 				}
 
+				status := storage.ServerStatus(statusStr)
 				if status == storage.StatusStopped {
 					// Start the container
-					if err := dockerClient.StartContainer(ctx, server.ContainerID); err != nil {
+					if err := containerProvider.Start(ctx, server.ContainerID); err != nil {
 						log.Error("Failed to start container for auto-start server %s: %v", server.Name, err)
 						return
 					}
@@ -236,7 +236,7 @@ func main() {
 	// Start container status monitor
 	stopMonitor := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(time.Duration(cfg.Docker.SyncInterval) * time.Second)
+		ticker := time.NewTicker(time.Duration(cfg.Containers.SyncInterval) * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -251,7 +251,8 @@ func main() {
 
 				for _, server := range servers {
 					if server.ContainerID != "" {
-						status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID)
+						statusStr, err := containerProvider.GetContainerStatus(ctx, server.ContainerID)
+						status := storage.ServerStatus(statusStr)
 						if err == nil && server.Status != status {
 							server.Status = status
 							if err := store.UpdateServer(ctx, server); err != nil {
@@ -306,7 +307,8 @@ func main() {
 			log.Info("Skipping shutdown of detached server: %s", server.Name)
 		} else if server.Status == storage.StatusRunning {
 			log.Info("Stopping managed container for server: %s", server.Name)
-			if err := dockerClient.StopContainer(ctx, server.ContainerID); err != nil {
+			timeout := 30 * time.Second
+			if err := containerProvider.Stop(ctx, server.ContainerID, &timeout); err != nil {
 				log.Error("Failed to stop container %s: %v", server.ContainerID, err)
 			}
 		}

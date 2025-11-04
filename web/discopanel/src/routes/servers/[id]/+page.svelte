@@ -98,7 +98,7 @@
 	async function handleDeleteServer() {
 		if (!server) return;
 		
-		const confirmed = confirm(`Are you sure you want to delete "${server.name}"?\n\nThis will:\n- Stop and remove the Docker container\n- Delete all server files and data\n- Remove all mods and configurations\n\nThis action cannot be undone!`);
+		const confirmed = confirm(`Are you sure you want to delete "${server.name}"?\n\nThis will:\n- Stop and remove the container\n- Delete all server files and data\n- Remove all mods and configurations\n\nThis action cannot be undone!`);
 		
 		if (!confirmed) return;
 		

@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/nickheyer/discopanel/internal/auth"
 	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 	"gorm.io/gorm"
 )
 
@@ -164,7 +165,7 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	// If server has a container, we need to recreate it with the new config
-	// Docker containers have immutable environment variables
+	// Containers have immutable environment variables
 	if server.ContainerID != "" {
 		oldContainerID := server.ContainerID
 
@@ -173,7 +174,8 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 		if server.Status == storage.StatusRunning {
 			wasRunning = true
 			// Stop the container first
-			if err := s.docker.StopContainer(ctx, oldContainerID); err != nil {
+			stopTimeout := 30 * time.Second
+			if err := s.containerProvider.Stop(ctx, oldContainerID, &stopTimeout); err != nil {
 				s.log.Error("Failed to stop container for config update: %v", err)
 				s.respondError(w, http.StatusInternalServerError, "Failed to stop server for configuration update")
 				return
@@ -184,14 +186,14 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 		}
 
 		// Remove old container
-		if err := s.docker.RemoveContainer(ctx, oldContainerID); err != nil {
+		if err := s.containerProvider.Remove(ctx, oldContainerID); err != nil {
 			s.log.Error("Failed to remove old container: %v", err)
 			s.respondError(w, http.StatusInternalServerError, "Failed to remove old container")
 			return
 		}
 
 		// Create new container with updated config
-		newContainerID, err := s.docker.CreateContainer(ctx, server, config)
+		newContainerID, err := minecraft.CreateContainer(ctx, s.containerProvider, server, config)
 		if err != nil {
 			s.log.Error("Failed to create new container with updated config: %v", err)
 			s.respondError(w, http.StatusInternalServerError, "Failed to create new container with updated configuration")
@@ -208,7 +210,7 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 
 		// Restart if it was running
 		if wasRunning {
-			if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
+			if err := s.containerProvider.Start(ctx, newContainerID); err != nil {
 				s.log.Error("Failed to restart container after config update: %v", err)
 				// Don't fail the whole operation, config is already saved
 			} else {

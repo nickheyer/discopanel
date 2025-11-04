@@ -6,13 +6,13 @@
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Plus, AlertCircle, Code, ChevronDown, ChevronRight, X } from '@lucide/svelte';
-	import type { DockerOverrides, VolumeMount } from '$lib/api/types';
+	import type { ContainerOverrides, VolumeMount } from '$lib/api/types';
 	import { Badge } from '$lib/components/ui/badge';
 
 	interface Props {
-		overrides?: DockerOverrides;
+		overrides?: ContainerOverrides;
 		disabled?: boolean;
-		onchange?: (overrides: DockerOverrides | undefined) => void;
+		onchange?: (overrides: ContainerOverrides | undefined) => void;
 	}
 
 	let { overrides = $bindable(), disabled = false, onchange }: Props = $props();
@@ -74,7 +74,7 @@
 		}
 	}
 
-	function updateOverride<K extends keyof DockerOverrides>(key: K, value: DockerOverrides[K]) {
+	function updateOverride<K extends keyof ContainerOverrides>(key: K, value: ContainerOverrides[K]) {
 		if (!overrides) overrides = {};
 
 		if (value === undefined || value === null ||
@@ -163,7 +163,7 @@
 			{:else}
 				<ChevronRight class="h-4 w-4" />
 			{/if}
-			<span>Docker Container Overrides</span>
+			<span>Container Overrides</span>
 			{#if activeCount() > 0}
 				<Badge variant="secondary" class="ml-1">{activeCount()}</Badge>
 			{/if}

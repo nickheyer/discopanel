@@ -8,11 +8,11 @@
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
-	import type { Server, UpdateServerRequest, MinecraftVersion, ModLoaderInfo, DockerImageInfo, AdditionalPort, DockerOverrides } from '$lib/api/types';
+	import type { Server, UpdateServerRequest, MinecraftVersion, ModLoaderInfo, ContainerImageInfo, AdditionalPort, ContainerOverrides } from '$lib/api/types';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
-	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
-	import { getUniqueDockerImages } from '$lib/utils';
+	import ContainerOverridesEditor from '$lib/components/container-overrides-editor.svelte';
+	import { getUniqueImages } from '$lib/utils';
 
 	interface Props {
 		server: Server;
@@ -24,7 +24,7 @@
 	let saving = $state(false);
 	let isDirty = $state(false);
 	
-	// Parse additional ports and docker overrides from JSON strings
+	// Parse additional ports and overrides from JSON strings
 	function parseAdditionalPorts(jsonStr?: string): AdditionalPort[] {
 		if (!jsonStr) return [];
 		try {
@@ -35,12 +35,12 @@
 		}
 	}
 
-	function parseDockerOverrides(jsonStr?: string): DockerOverrides | undefined {
+	function parseContainerOverrides(jsonStr?: string): ContainerOverrides | undefined {
 		if (!jsonStr) return undefined;
 		try {
 			return JSON.parse(jsonStr);
 		} catch (e) {
-			console.error('Failed to parse docker_overrides:', e);
+			console.error('Failed to parse container_overrides:', e);
 			return undefined;
 		}
 	}
@@ -52,19 +52,19 @@
 		memory: server.memory,
 		mod_loader: server.mod_loader,
 		mc_version: server.mc_version,
-		docker_image: server.docker_image,
+		container_image: server.container_image,
 		detached: !!(server.detached),
 		auto_start: !!(server.auto_start),
 		tps_command: server.tps_command || '',
 		additional_ports: parseAdditionalPorts(server.additional_ports),
-		docker_overrides: parseDockerOverrides(server.docker_overrides)
+		container_overrides: parseContainerOverrides(server.container_overrides)
 	});
 
 
 	// Available options
 	let minecraftVersions = $state<MinecraftVersion | null>(null);
 	let modLoaders = $state<ModLoaderInfo[]>([]);
-	let dockerImages = $state<DockerImageInfo[]>([]);
+	let containerImages = $state<ContainerImageInfo[]>([]);
 	let loadingOptions = $state(true);
 
 	// Reset state when server changes
@@ -82,12 +82,12 @@
 				memory: server.memory,
 				mod_loader: server.mod_loader,
 				mc_version: server.mc_version,
-				docker_image: server.docker_image,
+				container_image: server.container_image,
 				detached: !!(server.detached),
 				auto_start: !!(server.auto_start),
 				tps_command: server.tps_command || '',
 				additional_ports: parseAdditionalPorts(server.additional_ports),
-				docker_overrides: parseDockerOverrides(server.docker_overrides)
+				container_overrides: parseContainerOverrides(server.container_overrides)
 			};
 			saving = false;
 			isDirty = false;
@@ -110,12 +110,12 @@
 			formData.memory !== server.memory ||
 			formData.mod_loader !== server.mod_loader ||
 			formData.mc_version !== server.mc_version ||
-			formData.docker_image !== server.docker_image ||
+			formData.container_image !== server.container_image ||
 			formData.detached !== !!(server.detached) ||
 			formData.auto_start !== !!(server.auto_start) ||
 			formData.tps_command !== (server.tps_command || '') ||
 			JSON.stringify(formData.additional_ports) !== JSON.stringify(parseAdditionalPorts(server.additional_ports)) ||
-			JSON.stringify(formData.docker_overrides) !== JSON.stringify(parseDockerOverrides(server.docker_overrides));
+			JSON.stringify(formData.container_overrides) !== JSON.stringify(parseContainerOverrides(server.container_overrides));
 	});
 
 	async function loadOptions() {
@@ -124,12 +124,12 @@
 			const [versions, loaders, images] = await Promise.all([
 				api.getMinecraftVersions(),
 				api.getModLoaders(),
-				api.getDockerImages()
+				api.getContainerImages()
 			]);
 			
 			minecraftVersions = versions;
 			modLoaders = loaders.modloaders;
-			dockerImages = images.images;
+			containerImages = images.images;
 		} catch (error) {
 			toast.error('Failed to load options');
 		} finally {
@@ -289,18 +289,18 @@
 		</div>
 
 		<div class="space-y-2">
-			<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
+			<Label for="container_image" class="text-sm font-medium">Container Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
 			<Select
 				type="single"
 				disabled={loadingOptions || server.status !== 'stopped'}
-				value={formData.docker_image}
-				onValueChange={(value: string | undefined) => formData.docker_image = value || ''}
+				value={formData.container_image}
+				onValueChange={(value: string | undefined) => formData.container_image = value || ''}
 			>
-				<SelectTrigger id="docker_image" class="h-10">
-					<span>{formData.docker_image || 'Select Docker image'}</span>
+				<SelectTrigger id="container_image" class="h-10">
+					<span>{formData.container_image || 'Select Container image'}</span>
 				</SelectTrigger>
 				<SelectContent>
-					{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
+					{#each getUniqueImages(containerImages) as image (image.tag)}
 						<SelectItem value={image.tag}>
 							{image.tag} - Java {image.java} ({image.distribution})
 						</SelectItem>
@@ -384,10 +384,10 @@
 			onchange={(ports) => formData.additional_ports = ports}
 		/>
 
-		<DockerOverridesEditor
-			bind:overrides={formData.docker_overrides}
+		<ContainerOverridesEditor
+			bind:overrides={formData.container_overrides}
 			disabled={saving}
-			onchange={(overrides) => formData.docker_overrides = overrides}
+			onchange={(overrides) => formData.container_overrides = overrides}
 		/>
 	</div>
 

@@ -10,13 +10,13 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Docker    DockerConfig    `mapstructure:"docker"`
-	Storage   StorageConfig   `mapstructure:"storage"`
-	Proxy     ProxyConfig     `mapstructure:"proxy"`
-	Minecraft MinecraftConfig `mapstructure:"minecraft"`
-	Logging   LoggingConfig   `mapstructure:"logging"`
+	Server     ServerConfig     `mapstructure:"server"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Containers ContainersConfig `mapstructure:"containers"`
+	Storage    StorageConfig    `mapstructure:"storage"`
+	Proxy      ProxyConfig      `mapstructure:"proxy"`
+	Minecraft  MinecraftConfig  `mapstructure:"minecraft"`
+	Logging    LoggingConfig    `mapstructure:"logging"`
 }
 
 type ServerConfig struct {
@@ -34,7 +34,8 @@ type DatabaseConfig struct {
 	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime"`
 }
 
-type DockerConfig struct {
+type ContainersConfig struct {
+	Provider      string `mapstructure:"provider"`
 	SyncInterval  int    `mapstructure:"sync_interval"`
 	Host          string `mapstructure:"host"`
 	Version       string `mapstructure:"version"`
@@ -131,13 +132,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.max_idle_conns", 5)
 	v.SetDefault("database.conn_max_lifetime", 300)
 
-	// Docker defaults
-	v.SetDefault("docker.sync_interval", 5)
-	v.SetDefault("docker.host", "unix:///var/run/docker.sock")
-	v.SetDefault("docker.version", "1.41")
-	v.SetDefault("docker.network_name", "discopanel-network")
-	v.SetDefault("docker.network_subnet", "172.20.0.0/16")
-	v.SetDefault("docker.registry_url", "")
+	// Container defaults
+	v.SetDefault("containers.provider", "docker")
+	v.SetDefault("containers.sync_interval", 5)
+	v.SetDefault("containers.host", "unix:///var/run/docker.sock")
+	v.SetDefault("containers.version", "1.41")
+	v.SetDefault("containers.network_name", "discopanel-network")
+	v.SetDefault("containers.network_subnet", "172.20.0.0/16")
+	v.SetDefault("containers.registry_url", "")
 
 	// Storage defaults
 	dataDir, err := filepath.Abs("./data")

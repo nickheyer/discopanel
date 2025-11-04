@@ -1,7 +1,9 @@
 package containers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	log "github.com/sirupsen/logrus"
@@ -52,14 +55,17 @@ func (d DockerProvider) Create(ctx context.Context, cfg *ContainerConfig) (strin
 		}
 	}
 
-	timeout := 0
 	config := &container.Config{
-		Image: cfg.image,
-		Env:   dockerEnv,
-		Cmd:   cfg.command,
-		// In case we pass a 0 value to the stop API, this timeout will be used.
-		// Setting this to 0 means: send SIGKILL immediately
-		StopTimeout: &timeout,
+		Image:        cfg.image,
+		Env:          dockerEnv,
+		Cmd:          cfg.command,
+		Tty:          true,
+		OpenStdin:    false,
+		AttachStdin:  false,
+		AttachStdout: true,
+		AttachStderr: true,
+		ExposedPorts: cfg.exposedPorts,
+		Labels:       cfg.labels,
 	}
 
 	servers := make([]string, len(cfg.dnsServers))
@@ -135,38 +141,17 @@ func (d DockerProvider) Wait(ctx context.Context, containerID string) (<-chan in
 	return msgChan, errChan
 }
 
-func (d DockerProvider) Logs(ctx context.Context, containerID string) (io.ReadCloser, io.ReadCloser, error) {
+func (d DockerProvider) Logs(ctx context.Context, containerID string) (io.ReadCloser, error) {
+	// Log streaming config
 	options := container.LogsOptions{
-		Follow:     true,
 		ShowStdout: true,
 		ShowStderr: true,
-	}
-	combined, err := d.client.ContainerLogs(ctx, containerID, options)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get logs from docker: %w", err)
-	}
-
-	readOut, writeOut, err := os.Pipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-	readErr, writeErr, err := os.Pipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+		Follow:     true,
+		Timestamps: false,
+		Tail:       "100", // Start with last 100 lines
 	}
 
-	go func() {
-		defer writeOut.Close()
-		defer writeErr.Close()
-		defer combined.Close()
-
-		_, err := stdcopy.StdCopy(writeOut, writeErr, combined)
-		if err != nil {
-			log.WithField("err", err).Warn("failed to copy logs content to pipes")
-		}
-	}()
-
-	return readOut, readErr, nil
+	return d.client.ContainerLogs(ctx, containerID, options)
 }
 
 func (d DockerProvider) CopyFrom(ctx context.Context, container, source, dest string) error {
@@ -187,6 +172,178 @@ func (d DockerProvider) CopyFrom(ctx context.Context, container, source, dest st
 		return fmt.Errorf("failed to extract tar archive: %w", err)
 	}
 	return nil
+}
+
+func (d DockerProvider) GetContainerStatus(ctx context.Context, containerID string) (string, error) {
+	inspect, err := d.client.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "error", err
+	}
+	return inspect.State.Status, nil
+}
+
+func (d DockerProvider) GetContainerStats(ctx context.Context, containerID string) (*ContainerStats, error) {
+	statsResponse, err := d.client.ContainerStats(ctx, containerID, false)
+	if err != nil {
+		return nil, err
+	}
+	defer statsResponse.Body.Close()
+
+	var stats container.Stats
+	if err := json.NewDecoder(statsResponse.Body).Decode(&stats); err != nil {
+		return nil, err
+	}
+
+	// Calculate CPU percentage
+	cpuPercent := 0.0
+	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage) - float64(stats.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(stats.CPUStats.SystemUsage) - float64(stats.PreCPUStats.SystemUsage)
+
+	cpuCount := float64(len(stats.CPUStats.CPUUsage.PercpuUsage))
+	if cpuCount == 0 {
+		cpuCount = float64(stats.CPUStats.OnlineCPUs)
+	}
+	if cpuCount == 0 {
+		cpuCount = 1.0
+	}
+
+	if systemDelta > 0.0 && cpuDelta > 0.0 {
+		cpuPercent = (cpuDelta / systemDelta) * cpuCount * 100.0
+	}
+
+	// Get memory usage in MB (excluding cache)
+	memoryUsage := float64(stats.MemoryStats.Usage-stats.MemoryStats.Stats["cache"]) / 1024 / 1024
+	memoryLimit := float64(stats.MemoryStats.Limit) / 1024 / 1024
+
+	return &ContainerStats{
+		CPUPercent:  cpuPercent,
+		MemoryUsage: memoryUsage,
+		MemoryLimit: memoryLimit,
+	}, nil
+}
+
+func (d DockerProvider) CleanupOrphanedContainers(ctx context.Context, trackedIDs map[string]bool) error {
+	containers, err := d.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return err
+	}
+
+	for _, cont := range containers {
+		// Check for discopanel prefix
+		hasPrefix := false
+		for _, name := range cont.Names {
+			if len(name) > 0 && len(name) > 18 && name[:18] == "/discopanel-server" {
+				hasPrefix = true
+				break
+			}
+		}
+
+		if hasPrefix && !trackedIDs[cont.ID] {
+			// Stop if running
+			if cont.State == "running" {
+				timeout := 30
+				d.client.ContainerStop(ctx, cont.ID, container.StopOptions{Timeout: &timeout})
+			}
+			// Remove container
+			d.client.ContainerRemove(ctx, cont.ID, container.RemoveOptions{Force: true})
+		}
+	}
+	return nil
+}
+
+func (d DockerProvider) EnsureNetwork(ctx context.Context, networkName string) error {
+	// List existing networks
+	networks, err := d.client.NetworkList(ctx, network.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list networks: %w", err)
+	}
+
+	// Check if network already exists
+	for _, net := range networks {
+		if net.Name == networkName {
+			return nil // Network already exists
+		}
+	}
+
+	// Create network
+	_, err = d.client.NetworkCreate(ctx, networkName, network.CreateOptions{
+		Driver: "bridge",
+		Labels: map[string]string{
+			"discopanel.managed": "true",
+		},
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to create network: %w", err)
+	}
+
+	return nil
+}
+
+func (d DockerProvider) Exec(ctx context.Context, containerID string, cmd []string) (string, error) {
+	execConfig := container.ExecOptions{
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+
+	execResp, err := d.client.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return "", fmt.Errorf("failed to create exec: %w", err)
+	}
+
+	attachResp, err := d.client.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to attach to exec: %w", err)
+	}
+	defer attachResp.Close()
+
+	var outputBuf bytes.Buffer
+	_, err = stdcopy.StdCopy(&outputBuf, &outputBuf, attachResp.Reader)
+	if err != nil {
+		return "", fmt.Errorf("failed to read exec output: %w", err)
+	}
+
+	// Check exec status
+	inspectResp, err := d.client.ContainerExecInspect(ctx, execResp.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect exec: %w", err)
+	}
+
+	if inspectResp.ExitCode != 0 {
+		return outputBuf.String(), fmt.Errorf("command exited with code %d", inspectResp.ExitCode)
+	}
+
+	return outputBuf.String(), nil
+}
+
+func (d DockerProvider) GetIP(ctx context.Context, containerID string, networkName string) (string, error) {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return "", err
+	}
+	defer cli.Close()
+
+	containerInfo, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect container: %w", err)
+	}
+
+	// Look for the IP on the specified network
+	if networkName != "" {
+		if network, ok := containerInfo.NetworkSettings.Networks[networkName]; ok && network.IPAddress != "" {
+			return network.IPAddress, nil
+		}
+	}
+
+	// Fallback to any available IP
+	for _, network := range containerInfo.NetworkSettings.Networks {
+		if network.IPAddress != "" {
+			return network.IPAddress, nil
+		}
+	}
+
+	return "", fmt.Errorf("no IP address found for container")
 }
 
 func (d DockerProvider) Command() string {

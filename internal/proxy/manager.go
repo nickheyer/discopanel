@@ -9,27 +9,30 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/config"
 	db "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/containers"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
 // Manager handles the lifecycle of the proxy and manages routes
 type Manager struct {
-	proxies     map[int]*Proxy // Map of port -> Proxy instance
-	store       *db.Store
-	config      *config.ProxyConfig
-	logger      *logger.Logger
-	mu          sync.Mutex
-	networkName string
+	proxies           map[int]*Proxy // Map of port -> Proxy instance
+	store             *db.Store
+	config            *config.ProxyConfig
+	logger            *logger.Logger
+	containerProvider containers.ContainerProvider
+	mu                sync.Mutex
+	networkName       string
 }
 
 // NewManager creates a new proxy manager
-func NewManager(store *db.Store, cfg *config.ProxyConfig, logger *logger.Logger) *Manager {
+func NewManager(store *db.Store, cfg *config.ProxyConfig, logger *logger.Logger, containerProvider containers.ContainerProvider) *Manager {
 	return &Manager{
-		proxies:     make(map[int]*Proxy),
-		store:       store,
-		config:      cfg,
-		logger:      logger,
-		networkName: "discopanel-network", // TODO: Get from main config
+		proxies:           make(map[int]*Proxy),
+		store:             store,
+		config:            cfg,
+		logger:            logger,
+		containerProvider: containerProvider,
+		networkName:       "discopanel-network", // TODO: Get from main config
 	}
 }
 
@@ -95,7 +98,7 @@ func (m *Manager) Start() error {
 			}
 
 			// Get container IP address
-			containerIP, err := getContainerIP(server.ContainerID, m.networkName)
+			containerIP, err := m.containerProvider.GetIP(context.Background(), server.ContainerID, m.networkName)
 			if err != nil {
 				m.logger.Error("Failed to get container IP for server %s: %v", server.Name, err)
 				continue
@@ -178,10 +181,10 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 
 	// Add or update route for servers that are starting or running with proxy hostname
 	if (server.Status == db.StatusRunning || server.Status == db.StatusStarting) && server.ProxyHostname != "" {
-		// Get the container's IP address on the Docker network
+		// Get the container's IP address on the container network
 		containerIP := ""
 		if server.ContainerID != "" {
-			if ip, err := getContainerIP(server.ContainerID, m.networkName); err == nil {
+			if ip, err := m.containerProvider.GetIP(context.Background(), server.ContainerID, m.networkName); err == nil {
 				containerIP = ip
 			} else {
 				m.logger.Error("Failed to get container IP for %s: %v", server.Name, err)

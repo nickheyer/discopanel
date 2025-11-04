@@ -16,10 +16,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	models "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/indexers"
 	"github.com/nickheyer/discopanel/internal/indexers/fuego"
 	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 )
 
 type Version struct {
@@ -169,8 +169,8 @@ func (s *Server) handleSyncModpacks(w http.ResponseWriter, r *http.Request) {
 			modLoader = models.ModLoader(modpack.ModLoaders[0])
 		}
 
-		javaVersion := docker.GetRequiredJavaVersion(mcVersion, modLoader)
-		dockerImage := docker.GetOptimalDockerTag(mcVersion, modLoader, false)
+		javaVersion := minecraft.GetRequiredJavaVersion(mcVersion, modLoader)
+		containerImage := minecraft.GetOptimalImageTag(mcVersion, modLoader, false)
 
 		dbModpack := &models.IndexedModpack{
 			ID:            modpack.ID,
@@ -193,7 +193,7 @@ func (s *Server) handleSyncModpacks(w http.ResponseWriter, r *http.Request) {
 			// Computed fields
 			MCVersion:      mcVersion,
 			JavaVersion:    javaVersion,
-			DockerImage:    dockerImage,
+			ContainerImage: containerImage,
 			RecommendedRAM: 6144, // 6GB for modpacks
 		}
 
@@ -400,13 +400,13 @@ func (s *Server) handleGetModpackConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	config := map[string]any{
-		"name":         modpack.Name,
-		"description":  modpack.Summary,
-		"mod_loader":   modLoader,
-		"mc_version":   modpack.MCVersion,
-		"memory":       modpack.RecommendedRAM,
-		"docker_image": modpack.DockerImage,
-		"modpack_file": modpack.LatestFileID, // For manual modpacks, this is the file ID
+		"name":            modpack.Name,
+		"description":     modpack.Summary,
+		"mod_loader":      modLoader,
+		"mc_version":      modpack.MCVersion,
+		"memory":          modpack.RecommendedRAM,
+		"container_image": modpack.ContainerImage,
+		"modpack_file":    modpack.LatestFileID, // For manual modpacks, this is the file ID
 	}
 
 	s.respondJSON(w, http.StatusOK, config)
@@ -646,8 +646,8 @@ func (s *Server) handleUploadModpack(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	javaVersion := docker.GetRequiredJavaVersion(manifest.Minecraft.Version, modLoader)
-	dockerImage := docker.GetOptimalDockerTag(manifest.Minecraft.Version, modLoader, false)
+	javaVersion := minecraft.GetRequiredJavaVersion(manifest.Minecraft.Version, modLoader)
+	containerImage := minecraft.GetOptimalImageTag(manifest.Minecraft.Version, modLoader, false)
 
 	// Create database entry
 	gameVersionsJSON, _ := json.Marshal([]string{manifest.Minecraft.Version})
@@ -673,7 +673,7 @@ func (s *Server) handleUploadModpack(w http.ResponseWriter, r *http.Request) {
 		DateReleased:   time.Now(),
 		MCVersion:      manifest.Minecraft.Version,
 		JavaVersion:    javaVersion,
-		DockerImage:    dockerImage,
+		ContainerImage: containerImage,
 		RecommendedRAM: 6144, // 6GB for modpacks
 	}
 

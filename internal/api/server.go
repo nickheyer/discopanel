@@ -10,25 +10,25 @@ import (
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/containers"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	web "github.com/nickheyer/discopanel/web/discopanel"
 )
 
 type Server struct {
-	store          *storage.Store
-	docker         *docker.Client
-	config         *config.Config
-	log            *logger.Logger
-	router         *mux.Router
-	proxyManager   *proxy.Manager
-	authManager    *auth.Manager
-	authMiddleware *auth.Middleware
-	logStreamer    *LogStreamer
+	store             *storage.Store
+	containerProvider containers.ContainerProvider
+	config            *config.Config
+	log               *logger.Logger
+	router            *mux.Router
+	proxyManager      *proxy.Manager
+	authManager       *auth.Manager
+	authMiddleware    *auth.Middleware
+	logStreamer       *containers.LogStreamer
 }
 
-func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, containerProvider containers.ContainerProvider, cfg *config.Config, log *logger.Logger) *Server {
 	// Initialize auth manager
 	authManager := auth.NewManager(store)
 	authMiddleware := auth.NewMiddleware(authManager, store)
@@ -39,16 +39,16 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	}
 
 	// Initialize log streamer
-	logStreamer := NewLogStreamer(docker.GetDockerClient(), log, 10000)
+	logStreamer := containers.NewLogStreamer(containerProvider, log, 10000)
 
 	s := &Server{
-		store:          store,
-		docker:         docker,
-		config:         cfg,
-		log:            log,
-		authManager:    authManager,
-		authMiddleware: authMiddleware,
-		logStreamer:    logStreamer,
+		store:             store,
+		containerProvider: containerProvider,
+		config:            cfg,
+		log:               log,
+		authManager:       authManager,
+		authMiddleware:    authMiddleware,
+		logStreamer:       logStreamer,
 	}
 
 	s.setupRoutes()
@@ -119,7 +119,7 @@ func (s *Server) setupServerRoutes(api *mux.Router) {
 	// Minecraft info
 	viewer.HandleFunc("/minecraft/versions", s.handleGetMinecraftVersions).Methods("GET")
 	viewer.HandleFunc("/minecraft/modloaders", s.handleGetModLoaders).Methods("GET")
-	viewer.HandleFunc("/minecraft/docker-images", s.handleGetDockerImages).Methods("GET")
+	viewer.HandleFunc("/minecraft/images", s.handleGetImages).Methods("GET")
 
 	// Server read operations
 	viewer.HandleFunc("/servers", s.handleListServers).Methods("GET")

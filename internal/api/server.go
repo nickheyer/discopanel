@@ -23,9 +23,20 @@ type Server struct {
 	log            *logger.Logger
 	router         *mux.Router
 	proxyManager   *proxy.Manager
+	tunnelManager  TunnelManager
 	authManager    *auth.Manager
 	authMiddleware *auth.Middleware
 	logStreamer    *LogStreamer
+}
+
+// TunnelManager interface for tunnel operations
+type TunnelManager interface {
+	ConfigureTunnel(accountID, apiToken string) error
+	StartContainer() error
+	StopContainer() error
+	GetContainerStatus() (string, error)
+	RefreshDomains() error
+	UpdateTunnelIngress() error
 }
 
 func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
@@ -176,6 +187,12 @@ func (s *Server) setupProxyRoutes(api *mux.Router) {
 	proxy.HandleFunc("/listeners", s.handleCreateProxyListener).Methods("POST")
 	proxy.HandleFunc("/listeners/{id}", s.handleUpdateProxyListener).Methods("PUT")
 	proxy.HandleFunc("/listeners/{id}", s.handleDeleteProxyListener).Methods("DELETE")
+
+	// Tunnel configuration routes
+	proxy.HandleFunc("/tunnel", s.handleGetTunnelConfig).Methods("GET")
+	proxy.HandleFunc("/tunnel", s.handleUpdateTunnelConfig).Methods("PUT")
+	proxy.HandleFunc("/tunnel/{action}", s.handleTunnelAction).Methods("POST")
+	proxy.HandleFunc("/tunnel/domains/{zone_id}", s.handleUpdateCloudflareDomain).Methods("PUT")
 }
 
 func (s *Server) setupModpackRoutes(api *mux.Router) {
@@ -281,6 +298,10 @@ func (s *Server) serveIndexHTML(w http.ResponseWriter, r *http.Request, fs http.
 
 func (s *Server) SetProxyManager(pm *proxy.Manager) {
 	s.proxyManager = pm
+}
+
+func (s *Server) SetTunnelManager(tm TunnelManager) {
+	s.tunnelManager = tm
 }
 
 // StartLogStreaming starts log streaming for a container

@@ -15,6 +15,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/internal/tunnel"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -157,8 +158,20 @@ func main() {
 			cfg.Proxy.Enabled, cfg.Proxy.BaseURL, len(cfg.Proxy.ListenPorts))
 	}
 
+	// Initialize tunnel manager
+	tunnelManager := tunnel.NewManager(dockerClient.GetDockerClient(), store, log, cfg.Docker.NetworkName)
+
 	// Initialize proxy manager
 	proxyManager := proxy.NewManager(store, &cfg.Proxy, log)
+
+	// Connect tunnel manager to proxy manager
+	proxyManager.SetTunnelManager(tunnelManager)
+
+	// Start tunnel manager if enabled
+	if err := tunnelManager.Start(); err != nil {
+		log.Error("Failed to start tunnel manager: %v", err)
+	}
+	defer tunnelManager.Stop()
 
 	// Start proxy if enabled
 	if err := proxyManager.Start(); err != nil {
@@ -169,6 +182,7 @@ func main() {
 	// Initialize API server with full configuration
 	apiServer := api.NewServer(store, dockerClient, cfg, log)
 	apiServer.SetProxyManager(proxyManager)
+	apiServer.SetTunnelManager(tunnelManager)
 
 	// Auto-start servers that have auto_start enabled
 	log.Info("Checking for servers with auto-start enabled...")

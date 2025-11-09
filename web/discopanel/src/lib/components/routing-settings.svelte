@@ -9,10 +9,11 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { toast } from 'svelte-sonner';
-	import { 
-		Save, Plus, Trash2, Loader2, AlertCircle, 
+	import {
+		Save, Plus, Trash2, Loader2, AlertCircle,
 		Server, Activity, CheckCircle2, XCircle, Network,
-		Info, Edit, Star
+		Info, Edit, Star, Cloud, Play, Square, RefreshCw,
+		Shield, Globe
 	} from '@lucide/svelte';
 
 	interface ProxyListener {
@@ -25,6 +26,25 @@
 		server_count?: number;
 		created_at?: string;
 		updated_at?: string;
+	}
+
+	interface CloudflareDomain {
+		id: string;
+		zone_id: string;
+		zone_name: string;
+		enabled: boolean;
+		created_at?: string;
+		updated_at?: string;
+	}
+
+	interface TunnelConfig {
+		enabled: boolean;
+		cloudflare_account_id: string;
+		tunnel_id: string;
+		tunnel_name: string;
+		container_status: string;
+		domains: CloudflareDomain[];
+		has_credentials: boolean;
 	}
 
 	let loading = $state(true);
@@ -43,6 +63,16 @@
 	let portError = $state('');
 	let activeRoutes = $state<any[]>([]);
 
+	// Tunnel configuration state
+	let tunnelConfig = $state<TunnelConfig | null>(null);
+	let tunnelCredentials = $state({
+		cloudflare_account_id: '',
+		cloudflare_api_token: ''
+	});
+	let showTunnelCredentials = $state(false);
+	let savingTunnel = $state(false);
+	let tunnelActionLoading = $state(false);
+
 	onMount(() => {
 		loadAll();
 	});
@@ -53,7 +83,8 @@
 			await Promise.all([
 				loadProxyConfig(),
 				loadListeners(),
-				loadActiveRoutes()
+				loadActiveRoutes(),
+				loadTunnelConfig()
 			]);
 		} finally {
 			loading = false;
@@ -227,6 +258,88 @@
 			default: return AlertCircle;
 		}
 	}
+
+	// Tunnel functions
+	async function loadTunnelConfig() {
+		try {
+			tunnelConfig = await api.getTunnelConfig();
+		} catch (error) {
+			console.error('Failed to load tunnel configuration:', error);
+		}
+	}
+
+	async function saveTunnelConfig() {
+		savingTunnel = true;
+		try {
+			const payload: any = {
+				enabled: tunnelConfig?.enabled || false
+			};
+
+			// Only include credentials if they're being updated
+			if (tunnelCredentials.cloudflare_account_id && tunnelCredentials.cloudflare_api_token) {
+				payload.cloudflare_account_id = tunnelCredentials.cloudflare_account_id;
+				payload.cloudflare_api_token = tunnelCredentials.cloudflare_api_token;
+			}
+
+			await api.updateTunnelConfig(payload);
+			toast.success('Tunnel configuration saved');
+			await loadTunnelConfig();
+			// Clear credentials after successful save
+			tunnelCredentials = { cloudflare_account_id: '', cloudflare_api_token: '' };
+			showTunnelCredentials = false;
+		} catch (error) {
+			// Error is already handled by API client
+		} finally {
+			savingTunnel = false;
+		}
+	}
+
+	async function performTunnelAction(action: 'start' | 'stop' | 'refresh-domains') {
+		tunnelActionLoading = true;
+		try {
+			await api.performTunnelAction(action);
+			switch (action) {
+				case 'start':
+					toast.success('Tunnel container started');
+					break;
+				case 'stop':
+					toast.success('Tunnel container stopped');
+					break;
+				case 'refresh-domains':
+					toast.success('Domains refreshed');
+					break;
+			}
+			await loadTunnelConfig();
+		} catch (error) {
+			// Error is already handled by API client
+		} finally {
+			tunnelActionLoading = false;
+		}
+	}
+
+	async function toggleDomain(domain: CloudflareDomain) {
+		await api.updateTunnelDomain(domain.zone_id, !domain.enabled);
+		domain.enabled = !domain.enabled;
+		toast.success(`Domain ${domain.zone_name} ${domain.enabled ? 'enabled' : 'disabled'}`);
+	}
+
+	function getTunnelStatusColor(status: string): string {
+		switch (status) {
+			case 'running': return 'text-green-500';
+			case 'stopped': return 'text-red-500';
+			case 'restarting': return 'text-yellow-500';
+			default: return 'text-gray-500';
+		}
+	}
+
+	function getTunnelStatusBadge(status: string) {
+		switch (status) {
+			case 'running': return 'default';
+			case 'stopped': return 'destructive';
+			case 'not_configured': return 'outline';
+			default: return 'secondary';
+		}
+	}
 </script>
 
 <div class="space-y-6">
@@ -280,6 +393,228 @@
 			</div>
 		</CardContent>
 	</Card>
+
+	<!-- Cloudflare Tunnel Configuration -->
+	{#if proxyEnabled}
+		<Card>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<Cloud class="h-5 w-5 text-primary" />
+						<div>
+							<CardTitle>Cloudflare Tunnels</CardTitle>
+							<CardDescription>
+								Auto-DNS routing through Cloudflare's global network
+							</CardDescription>
+						</div>
+					</div>
+					{#if tunnelConfig}
+						<div class="flex items-center gap-3">
+							<Badge variant={getTunnelStatusBadge(tunnelConfig.container_status)}>
+								{tunnelConfig.container_status}
+							</Badge>
+							<Switch
+								checked={tunnelConfig.enabled}
+								onCheckedChange={(checked) => { if (tunnelConfig) tunnelConfig.enabled = checked }}
+								disabled={savingTunnel || !tunnelConfig.has_credentials}
+							/>
+						</div>
+					{/if}
+				</div>
+			</CardHeader>
+			<CardContent class="space-y-4">
+				{#if tunnelConfig && !tunnelConfig.has_credentials && !showTunnelCredentials}
+					<Alert>
+						<Shield class="h-4 w-4" />
+						<AlertDescription>
+							Cloudflare credentials are required to use tunnels.
+							<Button
+								variant="link"
+								class="p-0 h-auto"
+								onclick={() => showTunnelCredentials = true}
+							>
+								Configure credentials
+							</Button>
+						</AlertDescription>
+					</Alert>
+				{:else if showTunnelCredentials || (tunnelConfig && !tunnelConfig.has_credentials)}
+					<div class="space-y-4 p-4 border rounded-lg">
+						<h4 class="font-medium">Cloudflare Credentials</h4>
+						<div class="space-y-3">
+							<div class="space-y-2">
+								<Label for="cf-account">Account ID</Label>
+								<Input
+									id="cf-account"
+									type="text"
+									bind:value={tunnelCredentials.cloudflare_account_id}
+									placeholder="Your Cloudflare Account ID"
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="cf-token">API Token</Label>
+								<Input
+									id="cf-token"
+									type="password"
+									bind:value={tunnelCredentials.cloudflare_api_token}
+									placeholder="API Token with Cloudflare Tunnel permissions"
+								/>
+								<p class="text-xs text-muted-foreground">
+									Create a token with Zone:DNS:Edit and Account:Cloudflare Tunnel:Edit permissions
+								</p>
+							</div>
+						</div>
+						<div class="flex gap-2">
+							{#if tunnelConfig?.has_credentials}
+								<Button
+									variant="outline"
+									onclick={() => {
+										showTunnelCredentials = false;
+										tunnelCredentials = { cloudflare_account_id: '', cloudflare_api_token: '' };
+									}}
+								>
+									Cancel
+								</Button>
+							{/if}
+							<Button
+								onclick={saveTunnelConfig}
+								disabled={savingTunnel || !tunnelCredentials.cloudflare_account_id || !tunnelCredentials.cloudflare_api_token}
+							>
+								{#if savingTunnel}
+									<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+								{/if}
+								Save Credentials
+							</Button>
+						</div>
+					</div>
+				{/if}
+
+				{#if tunnelConfig?.has_credentials}
+					<!-- Tunnel Status and Controls -->
+					<div class="space-y-3">
+						<div class="flex items-center justify-between p-3 border rounded-lg">
+							<div class="space-y-1">
+								<div class="flex items-center gap-2">
+									<span class="font-medium">Tunnel Status</span>
+									<Badge variant={getTunnelStatusBadge(tunnelConfig.container_status)}>
+										{tunnelConfig.container_status}
+									</Badge>
+								</div>
+								{#if tunnelConfig.tunnel_name}
+									<p class="text-sm text-muted-foreground">
+										Tunnel: {tunnelConfig.tunnel_name}
+									</p>
+								{/if}
+							</div>
+							<div class="flex gap-2">
+								{#if tunnelConfig.container_status === 'stopped' || tunnelConfig.container_status === 'not_configured'}
+									<Button
+										size="sm"
+										onclick={() => performTunnelAction('start')}
+										disabled={tunnelActionLoading || !tunnelConfig.enabled}
+									>
+										{#if tunnelActionLoading}
+											<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+										{:else}
+											<Play class="h-4 w-4 mr-2" />
+										{/if}
+										Start
+									</Button>
+								{:else if tunnelConfig.container_status === 'running'}
+									<Button
+										size="sm"
+										variant="destructive"
+										onclick={() => performTunnelAction('stop')}
+										disabled={tunnelActionLoading}
+									>
+										{#if tunnelActionLoading}
+											<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+										{:else}
+											<Square class="h-4 w-4 mr-2" />
+										{/if}
+										Stop
+									</Button>
+								{/if}
+								<Button
+									size="sm"
+									variant="outline"
+									onclick={() => performTunnelAction('refresh-domains')}
+									disabled={tunnelActionLoading}
+								>
+									{#if tunnelActionLoading}
+										<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+									{:else}
+										<RefreshCw class="h-4 w-4 mr-2" />
+									{/if}
+									Refresh Domains
+								</Button>
+							</div>
+						</div>
+
+						{#if !showTunnelCredentials}
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => showTunnelCredentials = true}
+							>
+								Update Credentials
+							</Button>
+						{/if}
+					</div>
+
+					<!-- Available Domains -->
+					{#if tunnelConfig.domains && tunnelConfig.domains.length > 0}
+						<div class="space-y-3">
+							<h4 class="font-medium flex items-center gap-2">
+								<Globe class="h-4 w-4" />
+								Available Domains
+							</h4>
+							<div class="space-y-2">
+								{#each tunnelConfig.domains as domain}
+									<div class="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+										<div class="flex items-center gap-3">
+											<Switch
+												checked={domain.enabled}
+												onCheckedChange={() => toggleDomain(domain)}
+											/>
+											<span class="font-mono text-sm">{domain.zone_name}</span>
+										</div>
+										<Badge variant={domain.enabled ? "default" : "outline"}>
+											{domain.enabled ? 'Enabled' : 'Disabled'}
+										</Badge>
+									</div>
+								{/each}
+							</div>
+							<p class="text-xs text-muted-foreground">
+								Enable domains to allow them to be used for tunnel routing. Servers can use subdomains of enabled domains.
+							</p>
+						</div>
+					{:else if tunnelConfig.enabled}
+						<Alert>
+							<Info class="h-4 w-4" />
+							<AlertDescription>
+								No domains found. Make sure your Cloudflare account has at least one domain configured.
+							</AlertDescription>
+						</Alert>
+					{/if}
+
+					<!-- Save button -->
+					<div class="flex justify-end">
+						<Button
+							onclick={saveTunnelConfig}
+							disabled={savingTunnel}
+						>
+							{#if savingTunnel}
+								<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+							{:else}
+								<Save class="h-4 w-4 mr-2" />
+							{/if}
+							Save Tunnel Settings
+						</Button>
+					</div>
+				{/if}
+			</CardContent>
+		</Card>
+	{/if}
 
 	{#if loading}
 		<Card>

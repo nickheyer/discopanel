@@ -8,7 +8,8 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, Globe, Save, Copy, AlertCircle, CheckCircle2, XCircle } from '@lucide/svelte';
+	import { Select, SelectTrigger, SelectContent, SelectItem } from '$lib/components/ui/select';
+	import { Loader2, Globe, Save, Copy, AlertCircle, CheckCircle2, XCircle, Cloud, Shield } from '@lucide/svelte';
 	import type { Server } from '$lib/api/types';
 
 	let { server, active, router: routingInfo = $bindable(null) }: { server: Server, active?: boolean, router?:any } = $props();
@@ -22,12 +23,16 @@
 	let hostnameError = $state('');
 	let initialized = $state(false);
 	let previousServerId = $state(server.id);
+	let tunnelConfig = $state<any>(null);
+	let selectedDomain = $state('');
+	let useCloudflare = $state(false);
 
 	onMount(() => {
 		if (server && !initialized) {
 			initialized = true;
 			loadRoutingInfo();
 			loadAllRoutes();
+			loadTunnelConfig();
 		}
 	})
 
@@ -105,11 +110,18 @@
 	}
 
 	async function saveRouting() {
-		if (!validateHostname(hostname)) return;
+		let finalHostname = hostname;
+
+		if (useCloudflare && selectedDomain) {
+			const subdomain = hostname || server.name.toLowerCase().replace(/\s+/g, '-');
+			finalHostname = `${subdomain}.${selectedDomain}`;
+		}
+
+		if (!validateHostname(finalHostname)) return;
 
 		saving = true;
 		try {
-			await api.updateServerRouting(server.id, hostname);
+			await api.updateServerRouting(server.id, finalHostname);
 			toast.success('Routing configuration saved');
 			originalHostname = hostname;
 			// Reload routing info to get updated server state
@@ -123,6 +135,15 @@
 			}
 		} finally {
 			saving = false;
+		}
+	}
+	
+	// Tunnel functions
+	async function loadTunnelConfig() {
+		try {
+			tunnelConfig = await api.getTunnelConfig();
+		} catch (error) {
+			console.error('Failed to load tunnel configuration:', error);
 		}
 	}
 
@@ -228,28 +249,85 @@
 				</CardDescription>
 			</CardHeader>
 			<CardContent class="space-y-4">
-				<div class="space-y-2">
-					<Label for="hostname">Custom Hostname</Label>
-					<Input
-						id="hostname"
-						type="text"
-						bind:value={hostname}
-						placeholder={routingInfo.suggested_hostname || 'minecraft.example.com'}
-						oninput={(e) => validateHostname(e.currentTarget.value)}
-						class={hostnameError ? 'border-destructive' : ''}
-					/>
-					{#if hostnameError}
-						<p class="text-sm text-destructive">{hostnameError}</p>
-					{:else if hostname}
-						<p class="text-sm text-muted-foreground">
-							Players will connect using: <span class="font-mono">{getConnectionString()}</span>
-						</p>
-					{:else}
-						<p class="text-sm text-muted-foreground">
-							Leave empty to use the default hostname based on your server name
-						</p>
-					{/if}
-				</div>
+				{#if tunnelConfig?.enabled && tunnelConfig?.domains?.length > 0}
+					<!-- Cloudflare Tunnel Option -->
+					<div class="space-y-3 p-4 border rounded-lg">
+						<div class="flex items-center justify-between">
+							<div class="flex items-center gap-2">
+								<Cloud class="h-4 w-4 text-primary" />
+								<Label>Use Cloudflare Tunnel</Label>
+							</div>
+							<input
+								type="checkbox"
+								bind:checked={useCloudflare}
+								class="h-4 w-4"
+							/>
+						</div>
+
+						{#if useCloudflare}
+							<div class="space-y-2">
+								<Label for="domain">Select Domain</Label>
+								<Select type="single" bind:value={selectedDomain}>
+									<SelectTrigger>
+										<span>Choose a domain: </span>
+									</SelectTrigger>
+									<SelectContent>
+										{#each tunnelConfig.domains.filter((d: any) => d.enabled) as domain}
+											<SelectItem value={domain.zone_name}>
+												{domain.zone_name}
+											</SelectItem>
+										{/each}
+									</SelectContent>
+								</Select>
+
+								{#if selectedDomain}
+									<div class="space-y-2">
+										<Label for="subdomain">Subdomain</Label>
+										<div class="flex gap-2 items-center">
+											<Input
+												id="subdomain"
+												type="text"
+												bind:value={hostname}
+												placeholder={server.name.toLowerCase().replace(/\s+/g, '-')}
+												oninput={(e) => validateHostname(e.currentTarget.value + '.' + selectedDomain)}
+											/>
+											<span class="text-sm text-muted-foreground">.{selectedDomain}</span>
+										</div>
+									</div>
+									<p class="text-sm text-muted-foreground">
+										Players will connect using: <span class="font-mono">{hostname || server.name.toLowerCase().replace(/\s+/g, '-')}.{selectedDomain}</span>
+									</p>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/if}
+
+				{#if !useCloudflare}
+					<!-- Traditional Hostname Input -->
+					<div class="space-y-2">
+						<Label for="hostname">Custom Hostname</Label>
+						<Input
+							id="hostname"
+							type="text"
+							bind:value={hostname}
+							placeholder={routingInfo.suggested_hostname || 'minecraft.example.com'}
+							oninput={(e) => validateHostname(e.currentTarget.value)}
+							class={hostnameError ? 'border-destructive' : ''}
+						/>
+						{#if hostnameError}
+							<p class="text-sm text-destructive">{hostnameError}</p>
+						{:else if hostname}
+							<p class="text-sm text-muted-foreground">
+								Players will connect using: <span class="font-mono">{getConnectionString()}</span>
+							</p>
+						{:else}
+							<p class="text-sm text-muted-foreground">
+								Leave empty to use the default hostname based on your server name
+							</p>
+						{/if}
+					</div>
+				{/if}
 
 				{#if routingInfo.base_url}
 					<Alert>

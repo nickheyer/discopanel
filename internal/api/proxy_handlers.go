@@ -426,3 +426,189 @@ func (s *Server) handleUpdateServerRouting(w http.ResponseWriter, r *http.Reques
 		"hostname": hostname,
 	})
 }
+
+// Tunnel configuration handlers
+
+func (s *Server) handleGetTunnelConfig(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Load proxy config from database
+	proxyConfig, _, err := s.store.GetProxyConfig(ctx)
+	if err != nil {
+		s.log.Error("Failed to load proxy configuration: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to load configuration")
+		return
+	}
+
+	// Get tunnel status
+	tunnelStatus := "not_configured"
+	if s.tunnelManager != nil {
+		status, err := s.tunnelManager.GetContainerStatus()
+		if err == nil {
+			tunnelStatus = status
+		}
+	}
+
+	// Get available domains
+	domains, err := s.store.GetCloudflareDomains(ctx)
+	if err != nil {
+		s.log.Error("Failed to get Cloudflare domains: %v", err)
+		domains = []*storage.CloudflareDomain{}
+	}
+
+	response := map[string]any{
+		"enabled":               proxyConfig.TunnelEnabled,
+		"cloudflare_account_id": proxyConfig.CloudflareAccountID,
+		"tunnel_id":             proxyConfig.TunnelID,
+		"tunnel_name":           proxyConfig.TunnelName,
+		"container_status":      tunnelStatus,
+		"domains":               domains,
+		"has_credentials":       proxyConfig.CloudflareAccountID != "" && proxyConfig.CloudflareAPIToken != "",
+	}
+
+	s.respondJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleUpdateTunnelConfig(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req struct {
+		CloudflareAccountID string `json:"cloudflare_account_id"`
+		CloudflareAPIToken  string `json:"cloudflare_api_token"`
+		Enabled             bool   `json:"enabled"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate credentials if provided
+	if req.CloudflareAccountID != "" && req.CloudflareAPIToken == "" {
+		s.respondError(w, http.StatusBadRequest, "API token is required when account ID is provided")
+		return
+	}
+
+	if req.CloudflareAPIToken != "" && req.CloudflareAccountID == "" {
+		s.respondError(w, http.StatusBadRequest, "Account ID is required when API token is provided")
+		return
+	}
+
+	// Get current proxy config
+	proxyConfig, _, err := s.store.GetProxyConfig(ctx)
+	if err != nil {
+		s.log.Error("Failed to get proxy config: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to get configuration")
+		return
+	}
+
+	// If credentials are provided, configure the tunnel
+	if req.CloudflareAccountID != "" && req.CloudflareAPIToken != "" {
+		if s.tunnelManager == nil {
+			s.respondError(w, http.StatusServiceUnavailable, "Tunnel manager not available")
+			return
+		}
+
+		// Configure tunnel (creates or updates)
+		if err := s.tunnelManager.ConfigureTunnel(req.CloudflareAccountID, req.CloudflareAPIToken); err != nil {
+			s.log.Error("Failed to configure tunnel: %v", err)
+			s.respondError(w, http.StatusBadRequest, "Failed to configure Cloudflare tunnel: "+err.Error())
+			return
+		}
+
+		// Reload config to get updated tunnel info
+		proxyConfig, _, _ = s.store.GetProxyConfig(ctx)
+	}
+
+	// Update enabled state
+	if proxyConfig.TunnelEnabled != req.Enabled {
+		proxyConfig.TunnelEnabled = req.Enabled
+		if err := s.store.SaveProxyConfig(ctx, proxyConfig); err != nil {
+			s.log.Error("Failed to save proxy config: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to save configuration")
+			return
+		}
+
+		// Start or stop tunnel container based on enabled state
+		if req.Enabled && s.tunnelManager != nil {
+			if err := s.tunnelManager.StartContainer(); err != nil {
+				s.log.Error("Failed to start tunnel container: %v", err)
+			}
+		} else if !req.Enabled && s.tunnelManager != nil {
+			if err := s.tunnelManager.StopContainer(); err != nil {
+				s.log.Error("Failed to stop tunnel container: %v", err)
+			}
+		}
+	}
+
+	// Return updated configuration
+	s.handleGetTunnelConfig(w, r)
+}
+
+func (s *Server) handleTunnelAction(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	action := vars["action"]
+
+	if s.tunnelManager == nil {
+		s.respondError(w, http.StatusServiceUnavailable, "Tunnel manager not available")
+		return
+	}
+
+	switch action {
+	case "start":
+		if err := s.tunnelManager.StartContainer(); err != nil {
+			s.log.Error("Failed to start tunnel container: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to start tunnel: "+err.Error())
+			return
+		}
+	case "stop":
+		if err := s.tunnelManager.StopContainer(); err != nil {
+			s.log.Error("Failed to stop tunnel container: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to stop tunnel: "+err.Error())
+			return
+		}
+	case "refresh-domains":
+		if err := s.tunnelManager.RefreshDomains(); err != nil {
+			s.log.Error("Failed to refresh domains: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to refresh domains: "+err.Error())
+			return
+		}
+	default:
+		s.respondError(w, http.StatusBadRequest, "Invalid action")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleUpdateCloudflareDomain(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	zoneID := vars["zone_id"]
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Get the domain
+	domain, err := s.store.GetCloudflareDomainByZoneID(ctx, zoneID)
+	if err != nil || domain == nil {
+		s.respondError(w, http.StatusNotFound, "Domain not found")
+		return
+	}
+
+	// Update enabled state
+	domain.Enabled = req.Enabled
+	if err := s.store.UpdateCloudflareDomain(ctx, domain); err != nil {
+		s.log.Error("Failed to update domain: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to update domain")
+		return
+	}
+
+	s.respondJSON(w, http.StatusOK, domain)
+}

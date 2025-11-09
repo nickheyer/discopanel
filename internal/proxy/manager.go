@@ -14,12 +14,22 @@ import (
 
 // Manager handles the lifecycle of the proxy and manages routes
 type Manager struct {
-	proxies     map[int]*Proxy // Map of port -> Proxy instance
-	store       *db.Store
-	config      *config.ProxyConfig
-	logger      *logger.Logger
-	mu          sync.Mutex
-	networkName string
+	proxies       map[int]*Proxy // Map of port -> Proxy instance
+	store         *db.Store
+	config        *config.ProxyConfig
+	logger        *logger.Logger
+	tunnelManager TunnelManager // Interface for tunnel operations
+	mu            sync.Mutex
+	networkName   string
+}
+
+// TunnelManager interface for tunnel operations
+type TunnelManager interface {
+	Start() error
+	Stop() error
+	CreateDNSRecord(hostname string) (*TunnelInfo, error)
+	DeleteDNSRecord(tunnelInfo *TunnelInfo) error
+	UpdateTunnelIngress() error
 }
 
 // NewManager creates a new proxy manager
@@ -31,6 +41,13 @@ func NewManager(store *db.Store, cfg *config.ProxyConfig, logger *logger.Logger)
 		logger:      logger,
 		networkName: "discopanel-network", // TODO: Get from main config
 	}
+}
+
+// SetTunnelManager sets the tunnel manager for proxy operations
+func (m *Manager) SetTunnelManager(tm TunnelManager) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tunnelManager = tm
 }
 
 // Start initializes and starts the proxy if enabled
@@ -150,6 +167,42 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Check if tunneling is enabled in proxy config
+	proxyConfig, _, err := m.store.GetProxyConfig(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get proxy config: %w", err)
+	}
+
+	hostname := m.generateHostname(server)
+
+	// Handle tunnel routes if tunneling is enabled
+	if proxyConfig.TunnelEnabled && m.tunnelManager != nil && server.ProxyHostname != "" {
+		// For tunnel routes, we need to manage DNS records
+		// Create DNS record if it doesn't exist (regardless of server status - DNS persists)
+		for _, proxy := range m.proxies {
+			routes := proxy.GetRoutes()
+			if route, exists := routes[hostname]; exists {
+				if route.Tunnel == nil {
+					// Create DNS record for tunnel route
+					tunnelInfo, err := m.tunnelManager.CreateDNSRecord(hostname)
+					if err != nil {
+						m.logger.Error("Failed to create DNS record for %s: %v", hostname, err)
+						// Don't fail the whole operation, just log it
+					} else {
+						route.Tunnel = tunnelInfo
+						m.logger.Info("Created tunnel DNS record for %s", hostname)
+					}
+				}
+			}
+		}
+
+		// Always update tunnel ingress configuration to reflect current server state
+		if err := m.tunnelManager.UpdateTunnelIngress(); err != nil {
+			m.logger.Error("Failed to update tunnel ingress: %v", err)
+		}
+	}
+
+	// Continue with regular proxy routing (for direct proxy without tunnel)
 	if len(m.proxies) == 0 || !m.config.Enabled {
 		return nil
 	}
@@ -174,8 +227,6 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 		return fmt.Errorf("no proxy instance for port %d", listener.Port)
 	}
 
-	hostname := m.generateHostname(server)
-
 	// Add or update route for servers that are starting or running with proxy hostname
 	if (server.Status == db.StatusRunning || server.Status == db.StatusStarting) && server.ProxyHostname != "" {
 		// Get the container's IP address on the Docker network
@@ -197,6 +248,24 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 			proxy.UpdateRoute(hostname, containerIP, 25565)
 		} else {
 			proxy.AddRoute(server.ID, hostname, containerIP, 25565)
+
+			// If tunnel is enabled and this is a Cloudflare domain, create DNS record
+			proxyConfig, _, err := m.store.GetProxyConfig(context.Background())
+			if err == nil && proxyConfig.TunnelEnabled && m.tunnelManager != nil {
+				// Check if this hostname is for a Cloudflare domain
+				if m.isCloudflareDomain(hostname) {
+					tunnelInfo, err := m.tunnelManager.CreateDNSRecord(hostname)
+					if err != nil {
+						m.logger.Error("Failed to create DNS record for %s: %v", hostname, err)
+					} else {
+						// Update the route with tunnel info
+						if route, exists := proxy.GetRoutes()[hostname]; exists {
+							route.Tunnel = tunnelInfo
+						}
+						m.logger.Info("Created tunnel DNS record for %s", hostname)
+					}
+				}
+			}
 		}
 		m.logger.Info("Updated route for server %s on port %d", server.Name, listener.Port)
 	} else if server.Status == db.StatusStopped || server.Status == db.StatusStopping {
@@ -207,14 +276,10 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 	return nil
 }
 
-// RemoveServerRoute removes a route for a server
+// RemoveServerRoute removes a route for a server (called when server is deleted)
 func (m *Manager) RemoveServerRoute(serverID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if len(m.proxies) == 0 || !m.config.Enabled {
-		return nil
-	}
 
 	server, err := m.store.GetServer(context.Background(), serverID)
 	if err != nil {
@@ -222,6 +287,27 @@ func (m *Manager) RemoveServerRoute(serverID string) error {
 	}
 
 	hostname := m.generateHostname(server)
+
+	// Check if tunneling is enabled and delete DNS record
+	proxyConfig, _, err := m.store.GetProxyConfig(context.Background())
+	if err == nil && proxyConfig.TunnelEnabled && m.tunnelManager != nil {
+		// Find and delete DNS record for this route
+		for _, proxy := range m.proxies {
+			routes := proxy.GetRoutes()
+			if route, exists := routes[hostname]; exists && route.Tunnel != nil {
+				if err := m.tunnelManager.DeleteDNSRecord(route.Tunnel); err != nil {
+					m.logger.Error("Failed to delete DNS record for %s: %v", hostname, err)
+				} else {
+					m.logger.Info("Deleted tunnel DNS record for %s", hostname)
+				}
+			}
+		}
+
+		// Update tunnel ingress configuration
+		if err := m.tunnelManager.UpdateTunnelIngress(); err != nil {
+			m.logger.Error("Failed to update tunnel ingress: %v", err)
+		}
+	}
 
 	// Remove from all proxies (in case it was moved between listeners)
 	for _, proxy := range m.proxies {
@@ -232,6 +318,21 @@ func (m *Manager) RemoveServerRoute(serverID string) error {
 }
 
 // generateHostname generates the hostname for a server
+// isCloudflareDomain checks if a hostname belongs to a Cloudflare-managed domain
+func (m *Manager) isCloudflareDomain(hostname string) bool {
+	domains, err := m.store.GetCloudflareDomains(context.Background())
+	if err != nil {
+		return false
+	}
+
+	for _, domain := range domains {
+		if domain.Enabled && strings.HasSuffix(hostname, domain.ZoneName) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Manager) generateHostname(server *db.Server) string {
 	// Use custom hostname if set
 	if server.ProxyHostname != "" {

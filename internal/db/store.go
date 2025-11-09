@@ -84,6 +84,7 @@ func (s *Store) Migrate() error {
 		&User{},
 		&AuthConfig{},
 		&Session{},
+		&CloudflareDomain{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate: %w", err)
@@ -770,4 +771,34 @@ func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
 
 func (s *Store) CleanExpiredSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
+}
+
+// CloudflareDomain operations
+func (s *Store) GetCloudflareDomains(ctx context.Context) ([]*CloudflareDomain, error) {
+	var domains []*CloudflareDomain
+	err := s.db.WithContext(ctx).Order("zone_name ASC").Find(&domains).Error
+	return domains, err
+}
+
+func (s *Store) GetCloudflareDomainByZoneID(ctx context.Context, zoneID string) (*CloudflareDomain, error) {
+	var domain CloudflareDomain
+	err := s.db.WithContext(ctx).Where("zone_id = ?", zoneID).First(&domain).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &domain, nil
+}
+
+func (s *Store) SaveCloudflareDomain(ctx context.Context, domain *CloudflareDomain) error {
+	if domain.ID == "" {
+		domain.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Save(domain).Error
+}
+
+func (s *Store) UpdateCloudflareDomain(ctx context.Context, domain *CloudflareDomain) error {
+	return s.db.WithContext(ctx).Save(domain).Error
 }

@@ -32,6 +32,13 @@ type Route struct {
 	BackendHost string
 	BackendPort int
 	Active      bool
+	Tunnel      *TunnelInfo // Optional: if set, route through Cloudflare tunnel
+}
+
+// TunnelInfo contains information for routing through a Cloudflare tunnel
+type TunnelInfo struct {
+	ZoneID      string // Cloudflare zone ID for this hostname
+	DNSRecordID string // DNS record ID for cleanup
 }
 
 // Config holds proxy configuration

@@ -12,7 +12,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
-	import { ArrowLeft, Loader2, Package, Settings, HardDrive } from '@lucide/svelte';
+	import { ArrowLeft, Loader2, Package, Settings, HardDrive, Cloud } from '@lucide/svelte';
 	import type { CreateServerRequest, ModLoader, ModLoaderInfo, DockerImageInfo, IndexedModpack } from '$lib/api/types';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
@@ -32,6 +32,9 @@
 	let usedPorts = $state<Record<number, boolean>>({});
 	let portError = $state('');
 	let useProxyMode = $state(false); // Track connection mode separately
+	let tunnelConfig = $state<any>(null);
+	let useCloudflare = $state(false);
+	let selectedDomain = $state('');
 	
 	// Modpack selection
 	let showModpackDialog = $state(false);
@@ -62,13 +65,14 @@
 
 	onMount(async () => {
 		try {
-			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners] = await Promise.all([
+			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners, tunnel] = await Promise.all([
 				api.getMinecraftVersions(),
 				api.getModLoaders(),
 				api.getDockerImages(),
 				api.getProxyStatus(),
 				api.getNextAvailablePort(),
-				api.getProxyListeners()
+				api.getProxyListeners(),
+				api.getTunnelConfig().catch(() => null)
 			]);
 			
 			minecraftVersions = versionsData.versions;
@@ -78,6 +82,7 @@
 			proxyEnabled = proxyStatus.enabled;
 			proxyBaseURL = proxyStatus.base_url || '';
 			proxyListeners = listeners.filter((l: any) => l.enabled);
+			tunnelConfig = tunnel;
 			
 			// Set default listener if available
 			const defaultListener = proxyListeners.find((l: any) => l.is_default);
@@ -242,6 +247,13 @@
 			const versionToSend = selectedModpack?.indexer === 'modrinth' && selectedVersion?.version_number
 				? selectedVersion.version_number
 				: selectedVersionId;
+
+			// Handle Cloudflare domain
+			if (useCloudflare && selectedDomain) {
+				const subdomain = formData.proxy_hostname || formData.name.toLowerCase().replace(/\s+/g, '-');
+				formData.proxy_hostname = `${subdomain}.${selectedDomain}`;
+				formData.use_base_url = false; // Don't append base URL when using Cloudflare
+			}
 
 			const createRequest = {
 				...formData,
@@ -584,40 +596,94 @@
 										</div>
 									{/if}
 
-									<!-- Hostname Input -->
-									<div class="space-y-2">
-										<Label for="proxy_hostname" class="text-sm font-medium">Server Hostname</Label>
-										<Input
-											id="proxy_hostname"
-											placeholder={proxyBaseURL ? "survival" : "survival.example.com"}
-											bind:value={formData.proxy_hostname}
-											disabled={loading}
-											class="h-10"
-										/>
-										
-										<!-- Base URL Checkbox -->
-										{#if proxyBaseURL}
-											<div class="flex items-center gap-2">
+									<!-- Cloudflare Tunnel Option -->
+									{#if tunnelConfig?.enabled && tunnelConfig?.domains?.length > 0}
+										<div class="space-y-3 p-4 border rounded-lg">
+											<div class="flex items-center justify-between">
+												<div class="flex items-center gap-2">
+													<Cloud class="h-4 w-4 text-primary" />
+													<Label class="text-sm font-medium">Use Cloudflare Tunnel</Label>
+												</div>
 												<input
 													type="checkbox"
-													id="use_base_url"
-													bind:checked={formData.use_base_url}
+													bind:checked={useCloudflare}
 													class="h-4 w-4"
 												/>
-												<Label for="use_base_url" class="text-sm font-medium">
-													Append base domain ({proxyBaseURL})
-												</Label>
 											</div>
-										{/if}
-										
-										<p class="text-xs text-muted-foreground">
-											{#if formData.use_base_url && proxyBaseURL}
-												Players will connect using: {formData.proxy_hostname}.{proxyBaseURL}
-											{:else}
-												Players will connect using: {formData.proxy_hostname}
+
+											{#if useCloudflare}
+												<div class="space-y-2">
+													<Label for="domain" class="text-sm">Select Domain</Label>
+													<Select type="single" bind:value={selectedDomain}>
+														<SelectTrigger>
+															<span>{selectedDomain || 'Choose a domain'}</span>
+														</SelectTrigger>
+														<SelectContent>
+															{#each tunnelConfig.domains.filter((d: any) => d.enabled) as domain}
+																<SelectItem value={domain.zone_name}>
+																	{domain.zone_name}
+																</SelectItem>
+															{/each}
+														</SelectContent>
+													</Select>
+
+													{#if selectedDomain}
+														<div class="space-y-2">
+															<Label for="subdomain" class="text-sm">Subdomain</Label>
+															<Input
+																id="subdomain"
+																type="text"
+																bind:value={formData.proxy_hostname}
+																placeholder={formData.name.toLowerCase().replace(/\s+/g, '-') || 'minecraft'}
+																disabled={loading}
+																class="h-10"
+															/>
+															<p class="text-xs text-muted-foreground">
+																Players will connect using: {formData.proxy_hostname || formData.name.toLowerCase().replace(/\s+/g, '-')}.{selectedDomain}
+															</p>
+														</div>
+													{/if}
+												</div>
 											{/if}
-										</p>
-									</div>
+										</div>
+									{/if}
+
+									<!-- Traditional Hostname Input -->
+									{#if !useCloudflare}
+										<div class="space-y-2">
+											<Label for="proxy_hostname" class="text-sm font-medium">Server Hostname</Label>
+											<Input
+												id="proxy_hostname"
+												placeholder={proxyBaseURL ? "survival" : "survival.example.com"}
+												bind:value={formData.proxy_hostname}
+												disabled={loading}
+												class="h-10"
+											/>
+
+											<!-- Base URL Checkbox -->
+											{#if proxyBaseURL}
+												<div class="flex items-center gap-2">
+													<input
+														type="checkbox"
+														id="use_base_url"
+														bind:checked={formData.use_base_url}
+														class="h-4 w-4"
+													/>
+													<Label for="use_base_url" class="text-sm font-medium">
+														Append base domain ({proxyBaseURL})
+													</Label>
+												</div>
+											{/if}
+
+											<p class="text-xs text-muted-foreground">
+												{#if formData.use_base_url && proxyBaseURL}
+													Players will connect using: {formData.proxy_hostname}.{proxyBaseURL}
+												{:else}
+													Players will connect using: {formData.proxy_hostname}
+												{/if}
+											</p>
+										</div>
+									{/if}
 								</div>
 							{:else}
 								<div class="space-y-2">

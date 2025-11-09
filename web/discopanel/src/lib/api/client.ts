@@ -381,6 +381,37 @@ class ApiClient {
     });
   }
 
+  // Tunnel Management
+  async getTunnelConfig(): Promise<any> {
+    return this.request<any>('/proxy/tunnel');
+  }
+
+  async updateTunnelConfig(config: {
+    enabled: boolean;
+    cloudflare_account_id?: string;
+    cloudflare_api_token?: string;
+  }): Promise<any> {
+    return this.request<any>('/proxy/tunnel', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+  }
+
+  async performTunnelAction(action: 'start' | 'stop' | 'refresh-domains'): Promise<any> {
+    return this.request<any>(`/proxy/tunnel/${action}`, {
+      method: 'POST',
+    });
+  }
+
+  async updateTunnelDomain(zoneId: string, enabled: boolean): Promise<any> {
+    return this.request<any>(`/proxy/tunnel/domains/${zoneId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
   async getServerRouting(id: string): Promise<any> {
     return this.request<any>(`/servers/${id}/routing`);
   }

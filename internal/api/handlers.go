@@ -935,6 +935,13 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Remove proxy route (and DNS records if tunneling is enabled)
+	if s.proxyManager != nil && server.ProxyHostname != "" {
+		if err := s.proxyManager.RemoveServerRoute(server.ID); err != nil {
+			s.log.Error("Failed to remove proxy route: %v", err)
+		}
+	}
+
 	// Delete from database
 	if err := s.store.DeleteServer(ctx, id); err != nil {
 		s.log.Error("Failed to delete server: %v", err)

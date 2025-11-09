@@ -359,7 +359,16 @@ type ProxyConfig struct {
 	ID        string    `json:"id" gorm:"primaryKey"`
 	Enabled   bool      `json:"enabled" gorm:"not null;default:false"`
 	BaseURL   string    `json:"base_url" gorm:"column:base_url"`
-	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	// Tunnel configuration
+	TunnelEnabled       bool      `json:"tunnel_enabled" gorm:"not null;default:false"`
+	CloudflareAccountID string    `json:"cloudflare_account_id" gorm:"column:cloudflare_account_id"`
+	CloudflareAPIToken  string    `json:"-" gorm:"column:cloudflare_api_token"` // Encrypted
+	TunnelID            string    `json:"tunnel_id" gorm:"column:tunnel_id"`
+	TunnelName          string    `json:"tunnel_name" gorm:"column:tunnel_name;default:'discopanel-tunnel'"`
+	TunnelSecret        string    `json:"-" gorm:"column:tunnel_secret"` // Encrypted
+	TunnelToken         string    `json:"-" gorm:"column:tunnel_token"`  // For running cloudflared
+	TunnelContainerID   string    `json:"tunnel_container_id" gorm:"column:tunnel_container_id"`
+	UpdatedAt           time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // ProxyListener represents an individual proxy listening port configuration
@@ -420,4 +429,14 @@ type Session struct {
 	UserAgent string    `json:"user_agent"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+}
+
+// CloudflareDomain represents a Cloudflare zone/domain that can be used for tunneling
+type CloudflareDomain struct {
+	ID        string    `json:"id" gorm:"primaryKey"`
+	ZoneID    string    `json:"zone_id" gorm:"not null;uniqueIndex;column:zone_id"`
+	ZoneName  string    `json:"zone_name" gorm:"not null;column:zone_name"`
+	Enabled   bool      `json:"enabled" gorm:"not null;default:true"` // Whether this domain can be used for DiscoPanel tunnels
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }

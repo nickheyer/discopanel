@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package discopanel.v1;
 
-option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
-
-import "google/protobuf/timestamp.proto";
 import "discopanel/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
 // Authentication and authorization service
 service AuthService {

@@ -10,6 +10,7 @@ lint:
     - FIELD_NOT_REQUIRED
     - PACKAGE_NO_IMPORT_CYCLE
     - COMMENT_FIELD
+    - COMMENT_ENUM_VALUE
   ignore:
     - google/protobuf
 breaking:

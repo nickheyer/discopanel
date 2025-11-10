@@ -1,0 +1,22 @@
+version: v2
+modules:
+  - path: proto
+    name: github.com/nickheyer/discopanel
+lint:
+  use:
+    - STANDARD
+    - COMMENTS
+  except:
+    - FIELD_NOT_REQUIRED
+    - PACKAGE_NO_IMPORT_CYCLE
+    - COMMENT_FIELD
+  ignore:
+    - google/protobuf
+breaking:
+  use:
+    - FILE
+  except:
+    - EXTENSION_NO_DELETE
+    - FIELD_SAME_DEFAULT
+deps:
+  - buf.build/googleapis/googleapis

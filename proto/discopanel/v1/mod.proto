@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Server mod management
+service ModService {
+  // List server mods
+  rpc ListMods(ListModsRequest) returns (ListModsResponse);
+  // Get mod details
+  rpc GetMod(GetModRequest) returns (GetModResponse);
+  // Upload mod file
+  rpc UploadMod(UploadModRequest) returns (UploadModResponse);
+  // Update mod metadata
+  rpc UpdateMod(UpdateModRequest) returns (UpdateModResponse);
+  // Delete mod file
+  rpc DeleteMod(DeleteModRequest) returns (DeleteModResponse);
+}
+
+// Server mod metadata
+message Mod {
+  string id = 1;
+  string server_id = 2;
+  string file_name = 3;
+  string display_name = 4;
+  string description = 5;
+  string version = 6;
+  string mod_id = 7; // External mod ID (e.g., CurseForge ID)
+  string author = 8;
+  string website = 9;
+  int64 file_size = 10;
+  google.protobuf.Timestamp uploaded_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+  bool enabled = 13;
+}
+
+// Server mods request
+message ListModsRequest {
+  string server_id = 1;
+}
+
+// All server mods
+message ListModsResponse {
+  repeated Mod mods = 1;
+}
+
+// Mod lookup
+message GetModRequest {
+  string server_id = 1;
+  string mod_id = 2;
+}
+
+// Mod details
+message GetModResponse {
+  Mod mod = 1;
+}
+
+// Mod file upload
+message UploadModRequest {
+  string server_id = 1;
+  string filename = 2;
+  bytes content = 3;
+  string display_name = 4;
+  string description = 5;
+}
+
+// Upload result
+message UploadModResponse {
+  Mod mod = 1;
+  string message = 2;
+}
+
+// Mod fields to update
+message UpdateModRequest {
+  string server_id = 1;
+  string mod_id = 2;
+  optional string display_name = 3;
+  optional string description = 4;
+  optional bool enabled = 5;
+}
+
+// Updated mod
+message UpdateModResponse {
+  Mod mod = 1;
+}
+
+// Mod to delete
+message DeleteModRequest {
+  string server_id = 1;
+  string mod_id = 2;
+}
+
+// Deletion confirmation
+message DeleteModResponse {
+  string message = 1;
+}

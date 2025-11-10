@@ -6,6 +6,7 @@
 sandbox/
 build/
 discopanel
+!proto/discopanel
 !cmd/discopanel
 !web/discopanel
 data/

@@ -1,0 +1,197 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+import "google/protobuf/timestamp.proto";
+import "discopanel/v1/common.proto";
+
+// Minecraft server management
+service ServerService {
+  // Get all servers with optional stats
+  rpc ListServers(ListServersRequest) returns (ListServersResponse);
+  // Get single server details
+  rpc GetServer(GetServerRequest) returns (GetServerResponse);
+  // Fetch container logs
+  rpc GetServerLogs(GetServerLogsRequest) returns (GetServerLogsResponse);
+  // Delete container logs
+  rpc ClearServerLogs(ClearServerLogsRequest) returns (ClearServerLogsResponse);
+  // Find unused port
+  rpc GetNextAvailablePort(GetNextAvailablePortRequest) returns (GetNextAvailablePortResponse);
+  // Create new server instance
+  rpc CreateServer(CreateServerRequest) returns (CreateServerResponse);
+  // Modify server settings
+  rpc UpdateServer(UpdateServerRequest) returns (UpdateServerResponse);
+  // Remove server and data
+  rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
+  // Start server container
+  rpc StartServer(StartServerRequest) returns (StartServerResponse);
+  // Stop server container
+  rpc StopServer(StopServerRequest) returns (StopServerResponse);
+  // Stop and start container
+  rpc RestartServer(RestartServerRequest) returns (RestartServerResponse);
+  // Execute console command
+  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
+}
+
+// Server list options
+message ListServersRequest {
+  bool full_stats = 1;
+}
+
+// All server instances
+message ListServersResponse {
+  repeated Server servers = 1;
+}
+
+// Server ID lookup
+message GetServerRequest {
+  string id = 1;
+}
+
+// Single server details
+message GetServerResponse {
+  Server server = 1;
+}
+
+// Log fetch parameters
+message GetServerLogsRequest {
+  string id = 1;
+  int32 tail = 2;
+}
+
+// Single log line
+message LogEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  string message = 2;
+  string level = 3;
+  string source = 4;
+  bool is_command = 5;
+  bool is_error = 6;
+}
+
+// Container log lines
+message GetServerLogsResponse {
+  repeated LogEntry logs = 1;
+  int32 total = 2;
+}
+
+// Server to clear logs for
+message ClearServerLogsRequest {
+  string id = 1;
+}
+
+// Empty log clear response
+message ClearServerLogsResponse {}
+
+// Empty port request
+message GetNextAvailablePortRequest {}
+
+// Available port and usage map
+message GetNextAvailablePortResponse {
+  int32 port = 1;
+  map<int32, bool> used_ports = 2;
+}
+
+// New server configuration
+message CreateServerRequest {
+  string name = 1;
+  string description = 2;
+  ModLoader mod_loader = 3;
+  string mc_version = 4;
+  int32 port = 5;
+  int32 max_players = 6;
+  int32 memory = 7;
+  string docker_image = 8;
+  bool auto_start = 9;
+  bool detached = 10;
+  bool start_immediately = 11;
+  string modpack_id = 12;
+  string modpack_version_id = 13;
+  string proxy_hostname = 14;
+  string proxy_listener_id = 15;
+  bool use_base_url = 16;
+  repeated AdditionalPort additional_ports = 17;
+  DockerOverrides docker_overrides = 18;
+}
+
+// Created server instance
+message CreateServerResponse {
+  Server server = 1;
+}
+
+// Server fields to update
+message UpdateServerRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int32 max_players = 4;
+  int32 memory = 5;
+  string mod_loader = 6;
+  string mc_version = 7;
+  string docker_image = 8;
+  optional bool auto_start = 9;
+  optional bool detached = 10;
+  optional string tps_command = 11;
+  string modpack_id = 12;
+  string modpack_version_id = 13;
+  repeated AdditionalPort additional_ports = 14;
+  DockerOverrides docker_overrides = 15;
+}
+
+// Updated server instance
+message UpdateServerResponse {
+  Server server = 1;
+}
+
+// Server to delete
+message DeleteServerRequest {
+  string id = 1;
+}
+
+// Empty deletion response
+message DeleteServerResponse {}
+
+// Server to start
+message StartServerRequest {
+  string id = 1;
+}
+
+// Start operation status
+message StartServerResponse {
+  string status = 1;
+}
+
+// Server to stop
+message StopServerRequest {
+  string id = 1;
+}
+
+// Stop operation status
+message StopServerResponse {
+  string status = 1;
+}
+
+// Server to restart
+message RestartServerRequest {
+  string id = 1;
+}
+
+// Restart operation status
+message RestartServerResponse {
+  string status = 1;
+}
+
+// Console command to execute
+message SendCommandRequest {
+  string id = 1;
+  string command = 2;
+}
+
+// Command execution result
+message SendCommandResponse {
+  bool success = 1;
+  string output = 2;
+  string error = 3;
+}

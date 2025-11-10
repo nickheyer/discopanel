@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+import "discopanel/v1/common.proto";
+
+// TCP proxy and routing management
+service ProxyService {
+  // List active proxy routes
+  rpc GetProxyRoutes(GetProxyRoutesRequest) returns (GetProxyRoutesResponse);
+  // Check proxy system status
+  rpc GetProxyStatus(GetProxyStatusRequest) returns (GetProxyStatusResponse);
+  // Modify proxy settings
+  rpc UpdateProxyConfig(UpdateProxyConfigRequest) returns (UpdateProxyConfigResponse);
+  // List all proxy listeners
+  rpc GetProxyListeners(GetProxyListenersRequest) returns (GetProxyListenersResponse);
+  // Add new listener port
+  rpc CreateProxyListener(CreateProxyListenerRequest) returns (CreateProxyListenerResponse);
+  // Modify listener settings
+  rpc UpdateProxyListener(UpdateProxyListenerRequest) returns (UpdateProxyListenerResponse);
+  // Remove listener port
+  rpc DeleteProxyListener(DeleteProxyListenerRequest) returns (DeleteProxyListenerResponse);
+  // Get server proxy configuration
+  rpc GetServerRouting(GetServerRoutingRequest) returns (GetServerRoutingResponse);
+  // Update server proxy hostname
+  rpc UpdateServerRouting(UpdateServerRoutingRequest) returns (UpdateServerRoutingResponse);
+}
+
+// Active proxy connection
+message ProxyRoute {
+  string server_id = 1;
+  string hostname = 2;
+  string backend_host = 3;
+  int32 backend_port = 4;
+  bool active = 5;
+}
+
+// Empty routes request
+message GetProxyRoutesRequest {}
+
+// All proxy routes
+message GetProxyRoutesResponse {
+  repeated ProxyRoute routes = 1;
+}
+
+// Empty status request
+message GetProxyStatusRequest {}
+
+// Proxy system state
+message GetProxyStatusResponse {
+  bool enabled = 1;
+  string base_url = 2;
+  repeated int32 listen_ports = 3;
+  repeated ProxyListener listeners = 4;
+  int32 listen_port = 5; // Primary port
+  bool running = 6;
+  int32 active_routes = 7;
+}
+
+// Proxy settings to update
+message UpdateProxyConfigRequest {
+  bool enabled = 1;
+  string base_url = 2;
+}
+
+// Updated proxy state
+message UpdateProxyConfigResponse {
+  bool enabled = 1;
+  string base_url = 2;
+  repeated int32 listen_ports = 3;
+  repeated ProxyListener listeners = 4;
+  int32 listen_port = 5;
+  bool running = 6;
+  int32 active_routes = 7;
+}
+
+// Empty listeners request
+message GetProxyListenersRequest {}
+
+// Listener with usage count
+message ProxyListenerWithCount {
+  ProxyListener listener = 1;
+  int32 server_count = 2;
+}
+
+// All configured listeners
+message GetProxyListenersResponse {
+  repeated ProxyListenerWithCount listeners = 1;
+}
+
+// New listener configuration
+message CreateProxyListenerRequest {
+  string name = 1;
+  string description = 2;
+  int32 port = 3;
+  bool enabled = 4;
+  bool is_default = 5;
+}
+
+// Created listener
+message CreateProxyListenerResponse {
+  ProxyListener listener = 1;
+}
+
+// Listener fields to update
+message UpdateProxyListenerRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int32 port = 4;
+  bool enabled = 5;
+  bool is_default = 6;
+}
+
+// Updated listener
+message UpdateProxyListenerResponse {
+  ProxyListener listener = 1;
+}
+
+// Listener to delete
+message DeleteProxyListenerRequest {
+  string id = 1;
+}
+
+// Deletion status
+message DeleteProxyListenerResponse {
+  string status = 1;
+}
+
+// Server routing lookup
+message GetServerRoutingRequest {
+  string server_id = 1;
+}
+
+// Active server route
+message ServerRoute {
+  string hostname = 1;
+  bool active = 2;
+}
+
+// Server proxy configuration
+message GetServerRoutingResponse {
+  bool proxy_enabled = 1;
+  string proxy_hostname = 2;
+  string suggested_hostname = 3;
+  string base_url = 4;
+  int32 listen_port = 5;
+  optional ServerRoute current_route = 6;
+}
+
+// Hostname to assign
+message UpdateServerRoutingRequest {
+  string server_id = 1;
+  string proxy_hostname = 2;
+}
+
+// Routing update result
+message UpdateServerRoutingResponse {
+  string status = 1;
+  string hostname = 2;
+}

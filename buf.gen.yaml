@@ -1,0 +1,28 @@
+version: v2
+plugins:
+  # Generate Go code with protoc-gen-go
+  - local: protoc-gen-go
+    out: pkg/proto
+    opt:
+      - paths=source_relative
+
+  # Generate Connect-Go code
+  - local: protoc-gen-connect-go
+    out: pkg/proto
+    opt:
+      - paths=source_relative
+
+  # Generate TypeScript code for the frontend
+  - remote: buf.build/connectrpc/es:v1.6.1
+    out: web/discopanel/src/lib/proto
+    opt:
+      - target=ts
+      - import_extension=none
+
+  # Generate Connect-Web TypeScript code
+#  - remote: buf.build/connectrpc/connect-es:v2.2.2
+  - local: web/discopanel/node_modules/.bin/protoc-gen-es
+    out: web/discopanel/src/lib/proto
+    opt:
+      - target=ts
+      - import_extension=none

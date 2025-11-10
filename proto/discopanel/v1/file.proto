@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// Server file management
+service FileService {
+  // Browse server directory
+  rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  // Download file content
+  rpc GetFile(GetFileRequest) returns (GetFileResponse);
+  // Upload new file
+  rpc UploadFile(UploadFileRequest) returns (UploadFileResponse);
+  // Modify file content
+  rpc UpdateFile(UpdateFileRequest) returns (UpdateFileResponse);
+  // Remove file or directory
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+  // Change file name
+  rpc RenameFile(RenameFileRequest) returns (RenameFileResponse);
+  // Unzip archive file
+  rpc ExtractArchive(ExtractArchiveRequest) returns (ExtractArchiveResponse);
+}
+
+// File metadata and tree
+message FileInfo {
+  string name = 1;
+  string path = 2;
+  bool is_dir = 3;
+  int64 size = 4;
+  int64 modified = 5;
+  bool is_editable = 6;
+  repeated FileInfo children = 7;
+}
+
+// Directory listing parameters
+message ListFilesRequest {
+  string server_id = 1;
+  string path = 2;
+  bool tree = 3;
+}
+
+// Directory contents
+message ListFilesResponse {
+  repeated FileInfo files = 1;
+}
+
+// File download parameters
+message GetFileRequest {
+  string server_id = 1;
+  string path = 2;
+}
+
+// File binary content
+message GetFileResponse {
+  bytes content = 1;
+  string mime_type = 2;
+}
+
+// File upload data
+message UploadFileRequest {
+  string server_id = 1;
+  string path = 2;
+  string filename = 3;
+  bytes content = 4;
+}
+
+// Upload confirmation
+message UploadFileResponse {
+  string message = 1;
+  string path = 2;
+}
+
+// File content update
+message UpdateFileRequest {
+  string server_id = 1;
+  string path = 2;
+  bytes content = 3;
+}
+
+// Update confirmation
+message UpdateFileResponse {
+  string message = 1;
+  string path = 2;
+}
+
+// File to delete
+message DeleteFileRequest {
+  string server_id = 1;
+  string path = 2;
+}
+
+// Empty delete response
+message DeleteFileResponse {}
+
+// File rename parameters
+message RenameFileRequest {
+  string server_id = 1;
+  string path = 2;
+  string new_name = 3;
+}
+
+// Rename result
+message RenameFileResponse {
+  string message = 1;
+  string new_path = 2;
+}
+
+// Archive to extract
+message ExtractArchiveRequest {
+  string server_id = 1;
+  string path = 2;
+}
+
+// Extraction result
+message ExtractArchiveResponse {
+  string message = 1;
+  int32 files_extracted = 2;
+}

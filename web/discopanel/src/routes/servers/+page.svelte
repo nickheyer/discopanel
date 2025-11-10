@@ -6,10 +6,10 @@
 	import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '$lib/components/ui/dropdown-menu';
 	import { Input } from '$lib/components/ui/input';
 	import { serversStore } from '$lib/stores/servers';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { Plus, Search, MoreVertical, Play, Square, RotateCw, Settings, Package, Trash2, Server as ServerIcon } from '@lucide/svelte';
-	import type { Server } from '$lib/api/types';
+	import { type Server, ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
 
 	let servers = $derived($serversStore);
 	let filteredServers = $state<Server[]>([]);
@@ -25,11 +25,11 @@
 			filteredServers = servers;
 		} else {
 			const query = searchQuery.toLowerCase();
-			filteredServers = servers.filter(server => 
+			filteredServers = servers.filter(server =>
 				server.name.toLowerCase().includes(query) ||
 				server.description.toLowerCase().includes(query) ||
-				server.mc_version.toLowerCase().includes(query) ||
-				server.mod_loader.toLowerCase().includes(query)
+				server.mcVersion.toLowerCase().includes(query) ||
+				String(server.modLoader).toLowerCase().includes(query)
 			);
 		}
 	}
@@ -39,15 +39,15 @@
 		try {
 			switch (action) {
 				case 'start':
-					await api.startServer(server.id);
+					await rpcClient.server.startServer({ id: server.id });
 					toast.success(`Starting ${server.name}...`);
 					break;
 				case 'stop':
-					await api.stopServer(server.id);
+					await rpcClient.server.stopServer({ id: server.id });
 					toast.success(`Stopping ${server.name}...`);
 					break;
 				case 'restart':
-					await api.restartServer(server.id);
+					await rpcClient.server.restartServer({ id: server.id });
 					toast.success(`Restarting ${server.name}...`);
 					break;
 			}
@@ -65,7 +65,7 @@
 
 		loading = true;
 		try {
-			await api.deleteServer(server.id);
+			await rpcClient.server.deleteServer({ id: server.id });
 			serversStore.removeServer(server.id);
 			toast.success(`Deleted ${server.name}`);
 		} catch (error) {
@@ -75,32 +75,56 @@
 		}
 	}
 
-	function getStatusBadgeVariant(status: Server['status']): 'default' | 'secondary' | 'destructive' | 'outline' {
+	function getStatusBadgeVariant(status: ServerStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {
-			case 'running':
+			case ServerStatus.RUNNING:
 				return 'default';
-			case 'starting':
-			case 'stopping':
-			case 'creating':
+			case ServerStatus.STARTING:
+			case ServerStatus.STOPPING:
+			case ServerStatus.CREATING:
 				return 'secondary';
-			case 'error':
+			case ServerStatus.ERROR:
 				return 'destructive';
 			default:
 				return 'outline';
 		}
 	}
 
-	function getModLoaderBadgeVariant(modLoader: Server['mod_loader']): 'default' | 'secondary' | 'outline' {
+	function getStatusDisplayName(status: ServerStatus): string {
+		switch (status) {
+			case ServerStatus.RUNNING:
+				return 'RUNNING';
+			case ServerStatus.STOPPED:
+				return 'STOPPED';
+			case ServerStatus.STARTING:
+				return 'STARTING';
+			case ServerStatus.STOPPING:
+				return 'STOPPING';
+			case ServerStatus.ERROR:
+				return 'ERROR';
+			case ServerStatus.CREATING:
+				return 'CREATING';
+			case ServerStatus.RESTARTING:
+				return 'RESTARTING';
+			case ServerStatus.UNHEALTHY:
+				return 'UNHEALTHY';
+			default:
+				return 'UNKNOWN';
+		}
+	}
+
+	function getModLoaderBadgeVariant(modLoader: ModLoader): 'default' | 'secondary' | 'outline' {
 		switch (modLoader) {
-			case 'forge':
-			case 'neoforge':
+			case ModLoader.FORGE:
+			case ModLoader.NEOFORGE:
 				return 'default';
-			case 'fabric':
+			case ModLoader.FABRIC:
 				return 'secondary';
 			default:
 				return 'outline';
 		}
 	}
+
 </script>
 
 <div class="flex-1 space-y-8 h-full p-8 pt-6 bg-gradient-to-br from-background to-muted/10">
@@ -179,19 +203,19 @@
 								<DropdownMenuContent align="end">
 									<DropdownMenuLabel>Actions</DropdownMenuLabel>
 									<DropdownMenuSeparator />
-									{#if server.status === 'stopped' || server.status === 'error'}
+									{#if server.status === ServerStatus.STOPPED || server.status === ServerStatus.ERROR}
 										<DropdownMenuItem class="flex flew-row" onclick={() => handleServerAction('start', server)}>
 											<Play class="h-4 w-4 mr-2" />
 											Start
 										</DropdownMenuItem>
 									{/if}
-									{#if (server.status === 'running' || server.status === 'unhealthy')|| server.status === 'starting'}
+									{#if (server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY)|| server.status === ServerStatus.STARTING}
 										<DropdownMenuItem class="flex flew-row" onclick={() => handleServerAction('stop', server)}>
 											<Square class="h-4 w-4 mr-2" />
 											Stop
 										</DropdownMenuItem>
 									{/if}
-									{#if (server.status === 'running' || server.status === 'unhealthy')}
+									{#if (server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY)}
 										<DropdownMenuItem  class="flex flew-row" onclick={() => handleServerAction('restart', server)}>
 											<RotateCw class="h-4 w-4 mr-2" />
 											Restart
@@ -217,22 +241,22 @@
 							<div class="flex items-center justify-between">
 								<span class="text-sm font-medium text-muted-foreground">Status</span>
 								<div class="flex items-center gap-2">
-									{#if server.status === 'running'}
+									{#if server.status === ServerStatus.RUNNING}
 										<div class="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
 									{/if}
 									<Badge variant={getStatusBadgeVariant(server.status)} class="font-semibold">
-										{server.status.toUpperCase()}
+										{getStatusDisplayName(server.status)}
 									</Badge>
 								</div>
 							</div>
 							<div class="flex items-center justify-between">
 								<span class="text-sm font-medium text-muted-foreground">Version</span>
-								<span class="font-semibold">{server.mc_version}</span>
+								<span class="font-semibold">{server.mcVersion}</span>
 							</div>
 							<div class="flex items-center justify-between">
 								<span class="text-sm font-medium text-muted-foreground">Mod Loader</span>
-								<Badge variant={getModLoaderBadgeVariant(server.mod_loader)} class="capitalize">
-									{server.mod_loader === 'vanilla' ? '⚡ Vanilla' : server.mod_loader === 'forge' ? '🔨 Forge' : server.mod_loader === 'fabric' ? '🧵 Fabric' : server.mod_loader}
+								<Badge variant={getModLoaderBadgeVariant(server.modLoader)} class="capitalize">
+									{ModLoader[server.modLoader].replace('_', ' ').toLowerCase()}
 								</Badge>
 							</div>
 							<div class="pt-3 mt-3 border-t space-y-2">

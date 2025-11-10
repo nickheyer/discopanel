@@ -7,13 +7,63 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-frontend:
-    name: Build Frontend
+  generate-proto:
+    name: Generate Proto Code
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Generate proto code
+        run: |
+          docker run --rm \
+            --volume "${{ github.workspace }}:/workspace" \
+            --workdir /workspace \
+            bufbuild/buf:latest generate
+
+      - name: Upload generated Go proto code
+        uses: actions/upload-artifact@v4
+        with:
+          name: proto-go
+          path: pkg/proto
+          retention-days: 1
+
+      - name: Upload generated TypeScript proto code
+        uses: actions/upload-artifact@v4
+        with:
+          name: proto-ts
+          path: web/discopanel/src/lib/proto
+          retention-days: 1
+  
+      - name: Upload generated oapi schema
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-schema-yaml
+          path: web/discopanel/static/schemav1.yaml
+          retention-days: 1
+
+  build-frontend:
+    name: Build Frontend
+    needs: generate-proto
+    if: ${{ !endsWith(github.ref_name, '-dev') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download generated TypeScript proto code
+        uses: actions/download-artifact@v4
+        with:
+          name: proto-ts
+          path: web/discopanel/src/lib/proto
+
+      - name: Download generated oapi schema
+        uses: actions/download-artifact@v4
+        with:
+          name: api-schema-yaml
+          path: web/discopanel/static/schemav1.yaml
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -41,7 +91,8 @@ jobs:
 
   build-binaries:
     name: Build Binaries
-    needs: build-frontend
+    needs: [generate-proto, build-frontend]
+    if: ${{ !endsWith(github.ref_name, '-dev') }}
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -71,10 +122,16 @@ jobs:
             suffix: windows-amd64.exe
             cgo: 1
             runner: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Download generated Go proto code
+        uses: actions/download-artifact@v4
+        with:
+          name: proto-go
+          path: pkg/proto
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -162,8 +219,9 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
-      - name: Extract metadata
+      - name: Extract metadata (prod)
         id: meta
+        if: ${{ !endsWith(github.ref_name, '-dev') }}
         uses: docker/metadata-action@v5
         with:
           images: |
@@ -172,7 +230,20 @@ jobs:
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
+
+      - name: Extract metadata (dev)
+        id: meta-dev
+        if: ${{ endsWith(github.ref_name, '-dev') }}
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            nickheyer/discopanel
+          tags: |
+            type=ref,event=tag
+            type=raw,value=dev
+          flavor: |
+            latest=false
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -180,8 +251,8 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags || steps.meta-dev.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels || steps.meta-dev.outputs.labels }}
           no-cache: true
           build-args: |
             APP_VERSION=${{ github.ref_name }}
@@ -189,6 +260,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [build-binaries, build-docker]
+    if: ${{ !endsWith(github.ref_name, '-dev') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -244,7 +316,7 @@ jobs:
     name: Discord Notification
     needs: [create-release]
     runs-on: ubuntu-latest
-    if: always()
+    if: ${{ !endsWith(github.ref_name, '-dev') && always() }}
     
     steps:
       - name: Send Discord notification

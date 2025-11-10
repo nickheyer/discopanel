@@ -5,14 +5,19 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
+	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
-	import type { Server, UpdateServerRequest, MinecraftVersion, ModLoaderInfo, DockerImageInfo, AdditionalPort, DockerOverrides } from '$lib/api/types';
+	import type { Server, AdditionalPort, DockerOverrides } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { UpdateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
+	import { UpdateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
+	import type { GetMinecraftVersionsResponse, GetModLoadersResponse, GetDockerImagesResponse } from '$lib/proto/discopanel/v1/minecraft_pb';
+	import { GetMinecraftVersionsRequestSchema, GetModLoadersRequestSchema, GetDockerImagesRequestSchema } from '$lib/proto/discopanel/v1/minecraft_pb';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
-	import { getUniqueDockerImages } from '$lib/utils';
 
 	interface Props {
 		server: Server;
@@ -30,7 +35,7 @@
 		try {
 			return JSON.parse(jsonStr);
 		} catch (e) {
-			console.error('Failed to parse additional_ports:', e);
+			console.error('Failed to parse additionalPorts:', e);
 			return [];
 		}
 	}
@@ -40,31 +45,36 @@
 		try {
 			return JSON.parse(jsonStr);
 		} catch (e) {
-			console.error('Failed to parse docker_overrides:', e);
+			console.error('Failed to parse dockerOverrides:', e);
 			return undefined;
 		}
 	}
 
-	let formData = $state<UpdateServerRequest>({
-		name: server.name,
-		description: server.description || '',
-		max_players: server.max_players,
-		memory: server.memory,
-		mod_loader: server.mod_loader,
-		mc_version: server.mc_version,
-		docker_image: server.docker_image,
-		detached: !!(server.detached),
-		auto_start: !!(server.auto_start),
-		tps_command: server.tps_command || '',
-		additional_ports: parseAdditionalPorts(server.additional_ports),
-		docker_overrides: parseDockerOverrides(server.docker_overrides)
-	});
+	let formData = $state<UpdateServerRequest>(
+		create(UpdateServerRequestSchema, {
+			id: server.id,
+			name: server.name,
+			description: server.description || '',
+			maxPlayers: server.maxPlayers,
+			memory: server.memory,
+			modLoader: String(server.modLoader),
+			mcVersion: server.mcVersion,
+			dockerImage: server.dockerImage,
+			detached: server.detached,
+			autoStart: server.autoStart,
+			tpsCommand: server.tpsCommand || '',
+			modpackId: '', // Not used in this context
+			modpackVersionId: '', // Not used in this context
+			additionalPorts: parseAdditionalPorts(server.additionalPorts),
+			dockerOverrides: parseDockerOverrides(server.dockerOverrides)
+		})
+	);
 
 
 	// Available options
-	let minecraftVersions = $state<MinecraftVersion | null>(null);
-	let modLoaders = $state<ModLoaderInfo[]>([]);
-	let dockerImages = $state<DockerImageInfo[]>([]);
+	let minecraftVersions = $state<GetMinecraftVersionsResponse | null>(null);
+	let modLoaders = $state<GetModLoadersResponse | null>(null);
+	let dockerImages = $state<GetDockerImagesResponse | null>(null);
 	let loadingOptions = $state(true);
 
 	// Reset state when server changes
@@ -75,20 +85,23 @@
 
 
 			// Reset form data to match new server
-			formData = {
+			formData = create(UpdateServerRequestSchema, {
+				id: server.id,
 				name: server.name,
 				description: server.description || '',
-				max_players: server.max_players,
+				maxPlayers: server.maxPlayers,
 				memory: server.memory,
-				mod_loader: server.mod_loader,
-				mc_version: server.mc_version,
-				docker_image: server.docker_image,
-				detached: !!(server.detached),
-				auto_start: !!(server.auto_start),
-				tps_command: server.tps_command || '',
-				additional_ports: parseAdditionalPorts(server.additional_ports),
-				docker_overrides: parseDockerOverrides(server.docker_overrides)
-			};
+				modLoader: String(server.modLoader),
+				mcVersion: server.mcVersion,
+				dockerImage: server.dockerImage,
+				detached: server.detached,
+				autoStart: server.autoStart,
+				tpsCommand: server.tpsCommand || '',
+				modpackId: '', // Not used in this context
+				modpackVersionId: '', // Not used in this context
+				additionalPorts: parseAdditionalPorts(server.additionalPorts),
+				dockerOverrides: parseDockerOverrides(server.dockerOverrides)
+			});
 			saving = false;
 			isDirty = false;
 			// Reload options for new server
@@ -106,30 +119,30 @@
 		isDirty =
 			formData.name !== server.name ||
 			formData.description !== (server.description || '') ||
-			formData.max_players !== server.max_players ||
+			formData.maxPlayers !== server.maxPlayers ||
 			formData.memory !== server.memory ||
-			formData.mod_loader !== server.mod_loader ||
-			formData.mc_version !== server.mc_version ||
-			formData.docker_image !== server.docker_image ||
-			formData.detached !== !!(server.detached) ||
-			formData.auto_start !== !!(server.auto_start) ||
-			formData.tps_command !== (server.tps_command || '') ||
-			JSON.stringify(formData.additional_ports) !== JSON.stringify(parseAdditionalPorts(server.additional_ports)) ||
-			JSON.stringify(formData.docker_overrides) !== JSON.stringify(parseDockerOverrides(server.docker_overrides));
+			formData.modLoader !== String(server.modLoader) ||
+			formData.mcVersion !== server.mcVersion ||
+			formData.dockerImage !== server.dockerImage ||
+			formData.detached !== server.detached ||
+			formData.autoStart !== server.autoStart ||
+			formData.tpsCommand !== (server.tpsCommand || '') ||
+			JSON.stringify(formData.additionalPorts) !== JSON.stringify(parseAdditionalPorts(server.additionalPorts)) ||
+			JSON.stringify(formData.dockerOverrides) !== JSON.stringify(parseDockerOverrides(server.dockerOverrides));
 	});
 
 	async function loadOptions() {
 		try {
 			loadingOptions = true;
 			const [versions, loaders, images] = await Promise.all([
-				api.getMinecraftVersions(),
-				api.getModLoaders(),
-				api.getDockerImages()
+				rpcClient.minecraft.getMinecraftVersions(create(GetMinecraftVersionsRequestSchema, {})),
+				rpcClient.minecraft.getModLoaders(create(GetModLoadersRequestSchema, {})),
+				rpcClient.minecraft.getDockerImages(create(GetDockerImagesRequestSchema, {}))
 			]);
-			
+
 			minecraftVersions = versions;
-			modLoaders = loaders.modloaders;
-			dockerImages = images.images;
+			modLoaders = loaders;
+			dockerImages = images;
 		} catch (error) {
 			toast.error('Failed to load options');
 		} finally {
@@ -155,7 +168,7 @@
 		// Prevent negative values and zero
 		if (value <= 0) {
 			input.value = '1';
-			formData.max_players = 1;
+			formData.maxPlayers = 1;
 		}
 	}
 
@@ -164,7 +177,8 @@
 
 		saving = true;
 		try {
-			await api.updateServer(server.id, formData);
+			const request = create(UpdateServerRequestSchema, formData);
+			await rpcClient.server.updateServer(request);
 			toast.success('Server settings updated. Restart the server to apply changes.');
 			onUpdate?.();
 			isDirty = false;
@@ -175,18 +189,16 @@
 		}
 	}
 
-	function getCompatibleModLoaders(mcVersion: string): ModLoaderInfo[] {
-		return modLoaders.filter(loader =>
-			!loader.SupportedVersions ||
-			loader.SupportedVersions.length === 0 ||
-			loader.SupportedVersions.includes(mcVersion)
-		);
+	function getCompatibleModLoaders(mcVersion: string) {
+		// The proto doesn't include version compatibility info, so all loaders are shown
+		// Backend has SupportedVersions field but it's not populated or sent via proto
+		return modLoaders?.modloaders || [];
 	}
 
 </script>
 
 <div class="space-y-6 p-4 overflow-y-auto h-full">
-	{#if server.status !== 'stopped'}
+	{#if server.status !== ServerStatus.STOPPED}
 		<Alert class="border-warning/50 bg-warning/10">
 			<AlertCircle class="h-4 w-4 text-warning" />
 			<AlertDescription class="text-sm">
@@ -227,7 +239,7 @@
 				class="h-10"
 			/>
 			<p class="text-xs text-muted-foreground">
-				Recommended: {formData.mod_loader === 'vanilla' ? '2048' : '4096'} MB
+				Recommended: {formData.modLoader === 'vanilla' ? '2048' : '4096'} MB
 			</p>
 		</div>
 
@@ -236,7 +248,7 @@
 			<Input
 				id="max_players"
 				type="number"
-				bind:value={formData.max_players}
+				bind:value={formData.maxPlayers}
 				oninput={handleMaxPlayersInput}
 				min="1"
 				max="1000"
@@ -248,17 +260,17 @@
 			<Label for="mc_version" class="text-sm font-medium">Minecraft Version</Label>
 			<Select
 				type="single"
-				disabled={loadingOptions || server.status !== 'stopped'}
-				value={formData.mc_version}
-				onValueChange={(value: string | undefined) => formData.mc_version = value || ''}
+				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
+				value={formData.mcVersion}
+				onValueChange={(value: string | undefined) => formData.mcVersion = value || ''}
 			>
 				<SelectTrigger id="mc_version" class="h-10">
-					<span>{formData.mc_version || 'Select a version'}</span>
+					<span>{formData.mcVersion || 'Select a version'}</span>
 				</SelectTrigger>
 				<SelectContent>
 					{#if minecraftVersions}
-						{#each minecraftVersions.versions as version (version)}
-							<SelectItem value={version}>{version}</SelectItem>
+						{#each minecraftVersions.versions as version (version.id)}
+							<SelectItem value={version.id}>{version.id}</SelectItem>
 						{/each}
 					{/if}
 				</SelectContent>
@@ -269,18 +281,18 @@
 			<Label for="mod_loader" class="text-sm font-medium">Mod Loader</Label>
 			<Select
 				type="single"
-				disabled={loadingOptions || server.status !== 'stopped'}
-				value={formData.mod_loader}
-				onValueChange={(value: string | undefined) => formData.mod_loader = value || ''}
+				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
+				value={formData.modLoader}
+				onValueChange={(value: string | undefined) => formData.modLoader = value || ''}
 			>
 				<SelectTrigger id="mod_loader" class="h-10">
-					<span>{formData.mod_loader || 'Select a mod loader'}</span>
+					<span>{formData.modLoader || 'Select a mod loader'}</span>
 				</SelectTrigger>
 				<SelectContent>
-					{#if formData.mc_version}
-						{#each getCompatibleModLoaders(formData.mc_version || '') as loader (loader.Name)}
-							<SelectItem value={loader.Name}>
-								{loader.DisplayName}
+					{#if formData.mcVersion}
+						{#each getCompatibleModLoaders(formData.mcVersion || '') as loader (loader.name)}
+							<SelectItem value={loader.name}>
+								{loader.displayName}
 							</SelectItem>
 						{/each}
 					{/if}
@@ -292,17 +304,17 @@
 			<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
 			<Select
 				type="single"
-				disabled={loadingOptions || server.status !== 'stopped'}
-				value={formData.docker_image}
-				onValueChange={(value: string | undefined) => formData.docker_image = value || ''}
+				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
+				value={formData.dockerImage}
+				onValueChange={(value: string | undefined) => formData.dockerImage = value || ''}
 			>
 				<SelectTrigger id="docker_image" class="h-10">
-					<span>{formData.docker_image || 'Select Docker image'}</span>
+					<span>{formData.dockerImage || 'Select Docker image'}</span>
 				</SelectTrigger>
 				<SelectContent>
-					{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
+					{#each dockerImages?.images || [] as image (image.tag)}
 						<SelectItem value={image.tag}>
-							{image.tag} - Java {image.java} ({image.distribution})
+							{image.displayName || image.tag}
 						</SelectItem>
 					{/each}
 				</SelectContent>
@@ -314,7 +326,7 @@
 			<Input
 				id="tps_command"
 				placeholder="Polling TPS command"
-				bind:value={formData.tps_command}
+				bind:value={formData.tpsCommand}
 				class="h-10"
 			/>
 			<p class="text-xs text-muted-foreground">
@@ -335,9 +347,9 @@
 				<Switch
 					id="detached"
 					checked={formData.detached}
-					disabled={server.proxy_hostname !== ''}
+					disabled={server.proxyHostname !== ''}
 					onCheckedChange={(checked) => {
-						if (checked && server.proxy_hostname !== '') {
+						if (checked && server.proxyHostname !== '') {
 							toast.error("Cannot detach proxied servers");
 							formData.detached = false;
 							return;
@@ -345,7 +357,7 @@
 						formData.detached = checked;
 						// If detaching, disable auto-start
 						if (checked) {
-							formData.auto_start = false;
+							formData.autoStart = false;
 						}
 					}}
 				/>
@@ -360,15 +372,15 @@
 				</div>
 				<Switch
 					id="auto_start"
-					checked={formData.auto_start}
+					checked={formData.autoStart}
 					disabled={formData.detached}
 					onCheckedChange={(checked) => {
 						if (formData.detached) {
 							toast.error("Cannot enable auto-start for detached servers");
-							formData.auto_start = false;
+							formData.autoStart = false;
 							return;
 						}
-						formData.auto_start = checked;
+						formData.autoStart = checked;
 					}}
 				/>
 			</div>
@@ -379,15 +391,15 @@
 
 	<div class="space-y-4">
 		<AdditionalPortsEditor
-			bind:ports={formData.additional_ports}
+			bind:ports={formData.additionalPorts}
 			disabled={saving}
-			onchange={(ports) => formData.additional_ports = ports}
+			onchange={(ports) => formData.additionalPorts = ports}
 		/>
 
 		<DockerOverridesEditor
-			bind:overrides={formData.docker_overrides}
+			bind:overrides={formData.dockerOverrides}
 			disabled={saving}
-			onchange={(overrides) => formData.docker_overrides = overrides}
+			onchange={(overrides) => formData.dockerOverrides = overrides}
 		/>
 	</div>
 

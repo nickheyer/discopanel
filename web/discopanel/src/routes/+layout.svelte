@@ -36,7 +36,9 @@
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
-	import { Server, Home, Settings, Package, User, Users, LogOut } from '@lucide/svelte';
+	import { Server, Home, Settings, Package, User, Users, LogOut, FileText } from '@lucide/svelte';
+	import { ServerStatus, UserRole } from '$lib/proto/discopanel/v1/common_pb';
+	import { getStringForEnum } from '$lib/utils';
 
 	let { children } = $props();
 
@@ -192,6 +194,16 @@
 										{/snippet}
 									</SidebarMenuButton>
 								</SidebarMenuItem>
+								<SidebarMenuItem>
+									<SidebarMenuButton isActive={page.url.pathname.startsWith('/docs/api')}>
+										{#snippet child({ props })}
+											<a href="/docs/api" {...props}>
+												<FileText class="h-4 w-4" />
+												<span class="group-data-[collapsible=icon]:hidden">API</span>
+											</a>
+										{/snippet}
+									</SidebarMenuButton>
+								</SidebarMenuItem>
 							</SidebarMenu>
 						</SidebarGroupContent>
 					</SidebarGroup>
@@ -210,11 +222,11 @@
 														<a href="/servers/{server.id}" {...props}>
 															<div class="flex w-full items-center gap-2">
 																<div
-																	class="h-2 w-2 rounded-full {server.status === 'running'
+																	class="h-2 w-2 rounded-full {server.status === ServerStatus.RUNNING
 																		? 'bg-green-500'
-																		: server.status === 'error'
+																		: server.status === ServerStatus.ERROR
 																			? 'bg-red-500 animate-pulse'
-																		: server.status === 'starting' || server.status === 'stopping' || server.status === 'unhealthy'
+																		: server.status === ServerStatus.STARTING || server.status === ServerStatus.STOPPING || server.status === ServerStatus.UNHEALTHY
 																			? 'bg-yellow-500'
 																			: 'bg-gray-400'}"
 																></div>
@@ -246,7 +258,7 @@
 												</Avatar>
 												<div class="ml-2 flex-1 text-left group-data-[collapsible=icon]:hidden">
 													<p class="text-sm font-medium leading-none">{user.username}</p>
-													<p class="text-xs text-muted-foreground capitalize">{user.role}</p>
+													<p class="text-xs text-muted-foreground capitalize">{getStringForEnum(UserRole, user.role)}</p>
 												</div>
 											</Button>
 										{/snippet}

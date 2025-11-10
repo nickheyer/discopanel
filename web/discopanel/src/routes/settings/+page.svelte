@@ -2,11 +2,12 @@
 	import { onMount } from 'svelte';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
 	import { Settings, Globe, Server, Shield, HelpCircle } from '@lucide/svelte';
-	import type { ConfigCategory } from '$lib/api/types';
+	import type { ConfigCategory } from '$lib/proto/discopanel/v1/config_pb';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import RoutingSettings from '$lib/components/routing-settings.svelte';
 	import AuthSettings from '$lib/components/auth-settings.svelte';
 	import SupportSettings from '$lib/components/support-settings.svelte';
@@ -19,9 +20,8 @@
 	async function loadGlobalSettings() {
 		loading = true;
 		try {
-			const response = await fetch('/api/v1/settings');
-			if (!response.ok) throw new Error('Failed to load settings');
-			globalConfig = await response.json();
+			const response = await rpcClient.config.getGlobalSettings({});
+			globalConfig = response.categories;
 		} catch (error) {
 			toast.error('Failed to load global settings');
 			console.error(error);
@@ -30,18 +30,14 @@
 		}
 	}
 	
-	async function saveGlobalSettings(updates: Record<string, any>) {
+	async function saveGlobalSettings(updates: Record<string, string>) {
 		saving = true;
 		try {
-			const response = await fetch('/api/v1/settings', {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(updates)
+			const response = await rpcClient.config.updateGlobalSettings({
+				updates
 			});
-			
-			if (!response.ok) throw new Error('Failed to save settings');
-			
-			globalConfig = await response.json();
+
+			globalConfig = response.categories;
 			toast.success('Global settings saved successfully');
 		} catch (error) {
 			toast.error('Failed to save global settings');
@@ -90,17 +86,10 @@
 		</TabsList>
 		
 		<TabsContent value="server-config" class="space-y-4">
-			<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
-				<CardHeader class="relative pb-6">
-					<CardTitle class="text-2xl font-semibold">Default Server Configuration</CardTitle>
-					<CardDescription class="text-base">
-						Configure default values that will be applied to all new servers. These settings can be overridden on a per-server basis.
-					</CardDescription>
-				</CardHeader>
-				<CardContent class="relative">
-					{#if loading}
-						<div class="flex items-center justify-center py-16">
+			{#if loading}
+				<Card>
+					<CardContent class="py-16">
+						<div class="flex items-center justify-center">
 							<div class="text-center space-y-3">
 								<div class="h-12 w-12 mx-auto rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
 									<Settings class="h-6 w-6 text-primary" />
@@ -108,15 +97,15 @@
 								<div class="text-muted-foreground font-medium">Loading settings...</div>
 							</div>
 						</div>
-					{:else}
-						<ServerConfiguration 
-							config={globalConfig} 
-							onSave={saveGlobalSettings}
-							{saving}
-						/>
-					{/if}
-				</CardContent>
-			</Card>
+					</CardContent>
+				</Card>
+			{:else}
+				<ServerConfiguration
+					config={globalConfig}
+					onSave={saveGlobalSettings}
+					{saving}
+				/>
+			{/if}
 		</TabsContent>
 		
 		<TabsContent value="routing" class="space-y-4">

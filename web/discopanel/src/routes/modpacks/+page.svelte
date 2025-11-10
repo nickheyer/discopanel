@@ -9,23 +9,28 @@
 	import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
 	import { toast } from 'svelte-sonner';
 	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload, Package, ArrowLeft, Trash2 } from '@lucide/svelte';
-	import type { IndexedModpack, ModpackSearchParams, ModpackSearchResponse } from '$lib/api/types';
+	import { create } from '@bufbuild/protobuf';
+	import type { IndexedModpack, SearchModpacksRequest, SearchModpacksResponse, GetIndexerStatusResponse } from '$lib/proto/discopanel/v1/modpack_pb';
+	import { SearchModpacksRequestSchema } from '$lib/proto/discopanel/v1/modpack_pb';
+	import { rpcClient } from '$lib/api/rpc-client';
 	
-	let searchParams = $state<ModpackSearchParams>({
-		q: '',
+	let searchParams = $state<SearchModpacksRequest>(create(SearchModpacksRequestSchema, {
+		query: '',
 		gameVersion: '',
 		modLoader: '',
-		page: 1
-	});
+		indexer: '',
+		page: 1,
+		pageSize: 20
+	}));
 	
-	let searchResults = $state<ModpackSearchResponse | null>(null);
+	let searchResults = $state<SearchModpacksResponse | null>(null);
 	let favorites = $state<IndexedModpack[]>([]);
 	let uploadedPacks = $state<IndexedModpack[]>([]);
 	let loading = $state(false);
 	let syncing = $state(false);
 	let showFavorites = $state(false);
 	let showUploaded = $state(false);
-	let indexerStatus = $state<any>(null);
+	let indexerStatus = $state<GetIndexerStatusResponse | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let uploading = $state(false);
 	let selectedIndexer = $state('modrinth'); // Default Modrinth since no API key initially
@@ -49,11 +54,8 @@
 	
 	async function loadMinecraftVersions() {
 		try {
-			const response = await fetch('/api/v1/minecraft/versions');
-			if (response.ok) {
-				const data = await response.json();
-				gameVersions = data.versions || [];
-			}
+			const response = await rpcClient.minecraft.getMinecraftVersions({});
+			gameVersions = response.versions.map(v => v.id);
 		} catch (error) {
 			console.error('Failed to load Minecraft versions:', error);
 		}
@@ -61,18 +63,15 @@
 	
 	async function loadModLoaders() {
 		try {
-			const response = await fetch('/api/v1/minecraft/modloaders');
-			if (response.ok) {
-				const data = await response.json();
-				const loaders = data.modloaders || [];
-				modLoaders = [
-					{ value: '', label: 'All Loaders' },
-					...loaders.map((loader: any) => ({
-						value: loader.Name,
-						label: loader.DisplayName || loader.Name
-					}))
-				];
-			}
+			const response = await rpcClient.minecraft.getModLoaders({});
+			const loaders = response.modloaders || [];
+			modLoaders = [
+				{ value: '', label: 'All Loaders' },
+				...loaders.map((loader) => ({
+					value: loader.name,
+					label: loader.displayName || loader.name
+				}))
+			];
 		} catch (error) {
 			console.error('Failed to load mod loaders:', error);
 		}
@@ -80,10 +79,8 @@
 	
 	async function checkIndexerStatus() {
 		try {
-			const response = await fetch('/api/v1/modpacks/status');
-			if (response.ok) {
-				indexerStatus = await response.json();
-			}
+			const response = await rpcClient.modpack.getIndexerStatus({});
+			indexerStatus = response;
 		} catch (error) {
 			console.error('Failed to check indexer status:', error);
 		}
@@ -96,15 +93,11 @@
 			if (resetPage) {
 				searchParams.page = 1;
 			}
-			const params = new URLSearchParams();
-			if (searchParams.q) params.append('q', searchParams.q);
-			if (searchParams.gameVersion) params.append('gameVersion', searchParams.gameVersion);
-			if (searchParams.modLoader) params.append('modLoader', searchParams.modLoader);
-			params.append('indexer', selectedIndexer);
-			params.append('page', searchParams.page?.toString() || '1');
-			const response = await fetch(`/api/v1/modpacks?${params}`);
-			if (!response.ok) throw new Error('Failed to search modpacks');
-			searchResults = await response.json();
+			const response = await rpcClient.modpack.searchModpacks({
+				...searchParams,
+				indexer: selectedIndexer
+			});
+			searchResults = response;
 		} catch (error) {
 			toast.error('Failed to search modpacks');
 			console.error(error);
@@ -116,22 +109,13 @@
 	async function syncModpacks() {
 		syncing = true;
 		try {
-			const response = await fetch('/api/v1/modpacks/sync', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					query: searchParams.q || '',
-					gameVersion: searchParams.gameVersion || '',
-					modLoader: searchParams.modLoader || '',
-					indexer: selectedIndexer
-				})
+			const result = await rpcClient.modpack.syncModpacks({
+				query: searchParams.query || '',
+				gameVersion: searchParams.gameVersion || '',
+				modLoader: searchParams.modLoader || '',
+				indexer: selectedIndexer
 			});
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to sync modpacks');
-			}
-			const result = await response.json();
-			toast.success(`Synced ${result.synced} modpacks from ${indexerName}`);
+			toast.success(`Synced ${result.syncedCount} modpacks from ${indexerName}`);
 			// Refresh search results
 			await searchModpacks();
 		} catch (error) {
@@ -144,31 +128,25 @@
 	
 	async function toggleFavorite(modpack: IndexedModpack) {
 		try {
-			const response = await fetch(`/api/v1/modpacks/${modpack.id}/favorite`, {
-				method: 'POST'
-			});
-			
-			if (!response.ok) throw new Error('Failed to toggle favorite');
-			
-			const result = await response.json();
-			
+			const result = await rpcClient.modpack.toggleFavorite({ id: modpack.id });
+
 			// Update the modpack in search results
 			if (searchResults) {
-				searchResults.modpacks = searchResults.modpacks.map(m => 
-					m.id === modpack.id ? { ...m, is_favorited: result.is_favorited } : m
+				searchResults.modpacks = searchResults.modpacks.map(m =>
+					m.id === modpack.id ? { ...m, isFavorited: result.isFavorited } : m
 				);
 			}
-			
+
 			// Update the modpack in uploaded packs
-			uploadedPacks = uploadedPacks.map(m => 
-				m.id === modpack.id ? { ...m, is_favorited: result.is_favorited } : m
+			uploadedPacks = uploadedPacks.map(m =>
+				m.id === modpack.id ? { ...m, isFavorited: result.isFavorited } : m
 			);
-			
+
 			// Update favorites list immediately
-			if (result.is_favorited) {
+			if (result.isFavorited) {
 				// Add to favorites if not already there
 				if (!favorites.find(f => f.id === modpack.id)) {
-					favorites = [...favorites, { ...modpack, is_favorited: true }];
+					favorites = [...favorites, { ...modpack, isFavorited: true }];
 				}
 				toast.success('Added to favorites');
 			} else {
@@ -176,9 +154,9 @@
 				favorites = favorites.filter(f => f.id !== modpack.id);
 				toast.success('Removed from favorites');
 			}
-			
+
 			// If viewing favorites, we may need to update the display
-			if (showFavorites && !result.is_favorited) {
+			if (showFavorites && !result.isFavorited) {
 				// Item was removed from favorites while viewing favorites
 				// The reactive displayModpacks will automatically update
 			}
@@ -190,10 +168,7 @@
 	
 	async function loadFavorites() {
 		try {
-			const response = await fetch('/api/v1/modpacks/favorites');
-			if (!response.ok) throw new Error('Failed to load favorites');
-			
-			const result = await response.json();
+			const result = await rpcClient.modpack.listFavorites({});
 			favorites = result.modpacks;
 		} catch (error) {
 			toast.error('Failed to load favorites');
@@ -204,10 +179,14 @@
 	async function loadUploadedPacks() {
 		try {
 			// Use the indexer parameter to get only manual uploads
-			const response = await fetch('/api/v1/modpacks?indexer=manual');
-			if (!response.ok) throw new Error('Failed to load uploaded packs');
-			
-			const result = await response.json();
+			const result = await rpcClient.modpack.searchModpacks({
+				query: '',
+				gameVersion: '',
+				modLoader: '',
+				indexer: 'manual',
+				page: 1,
+				pageSize: 100
+			});
 			uploadedPacks = result.modpacks || [];
 		} catch (error) {
 			console.error('Failed to load uploaded packs:', error);
@@ -235,31 +214,27 @@
 		const input = event.target as HTMLInputElement;
 		const files = input.files;
 		if (!files || files.length === 0) return;
-		
+
 		const file = files[0];
 		if (!file.name.endsWith('.zip')) {
 			toast.error('Please select a valid modpack ZIP file');
 			return;
 		}
-		
+
 		uploading = true;
 		try {
-			const formData = new FormData();
-			formData.append('modpack', file);
-			
-			const response = await fetch('/api/v1/modpacks/upload', {
-				method: 'POST',
-				body: formData
+			const arrayBuffer = await file.arrayBuffer();
+			const content = new Uint8Array(arrayBuffer);
+
+			const result = await rpcClient.modpack.uploadModpack({
+				filename: file.name,
+				content: content,
+				name: file.name.replace('.zip', ''),
+				description: ''
 			});
-			
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to upload modpack');
-			}
-			
-			const result = await response.json();
-			toast.success(`Modpack "${result.name}" uploaded successfully`);
-			
+
+			toast.success(`Modpack "${result.modpack?.name}" uploaded successfully`);
+
 			// Refresh the modpack list and uploaded packs
 			await Promise.all([
 				searchModpacks(),
@@ -279,14 +254,7 @@
 		}
 
 		try {
-			const response = await fetch(`/api/v1/modpacks/${modpack.id}`, {
-				method: 'DELETE'
-			});
-
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to delete modpack');
-			}
+			await rpcClient.modpack.deleteModpack({ id: modpack.id });
 
 			toast.success(`Modpack "${modpack.name}" deleted successfully`);
 
@@ -310,7 +278,7 @@
 			loadUploadedPacks()
 		]);
 
-		if (searchResults && searchResults.total === 0 && !searchParams.q) {
+		if (searchResults && searchResults.total === 0 && !searchParams.query) {
 			syncModpacks();
 		}
 	});
@@ -376,19 +344,15 @@
 		</div>
 	</div>
 	
-	{#if selectedIndexer === 'fuego' && indexerStatus?.indexers?.fuego && !indexerStatus.indexers.fuego.apiKeyConfigured}
+	{#if selectedIndexer === 'fuego' && indexerStatus && !indexerStatus.indexersAvailable['fuego']}
 		<Alert>
 			<AlertCircle class="h-4 w-4" />
 			<AlertTitle>CurseForge API Key Required</AlertTitle>
 			<AlertDescription>
 				<div class="space-y-2">
-					<p>To sync modpacks from CurseForge, you need to configure a CurseForge API key.</p>
+					<p>To sync modpacks from CurseForge, you need to configure a CurseForge API key in the settings.</p>
 					<div class="flex items-center gap-2 mt-2">
-						<Button size="sm" href={indexerStatus.indexers.fuego.apiKeyUrl} target="_blank">
-							<ExternalLink class="h-4 w-4 mr-2" />
-							Get API Key
-						</Button>
-						<Button size="sm" variant="outline" href="/settings#curseforge">
+						<Button size="sm" href="/settings">
 							<Settings class="h-4 w-4 mr-2" />
 							Configure in Settings
 						</Button>
@@ -403,7 +367,7 @@
 			<div class="flex gap-2">
 				<Input
 					placeholder="Search modpacks..."
-					bind:value={searchParams.q}
+					bind:value={searchParams.query}
 					onkeydown={(e) => e.key === 'Enter' && searchModpacks()}
 					class="flex-1"
 				/>
@@ -444,7 +408,7 @@
 					<Search class="h-5 w-5 mr-2" />
 					Search
 				</Button>
-				<Button onclick={syncModpacks} disabled={syncing || (selectedIndexer === 'fuego' && !indexerStatus?.indexers?.fuego?.apiKeyConfigured)} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
+				<Button onclick={syncModpacks} disabled={syncing || (selectedIndexer === 'fuego' && indexerStatus && !indexerStatus.indexersAvailable['fuego'])} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
 					<RefreshCw class={`h-5 w-5 mr-2 ${syncing ? 'animate-spin' : ''}`} />
 					Sync {indexerName}
 				</Button>
@@ -474,9 +438,9 @@
 				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 				<CardHeader class="relative">
 					<div class="flex items-start gap-4">
-						{#if modpack.logo_url}
-							<img 
-								src={modpack.logo_url} 
+						{#if modpack.logoUrl}
+							<img
+								src={modpack.logoUrl} 
 								alt={modpack.name}
 								class="w-16 h-16 rounded-md object-cover"
 							/>
@@ -495,17 +459,17 @@
 								{/if}
 								<span class="text-xs text-muted-foreground">
 									<Download class="h-3 w-3 inline mr-1" />
-									{formatNumber(modpack.download_count)}
+									{formatNumber(modpack.downloadCount)}
 								</span>
 							</div>
 						</div>
 						<Button
 							size="icon"
-							variant={modpack.is_favorited ? "default" : "outline"}
+							variant={modpack.isFavorited ? "default" : "outline"}
 							onclick={() => toggleFavorite(modpack)}
 							class="hover:scale-110 transition-transform"
 						>
-							<Heart class={`h-4 w-4 ${modpack.is_favorited ? 'fill-current' : ''}`} />
+							<Heart class={`h-4 w-4 ${modpack.isFavorited ? 'fill-current' : ''}`} />
 						</Button>
 					</div>
 				</CardHeader>
@@ -515,19 +479,19 @@
 					</CardDescription>
 					
 					<div class="space-y-2">
-						{#if parseJsonArray(modpack.mod_loaders).length > 0}
+						{#if parseJsonArray(modpack.modLoaders).length > 0}
 							<div class="flex flex-wrap gap-1">
-								{#each parseJsonArray(modpack.mod_loaders) as loader}
+								{#each parseJsonArray(modpack.modLoaders) as loader}
 									<Badge variant="outline" class="text-xs">{loader}</Badge>
 								{/each}
 							</div>
 						{/if}
 						
-						{#if parseJsonArray(modpack.game_versions).length > 0}
+						{#if parseJsonArray(modpack.gameVersions).length > 0}
 							<div class="text-xs text-muted-foreground">
-								MC: {parseJsonArray(modpack.game_versions).slice(0, 3).join(', ')}
-								{#if parseJsonArray(modpack.game_versions).length > 3}
-									+{parseJsonArray(modpack.game_versions).length - 3} more
+								MC: {parseJsonArray(modpack.gameVersions).slice(0, 3).join(', ')}
+								{#if parseJsonArray(modpack.gameVersions).length > 3}
+									+{parseJsonArray(modpack.gameVersions).length - 3} more
 								{/if}
 							</div>
 						{/if}
@@ -535,8 +499,8 @@
 					
 					<div class="flex items-center justify-between mt-4 gap-2">
 						<div class="flex items-center gap-2">
-							{#if modpack.website_url}
-								<a href={modpack.website_url} target="_blank" rel="noopener noreferrer">
+							{#if modpack.websiteUrl}
+								<a href={modpack.websiteUrl} target="_blank" rel="noopener noreferrer">
 									<Button variant="outline" size="sm">
 										<ExternalLink class="h-3 w-3 mr-1" />
 										View
@@ -602,7 +566,7 @@
 				{:else if syncing}
 					Syncing modpacks...
 				{:else}
-					{#if searchParams.q}
+					{#if searchParams.query}
 						No modpacks found matching your search.
 					{:else}
 						No modpacks found.

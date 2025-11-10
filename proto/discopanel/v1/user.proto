@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+import "discopanel/v1/common.proto";
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// User management service (admin only)
+service UserService {
+  // Get all system users
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  // Create new user account
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  // Modify user account
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+  // Remove user account
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+}
+
+// Empty user list request
+message ListUsersRequest {}
+
+// All system users
+message ListUsersResponse {
+  repeated User users = 1;
+}
+
+// New user details
+message CreateUserRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+  UserRole role = 4;
+}
+
+// Created user
+message CreateUserResponse {
+  User user = 1;
+}
+
+// User fields to update
+message UpdateUserRequest {
+  string id = 1;
+  optional string email = 2;
+  optional UserRole role = 3;
+  optional bool is_active = 4;
+}
+
+// Updated user
+message UpdateUserResponse {
+  User user = 1;
+}
+
+// User to delete
+message DeleteUserRequest {
+  string id = 1;
+}
+
+// Deletion confirmation
+message DeleteUserResponse {
+  string message = 1;
+}

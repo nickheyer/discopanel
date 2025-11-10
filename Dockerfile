@@ -1,5 +1,12 @@
 ARG APP_VERSION=dev
 
+# Generate protobuf code using buf
+FROM bufbuild/buf:latest AS proto-builder
+WORKDIR /app
+COPY buf.yaml buf.gen.yaml ./
+COPY proto/ ./proto/
+RUN mkdir -p web/discopanel/static pkg/proto web/discopanel/src/lib/proto && buf generate
+
 FROM node:22-alpine AS frontend-builder
 
 ARG APP_VERSION
@@ -11,6 +18,8 @@ COPY web/discopanel/package*.json ./
 RUN npm ci
 
 COPY web/discopanel/ ./
+COPY --from=proto-builder /app/web/discopanel/src/lib/proto ./src/lib/proto/
+COPY --from=proto-builder /app/web/discopanel/static/schemav1.yaml ./static/
 
 RUN npm run build
 
@@ -27,6 +36,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+COPY --from=proto-builder /app/pkg/proto ./pkg/proto/
 COPY --from=frontend-builder /app/web/discopanel/build ./web/discopanel/build
 
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o discopanel ./cmd/discopanel

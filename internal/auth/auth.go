@@ -20,6 +20,12 @@ var (
 	ErrAuthDisabled       = errors.New("authentication is disabled")
 	ErrInvalidToken       = errors.New("invalid token")
 	ErrSessionExpired     = errors.New("session expired")
+	AnonymousUser         = &db.User{
+		ID:       "anonymous",
+		Username: "anonymous",
+		Role:     db.RoleAdmin,
+		IsActive: true,
+	}
 )
 
 type Manager struct {
@@ -32,19 +38,19 @@ func NewManager(store *db.Store) *Manager {
 	}
 }
 
-// HashPassword hashes a plain text password
+// Hashes plaintext
 func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(bytes), err
 }
 
-// CheckPassword compares a hashed password with plain text
+// Compares a hashed pass with plaintext
 func CheckPassword(hashedPassword, password string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	return err == nil
 }
 
-// GenerateSecretKey generates a random secret key
+// Generate a random secret key
 func GenerateSecretKey() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
@@ -53,7 +59,11 @@ func GenerateSecretKey() (string, error) {
 	return base64.URLEncoding.EncodeToString(bytes), nil
 }
 
-// GenerateJWT generates a JWT token for a user
+func GetAnonUser() *db.User {
+	return AnonymousUser
+}
+
+// Generate JWT token for a user
 func (m *Manager) GenerateJWT(user *db.User, authConfig *db.AuthConfig) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":  user.ID,
@@ -67,7 +77,7 @@ func (m *Manager) GenerateJWT(user *db.User, authConfig *db.AuthConfig) (string,
 	return token.SignedString([]byte(authConfig.JWTSecret))
 }
 
-// ValidateJWT validates a JWT token and returns the claims
+// Validate JWT token and returns the claims
 func (m *Manager) ValidateJWT(tokenString string, authConfig *db.AuthConfig) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -93,7 +103,7 @@ func (m *Manager) ValidateJWT(tokenString string, authConfig *db.AuthConfig) (jw
 	return nil, ErrInvalidToken
 }
 
-// Login authenticates a user and creates a session
+// Authenticates a user and creates a session
 func (m *Manager) Login(ctx context.Context, username, password string) (*db.User, string, error) {
 	// Check if auth is enabled
 	authConfig, _, err := m.store.GetAuthConfig(ctx)
@@ -102,16 +112,8 @@ func (m *Manager) Login(ctx context.Context, username, password string) (*db.Use
 	}
 
 	if !authConfig.Enabled {
-		// If auth is disabled and no users exist, allow access
-		userCount, err := m.store.CountUsers(ctx)
-		if err != nil {
-			return nil, "", err
-		}
-		if userCount == 0 {
-			// No users exist, auth is disabled - allow unrestricted access
-			return nil, "", nil
-		}
-		return nil, "", ErrAuthDisabled
+		// Auth is disabled - return anon admin
+		return GetAnonUser(), "", nil
 	}
 
 	// Get user by username
@@ -161,7 +163,7 @@ func (m *Manager) Logout(ctx context.Context, token string) error {
 	return m.store.DeleteSession(ctx, token)
 }
 
-// ValidateSession validates a session token
+// Validate session token
 func (m *Manager) ValidateSession(ctx context.Context, token string) (*db.User, error) {
 	// Check if auth is enabled
 	authConfig, _, err := m.store.GetAuthConfig(ctx)
@@ -170,16 +172,13 @@ func (m *Manager) ValidateSession(ctx context.Context, token string) (*db.User, 
 	}
 
 	if !authConfig.Enabled {
-		// If auth is disabled and no users exist, allow access
-		userCount, err := m.store.CountUsers(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if userCount == 0 {
-			// No users exist, auth is disabled - allow unrestricted access
-			return nil, nil
-		}
-		return nil, ErrAuthDisabled
+		// Auth is disabled - return anon admin
+		return GetAnonUser(), nil
+	}
+
+	// Auth enabled and no token means err
+	if token == "" {
+		return nil, ErrInvalidToken
 	}
 
 	// Validate JWT
@@ -204,7 +203,7 @@ func (m *Manager) ValidateSession(ctx context.Context, token string) (*db.User, 
 	return session.User, nil
 }
 
-// CreateUser creates a new user
+// Create new user
 func (m *Manager) CreateUser(ctx context.Context, username, email, password string, role db.UserRole) (*db.User, error) {
 	// Hash password
 	hashedPassword, err := HashPassword(password)
@@ -235,7 +234,7 @@ func (m *Manager) CreateUser(ctx context.Context, username, email, password stri
 	return user, nil
 }
 
-// ChangePassword changes a user's password
+// Change user's password
 func (m *Manager) ChangePassword(ctx context.Context, userID, oldPassword, newPassword string) error {
 	// Get user
 	user, err := m.store.GetUser(ctx, userID)
@@ -259,7 +258,7 @@ func (m *Manager) ChangePassword(ctx context.Context, userID, oldPassword, newPa
 	return m.store.UpdateUser(ctx, user)
 }
 
-// ResetPassword resets a user's password using recovery key
+// Reset user's password using recovery key
 func (m *Manager) ResetPassword(ctx context.Context, username, recoveryKey, newPassword string) error {
 	// Get auth config
 	authConfig, _, err := m.store.GetAuthConfig(ctx)
@@ -289,7 +288,7 @@ func (m *Manager) ResetPassword(ctx context.Context, username, recoveryKey, newP
 	return m.store.UpdateUser(ctx, user)
 }
 
-// InitializeAuth initializes authentication configuration
+// Initialize auth config
 func (m *Manager) InitializeAuth(ctx context.Context) error {
 	authConfig, isNew, err := m.store.GetAuthConfig(ctx)
 	if err != nil {
@@ -310,7 +309,7 @@ func (m *Manager) InitializeAuth(ctx context.Context) error {
 			return err
 		}
 		authConfig.RecoveryKey = recoveryKey
-		
+
 		// Hash recovery key for storage
 		hashedRecovery, err := HashPassword(recoveryKey)
 		if err != nil {
@@ -333,7 +332,7 @@ func (m *Manager) InitializeAuth(ctx context.Context) error {
 	return nil
 }
 
-// saveRecoveryKey saves the recovery key to a file
+// Save recovery key to a file
 func (m *Manager) saveRecoveryKey(key string) error {
 	// Save to file
 	if err := SaveRecoveryKeyToFile(key); err != nil {
@@ -344,19 +343,17 @@ func (m *Manager) saveRecoveryKey(key string) error {
 		fmt.Printf("===========================================\n\n")
 		return err
 	}
-	
-	// Also print to console for immediate visibility
 	path, _ := GetRecoveryKeyPath()
 	fmt.Printf("\n===========================================\n")
 	fmt.Printf("Recovery key has been saved to: %s\n", path)
 	fmt.Printf("Recovery Key: %s\n", key)
 	fmt.Printf("IMPORTANT: Keep this key secure!\n")
 	fmt.Printf("===========================================\n\n")
-	
+
 	return nil
 }
 
-// CheckPermission checks if a user has permission for an action
+// Check user has permission for an action
 func CheckPermission(user *db.User, requiredRole db.UserRole) bool {
 	if user == nil {
 		return false

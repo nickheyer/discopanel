@@ -17,7 +17,7 @@
 		ExternalLink
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 
 	let generating = $state(false);
 	let uploading = $state(false);
@@ -35,28 +35,48 @@
 		referenceId = null;
 
 		try {
-			const response = await api.generateSupportBundle(upload);
+			if (upload) {
+				const response = await rpcClient.support.uploadSupportBundle({
+					includeLogs: true,
+					includeConfigs: true,
+					includeSystemInfo: true,
+					serverIds: []
+				});
 
-			if (response.success) {
-				if (upload && response.reference_id) {
-					referenceId = response.reference_id;
+				if (response.success && response.referenceId) {
+					referenceId = response.referenceId;
 					toast.success('Support bundle uploaded successfully!', {
 						description: 'Save your reference ID for support requests.',
 					});
-				} else if (response.bundle_path) {
-					bundlePath = response.bundle_path;
-					toast.success('Support bundle generated!', {
-						description: 'Click the download button to save the bundle.',
+				} else {
+					toast.error('Failed to upload support bundle', {
+						description: response.message || 'Unknown error occurred',
 					});
 				}
 			} else {
-				toast.error('Failed to generate support bundle', {
-					description: response.message,
+				// Gen bundle for download
+				const response = await rpcClient.support.generateSupportBundle({
+					includeLogs: true,
+					includeConfigs: true,
+					includeSystemInfo: true,
+					serverIds: []
 				});
+
+				if (response.bundleId) {
+					bundlePath = response.bundleId;
+					toast.success('Support bundle generated!', {
+						description: 'Click the download button to save the bundle.',
+					});
+				} else {
+					toast.error('Failed to generate support bundle', {
+						description: response.message,
+					});
+				}
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error occurred';
-			toast.error('Failed to generate support bundle', {
+			const action = upload ? 'upload' : 'generate';
+			toast.error(`Failed to ${action} support bundle`, {
 				description: message,
 			});
 		} finally {
@@ -69,7 +89,19 @@
 		if (!bundlePath) return;
 
 		try {
-			await api.downloadSupportBundle(bundlePath);
+			const response = await rpcClient.support.downloadSupportBundle({
+				bundleId: bundlePath
+			});
+			// Create download link
+			const blob = new Blob([
+				new Uint8Array(response.content)
+			], { type: response.mimeType });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = response.filename;
+			a.click();
+			URL.revokeObjectURL(url);
 			// Clear the bundle path after download
 			bundlePath = null;
 			toast.success('Support bundle downloaded!');

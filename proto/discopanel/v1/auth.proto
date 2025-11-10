@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+import "discopanel/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// Authentication and authorization service
+service AuthService {
+  // Check if auth is enabled
+  rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse);
+  // Authenticate user credentials
+  rpc Login(LoginRequest) returns (LoginResponse);
+  // Invalidate session token
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  // Create new user account
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // Reset password with recovery key
+  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
+  // Get auth configuration
+  rpc GetAuthConfig(GetAuthConfigRequest) returns (GetAuthConfigResponse);
+  // Modify auth configuration
+  rpc UpdateAuthConfig(UpdateAuthConfigRequest) returns (UpdateAuthConfigResponse);
+  // Get authenticated user info
+  rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
+  // Change user's own password
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+}
+
+// Empty auth status request
+message GetAuthStatusRequest {}
+
+// Auth system state
+message GetAuthStatusResponse {
+  bool enabled = 1;
+  bool first_user_setup = 2;
+  bool allow_registration = 3;
+}
+
+// User credentials
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+// Session token and user
+message LoginResponse {
+  string token = 1;
+  User user = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+// Empty logout request
+message LogoutRequest {}
+
+// Logout confirmation
+message LogoutResponse {
+  string message = 1;
+}
+
+// New account info
+message RegisterRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+}
+
+// Created user account
+message RegisterResponse {
+  User user = 1;
+}
+
+// Password reset credentials
+message ResetPasswordRequest {
+  string username = 1;
+  string recovery_key = 2;
+  string new_password = 3;
+}
+
+// Reset confirmation
+message ResetPasswordResponse {
+  string message = 1;
+}
+
+// Empty config request
+message GetAuthConfigRequest {}
+
+// Current auth settings
+message GetAuthConfigResponse {
+  bool enabled = 1;
+  int32 session_timeout = 2;
+  bool require_email_verify = 3;
+  bool allow_registration = 4;
+}
+
+// Auth settings to update
+message UpdateAuthConfigRequest {
+  optional bool enabled = 1;
+  optional int32 session_timeout = 2;
+  optional bool require_email_verify = 3;
+  optional bool allow_registration = 4;
+}
+
+// Config update result
+message UpdateAuthConfigResponse {
+  string message = 1;
+  bool requires_first_user = 2; // If enabling auth with no users
+}
+
+// Empty current user request
+message GetCurrentUserRequest {}
+
+// Authenticated user info
+message GetCurrentUserResponse {
+  User user = 1;
+}
+
+// Password change credentials
+message ChangePasswordRequest {
+  string old_password = 1;
+  string new_password = 2;
+}
+
+// Password change confirmation
+message ChangePasswordResponse {
+  string message = 1;
+}

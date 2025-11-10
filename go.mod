@@ -3,14 +3,17 @@ module github.com/nickheyer/discopanel
 go 1.24.5
 
 require (
+	connectrpc.com/connect v1.19.1
+	connectrpc.com/grpcreflect v1.3.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/mux v1.8.1
 	github.com/mholt/archives v0.1.5
 	github.com/spf13/viper v1.20.1
 	golang.org/x/crypto v0.40.0
+	golang.org/x/net v0.41.0
+	google.golang.org/protobuf v1.36.10
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/sqlite v1.6.0
@@ -75,6 +78,5 @@ require (
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20251111163417-95abcf5c77ba // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251111163417-95abcf5c77ba // indirect
-	google.golang.org/protobuf v1.36.10 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )

@@ -4,7 +4,7 @@
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, Upload, Download, Trash2, ToggleLeft, ToggleRight, Package, FileText } from '@lucide/svelte';
+	import { Loader2, Upload, Download, Trash2, ToggleLeft, ToggleRight, Package, FileText, RefreshCw } from '@lucide/svelte';
 	import { api } from '$lib/api/client';
 	import { toast } from 'svelte-sonner';
 	import type { Server, Mod } from '$lib/api/types';
@@ -24,7 +24,7 @@
 
 	let hasLoaded = false;
 	let previousServerId = $state(server.id);
-	
+
 	// Reset state when server changes
 	$effect(() => {
 		if (server.id !== previousServerId) {
@@ -36,7 +36,7 @@
 			hasLoaded = false;
 		}
 	});
-	
+
 	$effect(() => {
 		if (active && !hasLoaded) {
 			hasLoaded = true;
@@ -92,6 +92,16 @@
 		}
 	}
 
+	async function updateMod(mod: Mod) {
+		try {
+			await api.updateModFromRemote(server.id, mod.id);
+			toast.success('Mod updated successfully');
+			await loadMods();
+		} catch (error) {
+			toast.error('Failed to update mod');
+		}
+	}
+
 	async function deleteMod(mod: Mod) {
 		const confirmed = confirm(`Are you sure you want to delete "${mod.name}"?`);
 		if (!confirmed) return;
@@ -139,7 +149,7 @@
 			arclight: 'mods',
 			spongevanilla: 'mods'
 		};
-		
+
 		return modLoaderInfo[server.mod_loader] || 'mods';
 	}
 
@@ -216,7 +226,7 @@
 									<ToggleLeft class="h-6 w-6" />
 								{/if}
 							</button>
-							
+
 							<div>
 								<div class="flex items-center gap-2">
 									<h4 class="font-medium">{mod.name}</h4>
@@ -240,7 +250,7 @@
 								{/if}
 							</div>
 						</div>
-						
+
 						<div class="flex items-center gap-2">
 							<Button
 								size="icon"
@@ -249,6 +259,15 @@
 								title="Download mod"
 							>
 								<Download class="h-4 w-4" />
+							</Button>
+							<Button
+								size="icon"
+								variant="ghost"
+								onclick={() => updateMod(mod)}
+								title="Update mod from remote"
+								disabled={!mod.mod_id}
+							>
+								<RefreshCw class="h-4 w-4" />
 							</Button>
 							<Button
 								size="icon"

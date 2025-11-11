@@ -5,6 +5,8 @@ import (
 	"io/fs"
 )
 
+//go:embed build/*
+
 // Embed the built SvelteKit application
 // Note: build directory is not included in version control
 // Run 'npm run build' in web/discopanel to generate it

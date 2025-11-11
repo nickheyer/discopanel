@@ -164,6 +164,16 @@ func (s *Server) setupServerRoutes(api *mux.Router) {
 	editor.HandleFunc("/servers/{id}/mods", s.handleUploadMod).Methods("POST")
 	editor.HandleFunc("/servers/{id}/mods/{modId}", s.handleUpdateMod).Methods("PUT")
 	editor.HandleFunc("/servers/{id}/mods/{modId}", s.handleDeleteMod).Methods("DELETE")
+
+	// Server statistics and health
+	editor.HandleFunc("/servers/{id}/stats", s.handleGetServerStats).Methods("GET")
+	editor.HandleFunc("/servers/{id}/health", s.handleGetServerHealth).Methods("GET")
+
+	// Server backup operations
+	editor.HandleFunc("/servers/{id}/backup", s.handleCreateServerBackup).Methods("POST")
+	editor.HandleFunc("/servers/{id}/backup", s.handleListServerBackups).Methods("GET")
+	editor.HandleFunc("/servers/{id}/backup/{backupId}", s.handleRestoreServerBackup).Methods("POST")
+	editor.HandleFunc("/servers/{id}/backup/{backupId}", s.handleDeleteServerBackup).Methods("DELETE")
 }
 
 func (s *Server) setupProxyRoutes(api *mux.Router) {
@@ -237,6 +247,10 @@ func (s *Server) getFrontendFS() http.FileSystem {
 
 func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if fs == nil {
+			http.NotFound(w, r)
+			return
+		}
 		path := strings.TrimPrefix(r.URL.Path, "/")
 
 		// Try to open

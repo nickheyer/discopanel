@@ -32,18 +32,18 @@ class ApiClient {
   ): Promise<T> {
     // Generate unique operation ID for this request
     const operationId = `${options.method || 'GET'}-${path}-${Date.now()}`;
-    
+
     // Don't show loading for polling operations or if explicitly skipped
     const showLoading = !options.skipLoading && !path.includes('?poll=true');
-    
+
     if (showLoading) {
       loadingStore.start(operationId);
     }
-    
+
     try {
       // Get auth headers
       const authHeaders = authStore.getHeaders();
-      
+
       const response = await fetch(`${API_BASE}${path}`, {
         ...options,
         headers: {
@@ -60,10 +60,10 @@ class ApiClient {
         } catch {
           // If response is not JSON, use default error message
         }
-        
+
         // Show error toast
         toast.error(errorMessage);
-        
+
         throw new Error(errorMessage);
       }
 
@@ -81,7 +81,7 @@ class ApiClient {
   ): Promise<Blob> {
     // Get auth headers
     const authHeaders = authStore.getHeaders();
-    
+
     const response = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers: {
@@ -98,10 +98,10 @@ class ApiClient {
       } catch {
         // If response is not JSON, use default error message
       }
-      
+
       // Show error toast
       toast.error(errorMessage);
-      
+
       throw new Error(errorMessage);
     }
 
@@ -229,7 +229,7 @@ class ApiClient {
   }): Promise<Mod> {
     const formData = new FormData();
     formData.append('mod', file);
-    
+
     if (metadata?.name) formData.append('name', metadata.name);
     if (metadata?.version) formData.append('version', metadata.version);
     if (metadata?.mod_id) formData.append('mod_id', metadata.mod_id);
@@ -314,7 +314,7 @@ class ApiClient {
       },
       body: JSON.stringify({ new_name: newName }),
     });
-    
+
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.error || 'Failed to rename file');
@@ -438,6 +438,23 @@ class ApiClient {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  }
+
+  // Console autocompletion
+  async getCommandSuggestions(serverId: string, prefix: string): Promise<string[]> {
+    return this.request<string[]>(`/servers/${serverId}/commands/suggest?prefix=${encodeURIComponent(prefix)}`);
+  }
+
+  async getPlayerSuggestions(serverId: string): Promise<string[]> {
+    return this.request<string[]>(`/servers/${serverId}/players/suggest`);
+  }
+
+  // Mod updates
+  async updateModFromRemote(serverId: string, modId: string, indexer?: string): Promise<Mod> {
+    const params = indexer ? `?indexer=${encodeURIComponent(indexer)}` : '';
+    return this.request<Mod>(`/servers/${serverId}/mods/${modId}/update${params}`, {
+      method: 'POST',
+    });
   }
 }
 

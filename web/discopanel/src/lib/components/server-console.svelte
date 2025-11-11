@@ -28,6 +28,7 @@
 	let endOfLogsRef = $state<HTMLDivElement | null>(null);
 	let pollingInterval: ReturnType<typeof setInterval> | null = null;
 	let tailLines = $state(500);
+	let isAtBottom = $state(true);
 
 	onMount(() => {
 		if (active) {
@@ -85,6 +86,24 @@
 		}
 	});
 
+	// Function to check if scrolled to bottom
+	function checkScrollPosition() {
+		if (!scrollAreaRef) return;
+		const { scrollTop, scrollHeight, clientHeight } = scrollAreaRef;
+		const threshold = 10; // pixels from bottom
+		isAtBottom = scrollTop + clientHeight >= scrollHeight - threshold;
+		autoScroll = isAtBottom;
+	}
+
+	// Scroll to bottom function
+	function scrollToBottom() {
+		if (endOfLogsRef) {
+			endOfLogsRef.scrollIntoView({ behavior: 'smooth', block: 'end' });
+			autoScroll = true;
+			isAtBottom = true;
+		}
+	}
+
 	async function fetchLogs() {
 		if (loading) return;
 
@@ -122,6 +141,53 @@
 			);
 		} finally {
 			loading = false;
+		}
+	}
+
+	// Handle command input with tab completion
+	async function handleCommandKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			sendCommand();
+		} else if (e.key === 'Tab') {
+			e.preventDefault();
+			await handleTabCompletion();
+		}
+	}
+
+	// Tab completion logic
+	async function handleTabCompletion() {
+		if (!command.trim()) return;
+
+		try {
+			// Check if command starts with common prefixes that suggest player names
+			const playerCommands = ['op ', 'deop ', 'ban ', 'pardon ', 'kick ', 'whitelist add ', 'whitelist remove '];
+			const isPlayerCommand = playerCommands.some(prefix => command.toLowerCase().startsWith(prefix));
+
+			if (isPlayerCommand) {
+				// Get player suggestions
+				const suggestions = await api.getPlayerSuggestions(server.id);
+				if (suggestions.length > 0) {
+					// Find the current word being typed
+					const words = command.split(' ');
+					const lastWord = words[words.length - 1];
+					const matchingSuggestion = suggestions.find(s => s.toLowerCase().startsWith(lastWord.toLowerCase()));
+					if (matchingSuggestion) {
+						words[words.length - 1] = matchingSuggestion;
+						command = words.join(' ') + ' ';
+					}
+				}
+			} else {
+				// Get command suggestions
+				const suggestions = await api.getCommandSuggestions(server.id, command);
+				if (suggestions.length > 0) {
+					const matchingSuggestion = suggestions.find(s => s.toLowerCase().startsWith(command.toLowerCase()));
+					if (matchingSuggestion) {
+						command = matchingSuggestion + ' ';
+					}
+				}
+			}
+		} catch (error) {
+			console.error('Tab completion failed:', error);
 		}
 	}
 
@@ -197,6 +263,7 @@
 			<div
 				class="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-auto bg-black px-4 py-2"
 				bind:this={scrollAreaRef}
+				onscroll={checkScrollPosition}
 			>
 				<div class="font-mono text-xs text-zinc-300">
 					{#if logEntries.length === 0}
@@ -227,7 +294,7 @@
 					placeholder={(server.status === 'running' || server.status === 'unhealthy')? 'Enter command...' : 'Server must be running'}
 					bind:value={command}
 					disabled={server.status !== 'running'}
-					onkeydown={(e) => e.key === 'Enter' && sendCommand()}
+					onkeydown={handleCommandKeydown}
 					class="flex-1 bg-transparent font-mono text-sm text-white outline-none placeholder:text-zinc-600"
 				/>
 			</div>
@@ -243,10 +310,15 @@
 
 		<div class="flex flex-shrink-0 items-center justify-between px-3 pb-2 text-xs text-zinc-500">
 			<div class="flex items-center gap-4">
-				<label class="flex items-center gap-2">
-					<input type="checkbox" bind:checked={autoScroll} class="h-3 w-3 rounded" />
-					Auto-scroll
-				</label>
+				<Button
+					size="sm"
+					variant="ghost"
+					onclick={scrollToBottom}
+					disabled={isAtBottom}
+					class="h-6 px-2 text-xs text-zinc-400 hover:text-white disabled:opacity-50"
+				>
+					Scroll to Bottom
+				</Button>
 				<div class="flex items-center gap-2">
 					<span>Tail:</span>
 					<select

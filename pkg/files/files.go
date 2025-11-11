@@ -176,3 +176,37 @@ func ExtractArchive(ctx context.Context, archivePath string, destPath string) er
 
 	return nil
 }
+
+// CreateTarGz creates a tar.gz archive from a source directory
+func CreateTarGz(sourceDir, destFile string) error {
+	// Use the archives library to create tar.gz
+	files, err := archives.FilesFromDisk(context.Background(), &archives.FromDiskOptions{}, map[string]string{
+		sourceDir: "",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to read source directory: %w", err)
+	}
+
+	out, err := os.Create(destFile)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer out.Close()
+
+	gz := archives.CompressedArchive{
+		Compression: archives.Gz{},
+		Archival:    archives.Tar{},
+	}
+
+	err = gz.Archive(context.Background(), out, files)
+	if err != nil {
+		return fmt.Errorf("failed to create archive: %w", err)
+	}
+
+	return nil
+}
+
+// ExtractTarGz extracts a tar.gz archive to a destination directory
+func ExtractTarGz(archivePath, destPath string) error {
+	return ExtractArchive(context.Background(), archivePath, destPath)
+}

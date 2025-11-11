@@ -1,7 +1,7 @@
-export type ModLoader = 'vanilla' | 'forge' | 'fabric' | 'neoforge' | 'paper' | 'spigot' | 
-  'bukkit' | 'pufferfish' | 'quilt' | 'magma' | 'magma_maintained' | 'ketting' | 
-  'mohist' | 'youer' | 'banner' | 'catserver' | 'arclight' | 'spongevanilla' | 
-  'limbo' | 'nanolimbo' | 'crucible' | 'glowstone' | 'custom' | 
+export type ModLoader = 'vanilla' | 'forge' | 'fabric' | 'neoforge' | 'paper' | 'spigot' |
+  'bukkit' | 'pufferfish' | 'quilt' | 'magma' | 'magma_maintained' | 'ketting' |
+  'mohist' | 'youer' | 'banner' | 'catserver' | 'arclight' | 'spongevanilla' |
+  'limbo' | 'nanolimbo' | 'crucible' | 'glowstone' | 'custom' |
   'auto_curseforge' | 'curseforge' | 'ftba' | 'modrinth' | 'purpur';
 export type ServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'unhealthy' | 'creating';
 
@@ -263,5 +263,10 @@ export interface ModpackSyncRequest {
   query: string;
   gameVersion: string;
   modLoader: string;
+  indexer?: string;
+}
+
+export interface ModUpdateRequest {
+  modId: string;
   indexer?: string;
 }

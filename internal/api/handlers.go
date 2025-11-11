@@ -1267,3 +1267,318 @@ func (s *Server) handleGetNextAvailablePort(w http.ResponseWriter, r *http.Reque
 		"usedPorts": usedPorts,
 	})
 }
+
+// handleGetServerStats returns detailed statistics for a server
+func (s *Server) handleGetServerStats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	server, err := s.store.GetServer(ctx, id)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+
+	if server.ContainerID == "" {
+		s.respondError(w, http.StatusBadRequest, "Server container not created")
+		return
+	}
+
+	// Get container stats from Docker
+	stats, err := s.docker.GetContainerStats(ctx, server.ContainerID)
+	if err != nil {
+		s.log.Error("Failed to get container stats: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to get server statistics")
+		return
+	}
+
+	// Get additional server-specific stats
+	response := map[string]interface{}{
+		"cpu_percent":  stats.CPUPercent,
+		"memory_usage": stats.MemoryUsage,
+		"memory_limit": stats.MemoryLimit,
+	}
+
+	s.respondJSON(w, http.StatusOK, response)
+}
+
+// handleGetServerHealth performs a health check on the server
+func (s *Server) handleGetServerHealth(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	server, err := s.store.GetServer(ctx, id)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+
+	health := map[string]interface{}{
+		"status": "unknown",
+		"checks": map[string]interface{}{},
+	}
+
+	if server.ContainerID == "" {
+		health["status"] = "not_created"
+		s.respondJSON(w, http.StatusOK, health)
+		return
+	}
+
+	// Check container status
+	status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+	if err != nil {
+		health["status"] = "error"
+		health["checks"].(map[string]interface{})["container_status"] = "error"
+		s.respondJSON(w, http.StatusOK, health)
+		return
+	}
+
+	health["checks"].(map[string]interface{})["container_status"] = string(status)
+
+	switch status {
+	case models.StatusRunning:
+		health["status"] = "healthy"
+
+		// Try to get player count as additional health check
+		output, err := s.docker.ExecCommand(ctx, server.ContainerID, "list")
+		if err == nil && output != "" {
+			count, _ := minecraft.ParsePlayerListFromOutput(output)
+			health["checks"].(map[string]interface{})["players_online"] = count
+		}
+
+		// Check TPS if configured
+		if server.TPSCommand != "" {
+			for _, cmd := range strings.Split(server.TPSCommand, " ?? ") {
+				cmd = strings.TrimSpace(cmd)
+				if cmd == "" {
+					continue
+				}
+				output, err := s.docker.ExecCommand(ctx, server.ContainerID, cmd)
+				if err == nil && output != "" {
+					tps := minecraft.ParseTPSFromOutput(output)
+					if tps > 0 {
+						health["checks"].(map[string]interface{})["tps"] = tps
+						break
+					}
+				}
+			}
+		}
+
+	case models.StatusStopped:
+		health["status"] = "stopped"
+	case models.StatusError, models.StatusUnhealthy:
+		health["status"] = "unhealthy"
+	default:
+		health["status"] = "unknown"
+	}
+
+	s.respondJSON(w, http.StatusOK, health)
+}
+
+// handleCreateServerBackup creates a backup of the server
+func (s *Server) handleCreateServerBackup(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	server, err := s.store.GetServer(ctx, id)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+
+	if server.ContainerID == "" {
+		s.respondError(w, http.StatusBadRequest, "Server container not created")
+		return
+	}
+
+	// Parse request body for backup name
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Name = fmt.Sprintf("backup_%d", time.Now().Unix())
+	}
+
+	if req.Name == "" {
+		req.Name = fmt.Sprintf("backup_%d", time.Now().Unix())
+	}
+
+	// Create backup directory if it doesn't exist
+	backupDir := filepath.Join(s.config.Storage.BackupDir, id)
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		s.log.Error("Failed to create backup directory: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to create backup directory")
+		return
+	}
+
+	// Generate backup filename
+	timestamp := time.Now().Format("20060102_150405")
+	backupFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s.tar.gz", req.Name, timestamp))
+
+	// Create backup using Docker exec to tar the data
+	backupCmd := fmt.Sprintf("tar -czf /tmp/backup.tar.gz -C %s .", server.DataPath)
+	if _, err := s.docker.ExecCommand(ctx, server.ContainerID, backupCmd); err != nil {
+		s.log.Error("Failed to create backup archive in container: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to create backup")
+		return
+	}
+
+	// For now, implement a simple backup using host filesystem access
+	// Create a tar.gz archive of the server data directory
+	if err := files.CreateTarGz(server.DataPath, backupFile); err != nil {
+		s.log.Error("Failed to create backup archive: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to create backup")
+		return
+	}
+
+	// Note: In a production system, you'd want to use Docker's copy functionality
+	// but for simplicity, we're using direct filesystem access
+
+	// Get backup file size
+	stat, err := os.Stat(backupFile)
+	size := int64(0)
+	if err == nil {
+		size = stat.Size()
+	}
+
+	backup := map[string]interface{}{
+		"id":          fmt.Sprintf("%s_%s", req.Name, timestamp),
+		"name":        req.Name,
+		"description": req.Description,
+		"filename":    filepath.Base(backupFile),
+		"path":        backupFile,
+		"size":        size,
+		"created_at":  time.Now(),
+	}
+
+	s.respondJSON(w, http.StatusCreated, backup)
+}
+
+// handleListServerBackups lists all backups for a server
+func (s *Server) handleListServerBackups(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	backupDir := filepath.Join(s.config.Storage.BackupDir, id)
+
+	// Check if backup directory exists
+	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
+		s.respondJSON(w, http.StatusOK, []map[string]interface{}{})
+		return
+	}
+
+	// Read backup files
+	files, err := os.ReadDir(backupDir)
+	if err != nil {
+		s.log.Error("Failed to read backup directory: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to list backups")
+		return
+	}
+
+	backups := []map[string]interface{}{}
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".tar.gz") {
+			filePath := filepath.Join(backupDir, file.Name())
+			stat, err := os.Stat(filePath)
+			if err != nil {
+				continue
+			}
+
+			// Parse filename to extract name and timestamp
+			name := strings.TrimSuffix(file.Name(), ".tar.gz")
+			parts := strings.Split(name, "_")
+			backupName := parts[0]
+			if len(parts) > 1 {
+				// Remove timestamp part for name
+				backupName = strings.Join(parts[:len(parts)-1], "_")
+			}
+
+			backup := map[string]interface{}{
+				"id":         strings.TrimSuffix(file.Name(), ".tar.gz"),
+				"name":       backupName,
+				"filename":   file.Name(),
+				"path":       filePath,
+				"size":       stat.Size(),
+				"created_at": stat.ModTime(),
+			}
+			backups = append(backups, backup)
+		}
+	}
+
+	s.respondJSON(w, http.StatusOK, backups)
+}
+
+// handleRestoreServerBackup restores a server from backup
+func (s *Server) handleRestoreServerBackup(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	id := vars["id"]
+	backupId := vars["backupId"]
+
+	server, err := s.store.GetServer(ctx, id)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+
+	backupDir := filepath.Join(s.config.Storage.BackupDir, id)
+	backupFile := filepath.Join(backupDir, backupId+".tar.gz")
+
+	// Check if backup file exists
+	if _, err := os.Stat(backupFile); os.IsNotExist(err) {
+		s.respondError(w, http.StatusNotFound, "Backup not found")
+		return
+	}
+
+	// Stop server if running
+	if server.ContainerID != "" {
+		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+		if err == nil && (status == models.StatusRunning || status == models.StatusUnhealthy) {
+			if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+				s.log.Error("Failed to stop container for restore: %v", err)
+				s.respondError(w, http.StatusInternalServerError, "Failed to stop server for restore")
+				return
+			}
+		}
+	}
+
+	// For restore, we'll use direct filesystem access for simplicity
+	// Extract the backup directly to the server data directory
+	if err := files.ExtractTarGz(backupFile, server.DataPath); err != nil {
+		s.log.Error("Failed to extract backup: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to restore backup")
+		return
+	}
+
+	s.respondJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+}
+
+// handleDeleteServerBackup deletes a server backup
+func (s *Server) handleDeleteServerBackup(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+	backupId := vars["backupId"]
+
+	backupDir := filepath.Join(s.config.Storage.BackupDir, id)
+	backupFile := filepath.Join(backupDir, backupId+".tar.gz")
+
+	// Check if backup file exists
+	if _, err := os.Stat(backupFile); os.IsNotExist(err) {
+		s.respondError(w, http.StatusNotFound, "Backup not found")
+		return
+	}
+
+	// Delete backup file
+	if err := os.Remove(backupFile); err != nil {
+		s.log.Error("Failed to delete backup file: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to delete backup")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -66,13 +66,13 @@ func (s *Server) handleListMods(w http.ResponseWriter, r *http.Request) {
 
 		// Create mod entry with consistent ID generation
 		mod := models.Mod{
-			ID:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+file.Name())).String(),
-			ServerID:    serverID,
-			Name:        file.Name(),
-			FileName:    file.Name(),
-			Enabled:     true,
-			FileSize:    info.Size(),
-			UploadedAt:  info.ModTime(),
+			ID:         uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+file.Name())).String(),
+			ServerID:   serverID,
+			Name:       file.Name(),
+			FileName:   file.Name(),
+			Enabled:    true,
+			FileSize:   info.Size(),
+			UploadedAt: info.ModTime(),
 		}
 
 		// Extract mod name from filename (remove extension)
@@ -103,13 +103,13 @@ func (s *Server) handleListMods(w http.ResponseWriter, r *http.Request) {
 			}
 
 			mod := models.Mod{
-				ID:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+file.Name())).String(),
-				ServerID:    serverID,
-				Name:        file.Name(),
-				FileName:    file.Name(),
-				Enabled:     false,
-				FileSize:    info.Size(),
-				UploadedAt:  info.ModTime(),
+				ID:         uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+file.Name())).String(),
+				ServerID:   serverID,
+				Name:       file.Name(),
+				FileName:   file.Name(),
+				Enabled:    false,
+				FileSize:   info.Size(),
+				UploadedAt: info.ModTime(),
 			}
 
 			// Extract mod name from filename
@@ -344,7 +344,7 @@ func (s *Server) handleDeleteMod(w http.ResponseWriter, r *http.Request) {
 	server, err := s.store.GetServer(ctx, mod.ServerID)
 	if err == nil {
 		modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
-		
+
 		// Delete mod file from active directory
 		modPath := filepath.Join(modsDir, mod.FileName)
 		if err := os.Remove(modPath); err != nil {

@@ -23,13 +23,13 @@ type Manager struct {
 }
 
 // NewManager creates a new proxy manager
-func NewManager(store *db.Store, cfg *config.ProxyConfig, logger *logger.Logger) *Manager {
+func NewManager(store *db.Store, cfg *config.ProxyConfig, logger *logger.Logger, networkName string) *Manager {
 	return &Manager{
 		proxies:     make(map[int]*Proxy),
 		store:       store,
 		config:      cfg,
 		logger:      logger,
-		networkName: "discopanel-network", // TODO: Get from main config
+		networkName: networkName,
 	}
 }
 

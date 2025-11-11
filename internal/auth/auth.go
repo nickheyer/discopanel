@@ -310,7 +310,7 @@ func (m *Manager) InitializeAuth(ctx context.Context) error {
 			return err
 		}
 		authConfig.RecoveryKey = recoveryKey
-		
+
 		// Hash recovery key for storage
 		hashedRecovery, err := HashPassword(recoveryKey)
 		if err != nil {
@@ -344,7 +344,7 @@ func (m *Manager) saveRecoveryKey(key string) error {
 		fmt.Printf("===========================================\n\n")
 		return err
 	}
-	
+
 	// Also print to console for immediate visibility
 	path, _ := GetRecoveryKeyPath()
 	fmt.Printf("\n===========================================\n")
@@ -352,7 +352,7 @@ func (m *Manager) saveRecoveryKey(key string) error {
 	fmt.Printf("Recovery Key: %s\n", key)
 	fmt.Printf("IMPORTANT: Keep this key secure!\n")
 	fmt.Printf("===========================================\n\n")
-	
+
 	return nil
 }
 

@@ -15,7 +15,7 @@ type ServerProperties map[string]string
 // LoadServerProperties loads the server.properties file from a server's data directory
 func LoadServerProperties(serverDataPath string) (ServerProperties, error) {
 	propertiesPath := filepath.Join(serverDataPath, "server.properties")
-	
+
 	file, err := os.Open(propertiesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open server.properties: %w", err)
@@ -24,15 +24,15 @@ func LoadServerProperties(serverDataPath string) (ServerProperties, error) {
 
 	properties := make(ServerProperties)
 	scanner := bufio.NewScanner(file)
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		
+
 		// Parse key=value pairs
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 {
@@ -41,23 +41,23 @@ func LoadServerProperties(serverDataPath string) (ServerProperties, error) {
 			properties[key] = value
 		}
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading server.properties: %w", err)
 	}
-	
+
 	return properties, nil
 }
 
 // SaveServerProperties saves the server.properties file
 func SaveServerProperties(serverDataPath string, properties ServerProperties) error {
 	propertiesPath := filepath.Join(serverDataPath, "server.properties")
-	
+
 	// Ensure directory exists
 	if err := os.MkdirAll(serverDataPath, 0755); err != nil {
 		return fmt.Errorf("failed to create server data directory: %w", err)
 	}
-	
+
 	// Read the original file to preserve comments and ordering
 	originalLines := []string{}
 	if file, err := os.Open(propertiesPath); err == nil {
@@ -67,27 +67,27 @@ func SaveServerProperties(serverDataPath string, properties ServerProperties) er
 		}
 		file.Close()
 	}
-	
+
 	// Create new file
 	file, err := os.Create(propertiesPath)
 	if err != nil {
 		return fmt.Errorf("failed to create server.properties: %w", err)
 	}
 	defer file.Close()
-	
+
 	writer := bufio.NewWriter(file)
 	updatedKeys := make(map[string]bool)
-	
+
 	// Update existing lines
 	for _, line := range originalLines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		// Keep comments and empty lines
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			writer.WriteString(line + "\n")
 			continue
 		}
-		
+
 		// Check if this is a property line
 		parts := strings.SplitN(trimmed, "=", 2)
 		if len(parts) == 2 {
@@ -102,14 +102,14 @@ func SaveServerProperties(serverDataPath string, properties ServerProperties) er
 			writer.WriteString(line + "\n")
 		}
 	}
-	
+
 	// Add any new properties that weren't in the original file
 	for key, value := range properties {
 		if !updatedKeys[key] {
 			writer.WriteString(key + "=" + value + "\n")
 		}
 	}
-	
+
 	return writer.Flush()
 }
 
@@ -153,4 +153,3 @@ func (p ServerProperties) SetBool(key string, value bool) {
 		p[key] = "false"
 	}
 }
-

@@ -124,24 +124,24 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var req struct {
-		Name             string                      `json:"name"`
-		Description      string                      `json:"description"`
-		ModLoader        models.ModLoader            `json:"mod_loader"`
-		MCVersion        string                      `json:"mc_version"`
-		Port             int                         `json:"port"`
-		MaxPlayers       int                         `json:"max_players"`
-		Memory           int                         `json:"memory"`
-		DockerImage      string                      `json:"docker_image"`
-		AutoStart        bool                        `json:"auto_start"`
-		Detached         bool                        `json:"detached"`
-		StartImmediately bool                        `json:"start_immediately"`
-		ModpackID        string                      `json:"modpack_id,omitempty"`
-		ModpackVersionID string                      `json:"modpack_version_id,omitempty"`
-		ProxyHostname    string                      `json:"proxy_hostname,omitempty"`
-		ProxyListenerID  string                      `json:"proxy_listener_id,omitempty"`
-		UseBaseURL       bool                        `json:"use_base_url,omitempty"`
-		AdditionalPorts  []docker.AdditionalPort     `json:"additional_ports,omitempty"`
-		DockerOverrides  *docker.DockerOverrides     `json:"docker_overrides,omitempty"`
+		Name             string                  `json:"name"`
+		Description      string                  `json:"description"`
+		ModLoader        models.ModLoader        `json:"mod_loader"`
+		MCVersion        string                  `json:"mc_version"`
+		Port             int                     `json:"port"`
+		MaxPlayers       int                     `json:"max_players"`
+		Memory           int                     `json:"memory"`
+		DockerImage      string                  `json:"docker_image"`
+		AutoStart        bool                    `json:"auto_start"`
+		Detached         bool                    `json:"detached"`
+		StartImmediately bool                    `json:"start_immediately"`
+		ModpackID        string                  `json:"modpack_id,omitempty"`
+		ModpackVersionID string                  `json:"modpack_version_id,omitempty"`
+		ProxyHostname    string                  `json:"proxy_hostname,omitempty"`
+		ProxyListenerID  string                  `json:"proxy_listener_id,omitempty"`
+		UseBaseURL       bool                    `json:"use_base_url,omitempty"`
+		AdditionalPorts  []docker.AdditionalPort `json:"additional_ports,omitempty"`
+		DockerOverrides  *docker.DockerOverrides `json:"docker_overrides,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

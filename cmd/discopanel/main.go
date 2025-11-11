@@ -158,7 +158,7 @@ func main() {
 	}
 
 	// Initialize proxy manager
-	proxyManager := proxy.NewManager(store, &cfg.Proxy, log)
+	proxyManager := proxy.NewManager(store, &cfg.Proxy, log, cfg.Docker.NetworkName)
 
 	// Start proxy if enabled
 	if err := proxyManager.Start(); err != nil {

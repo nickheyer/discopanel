@@ -23,13 +23,13 @@ type Manager struct {
 }
 
 // NewManager creates a new proxy manager
-func NewManager(store *db.Store, cfg *config.ProxyConfig, logger *logger.Logger, networkName string) *Manager {
+func NewManager(store *db.Store, cfg *config.Config, logger *logger.Logger) *Manager {
 	return &Manager{
 		proxies:     make(map[int]*Proxy),
 		store:       store,
-		config:      cfg,
+		config:      &cfg.Proxy,
 		logger:      logger,
-		networkName: networkName,
+		networkName: cfg.Docker.NetworkName, // TODO: Get from main config
 	}
 }
 

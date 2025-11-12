@@ -110,7 +110,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	modService := services.NewModService(s.store, s.docker, s.log)
 	modpackService := services.NewModpackService(s.store, s.log)
 	proxyService := services.NewProxyService(s.store, s.proxyManager, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 

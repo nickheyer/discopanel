@@ -28,7 +28,7 @@ import (
 
 // AdditionalPort represents a single additional port configuration
 type AdditionalPort struct {
-	Name          string `json:"name"`           // User-friendly name for the port (e.g., "BlueMap Web")
+	Description   string `json:"name"`           // User-friendly name for the port (e.g., "BlueMap Web")
 	ContainerPort int    `json:"container_port"` // Port inside the container
 	HostPort      int    `json:"host_port"`      // Port on the host machine
 	Protocol      string `json:"protocol"`       // Protocol: "tcp" or "udp" (defaults to "tcp" if empty)
@@ -374,7 +374,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 				HostPort: fmt.Sprintf("%d", port.HostPort),
 			},
 		}
-		fmt.Printf("Adding additional port: %s - %d:%d/%s\n", port.Name, port.HostPort, port.ContainerPort, protocol)
+		fmt.Printf("Adding additional port: %s - %d:%d/%s\n", port.Description, port.HostPort, port.ContainerPort, protocol)
 	}
 
 	// Handle path translation when DiscoPanel is running in a container

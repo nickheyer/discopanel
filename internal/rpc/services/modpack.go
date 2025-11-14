@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,31 +47,12 @@ func NewModpackService(store *storage.Store, cfg *config.Config, log *logger.Log
 	}
 }
 
-// Helper: Find most recent Minecraft version from list
-func findMostRecentMinecraftVersion(versions []string) string {
-	for i := len(versions) - 1; i >= 0; i-- {
-		hasLetter := false
-		for _, ch := range versions[i] {
-			if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
-				hasLetter = true
-				break
-			}
-		}
-		if !hasLetter {
-			return versions[i]
-		}
-	}
-	if len(versions) > 0 {
-		return versions[len(versions)-1]
-	}
-	return ""
-}
-
 // Helper: Convert DB modpack to proto
 func dbModpackToProto(modpack *storage.IndexedModpack, isFavorited bool) *v1.IndexedModpack {
 	if modpack == nil {
 		return nil
 	}
+	jv, _ := strconv.ParseInt(modpack.JavaVersion, 10, 32)
 	return &v1.IndexedModpack{
 		Id:             modpack.ID,
 		IndexerId:      modpack.IndexerID,
@@ -91,7 +72,7 @@ func dbModpackToProto(modpack *storage.IndexedModpack, isFavorited bool) *v1.Ind
 		DateModified:   timestamppb.New(modpack.DateModified),
 		DateReleased:   timestamppb.New(modpack.DateReleased),
 		McVersion:      modpack.MCVersion,
-		JavaVersion:    int32(modpack.JavaVersion),
+		JavaVersion:    int32(jv),
 		DockerImage:    modpack.DockerImage,
 		RecommendedRam: int32(modpack.RecommendedRAM),
 		IsFavorited:    isFavorited,
@@ -333,26 +314,26 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 		dockerImage := docker.GetOptimalDockerTag(mcVersion, modLoader, false)
 
 		dbModpack := &storage.IndexedModpack{
-			ID:            modpack.ID,
-			IndexerID:     modpack.IndexerID,
-			Indexer:       modpack.Indexer,
-			Name:          modpack.Name,
-			Slug:          modpack.Slug,
-			Summary:       modpack.Summary,
-			Description:   modpack.Description,
-			LogoURL:       modpack.LogoURL,
-			WebsiteURL:    modpack.WebsiteURL,
-			DownloadCount: modpack.DownloadCount,
-			Categories:    string(categoriesJSON),
-			GameVersions:  string(gameVersionsJSON),
-			ModLoaders:    string(modLoadersJSON),
-			LatestFileID:  modpack.LatestFileID,
-			DateCreated:   modpack.DateCreated,
-			DateModified:  modpack.DateModified,
-			DateReleased:  modpack.DateReleased,
-			MCVersion:     mcVersion,
-			JavaVersion:   javaVersion,
-			DockerImage:   dockerImage,
+			ID:             modpack.ID,
+			IndexerID:      modpack.IndexerID,
+			Indexer:        modpack.Indexer,
+			Name:           modpack.Name,
+			Slug:           modpack.Slug,
+			Summary:        modpack.Summary,
+			Description:    modpack.Description,
+			LogoURL:        modpack.LogoURL,
+			WebsiteURL:     modpack.WebsiteURL,
+			DownloadCount:  modpack.DownloadCount,
+			Categories:     string(categoriesJSON),
+			GameVersions:   string(gameVersionsJSON),
+			ModLoaders:     string(modLoadersJSON),
+			LatestFileID:   modpack.LatestFileID,
+			DateCreated:    modpack.DateCreated,
+			DateModified:   modpack.DateModified,
+			DateReleased:   modpack.DateReleased,
+			MCVersion:      mcVersion,
+			JavaVersion:    javaVersion,
+			DockerImage:    dockerImage,
 			RecommendedRAM: 6144,
 		}
 

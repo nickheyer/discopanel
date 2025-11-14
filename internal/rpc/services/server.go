@@ -14,7 +14,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/nickheyer/discopanel/internal/api"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -37,17 +36,17 @@ type ServerService struct {
 	config       *config.Config
 	proxyManager *proxy.Manager
 	log          *logger.Logger
-	logStreamer  *api.LogStreamer
+	logStreamer  *docker.LogStreamer
 }
 
 // NewServerService creates a new server service
-func NewServerService(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, log *logger.Logger) *ServerService {
+func NewServerService(store *storage.Store, dockerClient *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, log *logger.Logger) *ServerService {
 	// Initialize log streamer
-	logStreamer := api.NewLogStreamer(docker.GetDockerClient(), log, 10000)
+	logStreamer := docker.NewLogStreamer(dockerClient.GetDockerClient(), log, 10000)
 
 	return &ServerService{
 		store:        store,
-		docker:       docker,
+		docker:       dockerClient,
 		config:       cfg,
 		proxyManager: proxyManager,
 		log:          log,

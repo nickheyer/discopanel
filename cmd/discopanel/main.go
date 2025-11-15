@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/api"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/internal/rpc"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -166,9 +166,9 @@ func main() {
 	}
 	defer proxyManager.Stop()
 
-	// Initialize API server with full configuration
-	apiServer := api.NewServer(store, dockerClient, cfg, log)
-	apiServer.SetProxyManager(proxyManager)
+	// Initialize RPC server with full configuration
+	rpcServer := rpc.NewServer(store, dockerClient, cfg, log)
+	rpcServer.SetProxyManager(proxyManager)
 
 	// Auto-start servers that have auto_start enabled
 	log.Info("Checking for servers with auto-start enabled...")
@@ -208,7 +208,7 @@ func main() {
 
 				// Start log streaming for this container (whether it was just started or already running)
 				if status == storage.StatusRunning || status == storage.StatusStopped {
-					if err := apiServer.StartLogStreaming(server.ContainerID); err != nil {
+					if err := rpcServer.StartLogStreaming(server.ContainerID); err != nil {
 						log.Error("Failed to start log streaming for auto-started server %s: %v", server.Name, err)
 					}
 				}
@@ -269,7 +269,7 @@ func main() {
 	// Setup HTTP server
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),
-		Handler:      apiServer.Router(),
+		Handler:      rpcServer.Handler(),
 		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
 		IdleTimeout:  time.Duration(cfg.Server.IdleTimeout) * time.Second,

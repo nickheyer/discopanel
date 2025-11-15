@@ -104,9 +104,9 @@ func (s *Server) setupHandler() {
 func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.log)
-	configService := services.NewConfigService(s.store, s.config, s.log)
+	configService := services.NewConfigService(s.store, s.config, s.docker, s.log)
 	fileService := services.NewFileService(s.store, s.docker, s.log)
-	minecraftService := services.NewMinecraftService(s.store, s.log)
+	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.log)
 	modpackService := services.NewModpackService(s.store, s.log)
 	proxyService := services.NewProxyService(s.store, s.proxyManager, s.log)

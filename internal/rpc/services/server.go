@@ -29,16 +29,6 @@ import (
 // Compile-time check that ServerService implements the interface
 var _ discopanelv1connect.ServerServiceHandler = (*ServerService)(nil)
 
-// LogStreamer interface for log management
-type LogStreamer interface {
-	StartStreaming(containerID string) error
-	StopStreaming(containerID string)
-	GetLogs(containerID string, tail int) []*v1.LogEntry
-	ClearLogs(containerID string)
-	AddCommandEntry(containerID, command string, timestamp time.Time)
-	AddCommandOutput(containerID, output string, success bool, timestamp time.Time)
-}
-
 // ServerService implements the Server service
 type ServerService struct {
 	store       *storage.Store
@@ -46,24 +36,21 @@ type ServerService struct {
 	config      *config.Config
 	proxy       *proxy.Manager
 	log         *logger.Logger
-	logStreamer LogStreamer
+	logStreamer *logger.LogStreamer
 }
 
 // NewServerService creates a new server service
-func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, log *logger.Logger) *ServerService {
+func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, logStreamer *logger.LogStreamer, log *logger.Logger) *ServerService {
 	return &ServerService{
-		store:  store,
-		docker: docker,
-		config: config,
-		proxy:  proxy,
-		log:    log,
+		store:       store,
+		docker:      docker,
+		config:      config,
+		proxy:       proxy,
+		log:         log,
+		logStreamer: logStreamer,
 	}
 }
 
-// SetLogStreamer sets the log streamer for the service
-func (s *ServerService) SetLogStreamer(logStreamer LogStreamer) {
-	s.logStreamer = logStreamer
-}
 
 // dbServerToProto converts a database server model to proto server
 func dbServerToProto(server *storage.Server) *v1.Server {

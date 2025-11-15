@@ -29,6 +29,7 @@ type Server struct {
 	proxyManager   *proxy.Manager
 	authManager    *auth.Manager
 	authMiddleware *auth.Middleware
+	logStreamer    *logger.LogStreamer
 }
 
 // NewServer creates a new Connect RPC server
@@ -42,6 +43,9 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		log.Error("Failed to initialize authentication: %v", err)
 	}
 
+	// Initialize log streamer
+	logStreamer := logger.NewLogStreamer(docker.GetDockerClient(), log, 10000)
+
 	s := &Server{
 		store:          store,
 		docker:         docker,
@@ -49,6 +53,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		log:            log,
 		authManager:    authManager,
 		authMiddleware: authMiddleware,
+		logStreamer:    logStreamer,
 	}
 
 	s.setupHandler()
@@ -110,7 +115,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	modService := services.NewModService(s.store, s.docker, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.log)
 	proxyService := services.NewProxyService(s.store, s.proxyManager, s.config, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 
@@ -272,4 +277,9 @@ func isConnectPath(path string) bool {
 		}
 	}
 	return false
+}
+
+// StartLogStreaming starts log streaming for a container
+func (s *Server) StartLogStreaming(containerID string) error {
+	return s.logStreamer.StartStreaming(containerID)
 }

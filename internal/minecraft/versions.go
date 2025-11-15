@@ -270,3 +270,22 @@ func GetJavaVersion(mcVersion string) (string, error) {
 
 	return javaVersion, nil
 }
+
+func FindMostRecentMinecraftVersion(versions []string) string {
+	for i := len(versions) - 1; i >= 0; i-- {
+		hasLetter := false
+		for _, ch := range versions[i] {
+			if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
+				hasLetter = true
+				break
+			}
+		}
+		if !hasLetter {
+			return versions[i]
+		}
+	}
+	if len(versions) > 0 {
+		return versions[len(versions)-1] // Return last because we don't have a choice now
+	}
+	return ""
+}

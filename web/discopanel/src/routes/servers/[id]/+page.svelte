@@ -27,7 +27,7 @@
 	let activeTab = $state('overview');
 	let routingInfo = $state<any>(null);
 
-	let interval: number|NodeJS.Timeout;
+	let interval: number;
 
 	onMount(() => {
 		return () => {

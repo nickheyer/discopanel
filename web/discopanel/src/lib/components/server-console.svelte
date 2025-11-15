@@ -25,7 +25,6 @@
 	let loading = $state(false);
 	let autoScroll = $state(true);
 	let scrollAreaRef = $state<HTMLDivElement | null>(null);
-	let endOfLogsRef = $state<HTMLDivElement | null>(null);
 	let pollingInterval: ReturnType<typeof setInterval> | null = null;
 	let tailLines = $state(500);
 
@@ -75,15 +74,30 @@
 		}
 	}
 
-	// Handle auto-scrolling in a separate effect to avoid scroll-linked positioning issues
+	// Handle auto-scrolling
 	$effect(() => {
-		if (logEntries.length > 0 && autoScroll && endOfLogsRef) {
+		if (logEntries.length > 0 && autoScroll && scrollAreaRef) {
 			// Use a microtask to ensure DOM has updated
 			queueMicrotask(() => {
-				endOfLogsRef?.scrollIntoView({ behavior: 'instant', block: 'end' });
+				if (scrollAreaRef) {
+					scrollAreaRef.scrollTop = scrollAreaRef.scrollHeight;
+				}
 			});
 		}
 	});
+
+	function handleScroll() {
+		if (!scrollAreaRef) return;
+
+		const { scrollTop, scrollHeight, clientHeight } = scrollAreaRef;
+		const isAtBottom = scrollHeight - scrollTop - clientHeight < 5; // Relock happens in last 5 px of scroll container
+
+		if (isAtBottom && !autoScroll) {
+			autoScroll = true;
+		} else if (!isAtBottom && autoScroll) {
+			autoScroll = false;
+		}
+	}
 
 	async function fetchLogs() {
 		if (loading) return;
@@ -197,6 +211,7 @@
 			<div
 				class="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-auto bg-black px-4 py-2"
 				bind:this={scrollAreaRef}
+				onscroll={handleScroll}
 			>
 				<div class="font-mono text-xs text-zinc-300">
 					{#if logEntries.length === 0}
@@ -210,7 +225,6 @@
 							</div>
 						{/each}
 					{/if}
-					<div bind:this={endOfLogsRef} aria-hidden="true"></div>
 				</div>
 			</div>
 		</div>

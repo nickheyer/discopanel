@@ -88,10 +88,16 @@ message ClearServerLogsResponse {}
 // Empty port request
 message GetNextAvailablePortRequest {}
 
-// Available port and usage map
+// Port usage entry
+message UsedPort {
+  int32 port = 1;
+  bool in_use = 2;
+}
+
+// Available port and usage list
 message GetNextAvailablePortResponse {
   int32 port = 1;
-  map<int32, bool> used_ports = 2;
+  repeated UsedPort used_ports = 2;
 }
 
 // New server configuration

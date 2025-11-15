@@ -4,8 +4,10 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
+	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -18,14 +20,18 @@ var _ discopanelv1connect.ServerServiceHandler = (*ServerService)(nil)
 type ServerService struct {
 	store  *storage.Store
 	docker *docker.Client
+	config *config.Config
+	proxy  *proxy.Manager
 	log    *logger.Logger
 }
 
 // NewServerService creates a new server service
-func NewServerService(store *storage.Store, docker *docker.Client, log *logger.Logger) *ServerService {
+func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, log *logger.Logger) *ServerService {
 	return &ServerService{
 		store:  store,
 		docker: docker,
+		config: config,
+		proxy:  proxy,
 		log:    log,
 	}
 }

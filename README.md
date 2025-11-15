@@ -205,7 +205,7 @@ curl -X POST http://localhost:8080/api/v1/servers \
 curl -X POST http://localhost:8080/api/v1/servers/{id}/start
 ```
 
->> NOTE: See `internal/api/server.go` for all the routes, or join the discord and ask about it!
+>> NOTE: See `proto/discopanel/v1` for all the routes, or join the discord and ask about it!
 
 ## Contributing
 

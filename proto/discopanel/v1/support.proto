@@ -42,3 +42,65 @@ message DownloadSupportBundleResponse {
   string filename = 2;
   string mime_type = 3;
 }
+
+// Docker system information
+message DockerInfo {
+  string version = 1;
+  int32 containers = 2;
+  int32 images = 3;
+  int64 memory_limit = 4;
+  int32 cpus = 5;
+}
+
+// Application configuration info for bundle
+message ConfigInfo {
+  string storage_dir = 1;
+  string temp_dir = 2;
+  string database_path = 3;
+  bool proxy_enabled = 4;
+  repeated int32 proxy_ports = 5;
+  string server_host = 6;
+  string server_port = 7;
+  bool logging_enabled = 8;
+  string log_file_path = 9;
+  int32 log_max_size = 10;
+}
+
+// Proxy listener info for bundle
+message ProxyListenerInfo {
+  string name = 1;
+  int32 port = 2;
+  bool enabled = 3;
+  bool is_default = 4;
+}
+
+// Proxy configuration info for bundle
+message ProxyConfigInfo {
+  bool enabled = 1;
+  string base_url = 2;
+  repeated ProxyListenerInfo listeners = 3;
+}
+
+// Server summary for bundle
+message ServerSummary {
+  string id = 1;
+  string name = 2;
+  string mod_loader = 3;
+  string mc_version = 4;
+  string status = 5;
+  int32 port = 6;
+  int32 memory = 7;
+  bool auto_start = 8;
+  string docker_image = 9;
+}
+
+// Complete system information for support bundle
+message SystemInfo {
+  string timestamp = 1;
+  string version = 2;
+  int32 server_count = 3;
+  ConfigInfo config = 4;
+  DockerInfo docker = 5;
+  ProxyConfigInfo proxy_config = 6;
+  repeated ServerSummary servers = 7;
+}

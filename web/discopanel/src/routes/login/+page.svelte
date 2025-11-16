@@ -5,7 +5,14 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardFooter,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
@@ -22,38 +29,37 @@
 	let authStatus = $state({
 		enabled: false,
 		firstUserSetup: false,
-		allowRegistration: false
+		allowRegistration: false,
+		oidcEnabled: false
 	});
 
-	onMount(() => {
-		// If already authenticated, redirect to home
+	onMount(async () => {
+		// Check auth status first and wait for it to complete
+		const status = await authStore.checkAuthStatus();
+		authStatus = status;
+
+		// Now check if authenticated after the async check completes
 		if ($authStore.isAuthenticated) {
 			goto('/');
+			return;
 		}
 
-		// Check auth status
-		authStore.checkAuthStatus().then(status => {
-			authStatus = status;
-			
-			// If auth is disabled and not first user setup, redirect to home
-			if (!status.enabled && !status.firstUserSetup) {
-				goto('/');
-				return;
-			}
-			
-			// If first user setup, show registration
-			if (status.firstUserSetup) {
-				mode = 'register';
-			}
-		});
-		
+		// If auth is disabled and not first user setup, redirect to home
+		if (!status.enabled && !status.firstUserSetup) {
+			goto('/');
+			return;
+		}
 
+		// If first user setup, show registration
+		if (status.firstUserSetup) {
+			mode = 'register';
+		}
 	});
 
 	async function handleLogin() {
 		error = '';
 		loading = true;
-		
+
 		try {
 			await authStore.login(username, password);
 			toast.success('Logged in successfully');
@@ -69,24 +75,26 @@
 
 	async function handleRegister() {
 		error = '';
-		
+
 		if (password !== confirmPassword) {
 			error = 'Passwords do not match';
 			return;
 		}
-		
+
 		if (password.length < 8) {
 			error = 'Password must be at least 8 characters';
 			return;
 		}
-		
+
 		loading = true;
-		
+
 		try {
 			await authStore.register(username, email, password);
-			toast.success(authStatus.firstUserSetup ? 
-				'Admin account created successfully' : 
-				'Account created successfully');
+			toast.success(
+				authStatus.firstUserSetup
+					? 'Admin account created successfully'
+					: 'Account created successfully'
+			);
 			// Small delay to ensure auth state is fully propagated before navigation
 			setTimeout(() => {
 				goto('/');
@@ -100,7 +108,7 @@
 	async function handleReset() {
 		error = '';
 		loading = true;
-		
+
 		try {
 			await authStore.resetPassword(username, recoveryKey, password);
 			toast.success('Password reset successfully');
@@ -116,7 +124,7 @@
 
 	function handleSubmit(e: Event) {
 		e.preventDefault();
-		
+
 		if (mode === 'login') {
 			handleLogin();
 		} else if (mode === 'register') {
@@ -127,11 +135,11 @@
 	}
 </script>
 
-<div class="min-h-screen flex items-center justify-center bg-background p-4">
+<div class="bg-background flex min-h-screen items-center justify-center p-4">
 	<Card class="w-full max-w-md">
 		<CardHeader class="space-y-1">
-			<div class="flex items-center justify-center mb-4">
-				<img src="/g1_24x24.png" alt="DiscoPanel Logo" class="h-8 w-8 mr-2" />
+			<div class="mb-4 flex items-center justify-center">
+				<img src="/g1_24x24.png" alt="DiscoPanel Logo" class="mr-2 h-8 w-8" />
 				<CardTitle class="text-2xl">DiscoPanel</CardTitle>
 			</div>
 			{#if authStatus.firstUserSetup}
@@ -144,7 +152,7 @@
 				</CardDescription>
 			{/if}
 		</CardHeader>
-		
+
 		<CardContent>
 			{#if error}
 				<Alert variant="destructive" class="mb-4">
@@ -155,14 +163,16 @@
 
 			{#if !authStatus.firstUserSetup}
 				<Tabs bind:value={mode} class="w-full">
-					<TabsList class="grid w-full grid-cols-{authStatus.allowRegistration ? 3 : 2}">
+					<TabsList
+						class="grid w-full {authStatus.allowRegistration ? 'grid-cols-3' : 'grid-cols-2'}"
+					>
 						<TabsTrigger value="login">Login</TabsTrigger>
 						{#if authStatus.allowRegistration}
 							<TabsTrigger value="register">Register</TabsTrigger>
 						{/if}
 						<TabsTrigger value="reset">Reset</TabsTrigger>
 					</TabsList>
-					
+
 					<TabsContent value="login">
 						<form onsubmit={handleSubmit} class="space-y-4">
 							<div class="space-y-2">
@@ -195,9 +205,27 @@
 									Sign In
 								{/if}
 							</Button>
+							{#if authStatus.oidcEnabled}
+								<div class="relative">
+									<div class="absolute inset-0 flex items-center">
+										<span class="w-full border-t" />
+									</div>
+									<div class="relative flex justify-center text-xs uppercase">
+										<span class="bg-card text-muted-foreground px-2">Or</span>
+									</div>
+								</div>
+								<Button
+									type="button"
+									variant="outline"
+									class="w-full"
+									onclick={() => (window.location.href = '/api/v1/auth/oidc/login')}
+								>
+									OIDC Login
+								</Button>
+							{/if}
 						</form>
 					</TabsContent>
-					
+
 					{#if authStatus.allowRegistration}
 						<TabsContent value="register">
 							<form onsubmit={handleSubmit} class="space-y-4">
@@ -255,10 +283,10 @@
 							</form>
 						</TabsContent>
 					{/if}
-					
+
 					<TabsContent value="reset">
 						<form onsubmit={handleSubmit} class="space-y-4">
-							<p class="text-sm text-muted-foreground mb-4">
+							<p class="text-muted-foreground mb-4 text-sm">
 								Enter your username, recovery key, and new password to reset your account.
 							</p>
 							<div class="space-y-2">
@@ -354,8 +382,8 @@
 					<Alert>
 						<AlertCircle class="h-4 w-4" />
 						<AlertDescription>
-							This will be the admin account with full system access. 
-							A recovery key will be generated and saved for password recovery.
+							This will be the admin account with full system access. A recovery key will be
+							generated and saved for password recovery.
 						</AlertDescription>
 					</Alert>
 					<Button type="submit" class="w-full" disabled={loading}>

@@ -117,7 +117,7 @@ func (m *Middleware) CheckAuthStatus() func(http.Handler) http.Handler {
 				w.Header().Set("X-Auth-Enabled", "error")
 			} else if authConfig.Enabled {
 				w.Header().Set("X-Auth-Enabled", "true")
-				
+
 				// Check if this is the first user setup
 				userCount, _ := m.store.CountUsers(r.Context())
 				if userCount == 0 {
@@ -145,7 +145,7 @@ func extractToken(r *http.Request) string {
 	}
 
 	// Check cookie as fallback
-	cookie, err := r.Cookie("auth_token")
+	cookie, err := r.Cookie(CookieAuthToken)
 	if err == nil && cookie != nil {
 		return cookie.Value
 	}

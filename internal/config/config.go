@@ -75,11 +75,18 @@ type LoggingConfig struct {
 }
 
 type OIDCConfig struct {
-	IssuerURI    string   `mapstructure:"issuer_uri"`
-	ClientID     string   `mapstructure:"client_id"`
-	ClientSecret string   `mapstructure:"client_secret"`
-	RedirectURL  string   `mapstructure:"redirect_url"`
-	Scopes       []string `mapstructure:"scopes"`
+	IssuerURI    string    `mapstructure:"issuer_uri"`
+	ClientID     string    `mapstructure:"client_id"`
+	ClientSecret string    `mapstructure:"client_secret"`
+	RedirectURL  string    `mapstructure:"redirect_url"`
+	Scopes       []string  `mapstructure:"scopes"`
+	Roles        OIDCRoles `mapstructure:"roles"`
+}
+
+type OIDCRoles struct {
+	Administrator string `mapstructure:"administrator"`
+	Editor        string `mapstructure:"editor"`
+	Viewer        string `mapstructure:"viewer"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -180,6 +187,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("oidc.roles.administrator", "discopanel-administrator") // Administrator role name
 	v.SetDefault("oidc.roles.editor", "discopanel-editor")               // Editor role name
 	v.SetDefault("oidc.roles.viewer", "discopanel-viewer")               // Viewer role name
+	v.SetDefault("oidc.username_claim", "preferred_username")
 }
 
 func validateConfig(cfg *Config) error {

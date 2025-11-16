@@ -22,6 +22,15 @@ var (
 	ErrSessionExpired     = errors.New("session expired")
 )
 
+// Cookie names used throughout the application
+const (
+	CookieAuthToken       = "auth_token"
+	CookieRefreshToken    = "refresh_token"
+	CookieOIDCAccessToken = "oidc_access_token"
+	CookieOIDCIdToken     = "oidc_id_token"
+	CookieOIDCState       = "oidc_state"
+)
+
 type Manager struct {
 	store *db.Store
 }
@@ -310,7 +319,7 @@ func (m *Manager) InitializeAuth(ctx context.Context) error {
 			return err
 		}
 		authConfig.RecoveryKey = recoveryKey
-		
+
 		// Hash recovery key for storage
 		hashedRecovery, err := HashPassword(recoveryKey)
 		if err != nil {
@@ -344,7 +353,7 @@ func (m *Manager) saveRecoveryKey(key string) error {
 		fmt.Printf("===========================================\n\n")
 		return err
 	}
-	
+
 	// Also print to console for immediate visibility
 	path, _ := GetRecoveryKeyPath()
 	fmt.Printf("\n===========================================\n")
@@ -352,7 +361,7 @@ func (m *Manager) saveRecoveryKey(key string) error {
 	fmt.Printf("Recovery Key: %s\n", key)
 	fmt.Printf("IMPORTANT: Keep this key secure!\n")
 	fmt.Printf("===========================================\n\n")
-	
+
 	return nil
 }
 

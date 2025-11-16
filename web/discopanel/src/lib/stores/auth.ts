@@ -60,12 +60,13 @@ function createAuthStore() {
 				return {
 					enabled: data.enabled,
 					firstUserSetup: data.first_user_setup,
-					allowRegistration: data.allow_registration
+					allowRegistration: data.allow_registration,
+					oidcEnabled: data.oidc_enabled || false
 				};
 			} catch (error) {
 				console.error('Failed to check auth status:', error);
 				update(state => ({ ...state, isLoading: false }));
-				return { enabled: false, firstUserSetup: false, allowRegistration: false };
+				return { enabled: false, firstUserSetup: false, allowRegistration: false, oidcEnabled: false };
 			}
 		},
 

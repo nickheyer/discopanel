@@ -1,13 +1,18 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/db"
+	"golang.org/x/oauth2"
 )
 
 // Auth request/response structures
@@ -59,6 +64,20 @@ type UpdateUserRequest struct {
 	IsActive *bool        `json:"is_active,omitempty"`
 }
 
+// generateRandomPassword generates a random 32-character password
+func generateRandomPassword() (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+	const length = 32
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	for i := range bytes {
+		bytes[i] = charset[bytes[i]%byte(len(charset))]
+	}
+	return string(bytes), nil
+}
+
 // handleLogin handles user login
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
@@ -96,7 +115,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Set cookie
 	http.SetCookie(w, &http.Cookie{
-		Name:     "auth_token",
+		Name:     auth.CookieAuthToken,
 		Value:    token,
 		Path:     "/",
 		Expires:  expiresAt,
@@ -125,7 +144,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 	if token == "" {
 		// Try cookie
-		cookie, err := r.Cookie("auth_token")
+		cookie, err := r.Cookie(auth.CookieAuthToken)
 		if err == nil && cookie != nil {
 			token = cookie.Value
 		}
@@ -138,15 +157,23 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Clear cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "auth_token",
-		Value:    "",
-		Path:     "/",
-		Expires:  time.Now().Add(-time.Hour),
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
+	// Clear all auth/oidc cookies by expiring them
+	cookieNames := []string{
+		auth.CookieAuthToken,
+		auth.CookieOIDCAccessToken,
+		auth.CookieOIDCIdToken,
+		auth.CookieRefreshToken,
+	}
+	for _, name := range cookieNames {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			Expires:  time.Now().Add(-time.Hour),
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{"message": "Logged out successfully"})
 }
@@ -409,6 +436,7 @@ func (s *Server) handleGetAuthConfig(w http.ResponseWriter, r *http.Request) {
 		"session_timeout":      config.SessionTimeout,
 		"require_email_verify": config.RequireEmailVerify,
 		"allow_registration":   config.AllowRegistration,
+		"oidc_enabled":         config.OIDCEnabled,
 	}
 
 	s.respondJSON(w, http.StatusOK, response)
@@ -469,6 +497,9 @@ func (s *Server) handleUpdateAuthConfig(w http.ResponseWriter, r *http.Request) 
 	if val, ok := req["allow_registration"].(bool); ok {
 		config.AllowRegistration = val
 	}
+	if val, ok := req["oidc_enabled"].(bool); ok {
+		config.OIDCEnabled = val
+	}
 
 	if err := s.store.SaveAuthConfig(r.Context(), config); err != nil {
 		s.respondError(w, http.StatusInternalServerError, "Failed to update auth config")
@@ -476,4 +507,407 @@ func (s *Server) handleUpdateAuthConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.respondJSON(w, http.StatusOK, map[string]string{"message": "Auth config updated successfully"})
+}
+
+// handleOIDCLogin initiates the OIDC login flow
+func (s *Server) handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
+	// Check if OIDC is enabled
+	authConfig, _, err := s.store.GetAuthConfig(r.Context())
+	if err != nil {
+		s.respondError(w, http.StatusInternalServerError, "Failed to get auth config")
+		return
+	}
+
+	if !authConfig.OIDCEnabled {
+		s.respondError(w, http.StatusBadRequest, "OIDC is not enabled")
+		return
+	}
+
+	// Check if OIDC discovery service is available
+	if s.oidcDiscovery == nil {
+		s.respondError(w, http.StatusInternalServerError, "OIDC discovery service not configured")
+		return
+	}
+
+	// Get OIDC provider
+	provider, err := s.oidcDiscovery.GetProvider(r.Context())
+	if err != nil {
+		s.log.Error("Failed to get OIDC provider: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to initialize OIDC provider")
+		return
+	}
+
+	// Generate random state for CSRF protection
+	stateBytes := make([]byte, 32)
+	if _, err := rand.Read(stateBytes); err != nil {
+		s.log.Error("Failed to generate state: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to generate state")
+		return
+	}
+	state := base64.URLEncoding.EncodeToString(stateBytes)
+
+	// Store state in cookie (expires in 10 minutes)
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieOIDCState,
+		Value:    state,
+		Path:     "/",
+		MaxAge:   600, // 10 minutes
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   r.TLS != nil, // Only set Secure if using HTTPS
+	})
+
+	// Build OAuth2 config
+	oauth2Config := oauth2.Config{
+		ClientID:     s.config.OIDC.ClientID,
+		ClientSecret: s.config.OIDC.ClientSecret,
+		RedirectURL:  s.config.OIDC.RedirectURL,
+		Endpoint:     provider.Endpoint(),
+		Scopes:       s.config.OIDC.Scopes,
+	}
+
+	// Generate authorization URL with state parameter
+	// The state will be automatically included as a query parameter in the URL
+	authURL := oauth2Config.AuthCodeURL(state, oauth2.AccessTypeOffline)
+
+	s.log.Debug("Redirecting to OIDC provider with state: %s", state[:8]+"...") // Log first 8 chars for debugging
+
+	// Redirect to OIDC provider (state is included in the URL)
+	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// handleOIDCCallback handles the OIDC callback and exchanges the authorization code for tokens
+func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
+	// Get authorization code and state from query parameters
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	errorParam := r.URL.Query().Get("error")
+
+	// Check for OAuth error
+	if errorParam != "" {
+		errorDescription := r.URL.Query().Get("error_description")
+		s.log.Error("OIDC callback error: %s - %s", errorParam, errorDescription)
+		http.Redirect(w, r, "/login?error=oidc_error", http.StatusFound)
+		return
+	}
+
+	// Validate state
+	stateCookie, err := r.Cookie(auth.CookieOIDCState)
+	if err != nil || stateCookie == nil || stateCookie.Value != state {
+		s.log.Error("Invalid OIDC state parameter")
+		http.Redirect(w, r, "/login?error=invalid_state", http.StatusFound)
+		return
+	}
+
+	// Clear state cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieOIDCState,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	if code == "" {
+		s.log.Error("Missing authorization code in OIDC callback")
+		http.Redirect(w, r, "/login?error=missing_code", http.StatusFound)
+		return
+	}
+
+	// Check if OIDC discovery service is available
+	if s.oidcDiscovery == nil {
+		s.log.Error("OIDC discovery service not configured")
+		http.Redirect(w, r, "/login?error=configuration_error", http.StatusFound)
+		return
+	}
+
+	// Get OIDC provider
+	provider, err := s.oidcDiscovery.GetProvider(r.Context())
+	if err != nil {
+		s.log.Error("Failed to get OIDC provider: %v", err)
+		http.Redirect(w, r, "/login?error=provider_error", http.StatusFound)
+		return
+	}
+
+	// Build OAuth2 config
+	oauth2Config := oauth2.Config{
+		ClientID:     s.config.OIDC.ClientID,
+		ClientSecret: s.config.OIDC.ClientSecret,
+		RedirectURL:  s.config.OIDC.RedirectURL,
+		Endpoint:     provider.Endpoint(),
+		Scopes:       s.config.OIDC.Scopes,
+	}
+
+	// Exchange authorization code for tokens
+	ctx := r.Context()
+	token, err := oauth2Config.Exchange(ctx, code)
+	if err != nil {
+		s.log.Error("Failed to exchange authorization code for tokens: %v", err)
+		http.Redirect(w, r, "/login?error=token_exchange_failed", http.StatusFound)
+		return
+	}
+
+	// Extract ID token
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if !ok {
+		s.log.Error("Missing id_token in token response")
+		http.Redirect(w, r, "/login?error=missing_id_token", http.StatusFound)
+		return
+	}
+
+	// Verify and parse ID token
+	verifier := provider.Verifier(&oidc.Config{ClientID: s.config.OIDC.ClientID})
+	idToken, err := verifier.Verify(ctx, rawIDToken)
+	if err != nil {
+		s.log.Error("Failed to verify ID token: %v", err)
+		http.Redirect(w, r, "/login?error=token_verification_failed", http.StatusFound)
+		return
+	}
+
+	// Extract user claims
+	var claims struct {
+		Subject           string `json:"sub"`
+		Email             string `json:"email"`
+		EmailVerified     bool   `json:"email_verified"`
+		Username          string `json:"username"`
+		PreferredUsername string `json:"preferred_username"`
+		Name              string `json:"name"`
+	}
+
+	if err := idToken.Claims(&claims); err != nil {
+		s.log.Error("Failed to extract claims from ID token: %v", err)
+		http.Redirect(w, r, "/login?error=claims_extraction_failed", http.StatusFound)
+		return
+	}
+
+	// Determine username (prefer preferred_username, fallback to email or sub)
+	username := claims.PreferredUsername
+	if username == "" {
+		username = claims.Username
+	}
+	if username == "" {
+		username = claims.Email
+	}
+	if username == "" {
+		username = claims.Subject
+	}
+
+	// Determine user role from claims (check both groups and roles)
+	userRole := db.RoleViewer // Default role
+
+	// Find or create user
+	// Try to find user by username first
+	user, err := s.store.GetUserByUsername(r.Context(), username)
+	if err != nil {
+		// If user not found by username, try by email (if email is present)
+		if err.Error() == "user not found" && claims.Email != "" {
+			userByEmail, errByEmail := s.store.GetUserByEmail(r.Context(), claims.Email)
+			if errByEmail == nil {
+				user = userByEmail
+				// User found - their configured role is already in user.Role
+			} else if errByEmail.Error() == "user not found" {
+				// Check if registration is enabled before creating new user
+				authConfig, _, err := s.store.GetAuthConfig(r.Context())
+				if err != nil {
+					s.log.Error("Failed to get auth config: %v", err)
+					http.Redirect(w, r, "/login?error=configuration_error", http.StatusFound)
+					return
+				}
+
+				// Check user count to allow first user even if registration is disabled
+				userCount, err := s.store.CountUsers(r.Context())
+				if err != nil {
+					s.log.Error("Failed to check user count: %v", err)
+					http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
+					return
+				}
+
+				// Only allow user creation if registration is enabled or this is the first user
+				if userCount > 0 && !authConfig.AllowRegistration {
+					s.log.Error("OIDC user creation blocked - registration is disabled")
+					http.Redirect(w, r, "/login?error=registration_disabled", http.StatusFound)
+					return
+				}
+
+				// User doesn't exist, create new user
+				var emailPtr *string
+				if claims.Email != "" {
+					emailPtr = &claims.Email
+				}
+				// Generate a random 32-character password for OIDC users
+				randomPassword, err := generateRandomPassword()
+				if err != nil {
+					s.log.Error("Failed to generate random password: %v", err)
+					http.Redirect(w, r, "/login?error=password_generation_failed", http.StatusFound)
+					return
+				}
+				hashedPassword, err := auth.HashPassword(randomPassword)
+				if err != nil {
+					s.log.Error("Failed to hash password: %v", err)
+					http.Redirect(w, r, "/login?error=password_hashing_failed", http.StatusFound)
+					return
+				}
+				user = &db.User{
+					ID:           uuid.New().String(),
+					Username:     username,
+					Email:        emailPtr,
+					PasswordHash: hashedPassword,
+					Role:         userRole,
+					IsActive:     true,
+				}
+
+				if err := s.store.CreateUser(r.Context(), user); err != nil {
+					// Check if error is UNIQUE constraint on email
+					if err.Error() == "UNIQUE constraint failed: users.email" {
+						s.log.Error("OIDC user creation failed - email already in use: %v", err)
+						http.Redirect(w, r, "/login?error=email_already_exists", http.StatusFound)
+						return
+					}
+					s.log.Error("Failed to create OIDC user: %v", err)
+					http.Redirect(w, r, "/login?error=user_creation_failed", http.StatusFound)
+					return
+				}
+			} else {
+				s.log.Error("Database error while looking up user by email: %v", errByEmail)
+				http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
+				return
+			}
+		} else if err.Error() != "user not found" {
+			s.log.Error("Database error while looking up user: %v", err)
+			http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
+			return
+		} else {
+			// Check if registration is enabled before creating new user
+			authConfig, _, err := s.store.GetAuthConfig(r.Context())
+			if err != nil {
+				s.log.Error("Failed to get auth config: %v", err)
+				http.Redirect(w, r, "/login?error=configuration_error", http.StatusFound)
+				return
+			}
+
+			// Check user count to allow first user even if registration is disabled
+			userCount, err := s.store.CountUsers(r.Context())
+			if err != nil {
+				s.log.Error("Failed to check user count: %v", err)
+				http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
+				return
+			}
+
+			// Only allow user creation if registration is enabled or this is the first user
+			if userCount > 0 && !authConfig.AllowRegistration {
+				s.log.Error("OIDC user creation blocked - registration is disabled")
+				http.Redirect(w, r, "/login?error=registration_disabled", http.StatusFound)
+				return
+			}
+
+			// User doesn't exist (by username and email), create new user
+			var emailPtr *string
+			if claims.Email != "" {
+				emailPtr = &claims.Email
+			}
+			user = &db.User{
+				ID:           uuid.New().String(),
+				Username:     username,
+				Email:        emailPtr,
+				PasswordHash: "", // OIDC users don't have passwords
+				Role:         userRole,
+				IsActive:     true,
+			}
+
+			if err := s.store.CreateUser(r.Context(), user); err != nil {
+				if err.Error() == "UNIQUE constraint failed: users.email" {
+					s.log.Error("OIDC user creation failed - email already in use: %v", err)
+					http.Redirect(w, r, "/login?error=email_already_exists", http.StatusFound)
+					return
+				}
+				s.log.Error("Failed to create OIDC user: %v", err)
+				http.Redirect(w, r, "/login?error=user_creation_failed", http.StatusFound)
+				return
+			}
+		}
+	} else {
+		// User found - their configured role is already in user.Role
+		// Ensure user is active
+		if !user.IsActive {
+			user.IsActive = true
+			if err := s.store.UpdateUser(r.Context(), user); err != nil {
+				s.log.Error("Failed to activate OIDC user: %v", err)
+			}
+		}
+	}
+
+	// Get auth config for session timeout
+	authConfig, _, _ := s.store.GetAuthConfig(r.Context())
+	expiresAt := time.Now().Add(time.Duration(authConfig.SessionTimeout) * time.Second)
+
+	// Generate JWT token for session
+	tokenString, err := s.authManager.GenerateJWT(user, authConfig)
+	if err != nil {
+		s.log.Error("Failed to generate JWT token: %v", err)
+		http.Redirect(w, r, "/login?error=token_generation_failed", http.StatusFound)
+		return
+	}
+
+	// Create session
+	session := &db.Session{
+		UserID:    user.ID,
+		Token:     tokenString,
+		ExpiresAt: expiresAt,
+		IPAddress: r.RemoteAddr,
+		UserAgent: r.UserAgent(),
+	}
+	if err := s.store.CreateSession(r.Context(), session); err != nil {
+		s.log.Error("Failed to create session: %v", err)
+		http.Redirect(w, r, "/login?error=session_creation_failed", http.StatusFound)
+		return
+	}
+
+	// Set auth token cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieAuthToken,
+		Value:    tokenString,
+		Path:     "/",
+		Expires:  expiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   r.TLS != nil,
+	})
+
+	// Set refresh token if exists
+	if token.RefreshToken != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     auth.CookieRefreshToken,
+			Value:    token.RefreshToken,
+			Path:     "/",
+			Expires:  time.Now().Add(30 * 24 * time.Hour), // 30 days
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			Secure:   r.TLS != nil,
+		})
+	}
+
+	for _, name := range []string{
+		auth.CookieOIDCAccessToken,
+		auth.CookieOIDCIdToken,
+	} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			Expires:  time.Now().Add(-time.Hour),
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+	}
+
+	// Update last login
+	now := time.Now()
+	user.LastLogin = &now
+	if err := s.store.UpdateUser(r.Context(), user); err != nil {
+		s.log.Error("Failed to update last login: %v", err)
+	}
+
+	// Redirect to /login (frontend will handle the redirect)
+	http.Redirect(w, r, "/login", http.StatusFound)
 }

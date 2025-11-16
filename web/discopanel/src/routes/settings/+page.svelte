@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -10,11 +11,13 @@
 	import RoutingSettings from '$lib/components/routing-settings.svelte';
 	import AuthSettings from '$lib/components/auth-settings.svelte';
 	import SupportSettings from '$lib/components/support-settings.svelte';
+	import { isAdmin } from '$lib/stores/auth';
 	
 	let globalConfig = $state<ConfigCategory[]>([]);
 	let loading = $state(true);
 	let saving = $state(false);
 	let activeTab = $state('server-config');
+	let userIsAdmin = $derived($isAdmin);
 	
 	async function loadGlobalSettings() {
 		loading = true;
@@ -52,6 +55,12 @@
 	}
 	
 	onMount(() => {
+		// Redirect non-admin users
+		if (!userIsAdmin) {
+			toast.error('Access denied. Admin privileges required.');
+			goto('/');
+			return;
+		}
 		loadGlobalSettings();
 	});
 </script>

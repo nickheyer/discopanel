@@ -40,16 +40,11 @@ proxy:
   port_range_max: 25665
 
 oidc:
-  issuer_uri: https://auth.example.com   # Base URL for discovery (where the .well-known/openid-configuration lives)
+  issuer_uri: https://auth.example.com # Base URL for discovery (where the .well-known/openid-configuration lives)
   client_id: YOUR_CLIENT_ID
   client_secret: YOUR_CLIENT_SECRET
   redirect_url: https://your-disco-panel-site.com/api/v1/auth/oidc/callback
   scopes: openid profile email
-
-  roles:
-    administrator: discopanel-administrator
-    editor: discopanel-editor
-    viewer: discopanel-viewer
 
 # Example usage:
 # With proxy enabled and base_url set to "mc.example.com":

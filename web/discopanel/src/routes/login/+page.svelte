@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { authStore } from '$lib/stores/auth';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -33,7 +34,42 @@
 		oidcEnabled: false
 	});
 
+	// Map OIDC error codes to user-friendly messages
+	function getErrorMessage(errorCode: string): string {
+		const errorMessages: Record<string, string> = {
+			oidc_error: 'OIDC authentication failed. Please try again.',
+			invalid_state: 'Invalid authentication state. Please try logging in again.',
+			missing_code: 'Authorization code missing. Please try logging in again.',
+			configuration_error: 'OIDC configuration error. Please contact your administrator.',
+			provider_error: 'OIDC provider error. Please try again later.',
+			token_exchange_failed: 'Failed to exchange authorization code. Please try again.',
+			missing_id_token: 'Missing ID token in response. Please try again.',
+			token_verification_failed: 'Token verification failed. Please try again.',
+			claims_extraction_failed: 'Failed to extract user information. Please try again.',
+			registration_disabled:
+				'Registration is disabled. Please contact your administrator to create an account.',
+			password_generation_failed: 'Failed to create account. Please try again.',
+			password_hashing_failed: 'Failed to create account. Please try again.',
+			email_already_exists:
+				'An account with this email already exists. Please use a different email or contact your administrator.',
+			user_creation_failed: 'Failed to create account. Please try again.',
+			database_error: 'Database error occurred. Please try again later.'
+		};
+
+		return errorMessages[errorCode] || 'OIDC login failed. Please try again.';
+	}
+
 	onMount(async () => {
+		// Check for OIDC error in URL query parameters
+		const errorParam = $page.url.searchParams.get('error');
+		if (errorParam) {
+			error = getErrorMessage(errorParam);
+			// Clear the error from URL
+			const url = new URL($page.url);
+			url.searchParams.delete('error');
+			goto(url.pathname + url.search, { replaceState: true });
+		}
+
 		// Check auth status first and wait for it to complete
 		const status = await authStore.checkAuthStatus();
 		authStatus = status;
@@ -208,7 +244,7 @@
 							{#if authStatus.oidcEnabled}
 								<div class="relative">
 									<div class="absolute inset-0 flex items-center">
-										<span class="w-full border-t" />
+										<span class="w-full border-t"></span>
 									</div>
 									<div class="relative flex justify-center text-xs uppercase">
 										<span class="bg-card text-muted-foreground px-2">Or</span>

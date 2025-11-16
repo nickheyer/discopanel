@@ -647,7 +647,16 @@ func (s *Store) CreateUser(ctx context.Context, user *User) error {
 	if user.ID == "" {
 		user.ID = uuid.New().String()
 	}
-	return s.db.WithContext(ctx).Create(user).Error
+	// Store IsActive value before create (GORM may use schema default for zero values)
+	isActiveValue := user.IsActive
+	if err := s.db.WithContext(ctx).Create(user).Error; err != nil {
+		return err
+	}
+	// If IsActive should be false, explicitly update it to override any schema default
+	if !isActiveValue {
+		return s.db.WithContext(ctx).Model(user).Update("is_active", false).Error
+	}
+	return nil
 }
 
 func (s *Store) GetUser(ctx context.Context, id string) (*User, error) {

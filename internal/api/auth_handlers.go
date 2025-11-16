@@ -723,12 +723,8 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 
-				// Only allow user creation if registration is enabled or this is the first user
-				if userCount > 0 && !authConfig.AllowRegistration {
-					s.log.Error("OIDC user creation blocked - registration is disabled")
-					http.Redirect(w, r, "/login?error=registration_disabled", http.StatusFound)
-					return
-				}
+				// Determine if user should be created as disabled
+				shouldCreateDisabled := userCount > 0 && !authConfig.AllowRegistration
 
 				// User doesn't exist, create new user
 				var emailPtr *string
@@ -754,7 +750,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 					Email:        emailPtr,
 					PasswordHash: hashedPassword,
 					Role:         userRole,
-					IsActive:     true,
+					IsActive:     !shouldCreateDisabled, // Disable if registration is disabled
 				}
 
 				if err := s.store.CreateUser(r.Context(), user); err != nil {
@@ -766,6 +762,13 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 					}
 					s.log.Error("Failed to create OIDC user: %v", err)
 					http.Redirect(w, r, "/login?error=user_creation_failed", http.StatusFound)
+					return
+				}
+
+				// If user was created as disabled, redirect with appropriate message
+				if shouldCreateDisabled {
+					s.log.Info("OIDC user created but disabled - registration is disabled: %s", username)
+					http.Redirect(w, r, "/login?error=account_disabled", http.StatusFound)
 					return
 				}
 			} else {
@@ -794,12 +797,8 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// Only allow user creation if registration is enabled or this is the first user
-			if userCount > 0 && !authConfig.AllowRegistration {
-				s.log.Error("OIDC user creation blocked - registration is disabled")
-				http.Redirect(w, r, "/login?error=registration_disabled", http.StatusFound)
-				return
-			}
+			// Determine if user should be created as disabled
+			shouldCreateDisabled := userCount > 0 && !authConfig.AllowRegistration
 
 			// User doesn't exist (by username and email), create new user
 			var emailPtr *string
@@ -812,7 +811,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 				Email:        emailPtr,
 				PasswordHash: "", // OIDC users don't have passwords
 				Role:         userRole,
-				IsActive:     true,
+				IsActive:     !shouldCreateDisabled, // Disable if registration is disabled
 			}
 
 			if err := s.store.CreateUser(r.Context(), user); err != nil {
@@ -825,15 +824,21 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/login?error=user_creation_failed", http.StatusFound)
 				return
 			}
+
+			// If user was created as disabled, redirect with appropriate message
+			if shouldCreateDisabled {
+				s.log.Info("OIDC user created but disabled - registration is disabled: %s", username)
+				http.Redirect(w, r, "/login?error=account_disabled", http.StatusFound)
+				return
+			}
 		}
 	} else {
 		// User found - their configured role is already in user.Role
-		// Ensure user is active
+		// Check if user is active - don't auto-activate disabled users
 		if !user.IsActive {
-			user.IsActive = true
-			if err := s.store.UpdateUser(r.Context(), user); err != nil {
-				s.log.Error("Failed to activate OIDC user: %v", err)
-			}
+			s.log.Info("OIDC login blocked - user account is disabled: %s", username)
+			http.Redirect(w, r, "/login?error=account_disabled", http.StatusFound)
+			return
 		}
 	}
 

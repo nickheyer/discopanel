@@ -43,6 +43,7 @@ type AuthStatusResponse struct {
 	Enabled           bool `json:"enabled"`
 	FirstUserSetup    bool `json:"first_user_setup"`
 	AllowRegistration bool `json:"allow_registration"`
+	OIDCEnabled       bool `json:"oidc_enabled"`
 }
 
 type CreateUserRequest struct {
@@ -225,6 +226,7 @@ func (s *Server) handleGetAuthStatus(w http.ResponseWriter, r *http.Request) {
 		Enabled:           authConfig.Enabled,
 		FirstUserSetup:    false,
 		AllowRegistration: authConfig.AllowRegistration,
+		OIDCEnabled:       authConfig.OIDCEnabled,
 	})
 }
 

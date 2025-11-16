@@ -17,6 +17,7 @@ type Config struct {
 	Proxy     ProxyConfig     `mapstructure:"proxy"`
 	Minecraft MinecraftConfig `mapstructure:"minecraft"`
 	Logging   LoggingConfig   `mapstructure:"logging"`
+	OIDC      OIDCConfig      `mapstructure:"oidc"`
 }
 
 type ServerConfig struct {
@@ -71,6 +72,14 @@ type LoggingConfig struct {
 	MaxBackups int    `mapstructure:"max_backups"`
 	MaxAge     int    `mapstructure:"max_age"`
 	Compress   bool   `mapstructure:"compress"`
+}
+
+type OIDCConfig struct {
+	IssuerURI    string   `mapstructure:"issuer_uri"`
+	ClientID     string   `mapstructure:"client_id"`
+	ClientSecret string   `mapstructure:"client_secret"`
+	RedirectURL  string   `mapstructure:"redirect_url"`
+	Scopes       []string `mapstructure:"scopes"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -166,6 +175,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.max_backups", 5) // keep 5
 	v.SetDefault("logging.max_age", 30)    // 30 days
 	v.SetDefault("logging.compress", true) // compress rotated
+
+	// OIDC defaults
+	v.SetDefault("oidc.roles.administrator", "discopanel-administrator") // Administrator role name
+	v.SetDefault("oidc.roles.editor", "discopanel-editor")               // Editor role name
+	v.SetDefault("oidc.roles.viewer", "discopanel-viewer")               // Viewer role name
 }
 
 func validateConfig(cfg *Config) error {

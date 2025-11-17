@@ -21,6 +21,7 @@ type Proxy struct {
 	listenAddr   string
 	running      bool
 	runningMutex sync.RWMutex
+	portMapper   *PortMapper
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
@@ -123,7 +124,15 @@ func (p *Proxy) Start() error {
 
 	p.listener = listener
 	p.running = true
-
+	portMapper, err := TryMapper(p.ctx)
+	if err != nil {
+		return fmt.Errorf("Failed mapper creation: %w", err)
+	}
+	p.portMapper = portMapper
+	err = p.portMapper.TryMap(p.listener.Addr())
+	if err != nil {
+		return fmt.Errorf("Failed try map: %w", err)
+	}
 	go p.acceptLoop()
 
 	p.logger.Info("Proxy started on %s", p.listenAddr)

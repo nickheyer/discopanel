@@ -6,6 +6,7 @@
 sandbox/
 build/
 discopanel
+discopanel.exe
 !cmd/discopanel
 !web/discopanel
 data/

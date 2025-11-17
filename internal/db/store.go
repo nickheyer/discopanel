@@ -695,6 +695,18 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error)
 	return &user, nil
 }
 
+func (s *Store) GetUserByOpenIDSub(ctx context.Context, sub string) (*User, error) {
+	var user User
+	err := s.db.WithContext(ctx).First(&user, "openid_sub = ?", sub).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (s *Store) ListUsers(ctx context.Context) ([]*User, error) {
 	var users []*User
 	err := s.db.WithContext(ctx).Order("created_at DESC").Find(&users).Error

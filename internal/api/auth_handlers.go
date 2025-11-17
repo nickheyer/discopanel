@@ -696,150 +696,174 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// Determine user role from claims (check both groups and roles)
 	userRole := db.RoleViewer // Default role
 
-	// Find or create user
-	// Try to find user by username first
-	user, err := s.store.GetUserByUsername(r.Context(), username)
-	if err != nil {
-		// If user not found by username, try by email (if email is present)
-		if err.Error() == "user not found" && claims.Email != "" {
-			userByEmail, errByEmail := s.store.GetUserByEmail(r.Context(), claims.Email)
-			if errByEmail == nil {
-				user = userByEmail
-				// User found - their configured role is already in user.Role
-			} else if errByEmail.Error() == "user not found" {
-				// Check if registration is enabled before creating new user
-				authConfig, _, err := s.store.GetAuthConfig(r.Context())
-				if err != nil {
-					s.log.Error("Failed to get auth config: %v", err)
-					http.Redirect(w, r, "/login?error=configuration_error", http.StatusFound)
+	var user *db.User
+
+	// OIDC Login Flow: Try to find existing user
+	// Step 1: Check if user exists based on sub claim
+	if claims.Subject != "" {
+		userBySub, err := s.store.GetUserByOpenIDSub(r.Context(), claims.Subject)
+		if err == nil {
+			user = userBySub
+			s.log.Info("OIDC user matched by OpenID sub claim: user_id=%s, username=%s, sub=%s", user.ID, user.Username, claims.Subject)
+		} else if err.Error() != "user not found" {
+			s.log.Error("Database error while looking up user by OpenID sub: %v", err)
+			http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
+			return
+		}
+	}
+
+	// Step 2: If not found by sub, check by email address
+	if user == nil && claims.Email != "" {
+		userByEmail, err := s.store.GetUserByEmail(r.Context(), claims.Email)
+		if err == nil {
+			// User found by email - check if sub claim is already set
+			if userByEmail.OpenIDSub != nil {
+				// User already has a sub claim set - check if it matches
+				if *userByEmail.OpenIDSub != claims.Subject {
+					// Sub claim doesn't match - this is a security issue
+					// Fail login to prevent account takeover
+					s.log.Warn("OIDC login blocked - user found by email but has different OpenID sub: user_id=%s, username=%s, email=%s, existing_sub=%s, new_sub=%s", userByEmail.ID, userByEmail.Username, claims.Email, *userByEmail.OpenIDSub, claims.Subject)
+					http.Redirect(w, r, "/login?error=account_linked_to_different_provider", http.StatusFound)
 					return
 				}
-
-				// Check user count to allow first user even if registration is disabled
-				userCount, err := s.store.CountUsers(r.Context())
-				if err != nil {
-					s.log.Error("Failed to check user count: %v", err)
+				// Sub claim matches - proceed with login
+				user = userByEmail
+				s.log.Info("OIDC user matched by email address with matching sub: user_id=%s, username=%s, email=%s, sub=%s", user.ID, user.Username, claims.Email, claims.Subject)
+			} else {
+				// User found by email but no sub claim - set it and proceed
+				user = userByEmail
+				user.OpenIDSub = &claims.Subject
+				if err := s.store.UpdateUser(r.Context(), user); err != nil {
+					s.log.Error("Failed to update user with OpenID sub: %v", err)
 					http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
 					return
 				}
-
-				// Determine if user should be created as disabled
-				shouldCreateDisabled := userCount > 0 && !authConfig.AllowRegistration
-
-				// User doesn't exist, create new user
-				var emailPtr *string
-				if claims.Email != "" {
-					emailPtr = &claims.Email
-				}
-				// Generate a random 32-character password for OIDC users
-				randomPassword, err := generateRandomPassword()
-				if err != nil {
-					s.log.Error("Failed to generate random password: %v", err)
-					http.Redirect(w, r, "/login?error=password_generation_failed", http.StatusFound)
-					return
-				}
-				hashedPassword, err := auth.HashPassword(randomPassword)
-				if err != nil {
-					s.log.Error("Failed to hash password: %v", err)
-					http.Redirect(w, r, "/login?error=password_hashing_failed", http.StatusFound)
-					return
-				}
-				user = &db.User{
-					ID:           uuid.New().String(),
-					Username:     username,
-					Email:        emailPtr,
-					PasswordHash: hashedPassword,
-					Role:         userRole,
-					IsActive:     !shouldCreateDisabled, // Disable if registration is disabled
-				}
-
-				if err := s.store.CreateUser(r.Context(), user); err != nil {
-					// Check if error is UNIQUE constraint on email
-					if err.Error() == "UNIQUE constraint failed: users.email" {
-						s.log.Error("OIDC user creation failed - email already in use: %v", err)
-						http.Redirect(w, r, "/login?error=email_already_exists", http.StatusFound)
-						return
-					}
-					s.log.Error("Failed to create OIDC user: %v", err)
-					http.Redirect(w, r, "/login?error=user_creation_failed", http.StatusFound)
-					return
-				}
-
-				// If user was created as disabled, redirect with appropriate message
-				if shouldCreateDisabled {
-					s.log.Info("OIDC user created but disabled - registration is disabled: %s", username)
-					http.Redirect(w, r, "/login?error=account_disabled", http.StatusFound)
-					return
-				}
-			} else {
-				s.log.Error("Database error while looking up user by email: %v", errByEmail)
-				http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
-				return
+				s.log.Info("OIDC user matched by email address and linked with sub claim: user_id=%s, username=%s, email=%s, sub=%s", user.ID, user.Username, claims.Email, claims.Subject)
 			}
 		} else if err.Error() != "user not found" {
-			s.log.Error("Database error while looking up user: %v", err)
+			s.log.Error("Database error while looking up user by email: %v", err)
 			http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
 			return
-		} else {
-			// Check if registration is enabled before creating new user
-			authConfig, _, err := s.store.GetAuthConfig(r.Context())
-			if err != nil {
-				s.log.Error("Failed to get auth config: %v", err)
-				http.Redirect(w, r, "/login?error=configuration_error", http.StatusFound)
-				return
-			}
+		}
+	}
 
-			// Check user count to allow first user even if registration is disabled
-			userCount, err := s.store.CountUsers(r.Context())
-			if err != nil {
-				s.log.Error("Failed to check user count: %v", err)
-				http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
-				return
-			}
-
-			// Determine if user should be created as disabled
-			shouldCreateDisabled := userCount > 0 && !authConfig.AllowRegistration
-
-			// User doesn't exist (by username and email), create new user
-			var emailPtr *string
-			if claims.Email != "" {
-				emailPtr = &claims.Email
-			}
-			user = &db.User{
-				ID:           uuid.New().String(),
-				Username:     username,
-				Email:        emailPtr,
-				PasswordHash: "", // OIDC users don't have passwords
-				Role:         userRole,
-				IsActive:     !shouldCreateDisabled, // Disable if registration is disabled
-			}
-
-			if err := s.store.CreateUser(r.Context(), user); err != nil {
-				if err.Error() == "UNIQUE constraint failed: users.email" {
-					s.log.Error("OIDC user creation failed - email already in use: %v", err)
-					http.Redirect(w, r, "/login?error=email_already_exists", http.StatusFound)
+	// Step 3: If still not found, check by username
+	if user == nil {
+		userByUsername, err := s.store.GetUserByUsername(r.Context(), username)
+		if err == nil {
+			// User found by username - check if sub claim is already set
+			if userByUsername.OpenIDSub != nil {
+				// User already has a sub claim set - check if it matches
+				if *userByUsername.OpenIDSub != claims.Subject {
+					// Sub claim doesn't match - this is a security issue
+					// Fail login to prevent account takeover
+					s.log.Warn("OIDC login blocked - user found by username but has different OpenID sub: user_id=%s, username=%s, existing_sub=%s, new_sub=%s", userByUsername.ID, username, *userByUsername.OpenIDSub, claims.Subject)
+					http.Redirect(w, r, "/login?error=account_linked_to_different_provider", http.StatusFound)
 					return
 				}
-				s.log.Error("Failed to create OIDC user: %v", err)
-				http.Redirect(w, r, "/login?error=user_creation_failed", http.StatusFound)
-				return
+				// Sub claim matches - proceed with login
+				user = userByUsername
+				s.log.Info("OIDC user matched by username with matching sub: user_id=%s, username=%s, sub=%s", user.ID, username, claims.Subject)
+			} else {
+				// User found by username but no sub claim - set it and proceed
+				user = userByUsername
+				user.OpenIDSub = &claims.Subject
+				if err := s.store.UpdateUser(r.Context(), user); err != nil {
+					s.log.Error("Failed to update user with OpenID sub: %v", err)
+					http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
+					return
+				}
+				s.log.Info("OIDC user matched by username and linked with sub claim: user_id=%s, username=%s, sub=%s", user.ID, username, claims.Subject)
 			}
-
-			// If user was created as disabled, redirect with appropriate message
-			if shouldCreateDisabled {
-				s.log.Info("OIDC user created but disabled - registration is disabled: %s", username)
-				http.Redirect(w, r, "/login?error=account_disabled", http.StatusFound)
-				return
-			}
+		} else if err.Error() != "user not found" {
+			s.log.Error("Database error while looking up user by username: %v", err)
+			http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
+			return
 		}
-	} else {
-		// User found - their configured role is already in user.Role
-		// Check if user is active - don't auto-activate disabled users
-		if !user.IsActive {
-			s.log.Info("OIDC login blocked - user account is disabled: %s", username)
+	}
+
+	// OIDC Register Flow: Create new user if not found
+	if user == nil {
+		// Check if registration is enabled
+		authConfig, _, err := s.store.GetAuthConfig(r.Context())
+		if err != nil {
+			s.log.Error("Failed to get auth config: %v", err)
+			http.Redirect(w, r, "/login?error=configuration_error", http.StatusFound)
+			return
+		}
+
+		// Check user count to allow first user even if registration is disabled
+		userCount, err := s.store.CountUsers(r.Context())
+		if err != nil {
+			s.log.Error("Failed to check user count: %v", err)
+			http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
+			return
+		}
+
+		// Determine if user should be created as disabled
+		shouldCreateDisabled := userCount > 0 && !authConfig.AllowRegistration
+
+		// Create new user with username, email, and sub claim from IDToken
+		var emailPtr *string
+		if claims.Email != "" {
+			emailPtr = &claims.Email
+		}
+		var openIDSubPtr *string
+		if claims.Subject != "" {
+			openIDSubPtr = &claims.Subject
+		}
+
+		// Generate a random password for OIDC users (required field but not used for OIDC auth)
+		randomPassword, err := generateRandomPassword()
+		if err != nil {
+			s.log.Error("Failed to generate random password: %v", err)
+			http.Redirect(w, r, "/login?error=password_generation_failed", http.StatusFound)
+			return
+		}
+		hashedPassword, err := auth.HashPassword(randomPassword)
+		if err != nil {
+			s.log.Error("Failed to hash password: %v", err)
+			http.Redirect(w, r, "/login?error=password_hashing_failed", http.StatusFound)
+			return
+		}
+
+		user = &db.User{
+			ID:           uuid.New().String(),
+			Username:     username,
+			Email:        emailPtr,
+			OpenIDSub:    openIDSubPtr,
+			PasswordHash: hashedPassword,
+			Role:         userRole,
+			IsActive:     !shouldCreateDisabled, // Disable if registration is disabled
+		}
+
+		if err := s.store.CreateUser(r.Context(), user); err != nil {
+			// Check if error is UNIQUE constraint on email
+			if err.Error() == "UNIQUE constraint failed: users.email" {
+				s.log.Error("OIDC user creation failed - email already in use: %v", err)
+				http.Redirect(w, r, "/login?error=email_already_exists", http.StatusFound)
+				return
+			}
+			s.log.Error("Failed to create OIDC user: %v", err)
+			http.Redirect(w, r, "/login?error=user_creation_failed", http.StatusFound)
+			return
+		}
+
+		s.log.Info("OIDC new user registered: user_id=%s, username=%s, email=%s, sub=%s, is_active=%v", user.ID, username, claims.Email, claims.Subject, !shouldCreateDisabled)
+
+		// If user was created as disabled, redirect with appropriate message
+		if shouldCreateDisabled {
+			s.log.Info("OIDC user created but disabled - registration is disabled: %s", username)
 			http.Redirect(w, r, "/login?error=account_disabled", http.StatusFound)
 			return
 		}
+	}
+
+	// At this point, user is found or created - check if active
+	if !user.IsActive {
+		s.log.Info("OIDC login blocked - user account is disabled: %s", username)
+		http.Redirect(w, r, "/login?error=account_disabled", http.StatusFound)
+		return
 	}
 
 	// Get auth config for session timeout

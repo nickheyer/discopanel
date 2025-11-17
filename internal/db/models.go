@@ -387,7 +387,8 @@ const (
 type User struct {
 	ID           string     `json:"id" gorm:"primaryKey"`
 	Username     string     `json:"username" gorm:"not null;uniqueIndex"`
-	Email        *string    `json:"email" gorm:"uniqueIndex"` // Pointer allows NULL, unique only on non-NULL
+	Email        *string    `json:"email" gorm:"uniqueIndex"`                        // Pointer allows NULL, unique only on non-NULL
+	OpenIDSub    *string    `json:"openid_sub" gorm:"uniqueIndex;column:openid_sub"` // OpenID Connect subject identifier
 	PasswordHash string     `json:"-" gorm:"not null;column:password_hash"`
 	Role         UserRole   `json:"role" gorm:"not null;default:'viewer'"`
 	IsActive     bool       `json:"is_active" gorm:"not null;default:true"`

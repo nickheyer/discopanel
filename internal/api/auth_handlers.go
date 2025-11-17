@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -62,6 +63,52 @@ type UpdateUserRequest struct {
 	Email    *string      `json:"email,omitempty"`
 	Role     *db.UserRole `json:"role,omitempty"`
 	IsActive *bool        `json:"is_active,omitempty"`
+}
+
+// LoginError represents all possible login error types
+type LoginError string
+
+const (
+	// General login errors
+	LoginErrorInvalidCredentials LoginError = "invalid_credentials"
+	LoginErrorUserNotActive      LoginError = "user_not_active"
+	LoginErrorAuthDisabled       LoginError = "auth_disabled"
+	LoginErrorLoginFailed        LoginError = "login_failed"
+
+	// OIDC callback errors
+	LoginErrorOIDCError                        LoginError = "oidc_error"
+	LoginErrorMissingCode                      LoginError = "missing_code"
+	LoginErrorInvalidState                     LoginError = "invalid_state"
+	LoginErrorConfigurationError               LoginError = "configuration_error"
+	LoginErrorProviderError                    LoginError = "provider_error"
+	LoginErrorTokenExchangeFailed              LoginError = "token_exchange_failed"
+	LoginErrorMissingIDToken                   LoginError = "missing_id_token"
+	LoginErrorTokenVerificationFailed          LoginError = "token_verification_failed"
+	LoginErrorClaimsExtractionFailed           LoginError = "claims_extraction_failed"
+	LoginErrorDatabaseError                    LoginError = "database_error"
+	LoginErrorAccountLinkedToDifferentProvider LoginError = "account_linked_to_different_provider"
+	LoginErrorPasswordGenerationFailed         LoginError = "password_generation_failed"
+	LoginErrorPasswordHashingFailed            LoginError = "password_hashing_failed"
+	LoginErrorEmailAlreadyExists               LoginError = "email_already_exists"
+	LoginErrorUserCreationFailed               LoginError = "user_creation_failed"
+	LoginErrorAccountDisabled                  LoginError = "account_disabled"
+	LoginErrorTokenGenerationFailed            LoginError = "token_generation_failed"
+	LoginErrorSessionCreationFailed            LoginError = "session_creation_failed"
+)
+
+// OIDC callback helper types
+type oidcCallbackParams struct {
+	code  string
+	state string
+}
+
+type oidcClaims struct {
+	Subject           string `json:"sub"`
+	Email             string `json:"email"`
+	EmailVerified     bool   `json:"email_verified"`
+	Username          string `json:"username"`
+	PreferredUsername string `json:"preferred_username"`
+	Name              string `json:"name"`
 }
 
 // generateRandomPassword generates a random 32-character password
@@ -576,27 +623,46 @@ func (s *Server) handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-// handleOIDCCallback handles the OIDC callback and exchanges the authorization code for tokens
-func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
-	// Get authorization code and state from query parameters
-	code := r.URL.Query().Get("code")
-	state := r.URL.Query().Get("state")
+// extractOIDCCallbackParams extracts and validates OIDC callback query parameters
+func (s *Server) extractOIDCCallbackParams(r *http.Request) (*oidcCallbackParams, error) {
 	errorParam := r.URL.Query().Get("error")
-
-	// Check for OAuth error
 	if errorParam != "" {
 		errorDescription := r.URL.Query().Get("error_description")
 		s.log.Error("OIDC callback error: %s - %s", errorParam, errorDescription)
-		http.Redirect(w, r, "/login?error=oidc_error", http.StatusFound)
-		return
+		return nil, newLoginError(LoginErrorOIDCError)
 	}
 
-	// Validate state
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+
+	if code == "" {
+		s.log.Error("Missing authorization code in OIDC callback")
+		return nil, newLoginError(LoginErrorMissingCode)
+	}
+
+	return &oidcCallbackParams{code: code, state: state}, nil
+}
+
+// loginError represents a login error that should redirect to login page
+type loginError struct {
+	err LoginError
+}
+
+func (e *loginError) Error() string {
+	return string(e.err)
+}
+
+// newLoginError creates a new login error
+func newLoginError(err LoginError) *loginError {
+	return &loginError{err: err}
+}
+
+// validateOIDCState validates the state parameter and clears the state cookie
+func (s *Server) validateOIDCState(w http.ResponseWriter, r *http.Request, state string) error {
 	stateCookie, err := r.Cookie(auth.CookieOIDCState)
 	if err != nil || stateCookie == nil || stateCookie.Value != state {
 		s.log.Error("Invalid OIDC state parameter")
-		http.Redirect(w, r, "/login?error=invalid_state", http.StatusFound)
-		return
+		return newLoginError(LoginErrorInvalidState)
 	}
 
 	// Clear state cookie
@@ -609,276 +675,236 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 
-	if code == "" {
-		s.log.Error("Missing authorization code in OIDC callback")
-		http.Redirect(w, r, "/login?error=missing_code", http.StatusFound)
-		return
-	}
+	return nil
+}
 
-	// Check if OIDC discovery service is available
+// getOIDCProvider retrieves the OIDC provider from the discovery service
+func (s *Server) getOIDCProvider(ctx context.Context) (*oidc.Provider, error) {
 	if s.oidcDiscovery == nil {
 		s.log.Error("OIDC discovery service not configured")
-		http.Redirect(w, r, "/login?error=configuration_error", http.StatusFound)
-		return
+		return nil, newLoginError(LoginErrorConfigurationError)
 	}
 
-	// Get OIDC provider
-	provider, err := s.oidcDiscovery.GetProvider(r.Context())
+	provider, err := s.oidcDiscovery.GetProvider(ctx)
 	if err != nil {
 		s.log.Error("Failed to get OIDC provider: %v", err)
-		http.Redirect(w, r, "/login?error=provider_error", http.StatusFound)
-		return
+		return nil, newLoginError(LoginErrorProviderError)
 	}
 
-	// Build OAuth2 config
-	oauth2Config := oauth2.Config{
+	return provider, nil
+}
+
+// buildOAuth2Config builds an OAuth2 configuration from the OIDC provider
+func (s *Server) buildOAuth2Config(provider *oidc.Provider) oauth2.Config {
+	return oauth2.Config{
 		ClientID:     s.config.OIDC.ClientID,
 		ClientSecret: s.config.OIDC.ClientSecret,
 		RedirectURL:  s.config.OIDC.RedirectURL,
 		Endpoint:     provider.Endpoint(),
 		Scopes:       s.config.OIDC.Scopes,
 	}
+}
 
-	// Exchange authorization code for tokens
-	ctx := r.Context()
+// exchangeOIDCCodeForTokens exchanges the authorization code for OAuth2 tokens
+func (s *Server) exchangeOIDCCodeForTokens(ctx context.Context, oauth2Config oauth2.Config, code string) (*oauth2.Token, string, error) {
 	token, err := oauth2Config.Exchange(ctx, code)
 	if err != nil {
 		s.log.Error("Failed to exchange authorization code for tokens: %v", err)
-		http.Redirect(w, r, "/login?error=token_exchange_failed", http.StatusFound)
-		return
+		return nil, "", newLoginError(LoginErrorTokenExchangeFailed)
 	}
 
-	// Extract ID token
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
 		s.log.Error("Missing id_token in token response")
-		http.Redirect(w, r, "/login?error=missing_id_token", http.StatusFound)
-		return
+		return nil, "", newLoginError(LoginErrorMissingIDToken)
 	}
 
-	// Verify and parse ID token
+	return token, rawIDToken, nil
+}
+
+// verifyAndExtractIDTokenClaims verifies the ID token and extracts user claims
+func (s *Server) verifyAndExtractIDTokenClaims(ctx context.Context, provider *oidc.Provider, rawIDToken string) (*oidcClaims, error) {
 	verifier := provider.Verifier(&oidc.Config{ClientID: s.config.OIDC.ClientID})
 	idToken, err := verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		s.log.Error("Failed to verify ID token: %v", err)
-		http.Redirect(w, r, "/login?error=token_verification_failed", http.StatusFound)
-		return
+		return nil, newLoginError(LoginErrorTokenVerificationFailed)
 	}
 
-	// Extract user claims
-	var claims struct {
-		Subject           string `json:"sub"`
-		Email             string `json:"email"`
-		EmailVerified     bool   `json:"email_verified"`
-		Username          string `json:"username"`
-		PreferredUsername string `json:"preferred_username"`
-		Name              string `json:"name"`
-	}
-
+	var claims oidcClaims
 	if err := idToken.Claims(&claims); err != nil {
 		s.log.Error("Failed to extract claims from ID token: %v", err)
-		http.Redirect(w, r, "/login?error=claims_extraction_failed", http.StatusFound)
-		return
+		return nil, newLoginError(LoginErrorClaimsExtractionFailed)
 	}
 
-	// Determine username (prefer preferred_username, fallback to email or sub)
-	username := claims.PreferredUsername
-	if username == "" {
-		username = claims.Username
-	}
-	if username == "" {
-		username = claims.Email
-	}
-	if username == "" {
-		username = claims.Subject
-	}
+	return &claims, nil
+}
 
-	// Determine user role from claims (check both groups and roles)
-	userRole := db.RoleViewer // Default role
+// determineUsernameFromClaims determines the username from OIDC claims
+func determineUsernameFromClaims(claims *oidcClaims) string {
+	if claims.PreferredUsername != "" {
+		return claims.PreferredUsername
+	}
+	if claims.Username != "" {
+		return claims.Username
+	}
+	if claims.Email != "" {
+		return claims.Email
+	}
+	return claims.Subject
+}
 
-	var user *db.User
-
-	// OIDC Login Flow: Try to find existing user
+// findOIDCUser attempts to find an existing user by sub, email, or username
+func (s *Server) findOIDCUser(ctx context.Context, claims *oidcClaims, username string) (*db.User, error) {
 	// Step 1: Check if user exists based on sub claim
 	if claims.Subject != "" {
-		userBySub, err := s.store.GetUserByOpenIDSub(r.Context(), claims.Subject)
+		userBySub, err := s.store.GetUserByOpenIDSub(ctx, claims.Subject)
 		if err == nil {
-			user = userBySub
-			s.log.Info("OIDC user matched by OpenID sub claim: user_id=%s, username=%s, sub=%s", user.ID, user.Username, claims.Subject)
+			return userBySub, nil
 		} else if err.Error() != "user not found" {
 			s.log.Error("Database error while looking up user by OpenID sub: %v", err)
-			http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
-			return
+			return nil, newLoginError(LoginErrorDatabaseError)
 		}
 	}
 
 	// Step 2: If not found by sub, check by email address
-	if user == nil && claims.Email != "" {
-		userByEmail, err := s.store.GetUserByEmail(r.Context(), claims.Email)
+	if claims.Email != "" {
+		userByEmail, err := s.store.GetUserByEmail(ctx, claims.Email)
 		if err == nil {
-			// User found by email - check if sub claim is already set
-			if userByEmail.OpenIDSub != nil {
-				// User already has a sub claim set - check if it matches
-				if *userByEmail.OpenIDSub != claims.Subject {
-					// Sub claim doesn't match - this is a security issue
-					// Fail login to prevent account takeover
-					s.log.Warn("OIDC login blocked - user found by email but has different OpenID sub: user_id=%s, username=%s, email=%s, existing_sub=%s, new_sub=%s", userByEmail.ID, userByEmail.Username, claims.Email, *userByEmail.OpenIDSub, claims.Subject)
-					http.Redirect(w, r, "/login?error=account_linked_to_different_provider", http.StatusFound)
-					return
-				}
-				// Sub claim matches - proceed with login
-				user = userByEmail
-				s.log.Info("OIDC user matched by email address with matching sub: user_id=%s, username=%s, email=%s, sub=%s", user.ID, user.Username, claims.Email, claims.Subject)
-			} else {
-				// User found by email but no sub claim - set it and proceed
-				user = userByEmail
-				user.OpenIDSub = &claims.Subject
-				if err := s.store.UpdateUser(r.Context(), user); err != nil {
-					s.log.Error("Failed to update user with OpenID sub: %v", err)
-					http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
-					return
-				}
-				s.log.Info("OIDC user matched by email address and linked with sub claim: user_id=%s, username=%s, email=%s, sub=%s", user.ID, user.Username, claims.Email, claims.Subject)
+			if userByEmail.OpenIDSub != nil && *userByEmail.OpenIDSub != claims.Subject {
+				s.log.Warn("OIDC login blocked - user found by email but has different OpenID sub: user_id=%s, username=%s, email=%s, existing_sub=%s, new_sub=%s", userByEmail.ID, userByEmail.Username, claims.Email, *userByEmail.OpenIDSub, claims.Subject)
+				return nil, newLoginError(LoginErrorAccountLinkedToDifferentProvider)
 			}
+
+			if userByEmail.OpenIDSub == nil {
+				userByEmail.OpenIDSub = &claims.Subject
+				if err := s.store.UpdateUser(ctx, userByEmail); err != nil {
+					s.log.Error("Failed to update user with OpenID sub: %v", err)
+					return nil, newLoginError(LoginErrorDatabaseError)
+				}
+			}
+			return userByEmail, nil
 		} else if err.Error() != "user not found" {
 			s.log.Error("Database error while looking up user by email: %v", err)
-			http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
-			return
+			return nil, newLoginError(LoginErrorDatabaseError)
 		}
 	}
 
 	// Step 3: If still not found, check by username
-	if user == nil {
-		userByUsername, err := s.store.GetUserByUsername(r.Context(), username)
-		if err == nil {
-			// User found by username - check if sub claim is already set
-			if userByUsername.OpenIDSub != nil {
-				// User already has a sub claim set - check if it matches
-				if *userByUsername.OpenIDSub != claims.Subject {
-					// Sub claim doesn't match - this is a security issue
-					// Fail login to prevent account takeover
-					s.log.Warn("OIDC login blocked - user found by username but has different OpenID sub: user_id=%s, username=%s, existing_sub=%s, new_sub=%s", userByUsername.ID, username, *userByUsername.OpenIDSub, claims.Subject)
-					http.Redirect(w, r, "/login?error=account_linked_to_different_provider", http.StatusFound)
-					return
-				}
-				// Sub claim matches - proceed with login
-				user = userByUsername
-				s.log.Info("OIDC user matched by username with matching sub: user_id=%s, username=%s, sub=%s", user.ID, username, claims.Subject)
-			} else {
-				// User found by username but no sub claim - set it and proceed
-				user = userByUsername
-				user.OpenIDSub = &claims.Subject
-				if err := s.store.UpdateUser(r.Context(), user); err != nil {
-					s.log.Error("Failed to update user with OpenID sub: %v", err)
-					http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
-					return
-				}
-				s.log.Info("OIDC user matched by username and linked with sub claim: user_id=%s, username=%s, sub=%s", user.ID, username, claims.Subject)
+	userByUsername, err := s.store.GetUserByUsername(ctx, username)
+	if err == nil {
+		if userByUsername.OpenIDSub != nil && *userByUsername.OpenIDSub != claims.Subject {
+			s.log.Warn("OIDC login blocked - user found by username but has different OpenID sub: user_id=%s, username=%s, existing_sub=%s, new_sub=%s", userByUsername.ID, username, *userByUsername.OpenIDSub, claims.Subject)
+			return nil, newLoginError(LoginErrorAccountLinkedToDifferentProvider)
+		}
+
+		if userByUsername.OpenIDSub == nil {
+			userByUsername.OpenIDSub = &claims.Subject
+			if err := s.store.UpdateUser(ctx, userByUsername); err != nil {
+				s.log.Error("Failed to update user with OpenID sub: %v", err)
+				return nil, newLoginError(LoginErrorDatabaseError)
 			}
-		} else if err.Error() != "user not found" {
-			s.log.Error("Database error while looking up user by username: %v", err)
-			http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
-			return
 		}
+		return userByUsername, nil
+	} else if err.Error() != "user not found" {
+		s.log.Error("Database error while looking up user by username: %v", err)
+		return nil, newLoginError(LoginErrorDatabaseError)
 	}
 
-	// OIDC Register Flow: Create new user if not found
-	if user == nil {
-		// Check if registration is enabled
-		authConfig, _, err := s.store.GetAuthConfig(r.Context())
-		if err != nil {
-			s.log.Error("Failed to get auth config: %v", err)
-			http.Redirect(w, r, "/login?error=configuration_error", http.StatusFound)
-			return
-		}
+	return nil, nil // User not found
+}
 
-		// Check user count to allow first user even if registration is disabled
-		userCount, err := s.store.CountUsers(r.Context())
-		if err != nil {
-			s.log.Error("Failed to check user count: %v", err)
-			http.Redirect(w, r, "/login?error=database_error", http.StatusFound)
-			return
-		}
-
-		// Determine if user should be created as disabled
-		shouldCreateDisabled := userCount > 0 && !authConfig.AllowRegistration
-
-		// Create new user with username, email, and sub claim from IDToken
-		var emailPtr *string
-		if claims.Email != "" {
-			emailPtr = &claims.Email
-		}
-		var openIDSubPtr *string
-		if claims.Subject != "" {
-			openIDSubPtr = &claims.Subject
-		}
-
-		// Generate a random password for OIDC users (required field but not used for OIDC auth)
-		randomPassword, err := generateRandomPassword()
-		if err != nil {
-			s.log.Error("Failed to generate random password: %v", err)
-			http.Redirect(w, r, "/login?error=password_generation_failed", http.StatusFound)
-			return
-		}
-		hashedPassword, err := auth.HashPassword(randomPassword)
-		if err != nil {
-			s.log.Error("Failed to hash password: %v", err)
-			http.Redirect(w, r, "/login?error=password_hashing_failed", http.StatusFound)
-			return
-		}
-
-		user = &db.User{
-			ID:           uuid.New().String(),
-			Username:     username,
-			Email:        emailPtr,
-			OpenIDSub:    openIDSubPtr,
-			PasswordHash: hashedPassword,
-			Role:         userRole,
-			IsActive:     !shouldCreateDisabled, // Disable if registration is disabled
-		}
-
-		if err := s.store.CreateUser(r.Context(), user); err != nil {
-			// Check if error is UNIQUE constraint on email
-			if err.Error() == "UNIQUE constraint failed: users.email" {
-				s.log.Error("OIDC user creation failed - email already in use: %v", err)
-				http.Redirect(w, r, "/login?error=email_already_exists", http.StatusFound)
-				return
-			}
-			s.log.Error("Failed to create OIDC user: %v", err)
-			http.Redirect(w, r, "/login?error=user_creation_failed", http.StatusFound)
-			return
-		}
-
-		s.log.Info("OIDC new user registered: user_id=%s, username=%s, email=%s, sub=%s, is_active=%v", user.ID, username, claims.Email, claims.Subject, !shouldCreateDisabled)
-
-		// If user was created as disabled, redirect with appropriate message
-		if shouldCreateDisabled {
-			s.log.Info("OIDC user created but disabled - registration is disabled: %s", username)
-			http.Redirect(w, r, "/login?error=account_disabled", http.StatusFound)
-			return
-		}
+// createOIDCUser creates a new user from OIDC claims
+func (s *Server) createOIDCUser(ctx context.Context, claims *oidcClaims, username string) (*db.User, error) {
+	authConfig, _, err := s.store.GetAuthConfig(ctx)
+	if err != nil {
+		s.log.Error("Failed to get auth config: %v", err)
+		return nil, newLoginError(LoginErrorConfigurationError)
 	}
 
-	// At this point, user is found or created - check if active
-	if !user.IsActive {
-		s.log.Info("OIDC login blocked - user account is disabled: %s", username)
-		http.Redirect(w, r, "/login?error=account_disabled", http.StatusFound)
-		return
+	userCount, err := s.store.CountUsers(ctx)
+	if err != nil {
+		s.log.Error("Failed to check user count: %v", err)
+		return nil, newLoginError(LoginErrorDatabaseError)
 	}
 
-	// Get auth config for session timeout
+	shouldCreateDisabled := userCount > 0 && !authConfig.AllowRegistration
+
+	var emailPtr *string
+	if claims.Email != "" {
+		emailPtr = &claims.Email
+	}
+	var openIDSubPtr *string
+	if claims.Subject != "" {
+		openIDSubPtr = &claims.Subject
+	}
+
+	randomPassword, err := generateRandomPassword()
+	if err != nil {
+		s.log.Error("Failed to generate random password: %v", err)
+		return nil, newLoginError(LoginErrorPasswordGenerationFailed)
+	}
+
+	hashedPassword, err := auth.HashPassword(randomPassword)
+	if err != nil {
+		s.log.Error("Failed to hash password: %v", err)
+		return nil, newLoginError(LoginErrorPasswordHashingFailed)
+	}
+
+	user := &db.User{
+		ID:           uuid.New().String(),
+		Username:     username,
+		Email:        emailPtr,
+		OpenIDSub:    openIDSubPtr,
+		PasswordHash: hashedPassword,
+		Role:         db.RoleViewer,
+		IsActive:     !shouldCreateDisabled,
+	}
+
+	if err := s.store.CreateUser(ctx, user); err != nil {
+		if err.Error() == "UNIQUE constraint failed: users.email" {
+			s.log.Error("OIDC user creation failed - email already in use: %v", err)
+			return nil, newLoginError(LoginErrorEmailAlreadyExists)
+		}
+		s.log.Error("Failed to create OIDC user: %v", err)
+		return nil, newLoginError(LoginErrorUserCreationFailed)
+	}
+
+	s.log.Info("OIDC new user registered: user_id=%s, username=%s, email=%s, sub=%s, is_active=%v", user.ID, username, claims.Email, claims.Subject, !shouldCreateDisabled)
+
+	if shouldCreateDisabled {
+		s.log.Info("OIDC user created but disabled - registration is disabled: %s", username)
+		return nil, newLoginError(LoginErrorAccountDisabled)
+	}
+
+	return user, nil
+}
+
+// findOrCreateOIDCUser finds an existing user or creates a new one
+func (s *Server) findOrCreateOIDCUser(ctx context.Context, claims *oidcClaims, username string) (*db.User, error) {
+	user, err := s.findOIDCUser(ctx, claims, username)
+	if err != nil {
+		return nil, err
+	}
+
+	if user != nil {
+		return user, nil
+	}
+
+	return s.createOIDCUser(ctx, claims, username)
+}
+
+// createOIDCSessionAndCookies creates a session and sets all necessary cookies
+func (s *Server) createOIDCSessionAndCookies(w http.ResponseWriter, r *http.Request, user *db.User, oauthToken *oauth2.Token) error {
 	authConfig, _, _ := s.store.GetAuthConfig(r.Context())
 	expiresAt := time.Now().Add(time.Duration(authConfig.SessionTimeout) * time.Second)
 
-	// Generate JWT token for session
 	tokenString, err := s.authManager.GenerateJWT(user, authConfig)
 	if err != nil {
 		s.log.Error("Failed to generate JWT token: %v", err)
-		http.Redirect(w, r, "/login?error=token_generation_failed", http.StatusFound)
-		return
+		return newLoginError(LoginErrorTokenGenerationFailed)
 	}
 
-	// Create session
 	session := &db.Session{
 		UserID:    user.ID,
 		Token:     tokenString,
@@ -886,13 +912,12 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.UserAgent(),
 	}
+
 	if err := s.store.CreateSession(r.Context(), session); err != nil {
 		s.log.Error("Failed to create session: %v", err)
-		http.Redirect(w, r, "/login?error=session_creation_failed", http.StatusFound)
-		return
+		return newLoginError(LoginErrorSessionCreationFailed)
 	}
 
-	// Set auth token cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.CookieAuthToken,
 		Value:    tokenString,
@@ -903,13 +928,12 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		Secure:   r.TLS != nil,
 	})
 
-	// Set refresh token if exists
-	if token.RefreshToken != "" {
+	if oauthToken.RefreshToken != "" {
 		http.SetCookie(w, &http.Cookie{
 			Name:     auth.CookieRefreshToken,
-			Value:    token.RefreshToken,
+			Value:    oauthToken.RefreshToken,
 			Path:     "/",
-			Expires:  time.Now().Add(30 * 24 * time.Hour), // 30 days
+			Expires:  time.Now().Add(30 * 24 * time.Hour),
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
 			Secure:   r.TLS != nil,
@@ -930,13 +954,75 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Update last login
 	now := time.Now()
 	user.LastLogin = &now
 	if err := s.store.UpdateUser(r.Context(), user); err != nil {
 		s.log.Error("Failed to update last login: %v", err)
 	}
 
-	// Redirect to /login (frontend will handle the redirect)
+	return nil
+}
+
+// handleOIDCCallback handles the OIDC callback and exchanges the authorization code for tokens
+func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract and validate callback parameters
+	params, err := s.extractOIDCCallbackParams(r)
+	if err != nil {
+		http.Redirect(w, r, "/login?error="+err.Error(), http.StatusFound)
+		return
+	}
+
+	// Validate state
+	if err := s.validateOIDCState(w, r, params.state); err != nil {
+		http.Redirect(w, r, "/login?error="+err.Error(), http.StatusFound)
+		return
+	}
+
+	// Get OIDC provider
+	provider, err := s.getOIDCProvider(ctx)
+	if err != nil {
+		http.Redirect(w, r, "/login?error="+err.Error(), http.StatusFound)
+		return
+	}
+
+	// Build OAuth2 config and exchange code for tokens
+	oauth2Config := s.buildOAuth2Config(provider)
+	oauthToken, rawIDToken, err := s.exchangeOIDCCodeForTokens(ctx, oauth2Config, params.code)
+	if err != nil {
+		http.Redirect(w, r, "/login?error="+err.Error(), http.StatusFound)
+		return
+	}
+
+	// Verify ID token and extract claims
+	claims, err := s.verifyAndExtractIDTokenClaims(ctx, provider, rawIDToken)
+	if err != nil {
+		http.Redirect(w, r, "/login?error="+err.Error(), http.StatusFound)
+		return
+	}
+
+	// Determine username and find or create user
+	username := determineUsernameFromClaims(claims)
+	user, err := s.findOrCreateOIDCUser(ctx, claims, username)
+	if err != nil {
+		http.Redirect(w, r, "/login?error="+err.Error(), http.StatusFound)
+		return
+	}
+
+	// Check if user is active
+	if !user.IsActive {
+		s.log.Info("OIDC login blocked - user account is disabled: %s", username)
+		http.Redirect(w, r, "/login?error="+string(LoginErrorAccountDisabled), http.StatusFound)
+		return
+	}
+
+	// Create session and set cookies
+	if err := s.createOIDCSessionAndCookies(w, r, user, oauthToken); err != nil {
+		http.Redirect(w, r, "/login?error="+err.Error(), http.StatusFound)
+		return
+	}
+
+	// Redirect to login page
 	http.Redirect(w, r, "/login", http.StatusFound)
 }

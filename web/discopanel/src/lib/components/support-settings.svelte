@@ -17,7 +17,7 @@
 		ExternalLink
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 
 	let generating = $state(false);
 	let uploading = $state(false);
@@ -35,16 +35,22 @@
 		referenceId = null;
 
 		try {
-			const response = await api.generateSupportBundle(upload);
+			const response = await rpcClient.support.generateSupportBundle({
+				includeLogs: true,
+				includeConfigs: true,
+				includeSystemInfo: true,
+				serverIds: []
+			});
 
-			if (response.success) {
-				if (upload && response.reference_id) {
-					referenceId = response.reference_id;
+			if (response.bundleId) {
+				if (upload) {
+					// For upload, the bundle ID serves as reference
+					referenceId = response.bundleId;
 					toast.success('Support bundle uploaded successfully!', {
 						description: 'Save your reference ID for support requests.',
 					});
-				} else if (response.bundle_path) {
-					bundlePath = response.bundle_path;
+				} else {
+					bundlePath = response.bundleId;
 					toast.success('Support bundle generated!', {
 						description: 'Click the download button to save the bundle.',
 					});
@@ -69,7 +75,17 @@
 		if (!bundlePath) return;
 
 		try {
-			await api.downloadSupportBundle(bundlePath);
+			const response = await rpcClient.support.downloadSupportBundle({
+				bundleId: bundlePath
+			});
+			// Create a download link
+			const blob = new Blob([response.content], { type: response.mimeType });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = response.filename;
+			a.click();
+			URL.revokeObjectURL(url);
 			// Clear the bundle path after download
 			bundlePath = null;
 			toast.success('Support bundle downloaded!');

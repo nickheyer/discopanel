@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
+	import type { ProxyListener } from '$lib/proto/discopanel/v1/common_pb';
+	import type { ProxyListenerWithCount, ProxyRoute } from '$lib/proto/discopanel/v1/proxy_pb';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -15,33 +17,21 @@
 		Info, Edit, Star
 	} from '@lucide/svelte';
 
-	interface ProxyListener {
-		id: string;
-		port: number;
-		name: string;
-		description: string;
-		enabled: boolean;
-		is_default: boolean;
-		server_count?: number;
-		created_at?: string;
-		updated_at?: string;
-	}
-
 	let loading = $state(true);
 	let saving = $state(false);
 	let proxyEnabled = $state(false);
 	let baseURL = $state('');
-	let listeners = $state<ProxyListener[]>([]);
+	let listenersWithCount = $state<ProxyListenerWithCount[]>([]);
 	let editingListener = $state<ProxyListener | null>(null);
 	let newListener = $state<Partial<ProxyListener>>({
 		port: 25565,
 		name: '',
 		description: '',
 		enabled: true,
-		is_default: false
+		isDefault: false
 	});
 	let portError = $state('');
-	let activeRoutes = $state<any[]>([]);
+	let activeRoutes = $state<ProxyRoute[]>([]);
 
 	onMount(() => {
 		loadAll();
@@ -62,9 +52,9 @@
 
 	async function loadProxyConfig() {
 		try {
-			const status = await api.getProxyStatus();
+			const status = await rpcClient.proxy.getProxyStatus({});
 			proxyEnabled = status.enabled;
-			baseURL = status.base_url || '';
+			baseURL = status.baseUrl || '';
 		} catch (error) {
 			toast.error('Failed to load proxy configuration');
 		}
@@ -72,10 +62,11 @@
 
 	async function loadListeners() {
 		try {
-			listeners = await api.getProxyListeners();
+			const response = await rpcClient.proxy.getProxyListeners({});
+			listenersWithCount = response.listeners;
 			// Set default port for new listener
-			if (listeners.length > 0) {
-				const usedPorts = new Set(listeners.map(l => l.port));
+			if (listenersWithCount.length > 0) {
+				const usedPorts = new Set(listenersWithCount.map(lwc => lwc.listener?.port || 0));
 				let nextPort = 25565;
 				while (usedPorts.has(nextPort)) {
 					nextPort++;
@@ -89,7 +80,8 @@
 
 	async function loadActiveRoutes() {
 		try {
-			activeRoutes = await api.getProxyRoutes();
+			const response = await rpcClient.proxy.getProxyRoutes({});
+			activeRoutes = response.routes;
 		} catch (error) {
 			console.error('Failed to load active routes:', error);
 		}
@@ -104,9 +96,9 @@
 		}
 		
 		// Check if port is already used by another listener
-		const existingListener = listeners.find(l => l.port === port && l.id !== editingListener?.id);
+		const existingListener = listenersWithCount.find(lwc => lwc.listener?.port === port && lwc.listener?.id !== editingListener?.id);
 		if (existingListener) {
-			portError = `Port ${port} is already used by listener "${existingListener.name}"`;
+			portError = `Port ${port} is already used by listener "${existingListener.listener?.name}"`;
 			return false;
 		}
 		
@@ -116,9 +108,9 @@
 	async function saveProxyConfig() {
 		saving = true;
 		try {
-			await api.updateProxyConfig({
+			await rpcClient.proxy.updateProxyConfig({
 				enabled: proxyEnabled,
-				base_url: baseURL
+				baseUrl: baseURL
 			});
 			
 			toast.success('Proxy configuration saved');
@@ -141,12 +133,12 @@
 		}
 
 		try {
-			await api.createProxyListener({
+			await rpcClient.proxy.createProxyListener({
 				port: newListener.port!,
 				name: newListener.name,
 				description: newListener.description || '',
 				enabled: newListener.enabled,
-				is_default: newListener.is_default
+				isDefault: newListener.isDefault
 			});
 			
 			toast.success(`Listener "${newListener.name}" created`);
@@ -157,7 +149,7 @@
 				name: '',
 				description: '',
 				enabled: true,
-				is_default: false
+				isDefault: false
 			};
 			
 			await loadListeners();
@@ -168,11 +160,12 @@
 
 	async function updateListener(listener: ProxyListener) {
 		try {
-			await api.updateProxyListener(listener.id, {
+			await rpcClient.proxy.updateProxyListener({
+				id: listener.id,
 				name: listener.name,
 				description: listener.description,
 				enabled: listener.enabled,
-				is_default: listener.is_default
+				isDefault: listener.isDefault
 			});
 			
 			toast.success(`Listener "${listener.name}" updated`);
@@ -183,15 +176,19 @@
 		}
 	}
 
-	async function deleteListener(listener: ProxyListener) {
-		if (listener.server_count && listener.server_count > 0) {
-			toast.error(`Cannot delete: ${listener.server_count} servers are using this listener`);
+	async function deleteListener(listenerWithCount: ProxyListenerWithCount) {
+		const listener = listenerWithCount.listener;
+		if (!listener) return;
+
+		// Check server count from the response
+		if (listenerWithCount.serverCount > 0) {
+			toast.error(`Cannot delete: ${listenerWithCount.serverCount} servers are using this listener`);
 			return;
 		}
 
 		if (confirm(`Delete listener "${listener.name}" on port ${listener.port}?`)) {
 			try {
-				await api.deleteProxyListener(listener.id);
+				await rpcClient.proxy.deleteProxyListener({ id: listener.id });
 				toast.success(`Listener "${listener.name}" deleted`);
 				await loadListeners();
 			} catch (error: any) {
@@ -201,14 +198,14 @@
 	}
 
 	async function setDefaultListener(listener: ProxyListener) {
-		listener.is_default = true;
+		listener.isDefault = true;
 		await updateListener(listener);
 	}
 
-	function getListenerStatus(listener: ProxyListener): 'active' | 'inactive' | 'disabled' {
-		if (!listener.enabled) return 'disabled';
+	function getListenerStatus(listener: ProxyListener | undefined, serverCount: number): 'active' | 'inactive' | 'disabled' {
+		if (!listener || !listener.enabled) return 'disabled';
 		if (!proxyEnabled) return 'inactive';
-		return listener.server_count && listener.server_count > 0 ? 'active' : 'inactive';
+		return serverCount > 0 ? 'active' : 'inactive';
 	}
 
 	function getStatusColor(status: string): string {
@@ -307,17 +304,19 @@
 					</div>
 					<Badge variant="outline" class="gap-1">
 						<Server class="h-3 w-3" />
-						{listeners.length} {listeners.length === 1 ? 'Listener' : 'Listeners'}
+						{listenersWithCount.length} {listenersWithCount.length === 1 ? 'Listener' : 'Listeners'}
 					</Badge>
 				</div>
 			</CardHeader>
 			<CardContent class="space-y-4">
 				<!-- Existing Listeners -->
-				{#if listeners.length > 0}
+				{#if listenersWithCount.length > 0}
 					<div class="space-y-3">
-						{#each listeners as listener}
-							{@const status = getListenerStatus(listener)}
+						{#each listenersWithCount as lwc}
+							{@const listener = lwc.listener}
+							{@const status = getListenerStatus(listener, lwc.serverCount)}
 							{@const StatusIcon = getStatusIcon(status)}
+							{#if listener}
 							<div class="p-4 rounded-lg border bg-card">
 								{#if editingListener?.id === listener.id}
 									<!-- Edit Mode -->
@@ -358,8 +357,8 @@
 												</div>
 												<div class="flex items-center gap-2">
 													<Switch
-														checked={editingListener?.is_default ?? false}
-														onCheckedChange={(checked) => { if (editingListener) editingListener.is_default = checked }}
+														checked={editingListener?.isDefault ?? false}
+														onCheckedChange={(checked) => { if (editingListener) editingListener.isDefault = checked }}
 													/>
 													<Label>Default</Label>
 												</div>
@@ -389,7 +388,7 @@
 												<StatusIcon class="h-4 w-4 {getStatusColor(status)}" />
 												<span class="font-semibold">{listener.name}</span>
 												<Badge variant="secondary" class="font-mono">:{listener.port}</Badge>
-												{#if listener.is_default}
+												{#if listener.isDefault}
 													<Badge variant="default" class="gap-1">
 														<Star class="h-3 w-3" />
 														Default
@@ -404,9 +403,9 @@
 												<p class="text-sm text-muted-foreground">{listener.description}</p>
 											{/if}
 											
-											{#if listener.server_count && listener.server_count > 0}
+											{#if lwc.serverCount > 0}
 												<p class="text-xs text-muted-foreground">
-													{listener.server_count} {listener.server_count === 1 ? 'server' : 'servers'} using this listener
+													{lwc.serverCount} {lwc.serverCount === 1 ? 'server' : 'servers'} using this listener
 												</p>
 											{:else}
 												<p class="text-xs text-muted-foreground">
@@ -416,7 +415,7 @@
 										</div>
 										
 										<div class="flex gap-2">
-											{#if !listener.is_default}
+											{#if !listener.isDefault}
 												<Button
 													variant="ghost"
 													size="icon"
@@ -435,12 +434,12 @@
 											>
 												<Edit class="h-4 w-4" />
 											</Button>
-											{#if listeners.length > 1 && (!listener.server_count || listener.server_count === 0)}
+											{#if listenersWithCount.length > 1 && lwc.serverCount === 0}
 												<Button
 													variant="ghost"
 													size="icon"
 													class="h-8 w-8"
-													onclick={() => deleteListener(listener)}
+													onclick={() => deleteListener(lwc)}
 												>
 													<Trash2 class="h-4 w-4" />
 												</Button>
@@ -449,6 +448,7 @@
 									</div>
 								{/if}
 							</div>
+							{/if}
 						{/each}
 					</div>
 				{/if}
@@ -494,11 +494,11 @@
 									/>
 									<Label>Enabled</Label>
 								</div>
-								{#if listeners.length === 0}
+								{#if listenersWithCount.length === 0}
 									<div class="flex items-center gap-2">
 										<Switch
-											checked={newListener.is_default}
-											onCheckedChange={(checked) => newListener.is_default = checked}
+											checked={newListener.isDefault}
+											onCheckedChange={(checked) => newListener.isDefault = checked}
 										/>
 										<Label>Set as Default</Label>
 									</div>
@@ -535,7 +535,7 @@
 									<div>
 										<p class="font-mono text-sm">{route.hostname}</p>
 										<p class="text-xs text-muted-foreground">
-											Server: {route.server_id.slice(0, 8)}...
+											Server: {route.serverId.slice(0, 8)}...
 										</p>
 									</div>
 								</div>

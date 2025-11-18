@@ -6,7 +6,9 @@
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Plus, AlertCircle, Code, ChevronDown, ChevronRight, X } from '@lucide/svelte';
-	import type { DockerOverrides, VolumeMount } from '$lib/api/types';
+	import type { DockerOverrides } from '$lib/proto/discopanel/v1/common_pb';
+	import { DockerOverridesSchema } from '$lib/proto/discopanel/v1/common_pb';
+	import { create } from '@bufbuild/protobuf';
 	import { Badge } from '$lib/components/ui/badge';
 
 	interface Props {
@@ -27,14 +29,16 @@
 	let activeCount = $derived(() => {
 		if (!overrides) return 0;
 		let count = 0;
-		if (overrides.environment && Object.keys(overrides.environment).length > 0) count++;
+		if (overrides.environment && overrides.environment.length > 0) count++;
 		if (overrides.volumes && overrides.volumes.length > 0) count++;
-		if (overrides.cpu_limit) count++;
-		if (overrides.memory_override) count++;
-		if (overrides.restart_policy) count++;
-		if (overrides.network_mode) count++;
+		if (overrides.cpuLimit) count++;
+		if (overrides.memoryLimit) count++;
+		if (overrides.memoryReservation) count++;
+		if (overrides.networkMode) count++;
 		if (overrides.privileged) count++;
 		if (overrides.user) count++;
+		if (overrides.capabilities && overrides.capabilities.length > 0) count++;
+		if (overrides.devices && overrides.devices.length > 0) count++;
 		return count;
 	});
 
@@ -74,75 +78,125 @@
 		}
 	}
 
-	function updateOverride<K extends keyof DockerOverrides>(key: K, value: DockerOverrides[K]) {
-		if (!overrides) overrides = {};
+	function updateOverride<K extends keyof Omit<DockerOverrides, '$typeName' | '$unknown'>>(
+		key: K,
+		value: DockerOverrides[K] | undefined
+	) {
+		if (!overrides) {
+			overrides = create(DockerOverridesSchema, {});
+		}
 
+		// Create a new instance with updated values
+		const updates: any = {};
+
+		// Copy existing values
+		if (overrides.environment) updates.environment = [...overrides.environment];
+		if (overrides.volumes) updates.volumes = [...overrides.volumes];
+		if (overrides.capabilities) updates.capabilities = [...overrides.capabilities];
+		if (overrides.devices) updates.devices = [...overrides.devices];
+		if (overrides.networkMode) updates.networkMode = overrides.networkMode;
+		if (overrides.privileged) updates.privileged = overrides.privileged;
+		if (overrides.user) updates.user = overrides.user;
+		if (overrides.memoryLimit) updates.memoryLimit = overrides.memoryLimit;
+		if (overrides.memoryReservation) updates.memoryReservation = overrides.memoryReservation;
+		if (overrides.cpuLimit) updates.cpuLimit = overrides.cpuLimit;
+		if (overrides.restartPolicy) updates.restartPolicy = overrides.restartPolicy;
+		if (overrides.entryPoint) updates.entryPoint = overrides.entryPoint;
+
+		// Update the specific field
 		if (value === undefined || value === null ||
 		    (typeof value === 'string' && !value) ||
 		    (Array.isArray(value) && value.length === 0) ||
-		    (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0)) {
-			delete overrides[key];
+		    (typeof value === 'number' && value === 0) ||
+		    (typeof value === 'bigint' && value === 0n)) {
+			delete updates[key];
 		} else {
-			overrides[key] = value;
+			updates[key] = value;
 		}
 
-		// If no overrides left, set to undefined
-		if (Object.keys(overrides).length === 0) {
-			overrides = undefined;
+		// Check if any values remain
+		const hasValues = Object.values(updates).some(v =>
+			v !== undefined && v !== null && v !== '' && v !== 0 && v !== 0n &&
+			(!Array.isArray(v) || v.length > 0)
+		);
+
+		if (hasValues) {
+			overrides = create(DockerOverridesSchema, updates);
 		} else {
-			overrides = { ...overrides };
+			overrides = undefined;
 		}
 
 		onchange?.(overrides);
 	}
 
-	// Environment Variables
+	// Environment Variables (stored as "KEY=VALUE" strings)
 	function addEnvVar() {
-		const env = { ...(overrides?.environment || {}) };
+		const envArray = [...(overrides?.environment || [])];
 		// Generate unique key name
 		let newKey = `VAR_${envVarCounter}`;
-		while (env[newKey]) {
+		const envMap = envArrayToMap(envArray);
+		while (envMap.has(newKey)) {
 			envVarCounter++;
 			newKey = `VAR_${envVarCounter}`;
 		}
 		envVarCounter++;
-		env[newKey] = '';
-		updateOverride('environment', env);
+		envArray.push(`${newKey}=`);
+		updateOverride('environment', envArray);
 	}
 
 	function updateEnvVar(oldKey: string, newKey: string, value: string) {
-		const env = { ...(overrides?.environment || {}) };
+		const envArray = [...(overrides?.environment || [])];
+		const envMap = envArrayToMap(envArray);
 
-		// If key changed, delete old key
+		// If key changed, remove old key
 		if (oldKey !== newKey) {
-			delete env[oldKey];
+			envMap.delete(oldKey);
 		}
 
 		// Add new key/value if both are present
 		if (newKey) {
-			env[newKey] = value;
+			envMap.set(newKey, value);
 		}
 
-		updateOverride('environment', Object.keys(env).length > 0 ? env : undefined);
+		const newArray = mapToEnvArray(envMap);
+		updateOverride('environment', newArray.length > 0 ? newArray : undefined);
 	}
 
 	function removeEnvVar(key: string) {
-		const env = { ...(overrides?.environment || {}) };
-		delete env[key];
-		updateOverride('environment', Object.keys(env).length > 0 ? env : undefined);
+		const envArray = [...(overrides?.environment || [])];
+		const envMap = envArrayToMap(envArray);
+		envMap.delete(key);
+		const newArray = mapToEnvArray(envMap);
+		updateOverride('environment', newArray.length > 0 ? newArray : undefined);
 	}
 
-	// Volumes
+	// Helper functions for environment variable conversion
+	function envArrayToMap(envArray: string[]): Map<string, string> {
+		const map = new Map<string, string>();
+		for (const env of envArray) {
+			const [key, ...valueParts] = env.split('=');
+			if (key) {
+				map.set(key, valueParts.join('='));
+			}
+		}
+		return map;
+	}
+
+	function mapToEnvArray(envMap: Map<string, string>): string[] {
+		return Array.from(envMap.entries()).map(([key, value]) => `${key}=${value}`);
+	}
+
+	// Volumes (stored as "source:target" or "source:target:mode" strings)
 	function addVolume() {
 		const volumes = [...(overrides?.volumes || [])];
-		volumes.push({ source: '', target: '', type: 'bind' });
+		volumes.push('');
 		updateOverride('volumes', volumes);
 	}
 
-	function updateVolume(index: number, volume: VolumeMount | null) {
+	function updateVolume(index: number, volumeStr: string | null) {
 		const volumes = [...(overrides?.volumes || [])];
-		if (volume) {
-			volumes[index] = volume;
+		if (volumeStr) {
+			volumes[index] = volumeStr;
 		} else {
 			volumes.splice(index, 1);
 		}
@@ -234,10 +288,10 @@
 								Add Variable
 							</Button>
 						</div>
-						{#if overrides?.environment && Object.keys(overrides.environment).length > 0}
+						{#if overrides?.environment && overrides.environment.length > 0}
 							<div class="rounded-lg border bg-muted/20 p-3">
 								<div class="space-y-2">
-									{#each Object.entries(overrides.environment) as [key, value]}
+									{#each Array.from(envArrayToMap(overrides.environment).entries()) as [key, value]}
 										<div class="flex items-center gap-2">
 											<Input
 												value={key}
@@ -295,32 +349,12 @@
 									{#each overrides.volumes as volume, i}
 										<div class="flex items-center gap-2">
 											<Input
-												bind:value={volume.source}
-												onchange={() => updateVolume(i, volume)}
-												placeholder="/host/path"
+												value={volume}
+												onchange={(e) => updateVolume(i, e.currentTarget.value)}
+												placeholder="/host/path:/container/path:ro"
 												disabled={disabled}
-												class="h-8 text-xs flex-1"
+												class="h-8 text-xs flex-1 font-mono"
 											/>
-											<span class="text-muted-foreground text-xs">→</span>
-											<Input
-												bind:value={volume.target}
-												onchange={() => updateVolume(i, volume)}
-												placeholder="/container/path"
-												disabled={disabled}
-												class="h-8 text-xs flex-1"
-											/>
-											<label class="flex items-center gap-1">
-												<Switch
-													checked={volume.read_only || false}
-													onCheckedChange={(checked) => {
-														volume.read_only = checked;
-														updateVolume(i, volume);
-													}}
-													disabled={disabled}
-													class="scale-75"
-												/>
-												<span class="text-xs">RO</span>
-											</label>
 											<Button
 												type="button"
 												variant="ghost"
@@ -350,21 +384,21 @@
 								step="0.5"
 								min="0"
 								placeholder="e.g., 2.5"
-								value={overrides?.cpu_limit || ''}
-								onchange={(e) => updateOverride('cpu_limit', e.currentTarget.value ? Number(e.currentTarget.value) : undefined)}
+								value={overrides?.cpuLimit || ''}
+								onchange={(e) => updateOverride('cpuLimit', e.currentTarget.value ? Number(e.currentTarget.value) : undefined)}
 								disabled={disabled}
 								class="h-8 text-xs"
 							/>
 						</div>
 						<div class="space-y-2">
-							<Label for="memory-override" class="text-sm">Memory Override (MB)</Label>
+							<Label for="memory-limit" class="text-sm">Memory Limit (MB)</Label>
 							<Input
-								id="memory-override"
+								id="memory-limit"
 								type="number"
 								min="512"
 								placeholder="e.g., 8192"
-								value={overrides?.memory_override || ''}
-								onchange={(e) => updateOverride('memory_override', e.currentTarget.value ? Number(e.currentTarget.value) : undefined)}
+								value={overrides?.memoryLimit ? Number(overrides.memoryLimit) / 1024 / 1024 : ''}
+								onchange={(e) => updateOverride('memoryLimit', e.currentTarget.value ? BigInt(Number(e.currentTarget.value) * 1024 * 1024) : undefined)}
 								disabled={disabled}
 								class="h-8 text-xs"
 							/>
@@ -379,8 +413,8 @@
 								id="network-mode"
 								type="text"
 								placeholder="bridge (default)"
-								value={overrides?.network_mode || ''}
-								onchange={(e) => updateOverride('network_mode', e.currentTarget.value || undefined)}
+								value={overrides?.networkMode || ''}
+								onchange={(e) => updateOverride('networkMode', e.currentTarget.value || undefined)}
 								disabled={disabled}
 								class="h-8 text-xs"
 							/>
@@ -391,8 +425,8 @@
 								id="restart-policy"
 								type="text"
 								placeholder="unless-stopped"
-								value={overrides?.restart_policy || ''}
-								onchange={(e) => updateOverride('restart_policy', e.currentTarget.value || undefined)}
+								value={overrides?.restartPolicy || ''}
+								onchange={(e) => updateOverride('restartPolicy', e.currentTarget.value || undefined)}
 								disabled={disabled}
 								class="h-8 text-xs"
 							/>
@@ -411,14 +445,6 @@
 								/>
 								<span class="text-sm">Privileged Mode</span>
 							</label>
-							<label class="flex items-center gap-2">
-								<Switch
-									checked={overrides?.read_only || false}
-									onCheckedChange={(checked) => updateOverride('read_only', checked || undefined)}
-									disabled={disabled}
-								/>
-								<span class="text-sm">Read-only Root FS</span>
-							</label>
 						</div>
 					</div>
 
@@ -431,6 +457,19 @@
 							placeholder="1000:1000 or username"
 							value={overrides?.user || ''}
 							onchange={(e) => updateOverride('user', e.currentTarget.value || undefined)}
+							disabled={disabled}
+							class="h-8 text-xs"
+						/>
+					</div>
+					<!-- Entrypoint -->
+					<div class="space-y-2">
+						<Label for="entrypoint" class="text-sm">Entrypoint</Label>
+						<Input
+							id="entrypoint"
+							type="text"
+							placeholder='echo "foobar"'
+							value={overrides?.entryPoint || ''}
+							onchange={(e) => updateOverride('entryPoint', e.currentTarget.value || undefined)}
 							disabled={disabled}
 							class="h-8 text-xs"
 						/>

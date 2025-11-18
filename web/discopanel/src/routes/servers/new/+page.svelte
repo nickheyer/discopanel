@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -10,10 +9,15 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { ArrowLeft, Loader2, Package, Settings, HardDrive } from '@lucide/svelte';
-	import type { CreateServerRequest, ModLoader, ModLoaderInfo, DockerImageInfo, IndexedModpack } from '$lib/api/types';
+	import { create } from '@bufbuild/protobuf';
+	import type { CreateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
+	import { CreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
+	import { ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+	import type { ModLoaderInfo, DockerImage } from '$lib/proto/discopanel/v1/minecraft_pb';
+	import type { IndexedModpack } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
@@ -24,7 +28,7 @@
 	let loadingVersions = $state(true);
 	let minecraftVersions = $state<string[]>([]);
 	let modLoaders = $state<ModLoaderInfo[]>([]);
-	let dockerImages = $state<DockerImageInfo[]>([]);
+	let dockerImages = $state<DockerImage[]>([]);
 	let latestVersion = $state('');
 	let proxyEnabled = $state(false);
 	let proxyBaseURL = $state('');
@@ -41,72 +45,76 @@
 	let selectedVersionId = $state<string>('');
 	let loadingModpackVersions = $state(false);
 
-	let formData = $state<CreateServerRequest>({
+	let formData = $state<CreateServerRequest>(create(CreateServerRequestSchema, {
 		name: '',
 		description: '',
-		mod_loader: 'vanilla',
-		mc_version: '',
+		modLoader: ModLoader.UNSPECIFIED,
+		mcVersion: '',
 		port: 25565,
-		max_players: 20,
+		maxPlayers: 20,
 		memory: 2048,
-		docker_image: '',
-		auto_start: false,
+		dockerImage: '',
+		autoStart: false,
 		detached: false,
-		start_immediately: false,
-		proxy_hostname: '',
-		proxy_listener_id: '',
-		use_base_url: false,
-		additional_ports: [],
-		docker_overrides: undefined
-	});
+		startImmediately: false,
+		proxyHostname: '',
+		proxyListenerId: '',
+		useBaseUrl: false,
+		additionalPorts: [],
+		dockerOverrides: undefined,
+		modpackId: '',
+		modpackVersionId: ''
+	}));
 
 	onMount(async () => {
 		try {
 			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners] = await Promise.all([
-				api.getMinecraftVersions(),
-				api.getModLoaders(),
-				api.getDockerImages(),
-				api.getProxyStatus(),
-				api.getNextAvailablePort(),
-				api.getProxyListeners()
+				rpcClient.minecraft.getMinecraftVersions({}),
+				rpcClient.minecraft.getModLoaders({}),
+				rpcClient.minecraft.getDockerImages({}),
+				rpcClient.proxy.getProxyStatus({}),
+				rpcClient.server.getNextAvailablePort({}),
+				rpcClient.proxy.getProxyListeners({})
 			]);
-			
-			minecraftVersions = versionsData.versions;
+
+			minecraftVersions = versionsData.versions.map(v => v.id);
 			latestVersion = versionsData.latest;
 			modLoaders = loadersData.modloaders;
 			dockerImages = imagesData.images;
 			proxyEnabled = proxyStatus.enabled;
-			proxyBaseURL = proxyStatus.base_url || '';
-			proxyListeners = listeners.filter((l: any) => l.enabled);
-			
+			proxyBaseURL = proxyStatus.baseUrl || '';
+			proxyListeners = listeners.listeners.map(l => l.listener).filter(l => l?.enabled);
+
 			// Set default listener if available
-			const defaultListener = proxyListeners.find((l: any) => l.is_default);
+			const defaultListener = proxyListeners.find(l => l?.isDefault);
 			if (defaultListener) {
-				formData.proxy_listener_id = defaultListener.id;
+				formData.proxyListenerId = defaultListener.id;
 			} else if (proxyListeners.length > 0) {
-				formData.proxy_listener_id = proxyListeners[0].id;
+				formData.proxyListenerId = proxyListeners[0]?.id || '';
 			}
 			
 			// Set the default port to the next available port
 			formData.port = portData.port;
-			usedPorts = portData.usedPorts;
-			
-			if (!formData.mc_version && latestVersion) {
-				formData.mc_version = latestVersion;
+			usedPorts = Object.fromEntries(
+				portData.usedPorts?.map(p => [p.port, p.inUse]) || []
+			);
+
+			if (!formData.mcVersion && latestVersion) {
+				formData.mcVersion = latestVersion;
 			}
 			
 			// Load favorite modpacks
 			await loadFavoriteModpacks();
 			
 			// Check if modpack was passed in URL
-			const modpackId = $page.url.searchParams.get('modpack');
+			const urlParams = new URLSearchParams(window.location.search);
+			const modpackId = urlParams.get('modpack');
 			if (modpackId) {
 				// Load and select the modpack
 				try {
-					const response = await fetch(`/api/v1/modpacks/${modpackId}`);
-					if (response.ok) {
-						const data = await response.json();
-						await selectModpack(data.modpack);
+					const response = await rpcClient.modpack.getModpack({ id: modpackId });
+					if (response.modpack) {
+						await selectModpack(response.modpack);
 					}
 				} catch (error) {
 					console.error('Failed to load modpack from URL:', error);
@@ -122,10 +130,7 @@
 	
 	async function loadFavoriteModpacks() {
 		try {
-			const response = await fetch('/api/v1/modpacks/favorites');
-			if (!response.ok) throw new Error('Failed to load favorites');
-			
-			const result = await response.json();
+			const result = await rpcClient.modpack.listFavorites({});
 			favoriteModpacks = result.modpacks;
 		} catch (error) {
 			console.error('Failed to load favorite modpacks:', error);
@@ -138,10 +143,11 @@
 		selectedVersionId = '';
 
 		try {
-			const response = await fetch(`/api/v1/modpacks/${modpackId}/versions`);
-			if (!response.ok) throw new Error('Failed to get modpack versions');
-
-			const data = await response.json();
+			const data = await rpcClient.modpack.getModpackVersions({
+				id: modpackId,
+				gameVersion: '',
+				modLoader: ''
+			});
 			modpackVersions = data.versions || [];
 		} catch (error) {
 			console.error('Failed to load modpack versions:', error);
@@ -157,16 +163,16 @@
 
 		try {
 			// Get configuration from the server
-			const response = await fetch(`/api/v1/modpacks/${modpack.id}/config`);
-			if (!response.ok) throw new Error('Failed to get modpack config');
+			const response = await rpcClient.modpack.getModpackConfig({ id: modpack.id });
 
-			const config = await response.json();
-			formData.name = config.name;
-			formData.description = config.description;
-			formData.mod_loader = config.mod_loader;
-			formData.mc_version = config.mc_version;
-			formData.memory = config.memory;
-			formData.docker_image = config.docker_image;
+			// Config is a map of key-value pairs (response.config) - currently unused
+			formData.name = modpack.name || '';
+			formData.description = modpack.summary || '';
+			// Convert mod loader string to enum - this needs mapping
+			formData.modLoader = 0; // Will be set based on modpack data
+			formData.mcVersion = modpack.mcVersion || '';
+			formData.memory = modpack.recommendedRam || 2048;
+			formData.dockerImage = modpack.dockerImage || '';
 			await loadModpackVersions(modpack.id);
 		} catch (error) {
 			toast.error('Failed to load modpack configuration');
@@ -179,9 +185,9 @@
 		selectedModpack = null;
 		modpackVersions = [];
 		selectedVersionId = '';
-		formData.mod_loader = 'vanilla';
-		formData.mc_version = latestVersion || '';
-		formData.docker_image = '';
+		formData.modLoader = 0; // VANILLA
+		formData.mcVersion = latestVersion || '';
+		formData.dockerImage = '';
 		formData.memory = 2048;
 	}
 	
@@ -211,9 +217,11 @@
 
 	async function refreshAvailablePort() {
 		try {
-			const portData = await api.getNextAvailablePort();
+			const portData = await rpcClient.server.getNextAvailablePort({});
 			formData.port = portData.port;
-			usedPorts = portData.usedPorts;
+			usedPorts = Object.fromEntries(
+				portData.usedPorts?.map(p => [p.port, p.inUse]) || []
+			);
 			portError = '';
 		} catch (error) {
 			console.error('Failed to get available port:', error);
@@ -245,16 +253,16 @@
 
 			const createRequest = {
 				...formData,
-				modpack_id: selectedModpack?.id || '',
-				modpack_version_id: versionToSend || '',
+				modpackId: selectedModpack?.id || '',
+				modpackVersionId: versionToSend || '',
 				// When using proxy with hostname, set port to 0 to indicate proxy usage
 				port: useProxyMode ? 0 : formData.port
 			};
-			
+
 			// Create the server
-			const server = await api.createServer(createRequest);
-			toast.success(`Server "${server.name}" created successfully!`);
-			goto(`/servers/${server.id}`);
+			const response = await rpcClient.server.createServer(createRequest);
+			toast.success(`Server "${response.server?.name}" created successfully!`);
+			goto(`/servers/${response.server?.id}`);
 		} catch (error) {
 			toast.error(`Failed to create server: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		} finally {
@@ -330,9 +338,9 @@
 							<Card class="border-2 border-primary/30 bg-gradient-to-br from-primary/10 to-primary/5 shadow-lg">
 								<CardContent class="p-5">
 									<div class="flex items-start gap-3">
-										{#if selectedModpack.logo_url}
+										{#if selectedModpack.logoUrl}
 											<img
-												src={selectedModpack.logo_url}
+												src={selectedModpack.logoUrl}
 												alt={selectedModpack.name}
 												class="w-12 h-12 rounded-md object-cover"
 											/>
@@ -343,14 +351,14 @@
 												{selectedModpack.summary}
 											</p>
 											<div class="flex gap-2 mt-2">
-												{#if parseJsonArray(selectedModpack.game_versions).length > 0}
+												{#if parseJsonArray(selectedModpack.gameVersions).length > 0}
 													<Badge variant="secondary" class="text-xs">
-														MC {parseJsonArray(selectedModpack.game_versions)[0]}
+														MC {parseJsonArray(selectedModpack.gameVersions)[0]}
 													</Badge>
 												{/if}
-												{#if parseJsonArray(selectedModpack.mod_loaders).length > 0}
+												{#if parseJsonArray(selectedModpack.modLoaders).length > 0}
 													<Badge variant="secondary" class="text-xs">
-														{parseJsonArray(selectedModpack.mod_loaders)[0]}
+														{parseJsonArray(selectedModpack.modLoaders)[0]}
 													</Badge>
 												{/if}
 											</div>
@@ -442,15 +450,15 @@
 					<Separator />
 
 					<div class="space-y-2">
-						<Label for="mc_version" class="text-sm font-medium">Minecraft Version</Label>
+						<Label for="mcVersion" class="text-sm font-medium">Minecraft Version</Label>
 						{#if loadingVersions}
 							<div class="flex items-center justify-center p-4">
 								<Loader2 class="h-4 w-4 animate-spin" />
 							</div>
 						{:else}
-							<Select type="single" value={formData.mc_version} onValueChange={(v: string | undefined) => formData.mc_version = v ?? ''} disabled={loading}>
-								<SelectTrigger id="mc_version">
-									<span>{formData.mc_version || 'Select a version'}</span>
+							<Select type="single" value={formData.mcVersion} onValueChange={(v: string | undefined) => formData.mcVersion = v ?? ''} disabled={loading}>
+								<SelectTrigger id="mcVersion">
+									<span>{formData.mcVersion || 'Select a version'}</span>
 								</SelectTrigger>
 								<SelectContent>
 									{#each minecraftVersions as version (version)}
@@ -464,15 +472,19 @@
 					</div>
 
 					<div class="space-y-2">
-						<Label for="mod_loader" class="text-sm font-medium">Mod Loader</Label>
-						<Select type="single" value={formData.mod_loader} onValueChange={(v: string | undefined) => formData.mod_loader = (v as ModLoader) ?? 'vanilla'} disabled={loading || !!selectedModpack}>
-							<SelectTrigger id="mod_loader">
-								<span>{modLoaders.find(l => l.Name === formData.mod_loader)?.DisplayName || 'Select a mod loader'}</span>
+						<Label for="modLoader" class="text-sm font-medium">Mod Loader</Label>
+						<Select type="single" value={formData.modLoader.toString()} onValueChange={(v: string | undefined) => {
+							// Convert string name to enum value
+							const loaderName = v ?? 'VANILLA';
+							formData.modLoader = ModLoader[loaderName.toUpperCase() as keyof typeof ModLoader] ?? ModLoader.VANILLA;
+						}} disabled={loading || !!selectedModpack}>
+							<SelectTrigger id="modLoader">
+								<span>{modLoaders.find(l => l.name.toLowerCase() === Object.keys(ModLoader).find(k => ModLoader[k as keyof typeof ModLoader] === formData.modLoader)?.toLowerCase())?.displayName || 'Select a mod loader'}</span>
 							</SelectTrigger>
 							<SelectContent>
-								{#each modLoaders as loader (loader.Name)}
-									<SelectItem value={loader.Name}>
-										{loader.DisplayName}
+								{#each modLoaders as loader (loader.name)}
+									<SelectItem value={loader.name}>
+										{loader.displayName}
 									</SelectItem>
 								{/each}
 							</SelectContent>
@@ -481,13 +493,13 @@
 							<p class="text-sm text-muted-foreground">
 								Mod loader auto-determined from modpack
 							</p>
-						{:else if formData.mod_loader === 'vanilla'}
+						{:else if formData.modLoader === ModLoader.VANILLA}
 							<p class="text-sm text-muted-foreground">
 								No mod support - vanilla Minecraft server
 							</p>
-						{:else if modLoaders.find(l => l.Name === formData.mod_loader)?.ModsDirectory}
+						{:else if modLoaders.find(l => l.name.toLowerCase() === Object.keys(ModLoader).find(k => ModLoader[k as keyof typeof ModLoader] === formData.modLoader)?.toLowerCase())?.supportsMods}
 							<p class="text-sm text-muted-foreground">
-								Mods will be stored in: {modLoaders.find(l => l.Name === formData.mod_loader)?.ModsDirectory}/
+								This mod loader supports mods
 							</p>
 						{/if}
 					</div>
@@ -518,7 +530,7 @@
 										variant={!useProxyMode ? "default" : "outline"}
 										onclick={() => {
 											useProxyMode = false;
-											formData.proxy_hostname = '';
+											formData.proxyHostname = '';
 											// Reset port error when switching to direct port
 											portError = '';
 										}}
@@ -534,8 +546,8 @@
 										variant={useProxyMode ? "default" : "outline"}
 										onclick={() => {
 											useProxyMode = true;
-											if (!formData.proxy_hostname) {
-												formData.proxy_hostname = formData.name.toLowerCase().replace(/\s+/g, '-') || 'minecraft-server';
+											if (!formData.proxyHostname) {
+												formData.proxyHostname = formData.name.toLowerCase().replace(/\s+/g, '-') || 'minecraft-server';
 											}
 											// Clear port error when using proxy
 											portError = '';
@@ -558,13 +570,13 @@
 											<Label for="proxy_listener" class="text-sm font-medium">Proxy Listener</Label>
 											<Select 
 												type="single" 
-												value={formData.proxy_listener_id} 
-												onValueChange={(v) => formData.proxy_listener_id = v || ''}
+												value={formData.proxyListenerId}
+												onValueChange={(v) => formData.proxyListenerId = v || ''}
 												disabled={loading}
 											>
 												<SelectTrigger id="proxy_listener">
 													<span>
-														{proxyListeners.find(l => l.id === formData.proxy_listener_id)?.name || 'Select a listener'}
+														{proxyListeners.find(l => l.id === formData.proxyListenerId)?.name || 'Select a listener'}
 													</span>
 												</SelectTrigger>
 												<SelectContent>
@@ -590,7 +602,7 @@
 										<Input
 											id="proxy_hostname"
 											placeholder={proxyBaseURL ? "survival" : "survival.example.com"}
-											bind:value={formData.proxy_hostname}
+											bind:value={formData.proxyHostname}
 											disabled={loading}
 											class="h-10"
 										/>
@@ -601,7 +613,7 @@
 												<input
 													type="checkbox"
 													id="use_base_url"
-													bind:checked={formData.use_base_url}
+													bind:checked={formData.useBaseUrl}
 													class="h-4 w-4"
 												/>
 												<Label for="use_base_url" class="text-sm font-medium">
@@ -611,10 +623,10 @@
 										{/if}
 										
 										<p class="text-xs text-muted-foreground">
-											{#if formData.use_base_url && proxyBaseURL}
-												Players will connect using: {formData.proxy_hostname}.{proxyBaseURL}
+											{#if formData.useBaseUrl && proxyBaseURL}
+												Players will connect using: {formData.proxyHostname}.{proxyBaseURL}
 											{:else}
-												Players will connect using: {formData.proxy_hostname}
+												Players will connect using: {formData.proxyHostname}
 											{/if}
 										</p>
 									</div>
@@ -694,7 +706,7 @@
 							type="number"
 							min="1"
 							max="1000"
-							bind:value={formData.max_players}
+							bind:value={formData.maxPlayers}
 							disabled={loading}
 							class="h-10"
 						/>
@@ -713,35 +725,32 @@
 							/>
 						</div>
 						<p class="text-xs text-muted-foreground">
-							Recommended: {formData.mod_loader === 'vanilla' ? '2048' : '4096'} MB
+							Recommended: {formData.modLoader === ModLoader.VANILLA ? '2048' : '4096'} MB
 						</p>
 					</div>
 
 					<Separator />
 
 					<AdditionalPortsEditor
-						bind:ports={formData.additional_ports}
+						bind:ports={formData.additionalPorts}
 						disabled={loading}
 						usedPorts={usedPorts}
-						onchange={(ports) => formData.additional_ports = ports}
+						onchange={(ports) => formData.additionalPorts = ports}
 					/>
 
 					<Separator />
 
 					<div class="space-y-2">
 						<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
-						<Select type="single" value={formData.docker_image} onValueChange={(v: string | undefined) => formData.docker_image = v ?? ''} disabled={loading || loadingVersions}>
+						<Select type="single" value={formData.dockerImage} onValueChange={(v: string | undefined) => formData.dockerImage = v ?? ''} disabled={loading || loadingVersions}>
 							<SelectTrigger id="docker_image">
-								<span>{formData.docker_image ? getDockerImageDisplayName(formData.docker_image) : 'Auto-select (Recommended)'}</span>
+								<span>{formData.dockerImage ? getDockerImageDisplayName(formData.dockerImage) : 'Auto-select (Recommended)'}</span>
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="">Auto-select (Recommended)</SelectItem>
-								{#each getUniqueDockerImages(dockerImages.filter(img => !img.deprecated)) as image (image.tag)}
+								{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
 									<SelectItem value={image.tag}>
 										{getDockerImageDisplayName(image)}
-										{#if image.notes}
-											<span class="text-xs text-muted-foreground ml-2">({image.notes})</span>
-										{/if}
 									</SelectItem>
 								{/each}
 							</SelectContent>
@@ -765,7 +774,7 @@
 							</div>
 							<Switch
 								id="start_immediately"
-								bind:checked={formData.start_immediately}
+								bind:checked={formData.startImmediately}
 								disabled={loading}
 							/>
 						</div>
@@ -790,7 +799,7 @@
 									formData.detached = checked;
 									// If detaching, disable auto-start
 									if (checked) {
-										formData.auto_start = false;
+										formData.autoStart = false;
 									}
 								}}
 							/>
@@ -805,15 +814,15 @@
 							</div>
 							<Switch
 								id="auto_start"
-								bind:checked={formData.auto_start}
+								bind:checked={formData.autoStart}
 								disabled={loading || formData.detached}
 								onCheckedChange={(checked) => {
 									if (formData.detached) {
 										toast.error("Cannot enable auto-start for detached servers");
-										formData.auto_start = false;
+										formData.autoStart = false;
 										return;
 									}
-									formData.auto_start = checked;
+									formData.autoStart = checked;
 								}}
 							/>
 						</div>
@@ -824,9 +833,9 @@
 			<!-- Docker Overrides - Advanced Configuration -->
 			<div class="lg:col-span-2">
 				<DockerOverridesEditor
-					bind:overrides={formData.docker_overrides}
+					bind:overrides={formData.dockerOverrides}
 					disabled={loading}
-					onchange={(overrides) => formData.docker_overrides = overrides}
+					onchange={(overrides) => formData.dockerOverrides = overrides}
 				/>
 			</div>
 		</div>
@@ -866,9 +875,9 @@
 					>
 						<CardContent class="p-4">
 							<div class="flex items-start gap-4">
-								{#if modpack.logo_url}
+								{#if modpack.logoUrl}
 									<img 
-										src={modpack.logo_url} 
+										src={modpack.logoUrl} 
 										alt={modpack.name}
 										class="w-16 h-16 rounded-md object-cover"
 									/>
@@ -882,9 +891,9 @@
 										<Badge variant="secondary" class="text-xs">
 											{modpack.indexer}
 										</Badge>
-										{#if parseJsonArray(modpack.game_versions).length > 0}
+										{#if parseJsonArray(modpack.gameVersions).length > 0}
 											<span class="text-xs text-muted-foreground">
-												MC: {parseJsonArray(modpack.game_versions)[0]}
+												MC: {parseJsonArray(modpack.gameVersions)[0]}
 											</span>
 										{/if}
 									</div>

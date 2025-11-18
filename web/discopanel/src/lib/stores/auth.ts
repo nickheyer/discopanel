@@ -1,16 +1,16 @@
 import { writable, derived, get } from 'svelte/store';
 import { goto } from '$app/navigation';
 import { browser } from '$app/environment';
-
-interface User {
-	id: string;
-	username: string;
-	email: string;
-	role: 'admin' | 'editor' | 'viewer';
-	is_active: boolean;
-	created_at: string;
-	last_login?: string;
-}
+import { create } from '@bufbuild/protobuf';
+import { rpcClient } from '$lib/api/rpc-client';
+import type { User } from '$lib/proto/discopanel/v1/common_pb';
+import { UserRole } from '$lib/proto/discopanel/v1/common_pb';
+import {
+	LoginRequestSchema,
+	RegisterRequestSchema,
+	ResetPasswordRequestSchema,
+	ChangePasswordRequestSchema
+} from '$lib/proto/discopanel/v1/auth_pb';
 
 interface AuthState {
 	user: User | null;
@@ -46,33 +46,32 @@ function createAuthStore() {
 		
 		async checkAuthStatus() {
 			try {
-				const response = await fetch('/api/v1/auth/status');
-				const data = await response.json();
-				
+				const response = await rpcClient.auth.getAuthStatus({});
+
 				update(state => ({
 					...state,
-					authEnabled: data.enabled,
-					firstUserSetup: data.first_user_setup,
-					allowRegistration: data.allow_registration,
+					authEnabled: response.enabled,
+					firstUserSetup: response.firstUserSetup,
+					allowRegistration: response.allowRegistration,
 				}));
-				
+
 				// If auth is enabled and we have a token, validate it
 				let currentToken: string | null = null;
 				update(state => {
 					currentToken = state.token;
 					return state;
 				});
-				
-				if (data.enabled && currentToken) {
+
+				if (response.enabled && currentToken) {
 					await this.validateSession();
 				} else {
 					update(state => ({ ...state, isLoading: false }));
 				}
-				
+
 				return {
-					enabled: data.enabled,
-					firstUserSetup: data.first_user_setup,
-					allowRegistration: data.allow_registration
+					enabled: response.enabled,
+					firstUserSetup: response.firstUserSetup,
+					allowRegistration: response.allowRegistration
 				};
 			} catch (error) {
 				console.error('Failed to check auth status:', error);
@@ -83,35 +82,23 @@ function createAuthStore() {
 		
 		async login(username: string, password: string) {
 			try {
-				const response = await fetch('/api/v1/auth/login', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({ username, password }),
-				});
-				
-				if (!response.ok) {
-					const error = await response.json();
-					throw new Error(error.error || 'Login failed');
-				}
-				
-				const data = await response.json();
-				
+				const request = create(LoginRequestSchema, { username, password });
+				const response = await rpcClient.auth.login(request);
+
 				// Store token
-				if (browser && data.token) {
-					localStorage.setItem('auth_token', data.token);
+				if (browser && response.token) {
+					localStorage.setItem('auth_token', response.token);
 				}
-				
+
 				update(state => ({
 					...state,
-					user: data.user,
-					token: data.token,
+					user: response.user || null,
+					token: response.token,
 					isAuthenticated: true,
 					isLoading: false,
 				}));
-				
-				return data;
+
+				return response;
 			} catch (error) {
 				update(state => ({ ...state, isLoading: false }));
 				throw error;
@@ -128,30 +115,25 @@ function createAuthStore() {
 				firstUserSetup: false,
 				allowRegistration: false,
 			};
-			
+
 			update(state => {
 				currentState = state;
 				return state;
 			});
-			
+
 			try {
 				if (currentState.token) {
-					await fetch('/api/v1/auth/logout', {
-						method: 'POST',
-						headers: {
-							'Authorization': `Bearer ${currentState.token}`,
-						},
-					});
+					await rpcClient.auth.logout({});
 				}
 			} catch (error) {
 				console.error('Logout error:', error);
 			}
-			
+
 			// Clear local storage
 			if (browser) {
 				localStorage.removeItem('auth_token');
 			}
-			
+
 			// Reset state
 			set({
 				user: null,
@@ -162,28 +144,16 @@ function createAuthStore() {
 				firstUserSetup: currentState.firstUserSetup,
 				allowRegistration: currentState.allowRegistration,
 			});
-			
+
 			// Redirect to login
 			goto('/login');
 		},
 		
 		async register(username: string, email: string, password: string) {
 			try {
-				const response = await fetch('/api/v1/auth/register', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({ username, email, password }),
-				});
-				
-				if (!response.ok) {
-					const error = await response.json();
-					throw new Error(error.error || 'Registration failed');
-				}
-				
-				const data = await response.json();
-				
+				const request = create(RegisterRequestSchema, { username, email, password });
+				await rpcClient.auth.register(request);
+
 				// After successful registration, log them in
 				return await this.login(username, password);
 			} catch (error) {
@@ -192,52 +162,30 @@ function createAuthStore() {
 		},
 		
 		async changePassword(oldPassword: string, newPassword: string) {
-			let currentToken: string | null = null;
-			update(state => {
-				currentToken = state.token;
-				return state;
-			});
-			
-			if (!currentToken) {
-				throw new Error('Not authenticated');
+			try {
+				const request = create(ChangePasswordRequestSchema, {
+					oldPassword,
+					newPassword
+				});
+				const response = await rpcClient.auth.changePassword(request);
+				return response;
+			} catch (error: any) {
+				throw new Error(error.message || 'Failed to change password');
 			}
-			
-			const response = await fetch('/api/v1/auth/change-password', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'Authorization': `Bearer ${currentToken}`,
-				},
-				body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
-			});
-			
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to change password');
-			}
-			
-			return await response.json();
 		},
 		
 		async resetPassword(username: string, recoveryKey: string, newPassword: string) {
-			const response = await fetch('/api/v1/auth/reset-password', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify({ 
-					username, 
-					recovery_key: recoveryKey, 
-					new_password: newPassword 
-				}),
-			});
-			
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to reset password');
+			try {
+				const request = create(ResetPasswordRequestSchema, {
+					username,
+					recoveryKey,
+					newPassword
+				});
+				const response = await rpcClient.auth.resetPassword(request);
+				return response;
+			} catch (error: any) {
+				throw new Error(error.message || 'Failed to reset password');
 			}
-			
-			return await response.json();
 		},
 		
 		async validateSession() {
@@ -246,24 +194,19 @@ function createAuthStore() {
 				currentToken = state.token;
 				return state;
 			});
-			
+
 			if (!currentToken) {
 				update(state => ({ ...state, isLoading: false }));
 				return false;
 			}
-			
+
 			try {
-				const response = await fetch('/api/v1/auth/me', {
-					headers: {
-						'Authorization': `Bearer ${currentToken}`,
-					},
-				});
-				
-				if (response.ok) {
-					const user = await response.json();
+				const response = await rpcClient.auth.getCurrentUser({});
+
+				if (response.user) {
 					update(state => ({
 						...state,
-						user,
+						user: response.user || null,
 						isAuthenticated: true,
 						isLoading: false,
 					}));
@@ -284,7 +227,17 @@ function createAuthStore() {
 				}
 			} catch (error) {
 				console.error('Session validation error:', error);
-				update(state => ({ ...state, isLoading: false }));
+				// Invalid token, clear it
+				if (browser) {
+					localStorage.removeItem('auth_token');
+				}
+				update(state => ({
+					...state,
+					user: null,
+					token: null,
+					isAuthenticated: false,
+					isLoading: false,
+				}));
 				return false;
 			}
 		},
@@ -310,8 +263,8 @@ export const authStore = createAuthStore();
 // Derived stores for convenience
 export const isAuthenticated = derived(authStore, $auth => $auth.isAuthenticated);
 export const currentUser = derived(authStore, $auth => $auth.user);
-export const isAdmin = derived(authStore, $auth => $auth.user?.role === 'admin');
-export const isEditor = derived(authStore, $auth => $auth.user?.role === 'editor' || $auth.user?.role === 'admin');
+export const isAdmin = derived(authStore, $auth => $auth.user?.role === UserRole.ADMIN);
+export const isEditor = derived(authStore, $auth => $auth.user?.role === UserRole.EDITOR || $auth.user?.role === UserRole.ADMIN);
 export const authEnabled = derived(authStore, $auth => $auth.authEnabled);
 
 // Make auth store values accessible as a readable store

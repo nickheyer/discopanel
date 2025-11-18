@@ -15,7 +15,8 @@
 		MessageCircle, HelpCircle, BookOpen, Shield, Gauge,
 		Database, Wifi, WifiOff, CheckCircle, XCircle, AlertTriangle, RefreshCw
 	} from '@lucide/svelte';
-	import type { Server as ServerType } from '$lib/api/types';
+	import { ServerStatus, type Server as ServerType } from '$lib/proto/discopanel/v1/common_pb';
+	import { rpcClient } from '$lib/api/rpc-client';
 
 	// Dashboard data - not from the polling store
 	let dashboardServers: ServerType[] = $state([]);
@@ -26,11 +27,8 @@
 	// Load dashboard data with full stats
 	async function loadDashboardData() {
 		try {
-			// Use the request method directly to add query parameters
-			const response = await fetch('/api/v1/servers?full_stats=true');
-			if (response.ok) {
-				dashboardServers = await response.json();
-			}
+			const response = await rpcClient.server.listServers({ fullStats: true });
+			dashboardServers = response.servers;
 		} catch (error) {
 			console.error('Failed to load dashboard data:', error);
 		}
@@ -45,36 +43,36 @@
 	
 	let stats = $derived({
 		total: dashboardServers.length,
-		running: dashboardServers.filter(s => s.status === 'running').length,
-		stopped: dashboardServers.filter(s => s.status === 'stopped').length,
-		error: dashboardServers.filter(s => s.status === 'error' || s.status === 'unhealthy').length,
+		running: dashboardServers.filter(s => s.status === ServerStatus.RUNNING).length,
+		stopped: dashboardServers.filter(s => s.status === ServerStatus.STOPPED).length,
+		error: dashboardServers.filter(s => s.status === ServerStatus.ERROR || s.status === ServerStatus.UNHEALTHY).length,
 		totalMemory: dashboardServers.reduce((acc, s) => acc + (s.memory || 0), 0),
-		usedMemory: dashboardServers.filter(s => s.status === 'running').reduce((acc, s) => acc + (s.memory_usage || s.memory || 0), 0),
-		totalPlayers: dashboardServers.filter(s => s.status === 'running').reduce((acc, s) => acc + (s.players_online || 0), 0),
-		totalMaxPlayers: dashboardServers.reduce((acc, s) => acc + (s.max_players || 0), 0),
+		usedMemory: dashboardServers.filter(s => s.status === ServerStatus.RUNNING).reduce((acc, s) => acc + Number(s.memoryUsage || s.memory || 0), 0),
+		totalPlayers: dashboardServers.filter(s => s.status === ServerStatus.RUNNING).reduce((acc, s) => acc + (s.playersOnline || 0), 0),
+		totalMaxPlayers: dashboardServers.reduce((acc, s) => acc + (s.maxPlayers || 0), 0),
 		avgTps: dashboardServers.filter(s => s.tps && s.tps > 0).reduce((acc, s, _, arr) => acc + (s.tps || 0) / arr.length, 0),
-		totalDiskUsage: dashboardServers.reduce((acc, s) => acc + (s.disk_usage || 0), 0),
-		totalDiskSize: dashboardServers.length > 0 ? ` / ${dashboardServers?.[0]?.disk_total && formatBytes(dashboardServers[0].disk_total)}` : '',
-		avgCpu: dashboardServers.filter(s => s.cpu_percent && s.cpu_percent > 0).reduce((acc, s, _, arr) => acc + (s.cpu_percent || 0) / arr.length, 0)
+		totalDiskUsage: dashboardServers.reduce((acc, s) => acc + Number(s.diskUsage || 0), 0),
+		totalDiskSize: dashboardServers.length > 0 ? ` / ${dashboardServers?.[0]?.diskTotal && formatBytes(Number(dashboardServers[0].diskTotal))}` : '',
+		avgCpu: dashboardServers.filter(s => s.cpuPercent && s.cpuPercent > 0).reduce((acc, s, _, arr) => acc + (s.cpuPercent || 0) / arr.length, 0)
 	});
 
 	let recentActivity = $derived(
 		dashboardServers
-			.filter(s => s.last_started)
-			.sort((a, b) => new Date(b.last_started!).getTime() - new Date(a.last_started!).getTime())
+			.filter(s => s.lastStarted)
+			.sort((a, b) => new Date(Number(b.lastStarted!.seconds) * 1000).getTime() - new Date(Number(a.lastStarted!.seconds) * 1000).getTime())
 			.slice(0, 5)
 			.map(s => ({
 				server: s.name,
-				action: s.status === 'running' ? 'Started' : 'Activity',
-				time: s.last_started,
+				action: s.status === ServerStatus.RUNNING ? 'Started' : 'Activity',
+				time: s.lastStarted,
 				status: s.status
 			}))
 	);
 
 	let serversByStatus = $derived({
-		healthy: dashboardServers.filter(s => s.status === 'running' && (!s.tps || s.tps >= 18)),
-		warning: dashboardServers.filter(s => s.status === 'running' && s.tps && s.tps < 18 && s.tps >= 15),
-		critical: dashboardServers.filter(s => s.status === 'error' || s.status === 'unhealthy' || (s.status === 'running' && s.tps && s.tps < 15))
+		healthy: dashboardServers.filter(s => s.status === ServerStatus.RUNNING && (!s.tps || s.tps >= 18)),
+		warning: dashboardServers.filter(s => s.status === ServerStatus.RUNNING && s.tps && s.tps < 18 && s.tps >= 15),
+		critical: dashboardServers.filter(s => s.status === ServerStatus.ERROR || s.status === ServerStatus.UNHEALTHY || (s.status === ServerStatus.RUNNING && s.tps && s.tps < 15))
 	});
 
 	onMount(() => {
@@ -90,54 +88,57 @@
 		return () => clearInterval(interval);
 	});
 
-	const getStatusColor = (status: ServerType['status']) => {
+	const getStatusColor = (status: ServerStatus) => {
 		switch (status) {
-			case 'running':
+			case ServerStatus.RUNNING:
 				return 'text-green-500';
-			case 'starting':
-			case 'stopping':
-			case 'creating':
+			case ServerStatus.STARTING:
+			case ServerStatus.STOPPING:
+			case ServerStatus.CREATING:
+			case ServerStatus.RESTARTING:
 				return 'text-yellow-500';
-			case 'stopped':
+			case ServerStatus.STOPPED:
 				return 'text-gray-400';
-			case 'error':
-			case 'unhealthy':
+			case ServerStatus.ERROR:
+			case ServerStatus.UNHEALTHY:
 				return 'text-red-500';
 			default:
 				return 'text-gray-400';
 		}
 	};
 
-	const getStatusIcon = (status: ServerType['status']) => {
+	const getStatusIcon = (status: ServerStatus) => {
 		switch (status) {
-			case 'running':
+			case ServerStatus.RUNNING:
 				return CheckCircle;
-			case 'starting':
-			case 'stopping':
-			case 'creating':
+			case ServerStatus.STARTING:
+			case ServerStatus.STOPPING:
+			case ServerStatus.CREATING:
+			case ServerStatus.RESTARTING:
 				return AlertCircle;
-			case 'stopped':
+			case ServerStatus.STOPPED:
 				return XCircle;
-			case 'error':
-			case 'unhealthy':
+			case ServerStatus.ERROR:
+			case ServerStatus.UNHEALTHY:
 				return AlertTriangle;
 			default:
 				return AlertCircle;
 		}
 	};
 
-	const getStatusBadgeColor = (status: ServerType['status']) => {
+	const getStatusBadgeColor = (status: ServerStatus) => {
 		switch (status) {
-			case 'running':
+			case ServerStatus.RUNNING:
 				return 'bg-green-500/10 text-green-500 border-green-500/20';
-			case 'starting':
-			case 'stopping':
-			case 'creating':
+			case ServerStatus.STARTING:
+			case ServerStatus.STOPPING:
+			case ServerStatus.CREATING:
+			case ServerStatus.RESTARTING:
 				return 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
-			case 'stopped':
+			case ServerStatus.STOPPED:
 				return 'bg-gray-500/10 text-gray-500 border-gray-500/20';
-			case 'error':
-			case 'unhealthy':
+			case ServerStatus.ERROR:
+			case ServerStatus.UNHEALTHY:
 				return 'bg-red-500/10 text-red-500 border-red-500/20';
 			default:
 				return 'bg-gray-500/10 text-gray-500 border-gray-500/20';
@@ -146,14 +147,14 @@
 
 
 
-	const formatUptime = (lastStarted: string | null) => {
+	const formatUptime = (lastStarted: any) => {
 		if (!lastStarted) return 'Never';
-		const start = new Date(lastStarted);
+		const start = new Date(Number(lastStarted.seconds) * 1000);
 		const diff = currentTime.getTime() - start.getTime();
 		const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 		const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
 		const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-		
+
 		if (days > 0) return `${days}d ${hours}h`;
 		if (hours > 0) return `${hours}h ${minutes}m`;
 		return `${minutes}m`;
@@ -381,7 +382,7 @@
 								<div class="flex items-center gap-3 flex-1">
 									<div class="relative">
 										<StatusIcon class="h-5 w-5 {getStatusColor(server.status)}" />
-										{#if server.status === 'running'}
+										{#if server.status === ServerStatus.RUNNING}
 											<div class="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
 										{/if}
 									</div>
@@ -393,11 +394,11 @@
 											</Badge>
 										</div>
 										<div class="flex items-center gap-3 mt-1">
-											<span class="text-xs text-muted-foreground">{server.mc_version}</span>
-											{#if server.status === 'running'}
+											<span class="text-xs text-muted-foreground">{server.mcVersion}</span>
+											{#if server.status === ServerStatus.RUNNING}
 												<span class="text-xs text-muted-foreground flex items-center gap-1">
 													<Users class="h-3 w-3" />
-													{server.players_online || 0}/{server.max_players}
+													{server.playersOnline || 0}/{server.maxPlayers}
 												</span>
 												{#if server.tps}
 													<span class="text-xs flex items-center gap-1 {getTpsColor(server.tps)}">
@@ -410,11 +411,11 @@
 									</div>
 								</div>
 								<div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-									{#if server.status === 'stopped'}
+									{#if server.status === ServerStatus.STOPPED}
 										<Button variant="ghost" size="sm" class="h-8 w-8 p-0">
 											<PlayCircle class="h-4 w-4" />
 										</Button>
-									{:else if server.status === 'running'}
+									{:else if server.status === ServerStatus.RUNNING}
 										<Button variant="ghost" size="sm" class="h-8 w-8 p-0">
 											<StopCircle class="h-4 w-4" />
 										</Button>
@@ -446,9 +447,9 @@
 						{#each recentActivity as activity, i}
 							<div class="flex items-start gap-3 animate-in fade-in-50 slide-in-from-right-2" style="animation-delay: {300 + i * 50}ms">
 								<div class="mt-1">
-									{#if activity.status === 'running'}
+									{#if activity.status === ServerStatus.RUNNING}
 										<div class="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
-									{:else if activity.status === 'stopped'}
+									{:else if activity.status === ServerStatus.STOPPED}
 										<div class="h-2 w-2 rounded-full bg-gray-400"></div>
 									{:else}
 										<div class="h-2 w-2 rounded-full bg-yellow-500"></div>
@@ -541,7 +542,7 @@
 					<div class="flex items-center justify-between">
 						<span class="text-sm text-muted-foreground">Network</span>
 						<div class="flex items-center gap-1">
-							{#if dashboardServers.some(s => s.status === 'running')}
+							{#if dashboardServers.some(s => s.status === ServerStatus.RUNNING)}
 								<Wifi class="h-4 w-4 text-green-500" />
 								<span class="text-sm font-medium">Connected</span>
 							{:else}

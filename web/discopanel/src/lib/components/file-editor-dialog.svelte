@@ -3,10 +3,10 @@
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { Dialog as DialogPrimitive } from "bits-ui";
 	import { Button } from '$lib/components/ui/button';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, X, Maximize2, Minimize2 } from '@lucide/svelte';
-	import type { FileInfo } from '$lib/api/types';
+	import type { FileInfo } from '$lib/proto/discopanel/v1/file_pb';
 	import * as monaco from 'monaco-editor';
 	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 	import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
@@ -58,7 +58,7 @@
 
 	// Load file content when dialog opens
 	$effect(() => {
-		if (open && file && !file.is_dir && file.path !== loadedFilePath) {
+		if (open && file && !file.isDir && file.path !== loadedFilePath) {
 			loadedFilePath = file.path;
 			loadFileContent();
 		}
@@ -106,8 +106,8 @@
 		
 		loading = true;
 		try {
-			const blob = await api.downloadFile(serverId, file.path);
-			const text = await blob.text();
+			const response = await rpcClient.file.getFile({ serverId: serverId, path: file.path });
+			const text = new TextDecoder().decode(response.content);
 			content = text;
 			originalContent = text;
 		} catch (error) {
@@ -123,7 +123,11 @@
 
 		saving = true;
 		try {
-			await api.updateFile(serverId, file.path, content);
+			await rpcClient.file.updateFile({
+				serverId: serverId,
+				path: file.path,
+				content: new TextEncoder().encode(content)
+			});
 			toast.success('File saved successfully');
 			originalContent = content;
 			onSave?.();

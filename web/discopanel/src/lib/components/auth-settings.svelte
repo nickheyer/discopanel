@@ -10,12 +10,15 @@
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { toast } from 'svelte-sonner';
 	import { Shield, AlertCircle, Users, Key, Clock, UserPlus, Loader2 } from '@lucide/svelte';
+	import { create } from '@bufbuild/protobuf';
+	import { rpcClient } from '$lib/api/rpc-client';
+	import { UpdateAuthConfigRequestSchema, RegisterRequestSchema } from '$lib/proto/discopanel/v1/auth_pb';
 
 	let authConfig = $state({
 		enabled: false,
-		session_timeout: 86400,
-		require_email_verify: false,
-		allow_registration: false
+		sessionTimeout: 86400,
+		requireEmailVerify: false,
+		allowRegistration: false
 	});
 	
 	let loading = $state(false);
@@ -35,30 +38,28 @@
 	let sessionTimeoutHours = $state(24);
 	
 	$effect(() => {
-		sessionTimeoutHours = Math.floor(authConfig.session_timeout / 3600);
+		sessionTimeoutHours = Math.floor(authConfig.sessionTimeout / 3600);
 	});
 	
 	async function loadAuthConfig() {
 		loading = true;
 		try {
-			// Get auth config - no auth headers needed when auth is disabled
-			const response = await fetch('/api/v1/auth/config');
-			if (response.ok) {
-				const config = await response.json();
-				authConfig = config;
-				sessionTimeoutHours = Math.floor(config.session_timeout / 3600);
-			}
-			
+			// Get auth config
+			const configResponse = await rpcClient.auth.getAuthConfig({});
+			authConfig = {
+				enabled: configResponse.enabled,
+				sessionTimeout: configResponse.sessionTimeout,
+				requireEmailVerify: configResponse.requireEmailVerify,
+				allowRegistration: configResponse.allowRegistration
+			};
+			sessionTimeoutHours = Math.floor(configResponse.sessionTimeout / 3600);
+
 			// Get user count if we can
 			try {
-				const headers = authStore.getHeaders();
-				const usersResponse = await fetch('/api/v1/users', { headers });
-				if (usersResponse.ok) {
-					const users = await usersResponse.json();
-					userCount = users.length;
-				}
+				const usersResponse = await rpcClient.user.listUsers({});
+				userCount = usersResponse.users.length;
 			} catch {
-				// Ignore - probably auth is disabled
+				// Ignore - probably auth is disabled or no permission
 			}
 		} catch (error) {
 			console.error('Failed to load auth config:', error);
@@ -70,42 +71,27 @@
 	async function saveAuthConfig() {
 		saving = true;
 		try {
-			const headers = {
-				...authStore.getHeaders(),
-				'Content-Type': 'application/json'
-			};
-			
-			const updates = {
+			const request = create(UpdateAuthConfigRequestSchema, {
 				enabled: authConfig.enabled,
-				session_timeout: sessionTimeoutHours * 3600,
-				require_email_verify: authConfig.require_email_verify,
-				allow_registration: authConfig.allow_registration
-			};
-			
-			const response = await fetch('/api/v1/auth/config', {
-				method: 'PUT',
-				headers,
-				body: JSON.stringify(updates)
+				sessionTimeout: sessionTimeoutHours * 3600,
+				requireEmailVerify: authConfig.requireEmailVerify,
+				allowRegistration: authConfig.allowRegistration
 			});
-			
-			const result = await response.json();
-			
-			if (!response.ok) {
-				throw new Error(result.error || 'Failed to save auth config');
-			}
-			
+
+			const result = await rpcClient.auth.updateAuthConfig(request);
+
 			// Check if we need to create first user
-			if (result.requires_first_user) {
+			if (result.requiresFirstUser) {
 				showFirstUserDialog = true;
 				saving = false;
 				return;
 			}
-			
+
 			// Update auth store
 			await authStore.checkAuthStatus();
-			
+
 			toast.success('Authentication settings saved');
-			
+
 			// If auth was just enabled, redirect to login
 			if (authConfig.enabled && userCount > 0) {
 				toast.info('Authentication enabled. Please log in.');
@@ -126,39 +112,30 @@
 			toast.error('Passwords do not match');
 			return;
 		}
-		
+
 		if (firstUserForm.password.length < 8) {
 			toast.error('Password must be at least 8 characters');
 			return;
 		}
-		
+
 		saving = true;
 		try {
 			// Create the first admin user
-			const response = await fetch('/api/v1/auth/register', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					username: firstUserForm.username,
-					email: firstUserForm.email,
-					password: firstUserForm.password
-				})
+			const request = create(RegisterRequestSchema, {
+				username: firstUserForm.username,
+				email: firstUserForm.email,
+				password: firstUserForm.password
 			});
-			
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to create user');
-			}
-			
+
+			await rpcClient.auth.register(request);
+
 			// Now enable authentication
 			authConfig.enabled = true;
 			await saveAuthConfig();
-			
+
 			showFirstUserDialog = false;
 			toast.success('Admin account created and authentication enabled');
-			
+
 			// Redirect to login
 			setTimeout(() => {
 				window.location.href = '/login';
@@ -250,8 +227,8 @@
 						</div>
 						<Switch
 							id="allow-registration"
-							checked={authConfig.allow_registration}
-							onCheckedChange={(checked) => authConfig.allow_registration = checked}
+							checked={authConfig.allowRegistration}
+							onCheckedChange={(checked) => authConfig.allowRegistration = checked}
 							disabled={saving}
 						/>
 					</div>

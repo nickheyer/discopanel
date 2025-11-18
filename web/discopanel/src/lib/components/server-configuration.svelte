@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import ScrollToTop from './scroll-to-top.svelte';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
@@ -11,7 +11,9 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { toast } from 'svelte-sonner';
 	import { Save, RefreshCw, Loader2, Link, ArrowUp } from '@lucide/svelte';
-	import type { Server, ConfigCategory } from '$lib/api/types';
+	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { ConfigCategory, ConfigProperty } from '$lib/proto/discopanel/v1/config_pb';
 
 	let { server, config, onSave, saving: externalSaving = false }: { 
 		server?: Server;
@@ -62,9 +64,9 @@
 	async function loadServerConfig() {
 		loading = true;
 		try {
-			const response = await api.getServerConfig(server!.id);
-			categories = response;
-			processConfig(response);
+			const response = await rpcClient.config.getServerConfig({ serverId: server!.id });
+			categories = response.categories;
+			processConfig(response.categories);
 		} catch (error) {
 			toast.error('Failed to load server configuration');
 			console.error(error);
@@ -81,7 +83,7 @@
 		currentValues = {};
 		enabledFields = new Set();
 		categories.forEach(category => {
-			category.properties.forEach(prop => {
+			category.properties.forEach((prop: ConfigProperty) => {
 				// Skip internal fields
 				if (prop.key === 'id' || prop.key === 'serverId' || prop.key === 'updatedAt') {
 					return;
@@ -141,9 +143,9 @@
 				await onSave(changes);
 			} else if (server) {
 				// Default server config save
-				const response = await api.updateServerConfig(server!.id, changes);
-				categories = response;
-				processConfig(response);
+				const response = await rpcClient.config.updateServerConfig({ serverId: server!.id, updates: changes });
+				categories = response.categories;
+				processConfig(response.categories);
 			}
 			enabledFields = new Set(enabledFields); // Trigger reactivity
 			
@@ -151,7 +153,7 @@
 			modifiedProperties.clear();
 			modifiedProperties = new Set(); // Trigger reactivity
 			
-			if (server && server?.status === 'running') {
+			if (server && server?.status === ServerStatus.RUNNING) {
 				toast.info('Restart the server for changes to take effect');
 			}
 		} catch (error) {
@@ -183,7 +185,7 @@
 			if (currentValues[key] === null || currentValues[key] === undefined) {
 				const prop = categories.flatMap(c => c.properties).find(p => p.key === key);
 				if (prop) {
-					currentValues[key] = prop.default ?? getDefaultForType(prop.type);
+					currentValues[key] = prop.defaultValue ?? getDefaultForType(prop.type);
 				}
 			}
 		} else {
@@ -201,7 +203,7 @@
 		
 		// Check for changes in enabled fields
 		categories.forEach(category => {
-			category.properties.forEach(prop => {
+			category.properties.forEach((prop: ConfigProperty) => {
 				const wasEnabled = originalValues[prop.key] !== null && originalValues[prop.key] !== undefined;
 				const isEnabled = enabledFields.has(prop.key);
 				
@@ -297,7 +299,7 @@
 					variant="outline"
 					size="sm"
 					onclick={resetChanges}
-					disabled={loading || (server && server?.status === 'running') || modifiedProperties.size === 0}
+					disabled={loading || (server && server?.status === ServerStatus.RUNNING) || modifiedProperties.size === 0}
 				>
 					<RefreshCw class="h-4 w-4 mr-2" />
 					Reset
@@ -305,7 +307,7 @@
 				<Button
 					size="sm"
 					onclick={saveServerConfig}
-					disabled={loading || isSaving || (server && server?.status === 'running') || modifiedProperties.size === 0}
+					disabled={loading || isSaving || (server && server?.status === ServerStatus.RUNNING) || modifiedProperties.size === 0}
 				>
 					{#if isSaving}
 						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
@@ -332,8 +334,8 @@
 			{:else}
 				<div class="space-y-6 overflow-y-auto pr-4">
 					{#each categories as category}
-						{@const filteredProps = !server ? 
-							category.properties.filter(p => !p.system) : 
+						{@const filteredProps = !server ?
+							category.properties.filter((p: ConfigProperty) => !p.system) :
 							category.properties}
 						{#if filteredProps.length > 0}
 							<div class="space-y-4" id={category.name.toLowerCase().replace(/\s+/g, '-')}>
@@ -359,7 +361,7 @@
 											<Checkbox
 												checked={enabledFields.has(prop.key)}
 												onCheckedChange={(checked) => toggleFieldEnabled(prop.key, checked)}
-												disabled={prop.required || prop.system || server?.status === 'running'}
+												disabled={prop.required || prop.system || server?.status === ServerStatus.RUNNING}
 												class="mt-1"
 											/>
 											<div class="flex-1 space-y-2">
@@ -387,7 +389,7 @@
 															<Link class="h-3 w-3" />
 														</Button>
 													</div>
-														<div class="text-xs text-muted-foreground font-mono">{prop.env_var}</div>
+														<div class="text-xs text-muted-foreground font-mono">{prop.envVar}</div>
 														{#if prop.description}
 															<p class="text-xs text-muted-foreground mt-1">{prop.description}</p>
 														{/if}
@@ -398,29 +400,29 @@
 											<div class="flex items-center space-x-2">
 												<Switch
 													id={prop.key}
-													checked={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? prop.default ?? false) : (prop.default ?? false)}
+													checked={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? prop.defaultValue ?? false) : (prop.defaultValue ?? false)}
 													onCheckedChange={(checked) => handlePropertyChange(prop.key, checked)}
-													disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
+													disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
 													class=""
 												/>
 												<span class="text-sm text-muted-foreground">
-													{(currentValues[prop.key] ?? prop.default ?? false) ? 'Enabled' : 'Disabled'}
+													{(currentValues[prop.key] ?? prop.defaultValue ?? false) ? 'Enabled' : 'Disabled'}
 													{#if currentValues[prop.key] === null || currentValues[prop.key] === undefined}
 														<span class="text-xs ml-1">(default)</span>
 													{/if}
 												</span>
 											</div>
 										{:else if inputType === 'select' && prop.options}
-											<Select 
+											<Select
 												type="single"
-												value={String(currentValues[prop.key] ?? prop.default ?? '')}
+												value={String(currentValues[prop.key] ?? prop.defaultValue ?? '')}
 												onValueChange={(value) => handlePropertyChange(prop.key, value || undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
+												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
 											>
 												<SelectTrigger class="h-9">
 													<span>
-														{currentValues[prop.key] || prop.default || 'Select an option'}
-														{#if currentValues[prop.key] === undefined && prop.default}
+														{currentValues[prop.key] || prop.defaultValue || 'Select an option'}
+														{#if currentValues[prop.key] === undefined && prop.defaultValue}
 															<span class="text-xs text-muted-foreground ml-1">(default)</span>
 														{/if}
 													</span>
@@ -436,9 +438,9 @@
 												id={prop.key}
 												type="number"
 												value={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? '') : ''}
-												placeholder={prop.default !== undefined ? String(prop.default) : ''}
+												placeholder={prop.defaultValue !== undefined ? String(prop.defaultValue) : ''}
 												oninput={(e) => handlePropertyChange(prop.key, e.currentTarget.value ? parseInt(e.currentTarget.value) : undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
+												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
 												class="h-9"
 											/>
 										{:else if inputType === 'password'}
@@ -446,9 +448,9 @@
 												id={prop.key}
 												type="password"
 												value={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? '') : ''}
-												placeholder={prop.default !== undefined ? String(prop.default) : ''}
+												placeholder={prop.defaultValue !== undefined ? String(prop.defaultValue) : ''}
 												oninput={(e) => handlePropertyChange(prop.key, e.currentTarget.value || undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
+												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
 												class="h-9"
 											/>
 										{:else}
@@ -456,16 +458,16 @@
 												id={prop.key}
 												type="text"
 												value={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? '') : ''}
-												placeholder={prop.default !== undefined ? String(prop.default) : ''}
+												placeholder={prop.defaultValue !== undefined ? String(prop.defaultValue) : ''}
 												oninput={(e) => handlePropertyChange(prop.key, e.currentTarget.value || undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === 'running'}
+												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
 												class="h-9"
 											/>
 										{/if}
 										
-										{#if prop.default !== undefined && prop.default !== ''}
+										{#if prop.defaultValue !== undefined}
 											<p class="text-xs text-muted-foreground">
-												Default: {prop.default}
+												Default: {String(prop.defaultValue)}
 											</p>
 										{/if}
 											</div>
@@ -479,7 +481,7 @@
 				</div>
 			{/if}
 
-			{#if server?.status === 'running'}
+			{#if server?.status === ServerStatus.RUNNING}
 				<div class="mt-4 p-4 bg-yellow-50 dark:bg-yellow-950 rounded-lg border border-yellow-200 dark:border-yellow-800">
 					<p class="text-sm text-yellow-800 dark:text-yellow-200">
 						⚠️ Server must be stopped to modify configuration. Changes will take effect after restart.

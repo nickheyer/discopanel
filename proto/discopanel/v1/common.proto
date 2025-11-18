@@ -120,6 +120,8 @@ message DockerOverrides {
   int64 memory_limit = 8;
   int64 memory_reservation = 9;
   double cpu_limit = 10;
+  string restart_policy = 11;
+  string entry_point = 12;
 }
 
 // TCP proxy listener endpoint

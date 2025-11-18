@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import { serversStore } from '$lib/stores/servers';
 	import { goto } from '$app/navigation';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -11,7 +11,11 @@
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { toast } from 'svelte-sonner';
 	import { Play, Square, RotateCw, Package, Activity, Loader2, Copy, ExternalLink, Trash2, Cpu, Info } from '@lucide/svelte';
-	import type { Server } from '$lib/api/types';
+	import { create } from '@bufbuild/protobuf';
+	import type { Timestamp } from '@bufbuild/protobuf/wkt';
+	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+	import { GetServerRequestSchema, DeleteServerRequestSchema, StartServerRequestSchema, StopServerRequestSchema, RestartServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import { formatBytes } from '$lib/utils';
 	import ServerConsole from '$lib/components/server-console.svelte';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
@@ -28,6 +32,13 @@
 	let routingInfo = $state<any>(null);
 
 	let interval: number;
+
+	// Helper function to convert protobuf Timestamp to Date
+	function timestampToDate(timestamp: Timestamp | undefined): Date {
+		if (!timestamp) return new Date();
+		// Protobuf timestamp has seconds as bigint and nanos as number
+		return new Date(Number(timestamp.seconds) * 1000 + timestamp.nanos / 1_000_000);
+	}
 
 	onMount(() => {
 		return () => {
@@ -46,9 +57,12 @@
 	async function loadServer(skipLoading = false) {
 		try {
 			if (!serverId) return;
-			server = await api.getServer(serverId, skipLoading);
-			serversStore.updateServer(server);
-		
+			const request = create(GetServerRequestSchema, { id: serverId });
+			const response = await rpcClient.server.getServer(request);
+			if (response.server) {
+				server = response.server;
+				serversStore.updateServer(server);
+			}
 		} catch (error) {
 			if (!server) {
 				toast.error('Failed to load server');
@@ -60,20 +74,23 @@
 
 	async function handleServerAction(action: 'start' | 'stop' | 'restart') {
 		if (!server) return;
-		
+
 		actionLoading = true;
 		try {
 			switch (action) {
 				case 'start':
-					await api.startServer(server.id);
+					const startRequest = create(StartServerRequestSchema, { id: server.id });
+					await rpcClient.server.startServer(startRequest);
 					toast.success('Server is starting...');
 					break;
 				case 'stop':
-					await api.stopServer(server.id);
+					const stopRequest = create(StopServerRequestSchema, { id: server.id });
+					await rpcClient.server.stopServer(stopRequest);
 					toast.success('Server is stopping...');
 					break;
 				case 'restart':
-					await api.restartServer(server.id);
+					const restartRequest = create(RestartServerRequestSchema, { id: server.id });
+					await rpcClient.server.restartServer(restartRequest);
 					toast.success('Server is restarting...');
 					break;
 			}
@@ -97,14 +114,15 @@
 
 	async function handleDeleteServer() {
 		if (!server) return;
-		
+
 		const confirmed = confirm(`Are you sure you want to delete "${server.name}"?\n\nThis will:\n- Stop and remove the Docker container\n- Delete all server files and data\n- Remove all mods and configurations\n\nThis action cannot be undone!`);
-		
+
 		if (!confirmed) return;
-		
+
 		actionLoading = true;
 		try {
-			await api.deleteServer(server.id);
+			const deleteRequest = create(DeleteServerRequestSchema, { id: server.id });
+			await rpcClient.server.deleteServer(deleteRequest);
 			serversStore.removeServer(server.id);
 			toast.success('Server deleted successfully');
 			goto('/servers');
@@ -132,10 +150,10 @@
 					<p class="text-sm sm:text-base text-muted-foreground">{server.description || ''}</p>
 					{#if server.description || (!server.description || server.description === '')}
 						<p class="text-xs text-muted-foreground/70 mt-1">
-							Created {new Date(server.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-							{#if server.last_started}
+							Created {timestampToDate(server.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+							{#if server.lastStarted}
 								• Last started {(() => {
-									const date = new Date(server.last_started);
+									const date = timestampToDate(server.lastStarted);
 									const now = new Date();
 									const diff = now.getTime() - date.getTime();
 									const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -152,10 +170,10 @@
 				</div>
 			</div>
 			<div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-				{#if server.status === 'stopped' || !server.container_id}
-					<Button 
-						onclick={() => handleServerAction('start')} 
-						disabled={actionLoading || server.status === 'starting' || server.status === 'stopping'}
+				{#if server.status === ServerStatus.STOPPED || !server.containerId}
+					<Button
+						onclick={() => handleServerAction('start')}
+						disabled={actionLoading || server.status === ServerStatus.STARTING || server.status === ServerStatus.STOPPING}
 						size="default"
 						class="bg-green-600 hover:bg-green-700 text-white shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
 					>
@@ -166,7 +184,7 @@
 						{/if}
 						<span class="sm:inline">Start</span>
 					</Button>
-				{:else if server.status === 'error'}
+				{:else if server.status === ServerStatus.ERROR}
 					<Button 
 						onclick={() => handleServerAction('restart')} 
 						disabled={actionLoading}
@@ -194,7 +212,7 @@
 						{/if}
 						<span class="sm:inline">Stop</span>
 					</Button>
-				{:else if server.status === 'running' || server.status === 'starting' || server.status === 'unhealthy'}
+				{:else if server.status === ServerStatus.RUNNING || server.status === ServerStatus.STARTING || server.status === ServerStatus.UNHEALTHY}
 					<Button 
 						variant="destructive" 
 						onclick={() => handleServerAction('stop')} 
@@ -223,7 +241,7 @@
 						{/if}
 						Restart
 					</Button>
-				{:else if server.status === 'stopping'}
+				{:else if server.status === ServerStatus.STOPPING}
 					<Button 
 						variant="secondary" 
 						disabled={true}
@@ -251,16 +269,16 @@
 
 		<div class="grid gap-4 sm:gap-5 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 flex-shrink-0 mb-6 sm:mb-8">
 			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-background via-background/95 to-background/90 hover:-translate-y-1">
-				{#if server.status === 'running'}
+				{#if server.status === ServerStatus.RUNNING}
 					<div class="absolute inset-0 bg-gradient-to-br from-green-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-green-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-				{:else if server.status === 'unhealthy'}
+				{:else if server.status === ServerStatus.UNHEALTHY}
 					<div class="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-purple-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-				{:else if server.status === 'stopped'}
+				{:else if server.status === ServerStatus.STOPPED}
 					<div class="absolute inset-0 bg-gradient-to-br from-gray-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-gray-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-				{:else if server.status === 'starting'}
+				{:else if server.status === ServerStatus.STARTING}
 					<div class="absolute inset-0 bg-gradient-to-br from-yellow-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-yellow-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{:else}
@@ -274,26 +292,26 @@
 						<p class="text-xs text-muted-foreground/50">Live monitoring</p>
 					</div>
 					<div class="relative">
-						{#if server.status === 'running'}
+						{#if server.status === ServerStatus.RUNNING}
 							<div class="absolute inset-0 bg-gradient-to-br from-green-500/20 to-green-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-green-500/10 to-green-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<div class="relative">
 									<Activity class="h-7 w-7 text-green-500" />
 								</div>
 							</div>
-						{:else if server.status === 'unhealthy'}
+						{:else if server.status === ServerStatus.UNHEALTHY}
 							<div class="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-purple-500/10 to-purple-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<div class="relative">
 									<Activity class="h-7 w-7 text-purple-500" />
 								</div>
 							</div>
-						{:else if server.status === 'stopped'}
+						{:else if server.status === ServerStatus.STOPPED}
 							<div class="absolute inset-0 bg-gradient-to-br from-gray-500/20 to-gray-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-gray-500/10 to-gray-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<Square class="h-7 w-7 text-gray-500" />
 							</div>
-						{:else if server.status === 'starting'}
+						{:else if server.status === ServerStatus.STARTING}
 							<div class="absolute inset-0 bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-yellow-500/10 to-yellow-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<Loader2 class="h-7 w-7 text-yellow-500 animate-spin" />
@@ -310,21 +328,21 @@
 					<div class="space-y-4">
 						<div class="relative">
 							<div class="flex items-center justify-center h-20 rounded-xl bg-gradient-to-br from-muted/30 to-muted/10 border border-border/30 overflow-hidden">
-								{#if server.status === 'running'}
+								{#if server.status === ServerStatus.RUNNING}
 									<div class="heartbeat-container">
 										{#each Array(5) as _, i}
 											<div class="heartbeat-bar bg-green-500" style="animation-delay: {i * 0.15}s"></div>
 										{/each}
 									</div>
-								{:else if server.status === 'unhealthy'}
+								{:else if server.status === ServerStatus.UNHEALTHY}
 									<div class="heartbeat-container">
 										{#each Array(5) as _, i}
 											<div class="heartbeat-bar heartbeat-erratic text-purple-500" style="animation-delay: {i * 0.1}s; height: {20 + Math.random() * 30}px"></div>
 										{/each}
 									</div>
-								{:else if server.status === 'stopped'}
+								{:else if server.status === ServerStatus.STOPPED}
 									<div class="w-full h-0.5 bg-gray-500/50"></div>
-								{:else if server.status === 'starting'}
+								{:else if server.status === ServerStatus.STARTING}
 									<div class="heartbeat-container">
 										{#each Array(5) as _, i}
 											<div class="heartbeat-bar heartbeat-slow bg-yellow-500" style="animation-delay: {i * 0.2}s"></div>
@@ -342,30 +360,30 @@
 						
 						<div class="text-center space-y-2">
 							<div class="text-2xl font-bold">
-								{#if server.status === 'running'}
+								{#if server.status === ServerStatus.RUNNING}
 									<span class="text-green-500">RUNNING</span>
-								{:else if server.status === 'unhealthy'}
+								{:else if server.status === ServerStatus.UNHEALTHY}
 									<span class="text-purple-500">BUSY</span>
-								{:else if server.status === 'stopped'}
+								{:else if server.status === ServerStatus.STOPPED}
 									<span class="text-gray-500">STOPPED</span>
-								{:else if server.status === 'starting'}
+								{:else if server.status === ServerStatus.STARTING}
 									<span class="text-yellow-500">STARTING</span>
-								{:else if server.status === 'stopping'}
+								{:else if server.status === ServerStatus.STOPPING}
 									<span class="text-orange-500">STOPPING</span>
 								{:else}
-									<span class="text-muted-foreground">{server.status.toUpperCase()}</span>
+									<span class="text-muted-foreground">UNKNOWN</span>
 								{/if}
 							</div>
 							<p class="text-xs text-muted-foreground/70">
-								{#if server.status === 'running'}
+								{#if server.status === ServerStatus.RUNNING}
 									Server healthy and responding
-								{:else if server.status === 'unhealthy'}
+								{:else if server.status === ServerStatus.UNHEALTHY}
 									Server temporarily unresponsive
-								{:else if server.status === 'stopped'}
+								{:else if server.status === ServerStatus.STOPPED}
 									Server is currently offline
-								{:else if server.status === 'starting'}
+								{:else if server.status === ServerStatus.STARTING}
 									Initializing server components
-								{:else if server.status === 'stopping'}
+								{:else if server.status === ServerStatus.STOPPING}
 									Shutting down gracefully
 								{:else}
 									Status: {server.status}
@@ -397,8 +415,8 @@
 						<div class="relative flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-muted/50 to-muted/30 backdrop-blur-sm border border-border/50 group-hover/copy:border-primary/30 transition-all duration-300">
 							<div class="flex-1 min-w-0">
 								<span class="font-mono text-sm font-bold block truncate text-foreground/90">
-									{#if server.proxy_hostname}
-										{server.proxy_hostname}
+									{#if server.proxyHostname}
+										{server.proxyHostname}
 									{:else}
 										localhost:{server.port}
 									{/if}
@@ -410,7 +428,7 @@
 								variant="ghost"
 								onclick={() => {
 									if (!server) return;
-									const connectionString = server.proxy_hostname || `localhost:${server.port}`;
+									const connectionString = server.proxyHostname || `localhost:${server.port}`;
 									copyToClipboard(connectionString);
 								}}
 								class="hover:bg-primary/20 hover:text-primary transition-all duration-300 hover:scale-110"
@@ -443,31 +461,31 @@
 						<div class="space-y-1.5">
 							<div class="flex items-center justify-between">
 								<span class="text-[10px] text-muted-foreground/60">Minecraft</span>
-								<span class="text-[11px] font-mono font-semibold text-purple-500">{server.mc_version}</span>
+								<span class="text-[11px] font-mono font-semibold text-purple-500">{server.mcVersion}</span>
 							</div>
-							{#if server.java_version}
+							{#if server.javaVersion}
 								<div class="flex items-center justify-between">
 									<span class="text-[10px] text-muted-foreground/60">Java</span>
-									<span class="text-[11px] font-mono font-semibold text-purple-400">Java {server.java_version}</span>
+									<span class="text-[11px] font-mono font-semibold text-purple-400">Java {server.javaVersion}</span>
 								</div>
 							{/if}
 							<div class="flex items-center justify-between">
 								<span class="text-[10px] text-muted-foreground/60">Mod Loader</span>
-								{#if server.mod_loader === 'vanilla'}
+								{#if server.modLoader === ModLoader.VANILLA}
 									<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 bg-yellow-500/10 border-yellow-500/20">
 										⚡ Vanilla
 									</Badge>
-								{:else if server.mod_loader.toLowerCase().includes('forge')}
+								{:else if server.modLoader === ModLoader.FORGE || server.modLoader === ModLoader.NEOFORGE}
 									<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 bg-orange-500/10 border-orange-500/20">
-										🔨 {server.mod_loader[0].toUpperCase() + server.mod_loader.slice(1)}
+										🔨 {server.modLoader === ModLoader.FORGE ? 'Forge' : 'NeoForge'}
 									</Badge>
-								{:else if server.mod_loader === 'fabric'}
+								{:else if server.modLoader === ModLoader.FABRIC}
 									<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 bg-blue-500/10 border-blue-500/20">
 										🧵 Fabric
 									</Badge>
 								{:else}
 									<Badge variant="secondary" class="capitalize text-[10px] px-1.5 py-0 h-4">
-										{server.mod_loader}
+										{ModLoader[server.modLoader]}
 									</Badge>
 								{/if}
 							</div>
@@ -485,13 +503,13 @@
 									<Copy class="h-2.5 w-2.5 text-muted-foreground/40 opacity-0 group-hover/copy:opacity-100 transition-opacity" />
 								</div>
 							</div>
-							{#if server.container_id}
+							{#if server.containerId}
 								<div class="flex items-center justify-between group/copy cursor-pointer" 
-									onclick={() => copyToClipboard(server?.container_id)}>
+									onclick={() => copyToClipboard(server?.containerId)}>
 									<span class="text-[10px] text-muted-foreground/60">Container</span>
 									<div class="flex items-center gap-1">
 										<span class="text-[10px] font-mono text-muted-foreground/70 truncate max-w-[80px]">
-											{server.container_id}
+											{server.containerId}
 										</span>
 										<Copy class="h-2.5 w-2.5 text-muted-foreground/40 opacity-0 group-hover/copy:opacity-100 transition-opacity" />
 									</div>
@@ -503,8 +521,8 @@
 						<div class="pt-1.5 border-t border-border/20">
 							<div class="flex items-center justify-between group/path">
 								<span class="text-[10px] text-muted-foreground/60">Data Path</span>
-								<span class="text-[10px] font-mono text-muted-foreground/70 truncate max-w-[100px]" title={server.data_path}>
-									.../{server.data_path.split('/').slice(-2).join('/')}
+								<span class="text-[10px] font-mono text-muted-foreground/70 truncate max-w-[100px]" title={server.dataPath}>
+									.../{server.dataPath.split('/').slice(-2).join('/')}
 								</span>
 							</div>
 						</div>
@@ -533,9 +551,9 @@
 						<div>
 							<div class="flex items-center justify-between mb-1.5">
 								<span class="text-xs font-semibold text-muted-foreground/70">MEMORY</span>
-								{#if server.memory_usage}
+								{#if server.memoryUsage}
 									<span class="text-xs font-mono text-orange-500">
-										{(server.memory_usage / 1024).toFixed(2)} / {(server.memory / 1024).toFixed(1)} GB
+										{(Number(server.memoryUsage) / 1024).toFixed(2)} / {(server.memory / 1024).toFixed(1)} GB
 									</span>
 								{:else}
 									<span class="text-xs font-mono text-muted-foreground/50">
@@ -544,18 +562,18 @@
 								{/if}
 							</div>
 							<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
-								{#if server.memory_usage}
-									<div class="relative h-full bg-gradient-to-r from-orange-500 to-yellow-500 rounded-full transition-all duration-700" 
-										style="width: {Math.min((server.memory_usage / server.memory) * 100, 100)}%">
+								{#if server.memoryUsage}
+									<div class="relative h-full bg-gradient-to-r from-orange-500 to-yellow-500 rounded-full transition-all duration-700"
+										style="width: {Math.min((Number(server.memoryUsage) / server.memory) * 100, 100)}%">
 										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
 									</div>
 								{:else}
 									<div class="h-full bg-muted/50"></div>
 								{/if}
 							</div>
-							{#if server.memory_usage}
+							{#if server.memoryUsage}
 								<p class="text-[10px] text-muted-foreground/50 mt-1">
-									{((server.memory_usage / server.memory) * 100).toFixed(1)}% used
+									{((Number(server.memoryUsage) / server.memory) * 100).toFixed(1)}% used
 								</p>
 							{/if}
 						</div>
@@ -564,16 +582,16 @@
 						<div>
 							<div class="flex items-center justify-between mb-1.5">
 								<span class="text-xs font-semibold text-muted-foreground/70">CPU</span>
-								{#if server.cpu_percent !== undefined}
-									<span class="text-xs font-mono text-blue-500">{server.cpu_percent.toFixed(1)}%</span>
+								{#if server.cpuPercent !== undefined}
+									<span class="text-xs font-mono text-blue-500">{server.cpuPercent.toFixed(1)}%</span>
 								{:else}
 									<span class="text-xs font-mono text-muted-foreground/50">--</span>
 								{/if}
 							</div>
 							<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
-								{#if server.cpu_percent !== undefined}
+								{#if server.cpuPercent !== undefined}
 									<div class="relative h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-700" 
-										style="width: {Math.min(server.cpu_percent, 100)}%">
+										style="width: {Math.min(server.cpuPercent, 100)}%">
 										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
 									</div>
 								{:else}
@@ -586,15 +604,15 @@
 						<div>
 							<div class="flex items-center justify-between mb-1.5">
 								<span class="text-xs font-semibold text-muted-foreground/70">STORAGE</span>
-								{#if server.disk_usage !== undefined && server.disk_usage > 0}
-									<span class="text-xs font-mono text-purple-500">{formatBytes(server.disk_usage)} (world)</span>
+								{#if server.diskUsage !== undefined && Number(server.diskUsage) > 0}
+									<span class="text-xs font-mono text-purple-500">{formatBytes(Number(server.diskUsage))} (world)</span>
 								{:else}
 									<span class="text-xs font-mono text-muted-foreground/50">--</span>
 								{/if}
 							</div>
 							<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
-								{#if server.disk_usage !== undefined && server.disk_usage > 0 && server.disk_total}
-									{@const diskPercent = (server.disk_usage / server.disk_total) * 100}
+								{#if server.diskUsage !== undefined && Number(server.diskUsage) > 0 && server.diskTotal}
+									{@const diskPercent = (Number(server.diskUsage) / Number(server.diskTotal)) * 100}
 									<div class="relative h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-700" 
 										style="width: {Math.min(diskPercent, 100)}%">
 										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
@@ -603,22 +621,22 @@
 									<div class="h-full bg-muted/50"></div>
 								{/if}
 							</div>
-							{#if server.disk_usage !== undefined && server.disk_usage > 0}
+							{#if server.diskUsage !== undefined && Number(server.diskUsage) > 0}
 								<p class="text-[10px] text-muted-foreground/50 mt-1">
-									{#if server.disk_total}
-										{((server.disk_usage / server.disk_total) * 100).toFixed(1)}% of {formatBytes(server.disk_total)} used
+									{#if server.diskTotal}
+										{((Number(server.diskUsage) / Number(server.diskTotal)) * 100).toFixed(1)}% of {formatBytes(Number(server.diskTotal))} used
 									{/if}
 								</p>
 							{/if}
 						</div>
 
 						<!-- Players Online -->
-						{#if server.players_online !== undefined}
-							{@const playersPercent = (server.players_online / server.max_players) * 100}
+						{#if server.playersOnline !== undefined}
+							{@const playersPercent = (server.playersOnline / server.maxPlayers) * 100}
 							<div>
 								<div class="flex items-center justify-between mb-1.5">
 									<span class="text-xs font-semibold text-muted-foreground/70">PLAYERS</span>
-									<span class="text-xs font-mono text-indigo-500">{server.players_online}/{server.max_players}</span>
+									<span class="text-xs font-mono text-indigo-500">{server.playersOnline}/{server.maxPlayers}</span>
 								</div>
 								<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
 									
@@ -631,7 +649,7 @@
 						{/if}
 
 						<!-- TPS -->
-						{#if server.tps_command !== '' && server.tps !== undefined}
+						{#if server.tpsCommand !== '' && server.tps !== undefined}
 							{@const tpsPercent = (server.tps / 20) * 100}
 							<div>
 								<div class="flex items-center justify-between mb-1.5">

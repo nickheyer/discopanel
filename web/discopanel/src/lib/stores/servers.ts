@@ -1,6 +1,9 @@
 import { writable, derived } from 'svelte/store';
-import type { Server } from '$lib/api/types';
-import { api } from '$lib/api/client';
+import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+import { rpcClient } from '$lib/api/rpc-client';
+import { create } from '@bufbuild/protobuf';
+import { ListServersRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 
 function createServersStore() {
   const { subscribe, set, update } = writable<Server[]>([]);
@@ -9,9 +12,10 @@ function createServersStore() {
     subscribe,
     fetchServers: async (skipLoading = true) => {
       try {
-        const servers = await api.getServers(skipLoading);
-        set(servers);
-        return servers;
+        const request = create(ListServersRequestSchema, { fullStats: false });
+        const response = await rpcClient.server.listServers(request);
+        set(response.servers);
+        return response.servers;
       } catch (error) {
         console.error('Failed to fetch servers:', error);
         throw error;
@@ -39,10 +43,10 @@ export const serversStore = createServersStore();
 
 export const runningServers = derived(
   serversStore,
-  $servers => $servers.filter(server => server.status === 'running')
+  $servers => $servers.filter(server => server.status === ServerStatus.RUNNING)
 );
 
 export const stoppedServers = derived(
   serversStore,
-  $servers => $servers.filter(server => server.status === 'stopped')
+  $servers => $servers.filter(server => server.status === ServerStatus.STOPPED)
 );

@@ -51,7 +51,6 @@ func NewServerService(store *storage.Store, docker *docker.Client, config *confi
 	}
 }
 
-
 // dbServerToProto converts a database server model to proto server
 func dbServerToProto(server *storage.Server) *v1.Server {
 	if server == nil {
@@ -596,13 +595,15 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		}
 
 		overrides := &docker.DockerOverrides{
-			Environment: envMap,
-			Volumes:     volumes,
-			Devices:     msg.DockerOverrides.Devices,
-			NetworkMode: msg.DockerOverrides.NetworkMode,
-			Privileged:  msg.DockerOverrides.Privileged,
-			User:        msg.DockerOverrides.User,
-			CPULimit:    msg.DockerOverrides.CpuLimit,
+			Environment:   envMap,
+			Volumes:       volumes,
+			Devices:       msg.DockerOverrides.Devices,
+			NetworkMode:   msg.DockerOverrides.NetworkMode,
+			Privileged:    msg.DockerOverrides.Privileged,
+			User:          msg.DockerOverrides.User,
+			CPULimit:      msg.DockerOverrides.CpuLimit,
+			RestartPolicy: msg.DockerOverrides.RestartPolicy,
+			Entrypoint:    []string{msg.DockerOverrides.EntryPoint},
 		}
 		overridesBytes, err := json.Marshal(overrides)
 		if err != nil {

@@ -5,9 +5,10 @@
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, Upload, Download, Trash2, ToggleLeft, ToggleRight, Package, FileText } from '@lucide/svelte';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import type { Server, Mod } from '$lib/api/types';
+	import { ModLoader, type Server } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Mod } from '$lib/proto/discopanel/v1/mod_pb';
 	import { formatBytes } from '$lib/utils';
 
 	interface Props {
@@ -47,9 +48,10 @@
 	async function loadMods() {
 		try {
 			loading = true;
-			mods = await api.getMods(server.id);
+			const response = await rpcClient.mod.listMods({ serverId: server.id });
+			mods = response.mods;
 		} catch (error) {
-			if (server.mod_loader !== 'vanilla') {
+			if (server.modLoader !== ModLoader.VANILLA) {
 				toast.error('Failed to load mods');
 			}
 		} finally {
@@ -65,7 +67,14 @@
 		uploading = true;
 		try {
 			for (const file of Array.from(files)) {
-				await api.uploadMod(server.id, file);
+				const content = await file.arrayBuffer();
+				await rpcClient.mod.uploadMod({
+					serverId: server.id,
+					filename: file.name,
+					content: new Uint8Array(content),
+					displayName: file.name,
+					description: ''
+				});
 			}
 			toast.success(`Uploaded ${files.length} mod(s)`);
 			await loadMods();
@@ -79,11 +88,12 @@
 
 	async function toggleMod(mod: Mod) {
 		try {
-			await api.updateMod(server.id, mod.id, {
+			await rpcClient.mod.updateMod({
+				serverId: server.id,
+				modId: mod.id,
 				enabled: !mod.enabled,
-				name: mod.name,
-				version: mod.version || '',
-				description: mod.description || ''
+				displayName: mod.displayName,
+				description: mod.description
 			});
 			toast.success(`Mod ${!mod.enabled ? 'enabled' : 'disabled'}`);
 			await loadMods();
@@ -93,11 +103,14 @@
 	}
 
 	async function deleteMod(mod: Mod) {
-		const confirmed = confirm(`Are you sure you want to delete "${mod.name}"?`);
+		const confirmed = confirm(`Are you sure you want to delete "${mod.displayName}"?`);
 		if (!confirmed) return;
 
 		try {
-			await api.deleteMod(server.id, mod.id);
+			await rpcClient.mod.deleteMod({
+				serverId: server.id,
+				modId: mod.id
+			});
 			toast.success('Mod deleted');
 			await loadMods();
 		} catch (error) {
@@ -107,11 +120,15 @@
 
 	async function downloadMod(mod: Mod) {
 		try {
-			const blob = await api.downloadFile(server.id, `mods/${mod.file_name}`);
+			const response = await rpcClient.file.getFile({
+				serverId: server.id,
+				path: `${getModsDirectory()}/${mod.fileName}`
+			});
+			const blob = new Blob([response.content]);
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = mod.file_name;
+			a.download = mod.fileName;
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (error) {
@@ -120,32 +137,33 @@
 	}
 
 	function getModsDirectory(): string {
-		const modLoaderInfo: Record<string, string> = {
-			forge: 'mods',
-			neoforge: 'mods',
-			fabric: 'mods',
-			quilt: 'mods',
-			bukkit: 'plugins',
-			spigot: 'plugins',
-			paper: 'plugins',
-			pufferfish: 'plugins',
-			magma: 'mods',
-			magma_maintained: 'mods',
-			ketting: 'mods',
-			mohist: 'mods',
-			youer: 'mods',
-			banner: 'mods',
-			catserver: 'mods',
-			arclight: 'mods',
-			spongevanilla: 'mods'
+		const modLoaderInfo: Record<ModLoader, string> = {
+			[ModLoader.UNSPECIFIED]: 'mods',
+			[ModLoader.VANILLA]: 'mods',
+			[ModLoader.FORGE]: 'mods',
+			[ModLoader.NEOFORGE]: 'mods',
+			[ModLoader.FABRIC]: 'mods',
+			[ModLoader.QUILT]: 'mods',
+			[ModLoader.BUKKIT]: 'plugins',
+			[ModLoader.SPIGOT]: 'plugins',
+			[ModLoader.PAPER]: 'plugins',
+			[ModLoader.PURPUR]: 'plugins',
+			[ModLoader.SPONGE_VANILLA]: 'mods',
+			[ModLoader.SPONGE_FORGE]: 'mods',
+			[ModLoader.MOHIST]: 'mods',
+			[ModLoader.CATSERVER]: 'mods',
+			[ModLoader.ARCLIGHT]: 'mods',
+			[ModLoader.AUTO_CURSEFORGE]: 'mods',
+			[ModLoader.MODRINTH]: 'mods',
+			[ModLoader.FOLIA]: 'plugins'
 		};
-		
-		return modLoaderInfo[server.mod_loader] || 'mods';
+
+		return modLoaderInfo[server.modLoader] || 'mods';
 	}
 
 	function canHaveMods(): boolean {
-		const noModLoaders = ['vanilla', 'limbo', 'nanolimbo', 'glowstone', 'custom'];
-		return !noModLoaders.includes(server.mod_loader);
+		const noModLoaders = [ModLoader.VANILLA, ModLoader.UNSPECIFIED];
+		return !noModLoaders.includes(server.modLoader);
 	}
 </script>
 
@@ -219,7 +237,7 @@
 							
 							<div>
 								<div class="flex items-center gap-2">
-									<h4 class="font-medium">{mod.name}</h4>
+									<h4 class="font-medium">{mod.displayName}</h4>
 									{#if mod.version}
 										<Badge variant="secondary" class="text-xs">{mod.version}</Badge>
 									{/if}
@@ -230,10 +248,10 @@
 								<div class="flex items-center gap-4 text-sm text-muted-foreground mt-1">
 									<span class="flex items-center gap-1">
 										<FileText class="h-3 w-3" />
-										{mod.file_name}
+										{mod.fileName}
 									</span>
-									<span>{formatBytes(mod.file_size)}</span>
-									<span>{new Date(mod.uploaded_at).toLocaleDateString()}</span>
+									<span>{formatBytes(Number(mod.fileSize))}</span>
+									<span>{mod.uploadedAt ? new Date(Number(mod.uploadedAt.seconds) * 1000).toLocaleDateString() : ''}</span>
 								</div>
 								{#if mod.description}
 									<p class="text-sm text-muted-foreground mt-2">{mod.description}</p>

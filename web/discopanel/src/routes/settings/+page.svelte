@@ -6,7 +6,8 @@
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
 	import { Settings, Globe, Server, Shield, HelpCircle } from '@lucide/svelte';
-	import type { ConfigCategory } from '$lib/api/types';
+	import type { ConfigCategory } from '$lib/proto/discopanel/v1/config_pb';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import RoutingSettings from '$lib/components/routing-settings.svelte';
 	import AuthSettings from '$lib/components/auth-settings.svelte';
 	import SupportSettings from '$lib/components/support-settings.svelte';
@@ -19,9 +20,8 @@
 	async function loadGlobalSettings() {
 		loading = true;
 		try {
-			const response = await fetch('/api/v1/settings');
-			if (!response.ok) throw new Error('Failed to load settings');
-			globalConfig = await response.json();
+			const response = await rpcClient.config.getGlobalSettings({});
+			globalConfig = response.categories;
 		} catch (error) {
 			toast.error('Failed to load global settings');
 			console.error(error);
@@ -33,15 +33,20 @@
 	async function saveGlobalSettings(updates: Record<string, any>) {
 		saving = true;
 		try {
-			const response = await fetch('/api/v1/settings', {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(updates)
+			// Convert updates to a map of Any values
+			const anyUpdates: Record<string, any> = {};
+			for (const [key, value] of Object.entries(updates)) {
+				anyUpdates[key] = {
+					typeUrl: 'type.googleapis.com/google.protobuf.StringValue',
+					value: new TextEncoder().encode(JSON.stringify({ value: String(value) }))
+				};
+			}
+
+			const response = await rpcClient.config.updateGlobalSettings({
+				updates: anyUpdates
 			});
-			
-			if (!response.ok) throw new Error('Failed to save settings');
-			
-			globalConfig = await response.json();
+
+			globalConfig = response.categories;
 			toast.success('Global settings saved successfully');
 		} catch (error) {
 			toast.error('Failed to save global settings');

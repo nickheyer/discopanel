@@ -3,9 +3,10 @@
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
 	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw, Plus, FolderPlus, FilePlus, Pencil, Package } from '@lucide/svelte';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import type { Server, FileInfo } from '$lib/api/types';
+	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import type { FileInfo } from '$lib/proto/discopanel/v1/file_pb';
 	import { formatBytes } from '$lib/utils';
 	import FileEditorDialog from './file-editor-dialog.svelte';
 	import { DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
@@ -69,7 +70,12 @@
 	async function loadFiles() {
 		try {
 			loading = true;
-			files = await api.listFiles(server.id, '', true); // Get tree view
+			const response = await rpcClient.file.listFiles({
+				serverId: server.id,
+				path: '',
+				tree: true
+			});
+			files = response.files;
 		} catch (error) {
 			toast.error('Failed to load files');
 		} finally {
@@ -78,7 +84,7 @@
 	}
 
 	function getFileIcon(file: FileInfo) {
-		if (file.is_dir) {
+		if (file.isDir) {
 			return expandedDirs.has(file.path) ? FolderOpen : Folder;
 		}
 		
@@ -113,7 +119,13 @@
 		uploading = true;
 		try {
 			for (const file of Array.from(files)) {
-				await api.uploadFile(server.id, file, uploadPath);
+				const arrayBuffer = await file.arrayBuffer();
+				await rpcClient.file.uploadFile({
+					serverId: server.id,
+					path: uploadPath,
+					filename: file.name,
+					content: new Uint8Array(arrayBuffer)
+				});
 			}
 			toast.success(`Uploaded ${files.length} file(s) to ${uploadPath || 'root'}`);
 			await loadFiles();
@@ -136,7 +148,11 @@
 
 	async function downloadFile(file: FileInfo) {
 		try {
-			const blob = await api.downloadFile(server.id, file.path);
+			const response = await rpcClient.file.getFile({
+				serverId: server.id,
+				path: file.path
+			});
+			const blob = new Blob([response.content]);
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
@@ -149,15 +165,18 @@
 	}
 
 	async function deleteFile(file: FileInfo) {
-		const confirmed = confirm(`Are you sure you want to delete "${file.name}"${file.is_dir ? ' and all its contents' : ''}?`);
+		const confirmed = confirm(`Are you sure you want to delete "${file.name}"${file.isDir ? ' and all its contents' : ''}?`);
 		if (!confirmed) return;
 
 		try {
-			await api.deleteFile(server.id, file.path);
-			toast.success(`${file.is_dir ? 'Directory' : 'File'} deleted`);
+			await rpcClient.file.deleteFile({
+				serverId: server.id,
+				path: file.path
+			});
+			toast.success(`${file.isDir ? 'Directory' : 'File'} deleted`);
 			await loadFiles();
 		} catch (error) {
-			toast.error(`Failed to delete ${file.is_dir ? 'directory' : 'file'}`);
+			toast.error(`Failed to delete ${file.isDir ? 'directory' : 'file'}`);
 		}
 	}
 
@@ -166,7 +185,7 @@
 		
 		for (const item of items) {
 			result.push(item);
-			if (item.is_dir && item.children && expandedDirs.has(item.path)) {
+			if (item.isDir && item.children && expandedDirs.has(item.path)) {
 				result.push(...renderFileTree(item.children, level + 1));
 			}
 		}
@@ -179,7 +198,7 @@
 	}
 
 	function editFile(file: FileInfo) {
-		if (file.is_dir || !file.is_editable) {
+		if (file.isDir || !file.isEditable) {
 			toast.error('This file cannot be edited');
 			return;
 		}
@@ -195,7 +214,11 @@
 		
 		const fullPath = path ? `${path}/${fileName}` : fileName;
 		try {
-			await api.updateFile(server.id, fullPath, '');
+			await rpcClient.file.updateFile({
+				serverId: server.id,
+				path: fullPath,
+				content: new Uint8Array()
+			});
 			toast.success(`Created file: ${fileName}`);
 			await loadFiles();
 		} catch (error) {
@@ -212,9 +235,16 @@
 		const fullPath = path ? `${path}/${folderName}` : folderName;
 		try {
 			// Create a dummy file in the folder to ensure it exists
-			await api.updateFile(server.id, `${fullPath}/.gitkeep`, '');
+			await rpcClient.file.updateFile({
+				serverId: server.id,
+				path: `${fullPath}/.gitkeep`,
+				content: new Uint8Array()
+			});
 			toast.success(`Created folder: ${folderName}`);
-			await api.deleteFile(server.id, `${fullPath}/.gitkeep`);
+			await rpcClient.file.deleteFile({
+				serverId: server.id,
+				path: `${fullPath}/.gitkeep`
+			});
 			await loadFiles();
 		} catch (error) {
 			toast.error('Failed to create folder');
@@ -232,7 +262,11 @@
 		}
 		
 		try {
-			await api.renameFile(server.id, item.path, newName);
+			await rpcClient.file.renameFile({
+				serverId: server.id,
+				path: item.path,
+				newName: newName
+			});
 			toast.success(`Renamed ${item.name} to ${newName}`);
 			await loadFiles();
 		} catch (error: any) {
@@ -242,7 +276,10 @@
 
 	async function extractArchive(file: FileInfo) {
 		try {
-			const result = await api.extractArchive(server.id, file.path);
+			const result = await rpcClient.file.extractArchive({
+				serverId: server.id,
+				path: file.path
+			});
 			toast.success(`Archive extracted successfully`);
 			await loadFiles();
 		} catch (error: any) {
@@ -311,24 +348,24 @@
 						<button
 							class="flex items-center gap-2 flex-1 text-left"
 							onclick={() => {
-								if (file.is_dir) {
+								if (file.isDir) {
 									toggleDir(file.path);
-								} else if (file.is_editable) {
+								} else if (file.isEditable) {
 									editFile(file);
 								}
 							}}
 						>
 							<Icon class="h-4 w-4 text-muted-foreground" />
 							<span class="text-sm">{file.name}</span>
-							{#if !file.is_dir}
+							{#if !file.isDir}
 								<span class="text-xs text-muted-foreground">
-									{formatBytes(file.size)}
+									{formatBytes(Number(file.size))}
 								</span>
 							{/if}
 						</button>
 						
 						<div class="flex items-center gap-1">
-							{#if file.is_dir}
+							{#if file.isDir}
 								<Button
 									size="icon"
 									variant="ghost"
@@ -365,7 +402,7 @@
 									<FolderPlus class="h-3 w-3" />
 								</Button>
 							{/if}
-							{#if file.is_editable}
+							{#if file.isEditable}
 								<Button
 									size="icon"
 									variant="ghost"
@@ -376,7 +413,7 @@
 									<FileEdit class="h-3 w-3" />
 								</Button>
 							{/if}
-							{#if !file.is_dir && getFileIcon(file) === Archive}
+							{#if !file.isDir && getFileIcon(file) === Archive}
 								<Button
 									size="icon"
 									variant="ghost"
@@ -387,7 +424,7 @@
 									<Package class="h-3 w-3" />
 								</Button>
 							{/if}
-							{#if !file.is_dir}
+							{#if !file.isDir}
 								<Button
 									size="icon"
 									variant="ghost"
@@ -407,7 +444,7 @@
 									newItemName = file.name;
 									showRenameDialog = true;
 								}}
-								title="Rename {file.is_dir ? 'folder' : 'file'}"
+								title="Rename {file.isDir ? 'folder' : 'file'}"
 							>
 								<Pencil class="h-3 w-3" />
 							</Button>
@@ -416,7 +453,7 @@
 								variant="ghost"
 								class="h-7 w-7"
 								onclick={() => deleteFile(file)}
-								title="Delete {file.is_dir ? 'directory' : 'file'}"
+								title="Delete {file.isDir ? 'directory' : 'file'}"
 							>
 								<Trash2 class="h-3 w-3" />
 							</Button>
@@ -525,7 +562,7 @@
 <DialogPrimitive.Root bind:open={showRenameDialog}>
 	<DialogContent>
 		<DialogHeader>
-			<DialogTitle>Rename {renamingItem?.is_dir ? 'Folder' : 'File'}</DialogTitle>
+			<DialogTitle>Rename {renamingItem?.isDir ? 'Folder' : 'File'}</DialogTitle>
 			<DialogDescription>
 				Enter a new name for {renamingItem?.name}
 			</DialogDescription>

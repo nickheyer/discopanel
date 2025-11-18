@@ -37,6 +37,7 @@
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
 	import { Server, Home, Settings, Package, User, Users, LogOut } from '@lucide/svelte';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 
 	let { children } = $props();
 
@@ -210,11 +211,11 @@
 														<a href="/servers/{server.id}" {...props}>
 															<div class="flex w-full items-center gap-2">
 																<div
-																	class="h-2 w-2 rounded-full {server.status === 'running'
+																	class="h-2 w-2 rounded-full {server.status === ServerStatus.RUNNING
 																		? 'bg-green-500'
-																		: server.status === 'error'
+																		: server.status === ServerStatus.ERROR
 																			? 'bg-red-500 animate-pulse'
-																		: server.status === 'starting' || server.status === 'stopping' || server.status === 'unhealthy'
+																		: server.status === ServerStatus.STARTING || server.status === ServerStatus.STOPPING || server.status === ServerStatus.UNHEALTHY
 																			? 'bg-yellow-500'
 																			: 'bg-gray-400'}"
 																></div>

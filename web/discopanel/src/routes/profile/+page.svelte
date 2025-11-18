@@ -7,6 +7,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
 	import { User, Key, Shield, Edit, Eye, Loader2 } from '@lucide/svelte';
+	import { UserRole } from '$lib/proto/discopanel/v1/common_pb';
 	
 	let user = $derived($currentUser);
 	let passwordForm = $state({
@@ -48,25 +49,42 @@
 		}
 	}
 	
-	function getRoleIcon(role: string) {
+	function getRoleIcon(role: UserRole) {
 		switch (role) {
-			case 'admin':
+			case UserRole.ADMIN:
 				return Shield;
-			case 'editor':
+			case UserRole.EDITOR:
 				return Edit;
+			case UserRole.VIEWER:
+				return Eye;
 			default:
 				return Eye;
 		}
 	}
-	
-	function getRoleBadgeVariant(role: string) {
+
+	function getRoleBadgeVariant(role: UserRole) {
 		switch (role) {
-			case 'admin':
+			case UserRole.ADMIN:
 				return 'destructive' as const;
-			case 'editor':
+			case UserRole.EDITOR:
 				return 'secondary' as const;
+			case UserRole.VIEWER:
+				return 'outline' as const;
 			default:
 				return 'outline' as const;
+		}
+	}
+
+	function getRoleDisplayName(role: UserRole): string {
+		switch (role) {
+			case UserRole.ADMIN:
+				return 'Admin';
+			case UserRole.EDITOR:
+				return 'Editor';
+			case UserRole.VIEWER:
+				return 'Viewer';
+			default:
+				return 'Unknown';
 		}
 	}
 </script>
@@ -112,20 +130,20 @@
 							<Badge variant={getRoleBadgeVariant(user.role)}>
 								{@const Icon = getRoleIcon(user.role)}
 								<Icon class="mr-1 h-3 w-3" />
-								{user.role}
+								{getRoleDisplayName(user.role)}
 							</Badge>
 						</div>
 					</div>
 					
 					<div>
 						<Label class="text-muted-foreground">Account Created</Label>
-						<p>{new Date(user.created_at).toLocaleDateString()}</p>
+						<p>{user.createdAt ? new Date(Number(user.createdAt.seconds) * 1000).toLocaleDateString() : 'Unknown'}</p>
 					</div>
-					
-					{#if user.last_login}
+
+					{#if user.updatedAt}
 						<div>
-							<Label class="text-muted-foreground">Last Login</Label>
-							<p>{new Date(user.last_login).toLocaleString()}</p>
+							<Label class="text-muted-foreground">Last Active</Label>
+							<p>{new Date(Number(user.updatedAt.seconds) * 1000).toLocaleString()}</p>
 						</div>
 					{/if}
 				</CardContent>

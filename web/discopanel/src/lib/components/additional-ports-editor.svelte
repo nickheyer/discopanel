@@ -4,7 +4,9 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Plus, X, AlertCircle } from '@lucide/svelte';
-	import type { AdditionalPort } from '$lib/api/types';
+	import type { AdditionalPort } from '$lib/proto/discopanel/v1/common_pb';
+	import { AdditionalPortSchema } from '$lib/proto/discopanel/v1/common_pb';
+	import { create } from '@bufbuild/protobuf';
 
 	interface Props {
 		ports?: AdditionalPort[];
@@ -18,12 +20,12 @@
 	let portErrors = $state<Record<number, string>>({});
 
 	function addPort() {
-		const newPort: AdditionalPort = {
-			name: '',
-			container_port: findNextAvailablePort(),
-			host_port: findNextAvailablePort(),
+		const newPort = create(AdditionalPortSchema, {
+			description: '',
+			containerPort: findNextAvailablePort(),
+			hostPort: findNextAvailablePort(),
 			protocol: 'tcp'
-		};
+		});
 		ports = [...ports, newPort];
 		onchange?.(ports);
 	}
@@ -41,8 +43,8 @@
 			[field]: value
 		};
 
-		// Validate port if it's a host_port change
-		if (field === 'host_port') {
+		// Validate port if it's a hostPort change
+		if (field === 'hostPort') {
 			const port = Number(value);
 			if (port && usedPorts[port]) {
 				portErrors[index] = `Port ${port} is already in use`;
@@ -51,7 +53,7 @@
 			} else {
 				// Check for duplicates within additional ports
 				const hasDuplicate = ports.some((p, i) =>
-					i !== index && p.host_port === port && p.protocol === ports[index].protocol
+					i !== index && p.hostPort === port && p.protocol === ports[index].protocol
 				);
 				if (hasDuplicate) {
 					portErrors[index] = `Duplicate port ${port}/${ports[index].protocol}`;
@@ -68,7 +70,7 @@
 	function findNextAvailablePort(startFrom: number = 25566): number {
 		let port = startFrom;
 		while (port <= 65535) {
-			if (!usedPorts[port] && !ports.some(p => p.host_port === port)) {
+			if (!usedPorts[port] && !ports.some(p => p.hostPort === port)) {
 				return port;
 			}
 			port++;
@@ -103,7 +105,7 @@
 			<div class="space-y-3">
 				<!-- Headers -->
 				<div class="grid grid-cols-12 gap-2 px-1 text-xs font-medium text-muted-foreground">
-					<div class="col-span-4">Name/Description</div>
+					<div class="col-span-4">Description</div>
 					<div class="col-span-2">Container Port</div>
 					<div class="col-span-2">Host Port</div>
 					<div class="col-span-2">Protocol</div>
@@ -118,9 +120,9 @@
 								<Input
 									type="text"
 									placeholder="e.g., BlueMap Web"
-									bind:value={port.name}
+									bind:value={port.description}
 									disabled={disabled}
-									onchange={() => updatePort(index, 'name', port.name)}
+									onchange={() => updatePort(index, 'description', port.description)}
 									class="h-8 text-xs"
 								/>
 							</div>
@@ -130,9 +132,9 @@
 									min="1"
 									max="65535"
 									placeholder="8100"
-									bind:value={port.container_port}
+									bind:value={port.containerPort}
 									disabled={disabled}
-									onchange={() => updatePort(index, 'container_port', port.container_port)}
+									onchange={() => updatePort(index, 'containerPort', port.containerPort)}
 									class="h-8 text-xs"
 								/>
 							</div>
@@ -142,9 +144,9 @@
 									min="1"
 									max="65535"
 									placeholder="8100"
-									bind:value={port.host_port}
+									bind:value={port.hostPort}
 									disabled={disabled}
-									onchange={() => updatePort(index, 'host_port', port.host_port)}
+									onchange={() => updatePort(index, 'hostPort', port.hostPort)}
 									class="h-8 text-xs {portErrors[index] ? 'border-destructive' : ''}"
 								/>
 							</div>

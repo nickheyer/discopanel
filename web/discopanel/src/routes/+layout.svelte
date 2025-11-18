@@ -31,7 +31,7 @@
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
 	import { serversStore, runningServers } from '$lib/stores/servers';
-	import { authStore, currentUser, isAdmin } from '$lib/stores/auth';
+	import { authEnabled, authStore, currentUser, isAdmin } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
@@ -60,51 +60,54 @@
 
 	onMount(() => {
 		return new Promise((resolve, reject) => {
-			authStore.checkAuthStatus().then(async (authStatus) => {
-				loading = false;
-				if (authStatus.enabled) {
-					if (authStatus.firstUserSetup) {
-						goto('/login');
-						return;
+			authStore
+				.checkAuthStatus()
+				.then(async (authStatus) => {
+					loading = false;
+					if (authStatus.enabled) {
+						if (authStatus.firstUserSetup) {
+							goto('/login');
+							return;
+						}
+						const isValid = await authStore.validateSession();
+						if (!isValid) {
+							goto('/login');
+							return;
+						}
 					}
-					const isValid = await authStore.validateSession();
-					if (!isValid) {
-						goto('/login');
-						return;
+				})
+				.then(() => {
+					// Fetch servers immediately after auth check
+					if (page.url.pathname !== '/login') {
+						// Start fetching without awaiting - reduces perceived load time
+						serversStore.fetchServers(false).catch((err) => {
+							console.error('Failed to fetch initial servers:', err);
+						});
+
+						// Start polling immediately, don't wait for first fetch to complete
+						if (!statusPollingInterval) {
+							statusPollingInterval = setInterval(() => {
+								if (page.url.pathname !== '/login') {
+									serversStore.fetchServers(true);
+								}
+							}, 10000);
+						}
 					}
-				}
-			}).then(() => {
-				// Fetch servers immediately after auth check
-				if (page.url.pathname !== '/login') {
-					// Start fetching without awaiting - reduces perceived load time
-					serversStore.fetchServers(false).catch(err => {
-						console.error('Failed to fetch initial servers:', err);
+
+					// Clean up on unmount
+					resolve(() => {
+						if (statusPollingInterval) {
+							clearInterval(statusPollingInterval);
+							statusPollingInterval = null;
+						}
 					});
-
-					// Start polling immediately, don't wait for first fetch to complete
-					if (!statusPollingInterval) {
-						statusPollingInterval = setInterval(() => {
-							if (page.url.pathname !== '/login') {
-								serversStore.fetchServers(true);
-							}
-						}, 10000);
-					}
-				}
-
-				// Clean up on unmount
-				resolve(() => {
-					if (statusPollingInterval) {
-						clearInterval(statusPollingInterval);
-						statusPollingInterval = null;
-					}
+				})
+				.catch((err) => {
+					console.debug(`Discopanel caught a polling error: ${err}`);
+					reject(err);
 				});
-			}).catch((err) => {
-				console.debug(`Discopanel caught a polling error: ${err}`);
-				reject(err);
-			});
 		});
 	});
-
 </script>
 
 <svelte:head>
@@ -134,7 +137,9 @@
 
 				<SidebarContent>
 					<SidebarGroup>
-						<SidebarGroupLabel class="group-data-[collapsible=icon]:opacity-0">Navigation</SidebarGroupLabel>
+						<SidebarGroupLabel class="group-data-[collapsible=icon]:opacity-0"
+							>Navigation</SidebarGroupLabel
+						>
 						<SidebarGroupContent>
 							<SidebarMenu>
 								<SidebarMenuItem>
@@ -154,7 +159,11 @@
 												<Server class="h-4 w-4" />
 												<span class="group-data-[collapsible=icon]:hidden">Servers</span>
 												{#if runningCount > 0}
-													<Badge variant="secondary" class="ml-auto group-data-[collapsible=icon]:hidden">{runningCount}</Badge>
+													<Badge
+														variant="secondary"
+														class="ml-auto group-data-[collapsible=icon]:hidden"
+														>{runningCount}</Badge
+													>
 												{/if}
 											</a>
 										{/snippet}
@@ -170,7 +179,7 @@
 										{/snippet}
 									</SidebarMenuButton>
 								</SidebarMenuItem>
-								{#if isUserAdmin}
+								{#if isUserAdmin && isAuthEnabled}
 									<SidebarMenuItem>
 										<SidebarMenuButton isActive={page.url.pathname === '/users'}>
 											{#snippet child({ props })}
@@ -182,7 +191,7 @@
 										</SidebarMenuButton>
 									</SidebarMenuItem>
 								{/if}
-								{#if isUserAdmin}
+								{#if isUserAdmin || !isAuthEnabled}
 									<SidebarMenuItem>
 										<SidebarMenuButton isActive={page.url.pathname === '/settings'}>
 											{#snippet child({ props })}
@@ -215,10 +224,12 @@
 																	class="h-2 w-2 rounded-full {server.status === 'running'
 																		? 'bg-green-500'
 																		: server.status === 'error'
-																			? 'bg-red-500 animate-pulse'
-																		: server.status === 'starting' || server.status === 'stopping' || server.status === 'unhealthy'
-																			? 'bg-yellow-500'
-																			: 'bg-gray-400'}"
+																			? 'animate-pulse bg-red-500'
+																			: server.status === 'starting' ||
+																				  server.status === 'stopping' ||
+																				  server.status === 'unhealthy'
+																				? 'bg-yellow-500'
+																				: 'bg-gray-400'}"
 																></div>
 																<span class="truncate">{server.name}</span>
 															</div>
@@ -239,8 +250,10 @@
 						<Separator orientation="horizontal" />
 						<div class="flex items-center justify-between">
 							<DropdownMenu>
-								<div class="py-2 w-full">
-									<DropdownMenuTrigger class="w-full h-full justify-start group-data-[collapsible=icon]:p-0">
+								<div class="w-full py-2">
+									<DropdownMenuTrigger
+										class="h-full w-full justify-start group-data-[collapsible=icon]:p-0"
+									>
 										{#snippet child({ props })}
 											<Button {...props} variant="ghost">
 												<Avatar class="h-8 w-8">
@@ -248,7 +261,7 @@
 												</Avatar>
 												<div class="ml-2 flex-1 text-left group-data-[collapsible=icon]:hidden">
 													<p class="text-sm font-medium leading-none">{user.username}</p>
-													<p class="text-xs text-muted-foreground capitalize">{user.role}</p>
+													<p class="text-muted-foreground text-xs capitalize">{user.role}</p>
 												</div>
 											</Button>
 										{/snippet}
@@ -259,9 +272,11 @@
 										<div class="flex flex-col space-y-1">
 											<p class="text-sm font-medium leading-none">{user.username}</p>
 											{#if user.email}
-												<p class="text-xs leading-none text-muted-foreground">{user.email}</p>
+												<p class="text-muted-foreground text-xs leading-none">{user.email}</p>
 											{/if}
-											<p class="text-xs leading-none text-muted-foreground capitalize">Role: {user.role}</p>
+											<p class="text-muted-foreground text-xs capitalize leading-none">
+												Role: {user.role}
+											</p>
 										</div>
 									</DropdownMenuLabel>
 									<DropdownMenuSeparator />
@@ -282,12 +297,14 @@
 										<span>Log out</span>
 									</DropdownMenuItem>
 								</DropdownMenuContent>
-							</DropdownMenu>					
+							</DropdownMenu>
 						</div>
 					{/if}
 					<Separator orientation="horizontal" class="mb-2" />
 					<div class="ml-auto flex items-center gap-2">
-						<span class="text-muted-foreground text-xs group-data-[collapsible=icon]:hidden">{__APP_VERSION__}</span>
+						<span class="text-muted-foreground text-xs group-data-[collapsible=icon]:hidden"
+							>{__APP_VERSION__}</span
+						>
 						<SidebarTrigger />
 					</div>
 				</SidebarFooter>

@@ -33,6 +33,8 @@
 		allowRegistration: false,
 		oidcEnabled: false
 	});
+	let oidcVerifyRequired = $state(false);
+	let oidcVerifyEmail = $state('');
 
 	// Map OIDC error codes to user-friendly messages
 	function getErrorMessage(errorCode: string): string {
@@ -60,6 +62,18 @@
 	}
 
 	onMount(async () => {
+		// Check for OIDC password verification requirement
+		const oidcVerifyParam = $page.url.searchParams.get('oidc_verify');
+		if (oidcVerifyParam === 'true') {
+			oidcVerifyRequired = true;
+			oidcVerifyEmail = $page.url.searchParams.get('email') || '';
+			// Clear the parameter from URL
+			const url = new URL($page.url);
+			url.searchParams.delete('oidc_verify');
+			url.searchParams.delete('email');
+			goto(url.pathname + url.search, { replaceState: true });
+		}
+
 		// Check for OIDC error in URL query parameters
 		const errorParam = $page.url.searchParams.get('error');
 		if (errorParam) {
@@ -158,10 +172,29 @@
 		}
 	}
 
+	async function handleOIDCVerify() {
+		error = '';
+		loading = true;
+
+		try {
+			await authStore.verifyOIDCPassword(password);
+			toast.success('Account linked successfully');
+			// Small delay to ensure auth state is fully propagated before navigation
+			setTimeout(() => {
+				goto('/');
+			}, 100);
+		} catch (err: any) {
+			error = err.message || 'Password verification failed';
+			loading = false;
+		}
+	}
+
 	function handleSubmit(e: Event) {
 		e.preventDefault();
 
-		if (mode === 'login') {
+		if (oidcVerifyRequired) {
+			handleOIDCVerify();
+		} else if (mode === 'login') {
 			handleLogin();
 		} else if (mode === 'register') {
 			handleRegister();
@@ -197,7 +230,39 @@
 				</Alert>
 			{/if}
 
-			{#if !authStatus.firstUserSetup}
+			{#if oidcVerifyRequired}
+				<!-- OIDC Password Verification -->
+				<div class="space-y-4">
+					<Alert class="mb-4">
+						<AlertCircle class="h-4 w-4" />
+						<AlertDescription>
+							An account with email <strong>{oidcVerifyEmail}</strong> was found. Please enter your password to link your OIDC account.
+						</AlertDescription>
+					</Alert>
+					<form onsubmit={handleSubmit} class="space-y-4">
+						<div class="space-y-2">
+							<Label for="oidc-password">Password</Label>
+							<Input
+								id="oidc-password"
+								type="password"
+								bind:value={password}
+								required
+								disabled={loading}
+								placeholder="Enter your password"
+								autofocus
+							/>
+						</div>
+						<Button type="submit" class="w-full" disabled={loading}>
+							{#if loading}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								Verifying...
+							{:else}
+								Verify and Link Account
+							{/if}
+						</Button>
+					</form>
+				</div>
+			{:else if !authStatus.firstUserSetup}
 				<Tabs bind:value={mode} class="w-full">
 					<TabsList
 						class="grid w-full {authStatus.allowRegistration ? 'grid-cols-3' : 'grid-cols-2'}"

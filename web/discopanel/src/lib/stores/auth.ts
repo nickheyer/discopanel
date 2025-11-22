@@ -226,6 +226,40 @@ function createAuthStore() {
 			return await response.json();
 		},
 
+		async verifyOIDCPassword(password: string) {
+			try {
+				const response = await fetch('/api/v1/auth/oidc/verify-password', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+					},
+					credentials: 'include', // Ensure cookies are sent
+					body: JSON.stringify({ password }),
+				});
+
+				if (!response.ok) {
+					const error = await response.json();
+					throw new Error(error.error || 'Password verification failed');
+				}
+
+				const data = await response.json();
+
+				// Update auth state after successful verification
+				update(state => ({
+					...state,
+					user: data.user,
+					token: data.token,
+					isAuthenticated: true,
+					isLoading: false,
+				}));
+
+				return data;
+			} catch (error) {
+				update(state => ({ ...state, isLoading: false }));
+				throw error;
+			}
+		},
+
 		async validateSession() {
 			try {
 				// Cookie is sent automatically with the request

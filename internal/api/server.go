@@ -96,6 +96,7 @@ func (s *Server) setupAuthRoutes(api *mux.Router) {
 	// OIDC endpoints
 	api.HandleFunc("/auth/oidc/login", s.handleOIDCLogin).Methods("GET")
 	api.HandleFunc("/auth/oidc/callback", s.handleOIDCCallback).Methods("GET")
+	api.HandleFunc("/auth/oidc/verify-password", s.handleOIDCVerifyPassword).Methods("POST")
 
 	// Auth config (optional auth)
 	api.Handle("/auth/config", s.authMiddleware.OptionalAuth()(http.HandlerFunc(s.handleGetAuthConfig))).Methods("GET")

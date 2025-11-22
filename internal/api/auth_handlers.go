@@ -45,6 +45,10 @@ type ResetPasswordRequest struct {
 	NewPassword string `json:"new_password"`
 }
 
+type OIDCVerifyPasswordRequest struct {
+	Password string `json:"password"`
+}
+
 type AuthStatusResponse struct {
 	Enabled           bool `json:"enabled"`
 	FirstUserSetup    bool `json:"first_user_setup"`
@@ -94,6 +98,7 @@ const (
 	LoginErrorAccountDisabled                  LoginError = "account_disabled"
 	LoginErrorTokenGenerationFailed            LoginError = "token_generation_failed"
 	LoginErrorSessionCreationFailed            LoginError = "session_creation_failed"
+	LoginErrorPasswordVerificationRequired     LoginError = "password_verification_required"
 )
 
 // OIDC callback helper types
@@ -110,6 +115,16 @@ type oidcClaims struct {
 	PreferredUsername string `json:"preferred_username"`
 	Name              string `json:"name"`
 }
+
+// OIDCUserMatchMethod indicates how a user was matched during OIDC login
+type OIDCUserMatchMethod string
+
+const (
+	OIDCMatchBySub      OIDCUserMatchMethod = "sub"
+	OIDCMatchByEmail    OIDCUserMatchMethod = "email"
+	OIDCMatchByUsername OIDCUserMatchMethod = "username"
+	OIDCMatchNone       OIDCUserMatchMethod = "none"
+)
 
 // generateRandomPassword generates a random 32-character password
 func generateRandomPassword() (string, error) {
@@ -755,15 +770,16 @@ func determineUsernameFromClaims(claims *oidcClaims) string {
 }
 
 // findOIDCUser attempts to find an existing user by sub, email, or username
-func (s *Server) findOIDCUser(ctx context.Context, claims *oidcClaims, username string) (*db.User, error) {
+// Returns the user, how they were matched, and any error
+func (s *Server) findOIDCUser(ctx context.Context, claims *oidcClaims, username string) (*db.User, OIDCUserMatchMethod, error) {
 	// Step 1: Check if user exists based on sub claim
 	if claims.Subject != "" {
 		userBySub, err := s.store.GetUserByOpenIDSub(ctx, claims.Subject)
 		if err == nil {
-			return userBySub, nil
+			return userBySub, OIDCMatchBySub, nil
 		} else if err.Error() != "user not found" {
 			s.log.Error("Database error while looking up user by OpenID sub: %v", err)
-			return nil, newLoginError(LoginErrorDatabaseError)
+			return nil, OIDCMatchNone, newLoginError(LoginErrorDatabaseError)
 		}
 	}
 
@@ -773,20 +789,19 @@ func (s *Server) findOIDCUser(ctx context.Context, claims *oidcClaims, username 
 		if err == nil {
 			if userByEmail.OpenIDSub != nil && *userByEmail.OpenIDSub != claims.Subject {
 				s.log.Warn("OIDC login blocked - user found by email but has different OpenID sub: user_id=%s, username=%s, email=%s, existing_sub=%s, new_sub=%s", userByEmail.ID, userByEmail.Username, claims.Email, *userByEmail.OpenIDSub, claims.Subject)
-				return nil, newLoginError(LoginErrorAccountLinkedToDifferentProvider)
+				return nil, OIDCMatchNone, newLoginError(LoginErrorAccountLinkedToDifferentProvider)
 			}
 
+			// If user found by email but not by sub, require password verification before linking
 			if userByEmail.OpenIDSub == nil {
-				userByEmail.OpenIDSub = &claims.Subject
-				if err := s.store.UpdateUser(ctx, userByEmail); err != nil {
-					s.log.Error("Failed to update user with OpenID sub: %v", err)
-					return nil, newLoginError(LoginErrorDatabaseError)
-				}
+				// Return user but indicate password verification is required
+				// We'll handle the linking after password verification
+				return userByEmail, OIDCMatchByEmail, newLoginError(LoginErrorPasswordVerificationRequired)
 			}
-			return userByEmail, nil
+			return userByEmail, OIDCMatchByEmail, nil
 		} else if err.Error() != "user not found" {
 			s.log.Error("Database error while looking up user by email: %v", err)
-			return nil, newLoginError(LoginErrorDatabaseError)
+			return nil, OIDCMatchNone, newLoginError(LoginErrorDatabaseError)
 		}
 	}
 
@@ -795,23 +810,23 @@ func (s *Server) findOIDCUser(ctx context.Context, claims *oidcClaims, username 
 	if err == nil {
 		if userByUsername.OpenIDSub != nil && *userByUsername.OpenIDSub != claims.Subject {
 			s.log.Warn("OIDC login blocked - user found by username but has different OpenID sub: user_id=%s, username=%s, existing_sub=%s, new_sub=%s", userByUsername.ID, username, *userByUsername.OpenIDSub, claims.Subject)
-			return nil, newLoginError(LoginErrorAccountLinkedToDifferentProvider)
+			return nil, OIDCMatchNone, newLoginError(LoginErrorAccountLinkedToDifferentProvider)
 		}
 
 		if userByUsername.OpenIDSub == nil {
 			userByUsername.OpenIDSub = &claims.Subject
 			if err := s.store.UpdateUser(ctx, userByUsername); err != nil {
 				s.log.Error("Failed to update user with OpenID sub: %v", err)
-				return nil, newLoginError(LoginErrorDatabaseError)
+				return nil, OIDCMatchNone, newLoginError(LoginErrorDatabaseError)
 			}
 		}
-		return userByUsername, nil
+		return userByUsername, OIDCMatchByUsername, nil
 	} else if err.Error() != "user not found" {
 		s.log.Error("Database error while looking up user by username: %v", err)
-		return nil, newLoginError(LoginErrorDatabaseError)
+		return nil, OIDCMatchNone, newLoginError(LoginErrorDatabaseError)
 	}
 
-	return nil, nil // User not found
+	return nil, OIDCMatchNone, nil // User not found
 }
 
 // createOIDCUser creates a new user from OIDC claims
@@ -880,20 +895,6 @@ func (s *Server) createOIDCUser(ctx context.Context, claims *oidcClaims, usernam
 	return user, nil
 }
 
-// findOrCreateOIDCUser finds an existing user or creates a new one
-func (s *Server) findOrCreateOIDCUser(ctx context.Context, claims *oidcClaims, username string) (*db.User, error) {
-	user, err := s.findOIDCUser(ctx, claims, username)
-	if err != nil {
-		return nil, err
-	}
-
-	if user != nil {
-		return user, nil
-	}
-
-	return s.createOIDCUser(ctx, claims, username)
-}
-
 // createOIDCSessionAndCookies creates a session and sets all necessary cookies
 func (s *Server) createOIDCSessionAndCookies(w http.ResponseWriter, r *http.Request, user *db.User, oauthToken *oauth2.Token) error {
 	authConfig, _, _ := s.store.GetAuthConfig(r.Context())
@@ -948,7 +949,7 @@ func (s *Server) createOIDCSessionAndCookies(w http.ResponseWriter, r *http.Requ
 			Name:     name,
 			Value:    "",
 			Path:     "/",
-			Expires:  time.Now().Add(-time.Hour),
+			Expires:  time.Now().Add(15 * time.Minute), // 15 minutes
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
 		})
@@ -1004,10 +1005,78 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Determine username and find or create user
 	username := determineUsernameFromClaims(claims)
-	user, err := s.findOrCreateOIDCUser(ctx, claims, username)
+	user, matchMethod, err := s.findOIDCUser(ctx, claims, username)
+
+	// Check if password verification is required (user found by email but not by sub)
 	if err != nil {
+		if loginErr, ok := err.(*loginError); ok && loginErr.err == LoginErrorPasswordVerificationRequired {
+			// Store OIDC callback data temporarily in a cookie for password verification
+			callbackData := map[string]interface{}{
+				"sub":          claims.Subject,
+				"email":        claims.Email,
+				"username":     username,
+				"raw_id_token": rawIDToken,
+			}
+			callbackDataJSON, _ := json.Marshal(callbackData)
+			callbackDataEncoded := base64.URLEncoding.EncodeToString(callbackDataJSON)
+
+			// Store in cookie (expires in 10 minutes)
+			http.SetCookie(w, &http.Cookie{
+				Name:     auth.CookieOIDCState + "_verify",
+				Value:    callbackDataEncoded,
+				Path:     "/",
+				MaxAge:   600, // 10 minutes
+				HttpOnly: true,
+				SameSite: http.SameSiteStrictMode,
+				Secure:   r.TLS != nil,
+			})
+
+			// Also store the OAuth token data temporarily
+			oauthTokenJSON, _ := json.Marshal(oauthToken)
+			oauthTokenEncoded := base64.URLEncoding.EncodeToString(oauthTokenJSON)
+			http.SetCookie(w, &http.Cookie{
+				Name:     auth.CookieOIDCState + "_token",
+				Value:    oauthTokenEncoded,
+				Path:     "/",
+				MaxAge:   600, // 10 minutes
+				HttpOnly: true,
+				SameSite: http.SameSiteStrictMode,
+				Secure:   r.TLS != nil,
+			})
+
+			// Redirect to login page with password verification required flag
+			http.Redirect(w, r, "/login?oidc_verify=true&email="+claims.Email, http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/login?error="+err.Error(), http.StatusFound)
 		return
+	}
+
+	// If user not found, create user if registration is enabled
+	if user == nil {
+		s.log.Debug("OIDC user not found (match_method=%s), attempting to create if registration enabled", matchMethod)
+		authConfig, _, err := s.store.GetAuthConfig(ctx)
+		if err != nil {
+			s.log.Error("Failed to get auth config: %v", err)
+			http.Redirect(w, r, "/login?error="+string(LoginErrorConfigurationError), http.StatusFound)
+			return
+		}
+
+		if authConfig.AllowRegistration {
+			var createErr error
+			user, createErr = s.createOIDCUser(ctx, claims, username)
+			if createErr != nil {
+				http.Redirect(w, r, "/login?error="+createErr.Error(), http.StatusFound)
+				return
+			}
+		} else {
+			// Registration is disabled and user doesn't exist
+			s.log.Info("OIDC login blocked - user not found and registration is disabled: %s", username)
+			http.Redirect(w, r, "/login?error="+string(LoginErrorInvalidCredentials), http.StatusFound)
+			return
+		}
+	} else {
+		s.log.Debug("OIDC user found via %s: user_id=%s, username=%s", matchMethod, user.ID, user.Username)
 	}
 
 	// Check if user is active
@@ -1025,4 +1094,131 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Redirect to login page
 	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+// handleOIDCVerifyPassword verifies the user's password and completes OIDC account linking
+func (s *Server) handleOIDCVerifyPassword(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Get stored OIDC callback data from cookie
+	verifyCookie, err := r.Cookie(auth.CookieOIDCState + "_verify")
+	if err != nil || verifyCookie == nil {
+		s.respondError(w, http.StatusBadRequest, "OIDC verification session expired or invalid")
+		return
+	}
+
+	// Decode callback data
+	callbackDataJSON, err := base64.URLEncoding.DecodeString(verifyCookie.Value)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid OIDC verification data")
+		return
+	}
+
+	var callbackData map[string]interface{}
+	if err := json.Unmarshal(callbackDataJSON, &callbackData); err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid OIDC verification data")
+		return
+	}
+
+	email, ok := callbackData["email"].(string)
+	if !ok || email == "" {
+		s.respondError(w, http.StatusBadRequest, "Missing email in verification data")
+		return
+	}
+
+	// Get user by email
+	user, err := s.store.GetUserByEmail(ctx, email)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	// Parse password from request
+	var req OIDCVerifyPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Verify password
+	if !auth.CheckPassword(user.PasswordHash, req.Password) {
+		s.respondError(w, http.StatusUnauthorized, "Invalid password")
+		return
+	}
+
+	// Get OAuth token data from cookie
+	tokenCookie, err := r.Cookie(auth.CookieOIDCState + "_token")
+	if err != nil || tokenCookie == nil {
+		s.respondError(w, http.StatusBadRequest, "OIDC token data expired or invalid")
+		return
+	}
+
+	// Decode OAuth token data
+	oauthTokenJSON, err := base64.URLEncoding.DecodeString(tokenCookie.Value)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid OIDC token data")
+		return
+	}
+
+	var oauthToken oauth2.Token
+	if err := json.Unmarshal(oauthTokenJSON, &oauthToken); err != nil {
+		s.respondError(w, http.StatusBadRequest, "Invalid OIDC token data")
+		return
+	}
+
+	// Link the sub claim to the user
+	sub, ok := callbackData["sub"].(string)
+	if !ok || sub == "" {
+		s.respondError(w, http.StatusBadRequest, "Missing sub claim in verification data")
+		return
+	}
+
+	user.OpenIDSub = &sub
+	if err := s.store.UpdateUser(ctx, user); err != nil {
+		s.log.Error("Failed to link OIDC sub to user: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to link account")
+		return
+	}
+
+	s.log.Info("OIDC account linked after password verification: user_id=%s, username=%s, email=%s, sub=%s", user.ID, user.Username, email, sub)
+
+	// Check if user is active
+	if !user.IsActive {
+		s.respondError(w, http.StatusForbidden, "User account is disabled")
+		return
+	}
+
+	// Create session and set cookies
+	if err := s.createOIDCSessionAndCookies(w, r, user, &oauthToken); err != nil {
+		s.respondError(w, http.StatusInternalServerError, "Failed to create session")
+		return
+	}
+
+	// Clear verification cookies
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieOIDCState + "_verify",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieOIDCState + "_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	// Get auth config for session timeout
+	authConfig, _, _ := s.store.GetAuthConfig(r.Context())
+	expiresAt := time.Now().Add(time.Duration(authConfig.SessionTimeout) * time.Second)
+
+	s.respondJSON(w, http.StatusOK, LoginResponse{
+		Token:     "", // Token is in cookie
+		User:      user,
+		ExpiresAt: expiresAt,
+	})
 }

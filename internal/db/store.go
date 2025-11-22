@@ -745,7 +745,7 @@ func (s *Store) GetAuthConfig(ctx context.Context) (*AuthConfig, bool, error) {
 				ID:                 "default",
 				Enabled:            false,
 				OIDCEnabled:        false,
-				SessionTimeout:     86400, // 24 hours
+				SessionTimeout:     604800, // 1 week
 				RequireEmailVerify: false,
 				AllowRegistration:  false,
 			}, true, nil

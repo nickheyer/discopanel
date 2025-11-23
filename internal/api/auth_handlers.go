@@ -934,13 +934,14 @@ func (s *Server) createOIDCSessionAndCookies(w http.ResponseWriter, r *http.Requ
 			Name:     auth.CookieRefreshToken,
 			Value:    oauthToken.RefreshToken,
 			Path:     "/",
-			Expires:  time.Now().Add(30 * 24 * time.Hour),
+			Expires:  time.Now().Add(7 * 24 * time.Hour), // 7 days
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
 			Secure:   r.TLS != nil,
 		})
 	}
 
+	// Remove OIDC access and ID token from browser cookies by expiring them
 	for _, name := range []string{
 		auth.CookieOIDCAccessToken,
 		auth.CookieOIDCIdToken,
@@ -949,9 +950,10 @@ func (s *Server) createOIDCSessionAndCookies(w http.ResponseWriter, r *http.Requ
 			Name:     name,
 			Value:    "",
 			Path:     "/",
-			Expires:  time.Now().Add(15 * time.Minute), // 15 minutes
+			Expires:  time.Now().Add(-time.Hour), // Expire in the past to delete cookie
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
+			Secure:   r.TLS != nil,
 		})
 	}
 

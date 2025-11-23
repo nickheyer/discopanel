@@ -806,25 +806,28 @@ func (s *Server) findOIDCUser(ctx context.Context, claims *oidcClaims, username 
 	}
 
 	// Step 3: If still not found, check by username
-	userByUsername, err := s.store.GetUserByUsername(ctx, username)
-	if err == nil {
-		if userByUsername.OpenIDSub != nil && *userByUsername.OpenIDSub != claims.Subject {
-			s.log.Warn("OIDC login blocked - user found by username but has different OpenID sub: user_id=%s, username=%s, existing_sub=%s, new_sub=%s", userByUsername.ID, username, *userByUsername.OpenIDSub, claims.Subject)
-			return nil, OIDCMatchNone, newLoginError(LoginErrorAccountLinkedToDifferentProvider)
-		}
 
-		if userByUsername.OpenIDSub == nil {
-			userByUsername.OpenIDSub = &claims.Subject
-			if err := s.store.UpdateUser(ctx, userByUsername); err != nil {
-				s.log.Error("Failed to update user with OpenID sub: %v", err)
-				return nil, OIDCMatchNone, newLoginError(LoginErrorDatabaseError)
-			}
-		}
-		return userByUsername, OIDCMatchByUsername, nil
-	} else if err.Error() != "user not found" {
-		s.log.Error("Database error while looking up user by username: %v", err)
-		return nil, OIDCMatchNone, newLoginError(LoginErrorDatabaseError)
-	}
+	// -- This step is disabled due to security concerns --
+
+	// userByUsername, err := s.store.GetUserByUsername(ctx, username)
+	// if err == nil {
+	// 	if userByUsername.OpenIDSub != nil && *userByUsername.OpenIDSub != claims.Subject {
+	// 		s.log.Warn("OIDC login blocked - user found by username but has different OpenID sub: user_id=%s, username=%s, existing_sub=%s, new_sub=%s", userByUsername.ID, username, *userByUsername.OpenIDSub, claims.Subject)
+	// 		return nil, OIDCMatchNone, newLoginError(LoginErrorAccountLinkedToDifferentProvider)
+	// 	}
+
+	// 	if userByUsername.OpenIDSub == nil {
+	// 		userByUsername.OpenIDSub = &claims.Subject
+	// 		if err := s.store.UpdateUser(ctx, userByUsername); err != nil {
+	// 			s.log.Error("Failed to update user with OpenID sub: %v", err)
+	// 			return nil, OIDCMatchNone, newLoginError(LoginErrorDatabaseError)
+	// 		}
+	// 	}
+	// 	return userByUsername, OIDCMatchByUsername, nil
+	// } else if err.Error() != "user not found" {
+	// 	s.log.Error("Database error while looking up user by username: %v", err)
+	// 	return nil, OIDCMatchNone, newLoginError(LoginErrorDatabaseError)
+	// }
 
 	return nil, OIDCMatchNone, nil // User not found
 }

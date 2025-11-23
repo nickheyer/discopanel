@@ -11,6 +11,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/oidc"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	web "github.com/nickheyer/discopanel/web/discopanel"
@@ -26,6 +27,7 @@ type Server struct {
 	authManager    *auth.Manager
 	authMiddleware *auth.Middleware
 	logStreamer    *LogStreamer
+	oidcDiscovery  *oidc.DiscoveryService
 }
 
 func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
@@ -90,6 +92,11 @@ func (s *Server) setupAuthRoutes(api *mux.Router) {
 	api.HandleFunc("/auth/logout", s.handleLogout).Methods("POST")
 	api.HandleFunc("/auth/register", s.handleRegister).Methods("POST")
 	api.HandleFunc("/auth/reset-password", s.handleResetPassword).Methods("POST")
+
+	// OIDC endpoints
+	api.HandleFunc("/auth/oidc/login", s.handleOIDCLogin).Methods("GET")
+	api.HandleFunc("/auth/oidc/callback", s.handleOIDCCallback).Methods("GET")
+	api.HandleFunc("/auth/oidc/verify-password", s.handleOIDCVerifyPassword).Methods("POST")
 
 	// Auth config (optional auth)
 	api.Handle("/auth/config", s.authMiddleware.OptionalAuth()(http.HandlerFunc(s.handleGetAuthConfig))).Methods("GET")
@@ -281,6 +288,10 @@ func (s *Server) serveIndexHTML(w http.ResponseWriter, r *http.Request, fs http.
 
 func (s *Server) SetProxyManager(pm *proxy.Manager) {
 	s.proxyManager = pm
+}
+
+func (s *Server) SetOIDCDiscovery(od *oidc.DiscoveryService) {
+	s.oidcDiscovery = od
 }
 
 // StartLogStreaming starts log streaming for a container

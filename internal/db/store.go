@@ -647,7 +647,16 @@ func (s *Store) CreateUser(ctx context.Context, user *User) error {
 	if user.ID == "" {
 		user.ID = uuid.New().String()
 	}
-	return s.db.WithContext(ctx).Create(user).Error
+	// Store IsActive value before create (GORM may use schema default for zero values)
+	isActiveValue := user.IsActive
+	if err := s.db.WithContext(ctx).Create(user).Error; err != nil {
+		return err
+	}
+	// If IsActive should be false, explicitly update it to override any schema default
+	if !isActiveValue {
+		return s.db.WithContext(ctx).Model(user).Update("is_active", false).Error
+	}
+	return nil
 }
 
 func (s *Store) GetUser(ctx context.Context, id string) (*User, error) {
@@ -677,6 +686,18 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	var user User
 	err := s.db.WithContext(ctx).First(&user, "email = ?", email).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (s *Store) GetUserByOpenIDSub(ctx context.Context, sub string) (*User, error) {
+	var user User
+	err := s.db.WithContext(ctx).First(&user, "openid_sub = ?", sub).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("user not found")
@@ -723,7 +744,8 @@ func (s *Store) GetAuthConfig(ctx context.Context) (*AuthConfig, bool, error) {
 			return &AuthConfig{
 				ID:                 "default",
 				Enabled:            false,
-				SessionTimeout:     86400, // 24 hours
+				OIDCEnabled:        false,
+				SessionTimeout:     604800, // 1 week
 				RequireEmailVerify: false,
 				AllowRegistration:  false,
 			}, true, nil

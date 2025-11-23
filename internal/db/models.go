@@ -84,10 +84,10 @@ type Server struct {
 	JavaVersion     string       `json:"java_version" gorm:"column:java_version"`
 	DockerImage     string       `json:"docker_image" gorm:"column:docker_image"`
 	DataPath        string       `json:"data_path" gorm:"not null;column:data_path"`
-	Detached        bool         `json:"detached" gorm:"default:false;column:detached"`     // Detach server container from DiscoPanel lifecycle (default: false)
-	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
-	TPSCommand      string       `json:"tps_command" gorm:"column:tps_command"`             // The TPS command for this server (empty if not supported)
-	AdditionalPorts string       `json:"additional_ports" gorm:"column:additional_ports"`   // JSON array of additional port configurations
+	Detached        bool         `json:"detached" gorm:"default:false;column:detached"`             // Detach server container from DiscoPanel lifecycle (default: false)
+	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"`         // Start server when DiscoPanel starts (default: false)
+	TPSCommand      string       `json:"tps_command" gorm:"column:tps_command"`                     // The TPS command for this server (empty if not supported)
+	AdditionalPorts string       `json:"additional_ports" gorm:"column:additional_ports"`           // JSON array of additional port configurations
 	DockerOverrides string       `json:"docker_overrides" gorm:"column:docker_overrides;type:text"` // JSON object with docker container overrides
 
 	// Runtime stats (not persisted to DB)
@@ -387,7 +387,8 @@ const (
 type User struct {
 	ID           string     `json:"id" gorm:"primaryKey"`
 	Username     string     `json:"username" gorm:"not null;uniqueIndex"`
-	Email        *string    `json:"email" gorm:"uniqueIndex"` // Pointer allows NULL, unique only on non-NULL
+	Email        *string    `json:"email" gorm:"uniqueIndex"`                        // Pointer allows NULL, unique only on non-NULL
+	OpenIDSub    *string    `json:"openid_sub" gorm:"uniqueIndex;column:openid_sub"` // OpenID Connect subject identifier
 	PasswordHash string     `json:"-" gorm:"not null;column:password_hash"`
 	Role         UserRole   `json:"role" gorm:"not null;default:'viewer'"`
 	IsActive     bool       `json:"is_active" gorm:"not null;default:true"`
@@ -408,6 +409,7 @@ type AuthConfig struct {
 	AllowRegistration  bool      `json:"allow_registration" gorm:"default:false"` // Allow new user registration
 	CreatedAt          time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt          time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	OIDCEnabled        bool      `json:"oidc_enabled" gorm:"not null;default:false;column:oidc_enabled"` // OIDC authentication enabled
 }
 
 // Session represents an active user session

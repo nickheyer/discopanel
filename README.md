@@ -164,6 +164,7 @@ services:
 - Admin, Editor, and Viewer roles
 - Recovery key system (because passwords get forgotten)
 - Session management and JWT tokens
+- **OpenID Connect (OIDC) support** - Integrate with your existing identity provider (Keycloak, Auth0, Logto etc.)
 
 ## Configuration
 
@@ -181,6 +182,39 @@ proxy:
 ```
 
 >> NOTE: There are a metric ton worth of configurable settings for your DiscoPanel and the servers it hosts, they can all be setup here ahead of time
+
+### OIDC Configuration
+
+DiscoPanel supports OpenID Connect (OIDC) authentication, allowing you to integrate with external identity providers like Keycloak, Auth0, Okta, Logto, and more.
+
+To enable OIDC authentication, add the following configuration to your `config.yaml`:
+
+```yaml
+oidc:
+  issuer_uri: https://auth.example.com  # Base URL for OIDC discovery (where .well-known/openid-configuration lives)
+  client_id: YOUR_CLIENT_ID              # OAuth2 client ID from your identity provider
+  client_secret: YOUR_CLIENT_SECRET      # OAuth2 client secret from your identity provider
+  redirect_url: https://your-disco-panel-site.com/api/v1/auth/oidc/callback  # Callback URL (must match provider config)
+  scopes: openid profile email            # OAuth2 scopes to request (space-separated)
+```
+
+**Setup Steps:**
+
+1. **Configure your Identity Provider:**
+   - Create an OAuth2/OIDC client application
+   - Set the redirect/callback URL to: `https://your-disco-panel-site.com/api/v1/auth/oidc/callback`
+   - Note your `client_id` and `client_secret`
+
+2. **Configure DiscoPanel:**
+   - Add the OIDC configuration to your `config.yaml` (see example above)
+   - Ensure `issuer_uri` points to your identity provider's base URL
+   - The provider's OpenID configuration will be automatically discovered at `{issuer_uri}/.well-known/openid-configuration`
+
+**Important Notes:**
+- The redirect URL must **exactly** match what's configured in your identity provider
+- Users are automatically created on first OIDC login but get disabled, when registration is deactivated.
+- Username is determined from `preferred_username`, `username`, `email`, or `sub` claims (in that order)
+- OIDC configuration is cached for 24 hours for performance.
 
 ## Requirements
 

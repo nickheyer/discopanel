@@ -32,20 +32,21 @@ class ApiClient {
   ): Promise<T> {
     // Generate unique operation ID for this request
     const operationId = `${options.method || 'GET'}-${path}-${Date.now()}`;
-    
+
     // Don't show loading for polling operations or if explicitly skipped
     const showLoading = !options.skipLoading && !path.includes('?poll=true');
-    
+
     if (showLoading) {
       loadingStore.start(operationId);
     }
-    
+
     try {
       // Get auth headers
       const authHeaders = authStore.getHeaders();
-      
+
       const response = await fetch(`${API_BASE}${path}`, {
         ...options,
+        credentials: 'include', // Ensure cookies are sent
         headers: {
           ...authHeaders,
           ...options.headers,
@@ -60,10 +61,10 @@ class ApiClient {
         } catch {
           // If response is not JSON, use default error message
         }
-        
+
         // Show error toast
         toast.error(errorMessage);
-        
+
         throw new Error(errorMessage);
       }
 
@@ -81,9 +82,10 @@ class ApiClient {
   ): Promise<Blob> {
     // Get auth headers
     const authHeaders = authStore.getHeaders();
-    
+
     const response = await fetch(`${API_BASE}${path}`, {
       ...options,
+      credentials: 'include', // Ensure cookies are sent
       headers: {
         ...authHeaders,
         ...options.headers,
@@ -98,10 +100,10 @@ class ApiClient {
       } catch {
         // If response is not JSON, use default error message
       }
-      
+
       // Show error toast
       toast.error(errorMessage);
-      
+
       throw new Error(errorMessage);
     }
 
@@ -157,6 +159,8 @@ class ApiClient {
   async deleteServer(id: string): Promise<void> {
     await fetch(`${API_BASE}/servers/${id}`, {
       method: 'DELETE',
+      credentials: 'include', // Ensure cookies are sent
+      headers: authStore.getHeaders(),
     });
   }
 
@@ -229,7 +233,7 @@ class ApiClient {
   }): Promise<Mod> {
     const formData = new FormData();
     formData.append('mod', file);
-    
+
     if (metadata?.name) formData.append('name', metadata.name);
     if (metadata?.version) formData.append('version', metadata.version);
     if (metadata?.mod_id) formData.append('mod_id', metadata.mod_id);
@@ -254,6 +258,8 @@ class ApiClient {
   async deleteMod(serverId: string, modId: string): Promise<void> {
     await fetch(`${API_BASE}/servers/${serverId}/mods/${modId}`, {
       method: 'DELETE',
+      credentials: 'include', // Ensure cookies are sent
+      headers: authStore.getHeaders(),
     });
   }
 
@@ -295,6 +301,7 @@ class ApiClient {
     const encodedPath = encodeFilePath(path);
     const response = await fetch(`${API_BASE}/servers/${serverId}/files/${encodedPath}`, {
       method: 'DELETE',
+      credentials: 'include', // Ensure cookies are sent
       headers: authStore.getHeaders(),
     });
 
@@ -308,13 +315,14 @@ class ApiClient {
     const encodedPath = encodeFilePath(path);
     const response = await fetch(`${API_BASE}/servers/${serverId}/rename/${encodedPath}`, {
       method: 'POST',
+      credentials: 'include', // Ensure cookies are sent
       headers: {
         'Content-Type': 'application/json',
         ...authStore.getHeaders(),
       },
       body: JSON.stringify({ new_name: newName }),
     });
-    
+
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.error || 'Failed to rename file');
@@ -421,6 +429,7 @@ class ApiClient {
 
   async downloadSupportBundle(path: string): Promise<void> {
     const response = await fetch(`${API_BASE}/support/bundle/download?path=${encodeURIComponent(path)}`, {
+      credentials: 'include', // Ensure cookies are sent
       headers: authStore.getHeaders(),
     });
 

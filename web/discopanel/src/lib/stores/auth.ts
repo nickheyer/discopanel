@@ -33,54 +33,43 @@ function createAuthStore() {
 		allowRegistration: false,
 	});
 
-	// Load token from localStorage on init
-	if (browser) {
-		const token = localStorage.getItem('auth_token');
-		if (token) {
-			update(state => ({ ...state, token }));
-		}
-	}
-
-	return {
+	const store = {
 		subscribe,
-		
+
 		async checkAuthStatus() {
 			try {
-				const response = await fetch('/api/v1/auth/status');
+				const response = await fetch('/api/v1/auth/status', {
+					credentials: 'include', // Ensure cookies are sent
+				});
 				const data = await response.json();
-				
+
 				update(state => ({
 					...state,
 					authEnabled: data.enabled,
 					firstUserSetup: data.first_user_setup,
 					allowRegistration: data.allow_registration,
 				}));
-				
-				// If auth is enabled and we have a token, validate it
-				let currentToken: string | null = null;
-				update(state => {
-					currentToken = state.token;
-					return state;
-				});
-				
-				if (data.enabled && currentToken) {
-					await this.validateSession();
+
+				// If auth is enabled, validate session using cookie
+				if (data.enabled) {
+					await store.validateSession();
 				} else {
 					update(state => ({ ...state, isLoading: false }));
 				}
-				
+
 				return {
 					enabled: data.enabled,
 					firstUserSetup: data.first_user_setup,
-					allowRegistration: data.allow_registration
+					allowRegistration: data.allow_registration,
+					oidcEnabled: data.oidc_enabled || false
 				};
 			} catch (error) {
 				console.error('Failed to check auth status:', error);
 				update(state => ({ ...state, isLoading: false }));
-				return { enabled: false, firstUserSetup: false, allowRegistration: false };
+				return { enabled: false, firstUserSetup: false, allowRegistration: false, oidcEnabled: false };
 			}
 		},
-		
+
 		async login(username: string, password: string) {
 			try {
 				const response = await fetch('/api/v1/auth/login', {
@@ -88,21 +77,19 @@ function createAuthStore() {
 					headers: {
 						'Content-Type': 'application/json',
 					},
+					credentials: 'include', // Ensure cookies are sent and received
 					body: JSON.stringify({ username, password }),
 				});
-				
+
 				if (!response.ok) {
 					const error = await response.json();
 					throw new Error(error.error || 'Login failed');
 				}
-				
+
 				const data = await response.json();
-				
-				// Store token
-				if (browser && data.token) {
-					localStorage.setItem('auth_token', data.token);
-				}
-				
+
+				// Token is stored in HttpOnly cookie by backend
+				// Keep token in memory for Authorization headers
 				update(state => ({
 					...state,
 					user: data.user,
@@ -110,14 +97,14 @@ function createAuthStore() {
 					isAuthenticated: true,
 					isLoading: false,
 				}));
-				
+
 				return data;
 			} catch (error) {
 				update(state => ({ ...state, isLoading: false }));
 				throw error;
 			}
 		},
-		
+
 		async logout() {
 			let currentState: AuthState = {
 				user: null,
@@ -128,30 +115,26 @@ function createAuthStore() {
 				firstUserSetup: false,
 				allowRegistration: false,
 			};
-			
+
 			update(state => {
 				currentState = state;
 				return state;
 			});
-			
+
 			try {
-				if (currentState.token) {
-					await fetch('/api/v1/auth/logout', {
-						method: 'POST',
-						headers: {
-							'Authorization': `Bearer ${currentState.token}`,
-						},
-					});
-				}
+				// Cookie will be sent automatically, but also send Authorization header if we have token in memory
+				await fetch('/api/v1/auth/logout', {
+					method: 'POST',
+					credentials: 'include', // Ensure cookies are sent
+					headers: currentState.token ? {
+						'Authorization': `Bearer ${currentState.token}`,
+					} : {},
+				});
 			} catch (error) {
 				console.error('Logout error:', error);
 			}
-			
-			// Clear local storage
-			if (browser) {
-				localStorage.removeItem('auth_token');
-			}
-			
+
+			// Cookie is cleared by backend
 			// Reset state
 			set({
 				user: null,
@@ -162,11 +145,11 @@ function createAuthStore() {
 				firstUserSetup: currentState.firstUserSetup,
 				allowRegistration: currentState.allowRegistration,
 			});
-			
+
 			// Redirect to login
 			goto('/login');
 		},
-		
+
 		async register(username: string, email: string, password: string) {
 			try {
 				const response = await fetch('/api/v1/auth/register', {
@@ -174,91 +157,117 @@ function createAuthStore() {
 					headers: {
 						'Content-Type': 'application/json',
 					},
+					credentials: 'include', // Ensure cookies are sent and received
 					body: JSON.stringify({ username, email, password }),
 				});
-				
+
 				if (!response.ok) {
 					const error = await response.json();
 					throw new Error(error.error || 'Registration failed');
 				}
-				
+
 				const data = await response.json();
-				
+
 				// After successful registration, log them in
-				return await this.login(username, password);
+				return await store.login(username, password);
 			} catch (error) {
 				throw error;
 			}
 		},
-		
+
 		async changePassword(oldPassword: string, newPassword: string) {
 			let currentToken: string | null = null;
 			update(state => {
 				currentToken = state.token;
 				return state;
 			});
-			
+
 			if (!currentToken) {
 				throw new Error('Not authenticated');
 			}
-			
+
 			const response = await fetch('/api/v1/auth/change-password', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',
 					'Authorization': `Bearer ${currentToken}`,
 				},
+				credentials: 'include', // Ensure cookies are sent
 				body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
 			});
-			
+
 			if (!response.ok) {
 				const error = await response.json();
 				throw new Error(error.error || 'Failed to change password');
 			}
-			
+
 			return await response.json();
 		},
-		
+
 		async resetPassword(username: string, recoveryKey: string, newPassword: string) {
 			const response = await fetch('/api/v1/auth/reset-password', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',
 				},
-				body: JSON.stringify({ 
-					username, 
-					recovery_key: recoveryKey, 
-					new_password: newPassword 
+				credentials: 'include', // Ensure cookies are sent
+				body: JSON.stringify({
+					username,
+					recovery_key: recoveryKey,
+					new_password: newPassword
 				}),
 			});
-			
+
 			if (!response.ok) {
 				const error = await response.json();
 				throw new Error(error.error || 'Failed to reset password');
 			}
-			
+
 			return await response.json();
 		},
-		
-		async validateSession() {
-			let currentToken: string | null = null;
-			update(state => {
-				currentToken = state.token;
-				return state;
-			});
-			
-			if (!currentToken) {
-				update(state => ({ ...state, isLoading: false }));
-				return false;
-			}
-			
+
+		async verifyOIDCPassword(password: string) {
 			try {
-				const response = await fetch('/api/v1/auth/me', {
+				const response = await fetch('/api/v1/auth/oidc/verify-password', {
+					method: 'POST',
 					headers: {
-						'Authorization': `Bearer ${currentToken}`,
+						'Content-Type': 'application/json',
 					},
+					credentials: 'include', // Ensure cookies are sent
+					body: JSON.stringify({ password }),
 				});
-				
+
+				if (!response.ok) {
+					const error = await response.json();
+					throw new Error(error.error || 'Password verification failed');
+				}
+
+				const data = await response.json();
+
+				// Update auth state after successful verification
+				update(state => ({
+					...state,
+					user: data.user,
+					token: data.token,
+					isAuthenticated: true,
+					isLoading: false,
+				}));
+
+				return data;
+			} catch (error) {
+				update(state => ({ ...state, isLoading: false }));
+				throw error;
+			}
+		},
+
+		async validateSession() {
+			try {
+				// Cookie is sent automatically with the request
+				// Backend will extract token from cookie or Authorization header
+				const response = await fetch('/api/v1/auth/me', {
+					credentials: 'include', // Ensure cookies are sent
+				});
+
 				if (response.ok) {
 					const user = await response.json();
 					update(state => ({
@@ -269,10 +278,8 @@ function createAuthStore() {
 					}));
 					return true;
 				} else {
-					// Invalid token, clear it
-					if (browser) {
-						localStorage.removeItem('auth_token');
-					}
+					// Invalid session, clear state
+					// Cookie will be cleared by backend if needed
 					update(state => ({
 						...state,
 						user: null,
@@ -288,14 +295,14 @@ function createAuthStore() {
 				return false;
 			}
 		},
-		
+
 		getHeaders() {
 			let currentToken: string | null = null;
 			update(state => {
 				currentToken = state.token;
 				return state;
 			});
-			
+
 			const headers: HeadersInit = {};
 			if (currentToken) {
 				headers['Authorization'] = `Bearer ${currentToken}`;
@@ -303,6 +310,17 @@ function createAuthStore() {
 			return headers;
 		},
 	};
+
+	// On init, validate session using cookie (if auth is enabled)
+	// Token will be loaded from cookie automatically by the backend
+	if (browser) {
+		// Check auth status and validate session if cookie exists
+		store.checkAuthStatus().catch(() => {
+			// Ignore errors on init
+		});
+	}
+
+	return store;
 }
 
 export const authStore = createAuthStore();

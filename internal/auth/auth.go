@@ -22,6 +22,15 @@ var (
 	ErrSessionExpired     = errors.New("session expired")
 )
 
+// Cookie names used throughout the application
+const (
+	CookieAuthToken       = "auth_token"
+	CookieRefreshToken    = "refresh_token"
+	CookieOIDCAccessToken = "oidc_access_token"
+	CookieOIDCIdToken     = "oidc_id_token"
+	CookieOIDCState       = "oidc_state"
+)
+
 type Manager struct {
 	store *db.Store
 }
@@ -59,6 +68,7 @@ func (m *Manager) GenerateJWT(user *db.User, authConfig *db.AuthConfig) (string,
 		"user_id":  user.ID,
 		"username": user.Username,
 		"role":     user.Role,
+		"active":   user.IsActive,
 		"exp":      time.Now().Add(time.Duration(authConfig.SessionTimeout) * time.Second).Unix(),
 		"iat":      time.Now().Unix(),
 	}
@@ -86,6 +96,10 @@ func (m *Manager) ValidateJWT(tokenString string, authConfig *db.AuthConfig) (jw
 			if time.Now().Unix() > int64(exp) {
 				return nil, ErrSessionExpired
 			}
+		}
+		// Check if user is active
+		if active, ok := claims["active"].(bool); ok && !active {
+			return nil, ErrUserNotActive
 		}
 		return claims, nil
 	}
@@ -201,6 +215,11 @@ func (m *Manager) ValidateSession(ctx context.Context, token string) (*db.User, 
 		}
 	}
 
+	// Check if user is active (check both JWT claim and database)
+	if !session.User.IsActive {
+		return nil, ErrUserNotActive
+	}
+
 	return session.User, nil
 }
 
@@ -310,7 +329,7 @@ func (m *Manager) InitializeAuth(ctx context.Context) error {
 			return err
 		}
 		authConfig.RecoveryKey = recoveryKey
-		
+
 		// Hash recovery key for storage
 		hashedRecovery, err := HashPassword(recoveryKey)
 		if err != nil {
@@ -344,7 +363,7 @@ func (m *Manager) saveRecoveryKey(key string) error {
 		fmt.Printf("===========================================\n\n")
 		return err
 	}
-	
+
 	// Also print to console for immediate visibility
 	path, _ := GetRecoveryKeyPath()
 	fmt.Printf("\n===========================================\n")
@@ -352,7 +371,7 @@ func (m *Manager) saveRecoveryKey(key string) error {
 	fmt.Printf("Recovery Key: %s\n", key)
 	fmt.Printf("IMPORTANT: Keep this key secure!\n")
 	fmt.Printf("===========================================\n\n")
-	
+
 	return nil
 }
 

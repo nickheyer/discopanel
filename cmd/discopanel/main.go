@@ -14,6 +14,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/oidc"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
@@ -166,9 +167,40 @@ func main() {
 	}
 	defer proxyManager.Stop()
 
+	// Initialize OIDC discovery service and load configuration if OIDC is configured
+	oidcDiscovery := oidc.NewDiscoveryService(cfg, log)
+	if cfg.OIDC.IssuerURI != "" && cfg.OIDC.ClientID != "" {
+		log.Info("OIDC provider is enabled - Issuer: %s, ClientID: %s", cfg.OIDC.IssuerURI, cfg.OIDC.ClientID)
+
+		// Update auth config to enable OIDC in database (config file takes precedence)
+		authConfig, _, err := store.GetAuthConfig(ctx)
+		if err != nil {
+			log.Warn("Failed to get auth config to enable OIDC: %v", err)
+		} else {
+			// Always sync OIDC enabled state from config file
+			if !authConfig.OIDCEnabled {
+				authConfig.OIDCEnabled = true
+				if err := store.SaveAuthConfig(ctx, authConfig); err != nil {
+					log.Warn("Failed to enable OIDC in auth config: %v", err)
+				} else {
+					log.Info("OIDC enabled in auth configuration")
+				}
+			}
+		}
+
+		if err := oidcDiscovery.LoadProviderOnStartup(ctx); err != nil {
+			log.Warn("Failed to load OIDC provider configuration: %v", err)
+		} else {
+			log.Info("OIDC provider configuration loaded successfully")
+		}
+	} else {
+		log.Debug("OIDC provider is not enabled")
+	}
+
 	// Initialize API server with full configuration
 	apiServer := api.NewServer(store, dockerClient, cfg, log)
 	apiServer.SetProxyManager(proxyManager)
+	apiServer.SetOIDCDiscovery(oidcDiscovery)
 
 	// Auto-start servers that have auto_start enabled
 	log.Info("Checking for servers with auto-start enabled...")

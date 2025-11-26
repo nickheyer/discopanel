@@ -5,8 +5,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
-	import { formatBytes } from '$lib/utils';
-	import { serversStore } from '$lib/stores/servers';
+	import { formatBytes, getStringForEnum } from '$lib/utils';
 	import { onMount } from 'svelte';
 	import { 
 		Server, MemoryStick, Plus, LayoutDashboard, 
@@ -390,7 +389,7 @@
 										<div class="flex items-center gap-2">
 											<p class="text-sm font-medium truncate">{server.name}</p>
 											<Badge variant="outline" class="text-xs {getStatusBadgeColor(server.status)} border">
-												{server.status}
+												{getStringForEnum(ServerStatus, server.status)}
 											</Badge>
 										</div>
 										<div class="flex items-center gap-3 mt-1">

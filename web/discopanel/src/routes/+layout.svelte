@@ -37,7 +37,8 @@
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
 	import { Server, Home, Settings, Package, User, Users, LogOut } from '@lucide/svelte';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus, UserRole } from '$lib/proto/discopanel/v1/common_pb';
+	import { getStringForEnum } from '$lib/utils';
 
 	let { children } = $props();
 
@@ -247,7 +248,7 @@
 												</Avatar>
 												<div class="ml-2 flex-1 text-left group-data-[collapsible=icon]:hidden">
 													<p class="text-sm font-medium leading-none">{user.username}</p>
-													<p class="text-xs text-muted-foreground capitalize">{user.role}</p>
+													<p class="text-xs text-muted-foreground capitalize">{getStringForEnum(UserRole, user.role)}</p>
 												</div>
 											</Button>
 										{/snippet}

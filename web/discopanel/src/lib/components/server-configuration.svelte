@@ -28,6 +28,7 @@
 	let categories = $state<ConfigCategory[]>(config || []);
 	let originalValues = $state<Record<string, any>>({});
 	let currentValues = $state<Record<string, any>>({});
+	let originalEnabledFields = $state<Set<string>>(new Set());
 	let enabledFields = $state<Set<string>>(new Set());
 	let modifiedProperties = $state<Set<string>>(new Set());
 	let highlightedField = $state<string | null>(null);
@@ -78,38 +79,39 @@
 
 	function processConfig(configData: ConfigCategory[]) {
 		categories = configData;
-		
 		// Build originalValues and currentValues from categories
 		originalValues = {};
 		currentValues = {};
-		enabledFields = new Set();
+		const newEnabledFields = new Set<string>();
 		categories.forEach(category => {
 			category.properties.forEach((prop: ConfigProperty) => {
 				// Skip internal fields
 				if (prop.key === 'id' || prop.key === 'serverId' || prop.key === 'updatedAt') {
 					return;
 				}
-				
 				// Store the actual value (which might be null/undefined)
 				originalValues[prop.key] = prop.value;
 				currentValues[prop.key] = prop.value;
-				
 				// For global settings (when no server), only enable fields that have values
 				// For server configs, enable required/system fields or fields with values
 				if (!server) {
 					// Global settings - only enable if there's a value
 					if (!_.isEmpty(prop.value)) {
-						enabledFields.add(prop.key);
+						newEnabledFields.add(prop.key);
 					}
 				} else {
 					// Server config - enable required/system fields or fields with values
 					if (!_.isEmpty(prop.value) || prop.required || prop.system) {
-						enabledFields.add(prop.key);
+						newEnabledFields.add(prop.key);
 					}
 				}
 			});
 		});
-		
+
+		// Store the original enabled fields state
+		originalEnabledFields = new Set(newEnabledFields);
+		enabledFields = newEnabledFields;
+
 		// Reset modified properties when loading new config
 		modifiedProperties.clear();
 	}
@@ -124,18 +126,18 @@
 			saving = true;
 		}
 		try {
-			const changes: Record<string, any> = {};
-			
+			const changes: Record<string, string> = {};
+
 			// Include all modified properties
 			modifiedProperties.forEach(key => {
 				if (enabledFields.has(key)) {
-					// Field is enabled - send its value (null/undefined means unset)
+					// Field is enabled
 					const value = currentValues[key];
-					// Convert undefined to null for consistency
-					changes[key] = value === undefined ? null : value;
+					// Convert to string
+					changes[key] = value === null || value === undefined ? '' : String(value);
 				} else {
-					// Field is disabled - send null to unset it
-					changes[key] = null;
+					// Field is disabled
+					changes[key] = '';
 				}
 			});
 
@@ -201,21 +203,24 @@
 
 	function updateModifiedProperties() {
 		modifiedProperties.clear();
-		
-		// Check for changes in enabled fields
 		categories.forEach(category => {
 			category.properties.forEach((prop: ConfigProperty) => {
-				const wasEnabled = originalValues[prop.key] !== null && originalValues[prop.key] !== undefined;
+				// Skip internal fields
+				if (prop.key === 'id' || prop.key === 'serverId' || prop.key === 'updatedAt') {
+					return;
+				}
+
+				const wasEnabled = originalEnabledFields.has(prop.key);
 				const isEnabled = enabledFields.has(prop.key);
-				
 				if (wasEnabled !== isEnabled) {
 					modifiedProperties.add(prop.key);
-				} else if (isEnabled && currentValues[prop.key] !== originalValues[prop.key]) {
+				}
+				// Check if value changed for enabled fields
+				else if (isEnabled && currentValues[prop.key] !== originalValues[prop.key]) {
 					modifiedProperties.add(prop.key);
 				}
 			});
 		});
-		
 		modifiedProperties = new Set(modifiedProperties);
 	}
 
@@ -261,10 +266,10 @@
 
 	function resetChanges() {
 		modifiedProperties.clear();
-		modifiedProperties = modifiedProperties;
-		enabledFields.clear();
+		modifiedProperties = new Set();
+		currentValues = { ...originalValues };
+		enabledFields = new Set(originalEnabledFields);
 		enabledFields = enabledFields;
-		loadServerConfig();
 	}
 
 	function getInputType(type: string): 'text' | 'number' | 'checkbox' | 'select' | 'password' {

@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { DockerImage } from "./proto/discopanel/v1/minecraft_pb";
 
+
 export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
 }
@@ -43,3 +44,7 @@ export 	function getDockerImageDisplayName(tagOrImage: string | DockerImage, doc
 		// Use the displayName field from the generated type
 		return image.displayName || image.tag;
 	}
+
+export function getStringForEnum(map: any, val: unknown) {
+  return Object.keys(map).find(key => map[key] === val);
+}

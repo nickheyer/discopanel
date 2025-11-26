@@ -14,6 +14,7 @@
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ConfigCategory, ConfigProperty } from '$lib/proto/discopanel/v1/config_pb';
+	import * as _ from 'lodash-es';
 
 	let { server, config, onSave, saving: externalSaving = false }: { 
 		server?: Server;
@@ -97,12 +98,12 @@
 				// For server configs, enable required/system fields or fields with values
 				if (!server) {
 					// Global settings - only enable if there's a value
-					if (prop.value !== null && prop.value !== undefined) {
+					if (!_.isEmpty(prop.value)) {
 						enabledFields.add(prop.key);
 					}
 				} else {
 					// Server config - enable required/system fields or fields with values
-					if ((prop.value !== null && prop.value !== undefined) || prop.required || prop.system) {
+					if (!_.isEmpty(prop.value) || prop.required || prop.system) {
 						enabledFields.add(prop.key);
 					}
 				}

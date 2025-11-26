@@ -12,6 +12,8 @@ service SupportService {
   rpc GenerateSupportBundle(GenerateSupportBundleRequest) returns (GenerateSupportBundleResponse);
   // Download diagnostic archive
   rpc DownloadSupportBundle(DownloadSupportBundleRequest) returns (DownloadSupportBundleResponse);
+  // Upload support bundle to support server
+  rpc UploadSupportBundle(UploadSupportBundleRequest) returns (UploadSupportBundleResponse);
 }
 
 // Bundle generation options
@@ -41,6 +43,21 @@ message DownloadSupportBundleResponse {
   bytes content = 1;
   string filename = 2;
   string mime_type = 3;
+}
+
+// Upload support bundle request
+message UploadSupportBundleRequest {
+  bool include_logs = 1;
+  bool include_configs = 2;
+  bool include_system_info = 3;
+  repeated string server_ids = 4; // Specific servers to include, empty for all
+}
+
+// Upload support bundle response
+message UploadSupportBundleResponse {
+  string reference_id = 1;
+  string message = 2;
+  bool success = 3;
 }
 
 // Docker system information

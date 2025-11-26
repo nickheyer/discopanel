@@ -167,8 +167,7 @@ func main() {
 	defer proxyManager.Stop()
 
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, cfg, log)
-	rpcServer.SetProxyManager(proxyManager)
+	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, log)
 
 	// Auto-start servers that have auto_start enabled
 	log.Info("Checking for servers with auto-start enabled...")

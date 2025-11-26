@@ -2,12 +2,15 @@ package services
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"debug/buildinfo"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,6 +192,196 @@ func (s *SupportService) DownloadSupportBundle(ctx context.Context, req *connect
 		Filename: bundleInfo.Filename,
 		MimeType: "application/gzip",
 	}), nil
+}
+
+// UploadSupportBundle generates and uploads a support bundle to the support server
+func (s *SupportService) UploadSupportBundle(ctx context.Context, req *connect.Request[v1.UploadSupportBundleRequest]) (*connect.Response[v1.UploadSupportBundleResponse], error) {
+	msg := req.Msg
+
+	// Default all options to true if not specified
+	includeLogs := msg.IncludeLogs
+	includeConfigs := msg.IncludeConfigs
+	includeSystemInfo := msg.IncludeSystemInfo
+
+	s.log.Info("Generating support bundle for upload (logs=%v, configs=%v, system=%v)", includeLogs, includeConfigs, includeSystemInfo)
+
+	// Create temporary directory for bundle
+	tempDir := filepath.Join(s.config.Storage.TempDir, fmt.Sprintf("support-bundle-%d", time.Now().Unix()))
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		s.log.Error("Failed to create temp directory: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create temp directory"))
+	}
+	defer os.RemoveAll(tempDir) // Clean up temp directory when done
+
+	// Prepare bundle file path
+	bundleFileName := fmt.Sprintf("discopanel-support-%s.tar.gz", time.Now().Format("20060102-150405"))
+	bundlePath := filepath.Join(s.config.Storage.TempDir, bundleFileName)
+
+	// Create the tar.gz file
+	bundleFile, err := os.Create(bundlePath)
+	if err != nil {
+		s.log.Error("Failed to create bundle file: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create bundle file"))
+	}
+	defer bundleFile.Close()
+
+	// Create gzip writer
+	gzipWriter := gzip.NewWriter(bundleFile)
+	defer gzipWriter.Close()
+
+	// Create tar writer
+	tarWriter := tar.NewWriter(gzipWriter)
+	defer tarWriter.Close()
+
+	// 1. Add logs to bundle if requested
+	if includeLogs {
+		if err := s.addLogsToBundle(ctx, tarWriter, msg.ServerIds); err != nil {
+			s.log.Error("Failed to add logs to bundle: %v", err)
+			// Continue without failing the entire bundle
+			s.log.Warn("Continuing without logs")
+		}
+	}
+
+	// 2. Add database/configs to bundle if requested
+	if includeConfigs {
+		if err := s.addDatabaseToBundle(tarWriter); err != nil {
+			s.log.Error("Failed to add database to bundle: %v", err)
+			// Continue without failing
+			s.log.Warn("Continuing without database")
+		}
+
+		// Add server configurations
+		if err := s.addServerConfigsToBundle(ctx, tarWriter, msg.ServerIds); err != nil {
+			s.log.Error("Failed to add server configs: %v", err)
+			s.log.Warn("Continuing without server configs")
+		}
+	}
+
+	// 3. Add system information if requested
+	if includeSystemInfo {
+		if err := s.addSystemInfoToBundle(ctx, tarWriter); err != nil {
+			s.log.Error("Failed to add system info to bundle: %v", err)
+			// Don't fail the entire bundle if system info fails
+			s.log.Warn("Continuing without system info")
+		}
+	}
+
+	// Close writers to flush all data
+	tarWriter.Close()
+	gzipWriter.Close()
+	bundleFile.Close()
+
+	// Upload the bundle to support server
+	referenceID, err := s.uploadBundleToServer(bundlePath, bundleFileName)
+	if err != nil {
+		s.log.Error("Failed to upload support bundle: %v", err)
+		// Clean up the bundle file
+		os.Remove(bundlePath)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to upload support bundle: %v", err))
+	}
+
+	// Clean up the bundle file after successful upload
+	os.Remove(bundlePath)
+
+	return connect.NewResponse(&v1.UploadSupportBundleResponse{
+		ReferenceId: referenceID,
+		Message:     "Support bundle uploaded successfully",
+		Success:     true,
+	}), nil
+}
+
+// uploadBundleToServer uploads a bundle file to the support server
+func (s *SupportService) uploadBundleToServer(bundlePath, fileName string) (string, error) {
+	supportURL := s.getUploadSupportUrl()
+
+	// Open the bundle file
+	file, err := os.Open(bundlePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open bundle file: %w", err)
+	}
+	defer file.Close()
+
+	// Get file info
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("failed to stat bundle file: %w", err)
+	}
+
+	// Create multipart form
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add file field
+	part, err := writer.CreateFormFile("bundle", fileName)
+	if err != nil {
+		return "", fmt.Errorf("failed to create form file: %w", err)
+	}
+
+	// Copy file content
+	if _, err := io.Copy(part, file); err != nil {
+		return "", fmt.Errorf("failed to copy file content: %w", err)
+	}
+
+	// Add metadata fields
+	writer.WriteField("timestamp", time.Now().Format(time.RFC3339))
+	writer.WriteField("size", fmt.Sprintf("%d", fileInfo.Size()))
+
+	// Close multipart writer
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	// Create request
+	req, err := http.NewRequest(http.MethodPost, supportURL, body)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	// Send request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload bundle: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("upload failed with status: %d", resp.StatusCode)
+	}
+
+	var uploadResp struct {
+		URL         string `json:"url"`
+		Message     string `json:"message"`
+		ReferenceID string `json:"reference_id"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&uploadResp); err != nil {
+		// If we can't decode the response, just return the support URL
+		return supportURL, nil
+	}
+
+	// Return the reference ID if provided
+	if uploadResp.ReferenceID != "" {
+		return uploadResp.ReferenceID, nil
+	}
+
+	return uploadResp.URL, nil
+}
+
+// Helper method to get the support server URL
+func (s *SupportService) getSupportUrl() string {
+	url := os.Getenv("SUPPORT_BASE_URL")
+	if url == "" {
+		url = "https://support.discopanel.app"
+	}
+	return url
+}
+
+// Helper method to get the upload support URL
+func (s *SupportService) getUploadSupportUrl() string {
+	return s.getSupportUrl() + "/api/v1/uploads"
 }
 
 // cleanupBundle removes a bundle from memory and disk

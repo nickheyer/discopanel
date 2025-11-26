@@ -11,7 +11,6 @@ require (
 	github.com/docker/go-connections v0.6.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/mux v1.8.1
 	github.com/mholt/archives v0.1.5
 	github.com/spf13/viper v1.20.1
 	golang.org/x/crypto v0.40.0

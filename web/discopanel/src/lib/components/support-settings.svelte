@@ -35,34 +35,48 @@
 		referenceId = null;
 
 		try {
-			const response = await rpcClient.support.generateSupportBundle({
-				includeLogs: true,
-				includeConfigs: true,
-				includeSystemInfo: true,
-				serverIds: []
-			});
+			if (upload) {
+				const response = await rpcClient.support.uploadSupportBundle({
+					includeLogs: true,
+					includeConfigs: true,
+					includeSystemInfo: true,
+					serverIds: []
+				});
 
-			if (response.bundleId) {
-				if (upload) {
-					// For upload, the bundle ID serves as reference
-					referenceId = response.bundleId;
+				if (response.success && response.referenceId) {
+					referenceId = response.referenceId;
 					toast.success('Support bundle uploaded successfully!', {
 						description: 'Save your reference ID for support requests.',
 					});
 				} else {
+					toast.error('Failed to upload support bundle', {
+						description: response.message || 'Unknown error occurred',
+					});
+				}
+			} else {
+				// Gen bundle for download
+				const response = await rpcClient.support.generateSupportBundle({
+					includeLogs: true,
+					includeConfigs: true,
+					includeSystemInfo: true,
+					serverIds: []
+				});
+
+				if (response.bundleId) {
 					bundlePath = response.bundleId;
 					toast.success('Support bundle generated!', {
 						description: 'Click the download button to save the bundle.',
 					});
+				} else {
+					toast.error('Failed to generate support bundle', {
+						description: response.message,
+					});
 				}
-			} else {
-				toast.error('Failed to generate support bundle', {
-					description: response.message,
-				});
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error occurred';
-			toast.error('Failed to generate support bundle', {
+			const action = upload ? 'upload' : 'generate';
+			toast.error(`Failed to ${action} support bundle`, {
 				description: message,
 			});
 		} finally {
@@ -78,8 +92,10 @@
 			const response = await rpcClient.support.downloadSupportBundle({
 				bundleId: bundlePath
 			});
-			// Create a download link
-			const blob = new Blob([response.content], { type: response.mimeType });
+			// Create download link
+			const blob = new Blob([
+				new Uint8Array(response.content)
+			], { type: response.mimeType });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;

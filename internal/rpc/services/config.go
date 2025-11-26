@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"time"
@@ -15,15 +16,11 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 	"gorm.io/gorm"
 )
 
-// Compile-time check that ConfigService implements the interface
 var _ discopanelv1connect.ConfigServiceHandler = (*ConfigService)(nil)
 
-// ConfigService implements the Config service
 type ConfigService struct {
 	store  *storage.Store
 	config *config.Config
@@ -31,7 +28,7 @@ type ConfigService struct {
 	log    *logger.Logger
 }
 
-// NewConfigService creates a new config service
+// Creates new config service
 func NewConfigService(store *storage.Store, cfg *config.Config, docker *docker.Client, log *logger.Logger) *ConfigService {
 	return &ConfigService{
 		store:  store,
@@ -41,11 +38,11 @@ func NewConfigService(store *storage.Store, cfg *config.Config, docker *docker.C
 	}
 }
 
-// GetServerConfig gets server configuration
+// Gets server config
 func (s *ConfigService) GetServerConfig(ctx context.Context, req *connect.Request[v1.GetServerConfigRequest]) (*connect.Response[v1.GetServerConfigResponse], error) {
 	msg := req.Msg
 
-	// Get server to ensure it exists and sync config
+	// Get server to ensure it exists
 	server, err := s.store.GetServer(ctx, msg.ServerId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
@@ -76,7 +73,7 @@ func (s *ConfigService) GetServerConfig(ctx context.Context, req *connect.Reques
 	}), nil
 }
 
-// UpdateServerConfig updates server configuration
+// Updates server config
 func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Request[v1.UpdateServerConfigRequest]) (*connect.Response[v1.UpdateServerConfigResponse], error) {
 	msg := req.Msg
 
@@ -97,7 +94,7 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 		}
 	}
 
-	// Apply updates using reflection
+	// Apply updates w/ reflection
 	if err := applyConfigUpdates(config, msg.Updates); err != nil {
 		s.log.Error("Failed to apply config updates: %v", err)
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("failed to apply configuration updates"))
@@ -109,61 +106,11 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save server configuration"))
 	}
 
-	// If server has a container, we need to recreate it with the new config
-	// Docker containers have immutable environment variables
+	// If server has a container, we need to recreate it to apply a new env
 	if server.ContainerID != "" && s.docker != nil {
-		oldContainerID := server.ContainerID
-
-		// Check if server is running
-		wasRunning := false
-		if server.Status == storage.StatusRunning {
-			wasRunning = true
-			// Stop the container first
-			if err := s.docker.StopContainer(ctx, oldContainerID); err != nil {
-				s.log.Error("Failed to stop container for config update: %v", err)
-				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stop server for configuration update"))
-			}
-
-			// Wait for clean shutdown
-			time.Sleep(2 * time.Second)
+		if err := s.recreateContainer(ctx, server, config); err != nil {
+			s.log.Error("Config saved but container recreation failed: %v", err)
 		}
-
-		// Remove old container
-		if err := s.docker.RemoveContainer(ctx, oldContainerID); err != nil {
-			s.log.Error("Failed to remove old container: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to remove old container"))
-		}
-
-		// Create new container with updated config
-		newContainerID, err := s.docker.CreateContainer(ctx, server, config)
-		if err != nil {
-			s.log.Error("Failed to create new container with updated config: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create new container with updated configuration"))
-		}
-
-		// Update server with new container ID
-		server.ContainerID = newContainerID
-		if err := s.store.UpdateServer(ctx, server); err != nil {
-			s.log.Error("Failed to update server with new container ID: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update server"))
-		}
-
-		// Restart if it was running
-		if wasRunning {
-			if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
-				s.log.Error("Failed to restart container after config update: %v", err)
-				// Don't fail the whole operation, config is already saved
-			} else {
-				server.Status = storage.StatusStarting
-				now := time.Now()
-				server.LastStarted = &now
-				if err := s.store.UpdateServer(ctx, server); err != nil {
-					s.log.Error("Failed to update server status: %v", err)
-				}
-			}
-		}
-
-		s.log.Info("Container recreated with updated configuration")
 	}
 
 	// Return updated config
@@ -178,23 +125,10 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 	}), nil
 }
 
-// GetGlobalSettings gets the global settings
+// Gets global settings
 func (s *ConfigService) GetGlobalSettings(ctx context.Context, req *connect.Request[v1.GetGlobalSettingsRequest]) (*connect.Response[v1.GetGlobalSettingsResponse], error) {
-	// Check if auth is enabled and enforce admin role
-	authConfig, _, err := s.store.GetAuthConfig(ctx)
-	if err != nil {
-		s.log.Error("Failed to get auth config: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get auth configuration"))
-	}
-
-	if authConfig.Enabled {
-		user := auth.GetUserFromContext(ctx)
-		if user == nil {
-			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
-		}
-		if !auth.CheckPermission(user, storage.RoleAdmin) {
-			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("admin access required"))
-		}
+	if err := s.checkAdminAuth(ctx); err != nil {
+		return nil, err
 	}
 
 	config, _, err := s.store.GetGlobalSettings(ctx)
@@ -203,7 +137,6 @@ func (s *ConfigService) GetGlobalSettings(ctx context.Context, req *connect.Requ
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get global settings"))
 	}
 
-	// Convert to categorized format
 	categories, err := buildConfigCategories(config)
 	if err != nil {
 		s.log.Error("Failed to build config categories: %v", err)
@@ -215,47 +148,29 @@ func (s *ConfigService) GetGlobalSettings(ctx context.Context, req *connect.Requ
 	}), nil
 }
 
-// UpdateGlobalSettings updates the global settings
+// Updates global settings
 func (s *ConfigService) UpdateGlobalSettings(ctx context.Context, req *connect.Request[v1.UpdateGlobalSettingsRequest]) (*connect.Response[v1.UpdateGlobalSettingsResponse], error) {
+	if err := s.checkAdminAuth(ctx); err != nil {
+		return nil, err
+	}
+
 	msg := req.Msg
-
-	// Check if auth is enabled and enforce admin role
-	authConfig, _, err := s.store.GetAuthConfig(ctx)
-	if err != nil {
-		s.log.Error("Failed to get auth config: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get auth configuration"))
-	}
-
-	if authConfig.Enabled {
-		user := auth.GetUserFromContext(ctx)
-		if user == nil {
-			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
-		}
-		if !auth.CheckPermission(user, storage.RoleAdmin) {
-			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("admin access required"))
-		}
-	}
-
-	// Get existing config
 	config, _, err := s.store.GetGlobalSettings(ctx)
 	if err != nil {
 		s.log.Error("Failed to get global settings: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get global settings"))
 	}
 
-	// Apply updates using reflection
 	if err := applyConfigUpdates(config, msg.Updates); err != nil {
 		s.log.Error("Failed to apply config updates: %v", err)
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("failed to apply configuration updates"))
 	}
 
-	// Save updated config
 	if err := s.store.UpdateGlobalSettings(ctx, config); err != nil {
 		s.log.Error("Failed to save global settings: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save global settings"))
 	}
 
-	// Return updated config
 	categories, err := buildConfigCategories(config)
 	if err != nil {
 		s.log.Error("Failed to build config categories: %v", err)
@@ -267,12 +182,68 @@ func (s *ConfigService) UpdateGlobalSettings(ctx context.Context, req *connect.R
 	}), nil
 }
 
-// applyConfigUpdates applies updates to a config struct using reflection
-func applyConfigUpdates(config any, updates map[string]*anypb.Any) error {
+func (s *ConfigService) checkAdminAuth(ctx context.Context) error {
+	authConfig, _, err := s.store.GetAuthConfig(ctx)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, errors.New("failed to get auth configuration"))
+	}
+
+	if authConfig.Enabled {
+		user := auth.GetUserFromContext(ctx)
+		if user == nil {
+			return connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
+		}
+		if !auth.CheckPermission(user, storage.RoleAdmin) {
+			return connect.NewError(connect.CodePermissionDenied, errors.New("admin access required"))
+		}
+	}
+	return nil
+}
+
+func (s *ConfigService) recreateContainer(ctx context.Context, server *storage.Server, config *storage.ServerConfig) error {
+	oldContainerID := server.ContainerID
+	wasRunning := false
+	if server.Status == storage.StatusRunning {
+		wasRunning = true
+		if err := s.docker.StopContainer(ctx, oldContainerID); err != nil {
+			return err
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	if err := s.docker.RemoveContainer(ctx, oldContainerID); err != nil {
+		return err
+	}
+
+	newContainerID, err := s.docker.CreateContainer(ctx, server, config)
+	if err != nil {
+		return err
+	}
+
+	server.ContainerID = newContainerID
+	if err := s.store.UpdateServer(ctx, server); err != nil {
+		return err
+	}
+
+	if wasRunning {
+		if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
+			return err
+		}
+		server.Status = storage.StatusStarting
+		now := time.Now()
+		server.LastStarted = &now
+		s.store.UpdateServer(ctx, server)
+	}
+	s.log.Info("Container recreated with updated configuration")
+	return nil
+}
+
+// Maps updates w/ reflection
+func applyConfigUpdates(config any, updates map[string]string) error {
 	configValue := reflect.ValueOf(config).Elem()
 	configType := configValue.Type()
 
-	for key, anyValue := range updates {
+	for key, strValue := range updates {
 		// Find the field by json tag
 		fieldIndex := -1
 		for i := 0; i < configType.NumField(); i++ {
@@ -293,115 +264,74 @@ func applyConfigUpdates(config any, updates map[string]*anypb.Any) error {
 			continue
 		}
 
-		// Unwrap the Any value
-		if anyValue == nil {
+		// Unset
+		if strValue == "" {
+			if fieldValue.Kind() == reflect.Pointer {
+				fieldValue.Set(reflect.Zero(fieldValue.Type()))
+				continue
+			}
 			fieldValue.Set(reflect.Zero(fieldValue.Type()))
 			continue
 		}
 
-		// Try to unmarshal as different wrapper types
-		var value any
-
-		// Try string wrapper
-		strVal := &wrapperspb.StringValue{}
-		if anyValue.MessageIs(strVal) {
-			if err := anyValue.UnmarshalTo(strVal); err == nil {
-				value = strVal.Value
-			}
-		}
-		// Try int64 wrapper
-		int64Val := &wrapperspb.Int64Value{}
-		if anyValue.MessageIs(int64Val) {
-			if err := anyValue.UnmarshalTo(int64Val); err == nil {
-				value = int64Val.Value
-			}
-		}
-		// Try int32 wrapper
-		int32Val := &wrapperspb.Int32Value{}
-		if anyValue.MessageIs(int32Val) {
-			if err := anyValue.UnmarshalTo(int32Val); err == nil {
-				value = int64(int32Val.Value)
-			}
-		}
-		// Try bool wrapper
-		boolVal := &wrapperspb.BoolValue{}
-		if anyValue.MessageIs(boolVal) {
-			if err := anyValue.UnmarshalTo(boolVal); err == nil {
-				value = boolVal.Value
-			}
-		}
-		// Try double wrapper
-		doubleVal := &wrapperspb.DoubleValue{}
-		if anyValue.MessageIs(doubleVal) {
-			if err := anyValue.UnmarshalTo(doubleVal); err == nil {
-				value = doubleVal.Value
-			}
-		}
-		// Try float wrapper
-		floatVal := &wrapperspb.FloatValue{}
-		if anyValue.MessageIs(floatVal) {
-			if err := anyValue.UnmarshalTo(floatVal); err == nil {
-				value = float64(floatVal.Value)
-			}
+		targetType := fieldValue.Type()
+		isPtr := targetType.Kind() == reflect.Ptr
+		if isPtr {
+			targetType = targetType.Elem()
 		}
 
-		if value == nil {
+		var val reflect.Value
+
+		switch targetType.Kind() {
+		case reflect.String:
+			val = reflect.ValueOf(strValue)
+		case reflect.Bool:
+			b, err := strconv.ParseBool(strValue)
+			if err != nil {
+				return fmt.Errorf("invalid boolean for key %s: %v", key, err)
+			}
+			val = reflect.ValueOf(b)
+		case reflect.Int, reflect.Int32, reflect.Int64:
+			i, err := strconv.ParseInt(strValue, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid integer for key %s: %v", key, err)
+			}
+			// Convert to specific int type
+			if targetType.Kind() == reflect.Int {
+				val = reflect.ValueOf(int(i))
+			} else if targetType.Kind() == reflect.Int32 {
+				val = reflect.ValueOf(int32(i))
+			} else {
+				val = reflect.ValueOf(i)
+			}
+		case reflect.Float32, reflect.Float64:
+			f, err := strconv.ParseFloat(strValue, 64)
+			if err != nil {
+				return fmt.Errorf("invalid float for key %s: %v", key, err)
+			}
+			if targetType.Kind() == reflect.Float32 {
+				val = reflect.ValueOf(float32(f))
+			} else {
+				val = reflect.ValueOf(f)
+			}
+		default:
+			// Skip complex types we don't support updating this way
 			continue
 		}
 
-		// Handle pointer types
-		if fieldValue.Kind() == reflect.Pointer {
-			elemType := fieldValue.Type().Elem()
-			newValue := reflect.New(elemType)
-			elem := newValue.Elem()
-
-			switch elemType.Kind() {
-			case reflect.String:
-				if str, ok := value.(string); ok {
-					elem.SetString(str)
-					fieldValue.Set(newValue)
-				}
-			case reflect.Int, reflect.Int32, reflect.Int64:
-				switch v := value.(type) {
-				case int64:
-					elem.SetInt(v)
-					fieldValue.Set(newValue)
-				case float64:
-					elem.SetInt(int64(v))
-					fieldValue.Set(newValue)
-				}
-			case reflect.Bool:
-				if b, ok := value.(bool); ok {
-					elem.SetBool(b)
-					fieldValue.Set(newValue)
-				}
-			}
+		if isPtr {
+			// New pointer and set value
+			ptr := reflect.New(targetType)
+			ptr.Elem().Set(val)
+			fieldValue.Set(ptr)
 		} else {
-			// Non-pointer fields
-			switch fieldValue.Kind() {
-			case reflect.String:
-				if str, ok := value.(string); ok {
-					fieldValue.SetString(str)
-				}
-			case reflect.Int, reflect.Int32, reflect.Int64:
-				switch v := value.(type) {
-				case int64:
-					fieldValue.SetInt(v)
-				case float64:
-					fieldValue.SetInt(int64(v))
-				}
-			case reflect.Bool:
-				if b, ok := value.(bool); ok {
-					fieldValue.SetBool(b)
-				}
-			}
+			fieldValue.Set(val)
 		}
 	}
 
 	return nil
 }
 
-// buildConfigCategories converts ServerConfig struct to categorized format for UI
 func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 	categories := []*v1.ConfigCategory{
 		{Name: "JVM Configuration", Properties: []*v1.ConfigProperty{}},
@@ -429,6 +359,7 @@ func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 			continue
 		}
 
+		// Metadata tags
 		envTag := field.Tag.Get("env")
 		defaultTag := field.Tag.Get("default")
 		descTag := field.Tag.Get("desc")
@@ -439,61 +370,32 @@ func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 		ephemeralTag := field.Tag.Get("ephemeral")
 
 		fieldValue := configValue.Field(i)
-		value := fieldValue.Interface()
-
-		// Handle pointer types - if nil, leave as nil, otherwise dereference
+		var strValue string
 		if fieldValue.Kind() == reflect.Pointer {
 			if fieldValue.IsNil() {
-				value = nil
+				// explicitly nil/unset
+				strValue = ""
 			} else {
-				value = fieldValue.Elem().Interface()
+				// dereference and stringify
+				strValue = fmt.Sprintf("%v", fieldValue.Elem().Interface())
+			}
+		} else {
+			// stringify direct value
+			strValue = fmt.Sprintf("%v", fieldValue.Interface())
+		}
+
+		// If the default tag is empty but we need a zero value representation for the UI
+		strDefault := defaultTag
+		if strDefault == "" {
+			// Provide logical defaults for types if tag is missing
+			switch field.Type.Kind() {
+			case reflect.Bool:
+				strDefault = "false"
+			case reflect.Int, reflect.Int32, reflect.Int64:
+				strDefault = "0"
 			}
 		}
 
-		// Convert value to Any proto
-		var anyValue *anypb.Any
-		var err error
-		if value != nil {
-			switch v := value.(type) {
-			case string:
-				anyValue, err = anypb.New(wrapperspb.String(v))
-			case int, int32, int64:
-				anyValue, err = anypb.New(wrapperspb.Int64(reflect.ValueOf(v).Int()))
-			case bool:
-				anyValue, err = anypb.New(wrapperspb.Bool(v))
-			case float32, float64:
-				anyValue, err = anypb.New(wrapperspb.Double(reflect.ValueOf(v).Float()))
-			}
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// Parse default value based on field type
-		var defaultValue *anypb.Any
-		fieldType := field.Type
-		if fieldType.Kind() == reflect.Ptr {
-			fieldType = fieldType.Elem()
-		}
-
-		switch fieldType.Kind() {
-		case reflect.Bool:
-			defaultValue, _ = anypb.New(wrapperspb.Bool(defaultTag == "true"))
-		case reflect.Int, reflect.Int32, reflect.Int64:
-			if defaultTag != "" {
-				if intVal, err := strconv.ParseInt(defaultTag, 10, 64); err == nil {
-					defaultValue, _ = anypb.New(wrapperspb.Int64(intVal))
-				} else {
-					defaultValue, _ = anypb.New(wrapperspb.Int64(0))
-				}
-			} else {
-				defaultValue, _ = anypb.New(wrapperspb.Int64(0))
-			}
-		default:
-			defaultValue, _ = anypb.New(wrapperspb.String(defaultTag))
-		}
-
-		// Use label if provided, otherwise use the json tag
 		label := labelTag
 		if label == "" {
 			label = jsonTag
@@ -502,8 +404,8 @@ func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 		prop := &v1.ConfigProperty{
 			Key:          jsonTag,
 			Label:        label,
-			Value:        anyValue,
-			DefaultValue: defaultValue,
+			Value:        strValue,
+			DefaultValue: strDefault,
 			Type:         inputTag,
 			Description:  descTag,
 			Required:     requiredTag == "true",
@@ -512,19 +414,17 @@ func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 			EnvVar:       envTag,
 		}
 
-		// Add options for select fields
 		if inputTag == "select" {
 			prop.Options = getSelectOptions(jsonTag)
 		}
 
-		// Categorize the property
 		categoryIndex := getCategoryIndex(jsonTag)
 		if categoryIndex >= 0 && categoryIndex < len(categories) {
 			categories[categoryIndex].Properties = append(categories[categoryIndex].Properties, prop)
 		}
 	}
 
-	// Remove empty categories
+	// Filter empty
 	var nonEmptyCategories []*v1.ConfigCategory
 	for _, cat := range categories {
 		if len(cat.Properties) > 0 {
@@ -563,7 +463,7 @@ func getSelectOptions(key string) []string {
 	}
 }
 
-// getCategoryIndex determines which category a property belongs to
+// Category a property belongs to
 func getCategoryIndex(key string) int {
 	switch key {
 	// JVM Configuration (0)
@@ -645,6 +545,6 @@ func getCategoryIndex(key string) int {
 		return 12
 
 	default:
-		return -1 // Unknown category
+		return -1 // Unknown
 	}
 }

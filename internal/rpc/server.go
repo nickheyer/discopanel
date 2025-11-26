@@ -3,6 +3,8 @@ package rpc
 import (
 	"context"
 	"net/http"
+	"slices"
+	"strings"
 
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
@@ -32,8 +34,8 @@ type Server struct {
 	logStreamer    *logger.LogStreamer
 }
 
-// NewServer creates a new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
+// Creates new Connect RPC server
+func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, log *logger.Logger) *Server {
 	// Initialize auth manager
 	authManager := auth.NewManager(store)
 	authMiddleware := auth.NewMiddleware(authManager, store)
@@ -51,6 +53,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		docker:         docker,
 		config:         cfg,
 		log:            log,
+		proxyManager:   proxyManager,
 		authManager:    authManager,
 		authMiddleware: authMiddleware,
 		logStreamer:    logStreamer,
@@ -60,7 +63,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	return s
 }
 
-// setupHandler configures all Connect RPC handlers
+// Setup all Connect RPC handlers
 func (s *Server) setupHandler() {
 	mux := http.NewServeMux()
 
@@ -105,7 +108,7 @@ func (s *Server) setupHandler() {
 	s.handler = h2c.NewHandler(mux, &http2.Server{})
 }
 
-// registerServices registers all Connect RPC service handlers
+// Registers all Connect RPC service handlers
 func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.log)
@@ -151,17 +154,12 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	mux.Handle(userPath, userHandler)
 }
 
-// Handler returns the HTTP handler for the server
+// The HTTP handler for the server
 func (s *Server) Handler() http.Handler {
 	return s.handler
 }
 
-// SetProxyManager sets the proxy manager for the server
-func (s *Server) SetProxyManager(pm *proxy.Manager) {
-	s.proxyManager = pm
-}
-
-// loggingInterceptor creates a Connect interceptor for logging
+// Creates a Connect interceptor for logging
 func (s *Server) loggingInterceptor() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
@@ -174,18 +172,32 @@ func (s *Server) loggingInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// authInterceptor creates a Connect interceptor for authentication
+// Creates a Connect interceptor for authentication
 func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			// Auth logic will be implemented based on procedure requirements
-			// For now, pass through to next handler
+			// Extract token from auth header
+			token := ""
+			if authHeader := req.Header().Get("Authorization"); authHeader != "" {
+				token, _ = strings.CutPrefix(authHeader, "Bearer ")
+				token, _ = strings.CutPrefix(token, "bearer ")
+			}
+
+			// Validate user session or return valid anon user/session if auth disabled
+			user, err := s.authManager.ValidateSession(ctx, token)
+			if err == nil && user != nil {
+				ctx = context.WithValue(ctx, auth.UserContextKey, user)
+				s.log.Debug("Auth: User %s (%s) authenticated for %s", user.Username, user.Role, req.Spec().Procedure)
+			} else if err != nil {
+				s.log.Debug("Auth: Token validation failed for %s: %v", req.Spec().Procedure, err)
+			}
+
 			return next(ctx, req)
 		}
 	}
 }
 
-// isPollingProcedure determines if a procedure is a polling endpoint
+// Checks if a procedure is a polling endpoint
 func (s *Server) isPollingProcedure(procedure string) bool {
 	pollingProcedures := []string{
 		"/discopanel.v1.AuthService/GetAuthStatus",
@@ -194,15 +206,10 @@ func (s *Server) isPollingProcedure(procedure string) bool {
 		"/discopanel.v1.ProxyService/GetProxyStatus",
 	}
 
-	for _, p := range pollingProcedures {
-		if procedure == p {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(pollingProcedures, procedure)
 }
 
-// setupFrontend sets up frontend serving
+// Frontend serving
 func (s *Server) setupFrontend(mux *http.ServeMux) {
 	// Get frontend source
 	fs := s.getFrontendFS()
@@ -215,7 +222,7 @@ func (s *Server) setupFrontend(mux *http.ServeMux) {
 	mux.Handle("/", s.createFrontendHandler(fs))
 }
 
-// getFrontendFS gets the frontend filesystem
+// Get frontend fs
 func (s *Server) getFrontendFS() http.FileSystem {
 	// Try embedded frontend first
 	if buildFS, err := web.BuildFS(); err == nil {
@@ -225,7 +232,7 @@ func (s *Server) getFrontendFS() http.FileSystem {
 	return nil
 }
 
-// createFrontendHandler creates the frontend handler
+// Create frontend handler
 func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Only serve frontend for non-Connect paths
@@ -262,7 +269,7 @@ func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
 	}
 }
 
-// isConnectPath checks if a path is a Connect RPC path
+// Checks if a path is a Connect RPC path
 func isConnectPath(path string) bool {
 	// Connect paths start with service names
 	connectPrefixes := []string{
@@ -279,7 +286,7 @@ func isConnectPath(path string) bool {
 	return false
 }
 
-// StartLogStreaming starts log streaming for a container
+// Starts log streaming for a container
 func (s *Server) StartLogStreaming(containerID string) error {
 	return s.logStreamer.StartStreaming(containerID)
 }

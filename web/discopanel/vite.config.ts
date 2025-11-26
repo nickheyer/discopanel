@@ -27,6 +27,21 @@ export default defineConfig({
 			'/api': {
 				target: 'http://localhost:8080',
 				changeOrigin: true
+			},
+			// Proxy Connect RPC service paths
+			'/discopanel.v1': {
+				target: 'http://localhost:8080',
+				changeOrigin: true
+			},
+			// Proxy gRPC reflection service
+			'/grpc.reflection': {
+				target: 'http://localhost:8080',
+				changeOrigin: true
+			},
+			// Proxy Connect service paths
+			'/connect': {
+				target: 'http://localhost:8080',
+				changeOrigin: true
 			}
 		}
 	},

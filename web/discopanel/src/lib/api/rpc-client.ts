@@ -51,7 +51,7 @@ const authInterceptor: Interceptor = (next) => async (req) => {
 // Transport w/ auth
 const transport = createConnectTransport({
   baseUrl: "",
-  interceptors: [authInterceptor],
+  interceptors: [authInterceptor]
 });
 
 // Clients for each service

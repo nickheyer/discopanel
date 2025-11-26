@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package discopanel.v1;
 
-import "google/protobuf/any.proto";
-
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
 // Configuration management
@@ -22,8 +20,8 @@ service ConfigService {
 message ConfigProperty {
   string key = 1;
   string label = 2;
-  google.protobuf.Any value = 3;
-  google.protobuf.Any default_value = 4;
+  string value = 3;
+  string default_value = 4;
   string type = 5; // text, number, checkbox, select, password
   string description = 6;
   bool required = 7;
@@ -52,7 +50,7 @@ message GetServerConfigResponse {
 // Config fields to update
 message UpdateServerConfigRequest {
   string server_id = 1;
-  map<string, google.protobuf.Any> updates = 2;
+  map<string, string> updates = 2;
 }
 
 // Updated server settings
@@ -70,7 +68,7 @@ message GetGlobalSettingsResponse {
 
 // Global fields to update
 message UpdateGlobalSettingsRequest {
-  map<string, google.protobuf.Any> updates = 1;
+  map<string, string> updates = 1;
 }
 
 // Updated global defaults

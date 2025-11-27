@@ -1,73 +1,148 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
+	import { replaceState } from '$app/navigation';
 	import { rpcClient } from '$lib/api/rpc-client';
-	import ScrollToTop from './scroll-to-top.svelte';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { toast } from 'svelte-sonner';
-	import { Save, RefreshCw, Loader2, Link, ArrowUp } from '@lucide/svelte';
+	import { Save, RefreshCw, Loader2, Link, CircleDot, Circle } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ConfigCategory, ConfigProperty } from '$lib/proto/discopanel/v1/config_pb';
-	import * as _ from 'lodash-es';
+	import ScrollToTop from './scroll-to-top.svelte';
 
-	let { server, config, onSave, saving: externalSaving = false }: { 
+	interface Props {
 		server?: Server;
 		config?: ConfigCategory[];
-		onSave?: (updates: Record<string, any>) => Promise<void>;
+		onSave?: (updates: Record<string, string>) => Promise<void>;
 		saving?: boolean;
-	} = $props();
+	}
 
+	let { server, config, onSave, saving: externalSaving = false }: Props = $props();
+
+	// State
 	let loading = $state(false);
 	let saving = $state(false);
-	let categories = $state<ConfigCategory[]>(config || []);
-	let originalValues = $state<Record<string, any>>({});
-	let currentValues = $state<Record<string, any>>({});
-	let originalEnabledFields = $state<Set<string>>(new Set());
-	let enabledFields = $state<Set<string>>(new Set());
-	let modifiedProperties = $state<Set<string>>(new Set());
+	let categories = $state<ConfigCategory[]>([]);
+	let activeCategory = $state<string>('');
 	let highlightedField = $state<string | null>(null);
-	
-	// Use external saving state if provided, otherwise use internal
-	let isSaving = $derived(externalSaving !== undefined ? externalSaving : saving);
 
-	onMount(() => {
-		if (server && !config) {
-			loadServerConfig();
-		} else if (config) {
-			processConfig(config);
-		}
-		
-		// Check for hash in URL to scroll to section/field
-		checkUrlHash();
-		
-		// Listen for hash changes
-		window.addEventListener('hashchange', checkUrlHash);
-		
-		return () => {
-			window.removeEventListener('hashchange', checkUrlHash);
-		};
+	// Track original and current values
+	let originalValues = $state<Map<string, string | null>>(new Map());
+	let currentValues = $state<Map<string, string | null>>(new Map());
+	let originalEnabled = $state<Set<string>>(new Set());
+	let currentEnabled = $state<Set<string>>(new Set());
+
+	// Derived state
+	let isSaving = $derived(externalSaving || saving);
+	let isServerRunning = $derived(server?.status === ServerStatus.RUNNING);
+
+	// Get filtered categories (hide empty ones and filter system fields for global)
+	let filteredCategories = $derived.by(() => {
+		return categories
+			.map(cat => ({
+				...cat,
+				properties: !server
+					? cat.properties.filter(p => !p.system)
+					: cat.properties
+			}))
+			.filter(cat => cat.properties.length > 0);
 	});
 
-	// Reload config when server changes
-	let previousServerId = $state(server?.id);
+	// Get current category's properties
+	let currentCategoryProps = $derived.by(() => {
+		const cat = filteredCategories.find(c => getCategoryId(c.name) === activeCategory);
+		return cat?.properties ?? [];
+	});
+
+	let currentCategoryName = $derived.by(() => {
+		const cat = filteredCategories.find(c => getCategoryId(c.name) === activeCategory);
+		return cat?.name ?? '';
+	});
+
+	// Calculate modified fields
+	let modifiedFields = $derived.by(() => {
+		const modified = new Set<string>();
+		for (const [key, value] of currentValues) {
+			const origValue = originalValues.get(key);
+			const wasEnabled = originalEnabled.has(key);
+			const isEnabled = currentEnabled.has(key);
+
+			if (wasEnabled !== isEnabled) {
+				modified.add(key);
+				continue;
+			}
+
+			if (isEnabled && value !== origValue) {
+				modified.add(key);
+			}
+		}
+		return modified;
+	});
+
+	// Count modified fields per category
+	let modifiedCountByCategory = $derived.by(() => {
+		const counts = new Map<string, number>();
+		for (const cat of filteredCategories) {
+			const catId = getCategoryId(cat.name);
+			let count = 0;
+			for (const prop of cat.properties) {
+				if (modifiedFields.has(prop.key)) count++;
+			}
+			counts.set(catId, count);
+		}
+		return counts;
+	});
+
+	let hasChanges = $derived(modifiedFields.size > 0);
+
+	// Initialize URL hash handling
+	onMount(() => {
+		checkUrlHash();
+		window.addEventListener('hashchange', checkUrlHash);
+		return () => window.removeEventListener('hashchange', checkUrlHash);
+	});
+
+	// React to config prop changes (for global settings)
+	let previousConfig = $state<ConfigCategory[] | undefined>(undefined);
+	$effect(() => {
+		if (config && config !== previousConfig) {
+			untrack(() => {
+				previousConfig = config;
+				processConfig(config);
+			});
+		}
+	});
+
+	// Reload when server changes
+	let previousServerId = $state<string | undefined>(undefined);
 	$effect(() => {
 		if (server && server.id !== previousServerId) {
-			previousServerId = server.id;
-			loadServerConfig();
+			untrack(() => {
+				previousServerId = server!.id;
+				loadServerConfig();
+			});
+		}
+	});
+
+	// Set initial active category when categories load
+	$effect(() => {
+		if (filteredCategories.length > 0 && !activeCategory) {
+			untrack(() => {
+				activeCategory = getCategoryId(filteredCategories[0].name);
+			});
 		}
 	});
 
 	async function loadServerConfig() {
+		if (!server) return;
 		loading = true;
 		try {
-			const response = await rpcClient.config.getServerConfig({ serverId: server!.id });
-			categories = response.categories;
+			const response = await rpcClient.config.getServerConfig({ serverId: server.id });
 			processConfig(response.categories);
 		} catch (error) {
 			toast.error('Failed to load server configuration');
@@ -79,184 +154,145 @@
 
 	function processConfig(configData: ConfigCategory[]) {
 		categories = configData;
-		// Build originalValues and currentValues from categories
-		originalValues = {};
-		currentValues = {};
-		const newEnabledFields = new Set<string>();
-		categories.forEach(category => {
-			category.properties.forEach((prop: ConfigProperty) => {
-				// Skip internal fields
-				if (prop.key === 'id' || prop.key === 'serverId' || prop.key === 'updatedAt') {
-					return;
-				}
-				// Store the actual value (which might be null/undefined)
-				originalValues[prop.key] = prop.value;
-				currentValues[prop.key] = prop.value;
-				// For global settings (when no server), only enable fields that have values
-				// For server configs, enable required/system fields or fields with values
-				if (!server) {
-					// Global settings - only enable if there's a value
-					if (!_.isEmpty(prop.value)) {
-						newEnabledFields.add(prop.key);
-					}
-				} else {
-					// Server config - enable required/system fields or fields with values
-					if (!_.isEmpty(prop.value) || prop.required || prop.system) {
-						newEnabledFields.add(prop.key);
-					}
-				}
-			});
-		});
 
-		// Store the original enabled fields state
-		originalEnabledFields = new Set(newEnabledFields);
-		enabledFields = newEnabledFields;
+		const newOriginalValues = new Map<string, string | null>();
+		const newCurrentValues = new Map<string, string | null>();
+		const newOriginalEnabled = new Set<string>();
+		const newCurrentEnabled = new Set<string>();
 
-		// Reset modified properties when loading new config
-		modifiedProperties.clear();
+		const isGlobal = !server;
+
+		for (const category of configData) {
+			for (const prop of category.properties) {
+				if (['id', 'serverId', 'updatedAt'].includes(prop.key)) continue;
+
+				const value = prop.value || null;
+				newOriginalValues.set(prop.key, value);
+				newCurrentValues.set(prop.key, value);
+
+				const hasValue = value !== null && value !== '';
+				const shouldEnable = isGlobal
+					? hasValue || prop.required
+					: hasValue || prop.required || prop.system;
+
+				if (shouldEnable) {
+					newOriginalEnabled.add(prop.key);
+					newCurrentEnabled.add(prop.key);
+				}
+			}
+		}
+
+		originalValues = newOriginalValues;
+		currentValues = newCurrentValues;
+		originalEnabled = newOriginalEnabled;
+		currentEnabled = newCurrentEnabled;
 	}
 
-	async function saveServerConfig() {
-		if (modifiedProperties.size === 0) {
+	async function handleSave() {
+		if (!hasChanges) {
 			toast.info('No changes to save');
 			return;
 		}
 
-		if (!onSave) {
-			saving = true;
-		}
+		saving = true;
 		try {
-			const changes: Record<string, string> = {};
+			const updates: Record<string, string> = {};
 
-			// Include all modified properties
-			modifiedProperties.forEach(key => {
-				if (enabledFields.has(key)) {
-					// Field is enabled
-					const value = currentValues[key];
-					// Convert to string
-					changes[key] = value === null || value === undefined ? '' : String(value);
+			for (const key of modifiedFields) {
+				if (currentEnabled.has(key)) {
+					const value = currentValues.get(key);
+					updates[key] = value ?? '';
 				} else {
-					// Field is disabled
-					changes[key] = '';
+					updates[key] = '';
 				}
-			});
+			}
 
 			if (onSave) {
-				// Custom save handler (for global settings)
-				await onSave(changes);
+				await onSave(updates);
 			} else if (server) {
-				// Default server config save
-				const response = await rpcClient.config.updateServerConfig({ serverId: server!.id, updates: changes });
-				categories = response.categories;
+				const response = await rpcClient.config.updateServerConfig({
+					serverId: server.id,
+					updates
+				});
 				processConfig(response.categories);
 			}
-			enabledFields = new Set(enabledFields); // Trigger reactivity
-			
-			toast.success('Configuration saved successfully');
-			modifiedProperties.clear();
-			modifiedProperties = new Set(); // Trigger reactivity
-			
-			if (server && server?.status === ServerStatus.RUNNING) {
+
+			toast.success('Configuration saved');
+
+			if (isServerRunning) {
 				toast.info('Restart the server for changes to take effect');
 			}
 		} catch (error) {
 			toast.error('Failed to save configuration');
-			console.error('Failed to save configuration:', error);
+			console.error(error);
 		} finally {
-			if (!onSave) {
-				saving = false;
-			}
+			saving = false;
 		}
 	}
 
-	function handlePropertyChange(key: string, value: any) {
-		// Treat empty strings as undefined (unset)
-		if (value === '') {
-			currentValues[key] = undefined;
-		} else {
-			currentValues[key] = value;
-		}
-		
-		// Track modifications
-		updateModifiedProperties();
+	function handleReset() {
+		currentValues = new Map(originalValues);
+		currentEnabled = new Set(originalEnabled);
 	}
 
-	function toggleFieldEnabled(key: string, enabled: boolean) {
+	function toggleFieldEnabled(key: string, enabled: boolean, prop: ConfigProperty) {
+		const newEnabled = new Set(currentEnabled);
+		const newValues = new Map(currentValues);
+
 		if (enabled) {
-			enabledFields.add(key);
-			// Set to default value if currently null
-			if (currentValues[key] === null || currentValues[key] === undefined) {
-				const prop = categories.flatMap(c => c.properties).find(p => p.key === key);
-				if (prop) {
-					currentValues[key] = prop.defaultValue ?? getDefaultForType(prop.type);
-				}
+			newEnabled.add(key);
+			if (!newValues.get(key)) {
+				newValues.set(key, prop.defaultValue ?? getDefaultForType(prop.type));
 			}
 		} else {
-			enabledFields.delete(key);
-			currentValues[key] = null;
+			newEnabled.delete(key);
 		}
-		enabledFields = new Set(enabledFields);
-		
-		// Track modifications
-		updateModifiedProperties();
+
+		currentEnabled = newEnabled;
+		currentValues = newValues;
 	}
 
-	function updateModifiedProperties() {
-		modifiedProperties.clear();
-		categories.forEach(category => {
-			category.properties.forEach((prop: ConfigProperty) => {
-				// Skip internal fields
-				if (prop.key === 'id' || prop.key === 'serverId' || prop.key === 'updatedAt') {
-					return;
-				}
-
-				const wasEnabled = originalEnabledFields.has(prop.key);
-				const isEnabled = enabledFields.has(prop.key);
-				if (wasEnabled !== isEnabled) {
-					modifiedProperties.add(prop.key);
-				}
-				// Check if value changed for enabled fields
-				else if (isEnabled && currentValues[prop.key] !== originalValues[prop.key]) {
-					modifiedProperties.add(prop.key);
-				}
-			});
-		});
-		modifiedProperties = new Set(modifiedProperties);
+	function updateValue(key: string, value: string | boolean) {
+		const newValues = new Map(currentValues);
+		const strValue = typeof value === 'boolean' ? String(value) : value;
+		newValues.set(key, strValue || null);
+		currentValues = newValues;
 	}
 
-	function getDefaultForType(type: string): any {
+	function getDefaultForType(type: string): string {
 		switch (type) {
-			case 'number': return 0;
-			case 'checkbox': return false;
-			case 'text':
-			case 'password':
-			case 'select':
+			case 'number': return '0';
+			case 'checkbox': return 'false';
 			default: return '';
 		}
 	}
-	
-	function checkUrlHash() {
-		const hash = window.location.hash.slice(1); // Remove #
-		if (!hash) return;
-		
-		// Hash can be either section name or field key
-		setTimeout(() => {
-			const element = document.getElementById(hash);
-			if (element) {
-				element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-				
-				// If it's a field, highlight it
-				if (element.hasAttribute('data-field')) {
-					highlightedField = hash;
-					// Remove highlight after 3 seconds
-					setTimeout(() => {
-						highlightedField = null;
-					}, 3000);
-				}
-			}
-		}, 100);
+
+	function getDisplayValue(prop: ConfigProperty): string {
+		const value = currentValues.get(prop.key);
+		const isEnabled = currentEnabled.has(prop.key);
+
+		if (isEnabled && value !== null && value !== undefined) {
+			return value;
+		}
+		return prop.defaultValue ?? '';
 	}
-	
+
+	function getBooleanValue(prop: ConfigProperty): boolean {
+		const value = getDisplayValue(prop);
+		return value.toLowerCase() === 'true';
+	}
+
+	function getCategoryId(name: string): string {
+		return name.toLowerCase().replace(/\s+/g, '-');
+	}
+
+	function selectCategory(categoryId: string) {
+		activeCategory = categoryId;
+		const url = new URL(window.location.href);
+		url.hash = categoryId;
+		replaceState(url.toString(), {});
+	}
+
 	function copyLinkToClipboard(anchor: string) {
 		const url = new URL(window.location.href);
 		url.hash = anchor;
@@ -264,237 +300,289 @@
 		toast.success('Link copied to clipboard');
 	}
 
-	function resetChanges() {
-		modifiedProperties.clear();
-		modifiedProperties = new Set();
-		currentValues = { ...originalValues };
-		enabledFields = new Set(originalEnabledFields);
-		enabledFields = enabledFields;
+	function checkUrlHash() {
+		const hash = window.location.hash.slice(1);
+		if (!hash) return;
+
+		setTimeout(() => {
+			const matchingCategory = filteredCategories.find(c => getCategoryId(c.name) === hash);
+			if (matchingCategory) {
+				activeCategory = hash;
+				return;
+			}
+
+			for (const cat of filteredCategories) {
+				const matchingProp = cat.properties.find(p => p.key === hash);
+				if (matchingProp) {
+					activeCategory = getCategoryId(cat.name);
+					setTimeout(() => {
+						const element = document.getElementById(hash);
+						if (element) {
+							element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+							highlightedField = hash;
+							setTimeout(() => {
+								highlightedField = null;
+							}, 3000);
+						}
+					}, 100);
+					return;
+				}
+			}
+		}, 50);
 	}
 
-	function getInputType(type: string): 'text' | 'number' | 'checkbox' | 'select' | 'password' {
-		switch (type) {
-			case 'text':
-			case 'number':
-			case 'checkbox':
-			case 'select':
-			case 'password':
-				return type;
-			default:
-				return 'text';
-		}
+	function canToggleField(prop: ConfigProperty): boolean {
+		if (isServerRunning) return false;
+		if (prop.required) return false;
+		if (prop.system) return false;
+		return true;
 	}
 </script>
 
-<Card class="h-full flex flex-col">
-	<CardHeader class="flex-shrink-0">
-		<div class="flex items-center justify-between">
-			<div class="flex items-center gap-2">
-				<CardTitle>Server Configuration</CardTitle>
-				<CardDescription>
-					Configure Minecraft server settings
-				</CardDescription>
+<Card class="h-full flex flex-col pb-0 gap-0">
+	<CardHeader class="flex-shrink-0 border-b pb-0 mb-0">
+		<div class="flex flex-col sm:flex-row sm:items-center justify-between">
+			<div>
+				<CardTitle>
+					{!server ? 'Default Server Configuration' : 'Server Configuration'}
+				</CardTitle>
+				<p class="text-sm text-muted-foreground mt-1">
+					{!server
+						? 'Configure default values for new servers'
+						: 'Configure Minecraft server environment variables'}
+				</p>
 			</div>
-			<div class="flex items-center gap-2">
-				{#if modifiedProperties.size > 0}
-					<span class="text-sm text-muted-foreground">
-						{modifiedProperties.size} unsaved {modifiedProperties.size === 1 ? 'change' : 'changes'}
+			<div class="flex items-center gap-3">
+				{#if hasChanges}
+					<span class="text-sm text-muted-foreground whitespace-nowrap">
+						{modifiedFields.size} unsaved {modifiedFields.size === 1 ? 'change' : 'changes'}
 					</span>
 				{/if}
 				<Button
 					variant="outline"
 					size="sm"
-					onclick={resetChanges}
-					disabled={loading || (server && server?.status === ServerStatus.RUNNING) || modifiedProperties.size === 0}
+					onclick={handleReset}
+					disabled={loading || isServerRunning || !hasChanges}
 				>
 					<RefreshCw class="h-4 w-4 mr-2" />
 					Reset
 				</Button>
 				<Button
 					size="sm"
-					onclick={saveServerConfig}
-					disabled={loading || isSaving || (server && server?.status === ServerStatus.RUNNING) || modifiedProperties.size === 0}
+					onclick={handleSave}
+					disabled={loading || isSaving || isServerRunning || !hasChanges}
 				>
 					{#if isSaving}
 						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
 					{:else}
 						<Save class="h-4 w-4 mr-2" />
 					{/if}
-					Save Changes
+					Save
 				</Button>
 			</div>
 		</div>
 	</CardHeader>
-	
-	<CardContent class="flex-1 flex flex-col min-h-0">
+
+	<CardContent class="flex-1 overflow-hidden p-0 my-0">
 		{#if loading}
-			<div class="flex items-center justify-center py-8">
+			<div class="flex items-center justify-center py-12">
 				<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 			</div>
+		{:else if filteredCategories.length === 0}
+			<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
+				<p class="text-lg mb-2">No configuration found</p>
+				<p class="text-sm">Unable to load server configuration</p>
+			</div>
 		{:else}
-			{#if categories.length === 0}
-				<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
-					<p class="text-lg mb-2">No configuration found</p>
-					<p class="text-sm">Unable to load server configuration</p>
+			<div class="flex h-full">
+				<!-- Category Sidebar -->
+				<div class="w-48 flex-shrink-0 border-r bg-muted/20 overflow-y-auto">
+					<nav class="p-2 space-y-1">
+						{#each filteredCategories as category}
+							{@const categoryId = getCategoryId(category.name)}
+							{@const isActive = activeCategory === categoryId}
+							{@const modCount = modifiedCountByCategory.get(categoryId) ?? 0}
+							<button
+								class="w-full flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors text-left
+									{isActive
+										? 'bg-primary text-primary-foreground'
+										: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+								onclick={() => selectCategory(categoryId)}
+							>
+								<span class="truncate">{category.name}</span>
+								{#if modCount > 0}
+									<span class="ml-2 inline-flex items-center justify-center h-5 min-w-5 px-1.5 text-xs font-medium rounded-full
+										{isActive ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-orange-500 text-white'}">
+										{modCount}
+									</span>
+								{/if}
+							</button>
+						{/each}
+					</nav>
 				</div>
-			{:else}
-				<div class="space-y-6 overflow-y-auto pr-4">
-					{#each categories as category}
-						{@const filteredProps = !server ?
-							category.properties.filter((p: ConfigProperty) => !p.system) :
-							category.properties}
-						{#if filteredProps.length > 0}
-							<div class="space-y-4" id={category.name.toLowerCase().replace(/\s+/g, '-')}>
-								<div class="flex items-center justify-between border-b pb-2 group">
-									<h3 class="text-lg font-semibold text-foreground/90">{category.name}</h3>
-									<Button
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-										onclick={() => copyLinkToClipboard(category.name.toLowerCase().replace(/\s+/g, '-'))}
-									>
-										<Link class="h-3 w-3" />
-									</Button>
-								</div>
-								<div class="grid gap-4 md:grid-cols-2">
-									{#each filteredProps as prop}
-									{@const inputType = getInputType(prop.type)}
-									<div 
-										id={prop.key}
-										data-field="true"
-										class="relative p-4 rounded-lg border bg-card hover:bg-accent/5 transition-all duration-300 {highlightedField === prop.key ? 'ring-2 ring-primary ring-offset-2 animate-pulse' : ''}">
-										<div class="flex gap-3">
-											<Checkbox
-												checked={enabledFields.has(prop.key)}
-												onCheckedChange={(checked) => toggleFieldEnabled(prop.key, checked)}
-												disabled={prop.required || prop.system || server?.status === ServerStatus.RUNNING}
-												class="mt-1"
-											/>
-											<div class="flex-1 space-y-2">
-												<div class="flex items-start justify-between gap-2">
-													<div class="flex-1">
-														<div class="flex items-center gap-2">
-															<Label for={prop.key} class="text-sm font-medium">
-															{prop.label}
-															{#if prop.required}
-																<span class="text-xs text-red-500 ml-1">*</span>
-															{/if}
-															{#if prop.system}
-																<span class="text-xs text-blue-500 ml-1">• system</span>
-															{/if}
-															{#if modifiedProperties.has(prop.key)}
-																<span class="text-xs text-orange-500 ml-1">• modified</span>
-															{/if}
-														</Label>
-														<Button
-															variant="ghost"
-															size="icon"
-															class="h-4 w-4 opacity-0 hover:opacity-100 transition-opacity"
-															onclick={() => copyLinkToClipboard(prop.key)}
-														>
-															<Link class="h-3 w-3" />
-														</Button>
-													</div>
-														<div class="text-xs text-muted-foreground font-mono">{prop.envVar}</div>
-														{#if prop.description}
-															<p class="text-xs text-muted-foreground mt-1">{prop.description}</p>
-														{/if}
-													</div>
-												</div>
-										
-										{#if inputType === 'checkbox'}
-											<div class="flex items-center space-x-2">
-												<Switch
-													id={prop.key}
-													checked={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? prop.defaultValue ?? false) : (prop.defaultValue ?? false)}
-													onCheckedChange={(checked) => handlePropertyChange(prop.key, checked)}
-													disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
-													class=""
-												/>
-												<span class="text-sm text-muted-foreground">
-													{(currentValues[prop.key] ?? prop.defaultValue ?? false) ? 'Enabled' : 'Disabled'}
-													{#if currentValues[prop.key] === null || currentValues[prop.key] === undefined}
-														<span class="text-xs ml-1">(default)</span>
-													{/if}
-												</span>
+
+				<!-- Fields Panel -->
+				<div class="flex-1 flex flex-col min-w-0">
+					<!-- Category Header -->
+					<div class="flex-shrink-0 px-4 py-3 border-b bg-muted/10">
+						<h3 class="font-semibold">{currentCategoryName}</h3>
+						<p class="text-xs text-muted-foreground">{currentCategoryProps.length} fields</p>
+					</div>
+
+					<!-- Fields Grid -->
+					<div class="flex-1 overflow-y-auto p-4">
+						<div class="grid gap-4 lg:grid-cols-2">
+							{#each currentCategoryProps as prop (prop.key)}
+								{@const isEnabled = currentEnabled.has(prop.key)}
+								{@const isModified = modifiedFields.has(prop.key)}
+								{@const isHighlighted = highlightedField === prop.key}
+								{@const canToggle = canToggleField(prop)}
+
+								<div
+									id={prop.key}
+									data-field="true"
+									class="group p-4 rounded-lg border transition-all duration-300
+										{isHighlighted ? 'ring-2 ring-primary ring-offset-2' : ''}
+										{isModified ? 'border-orange-500/50 bg-orange-500/5' : 'bg-card'}
+										{!isEnabled ? 'bg-muted/30' : ''}"
+								>
+									<!-- Field Header -->
+									<div class="flex items-start justify-between gap-2 mb-3">
+										<div class="flex-1 min-w-0">
+											<div class="flex items-center gap-2 flex-wrap mb-1">
+												<Label for={prop.key} class="font-medium text-sm {!isEnabled ? 'text-muted-foreground' : ''}">
+													{prop.label}
+												</Label>
+												{#if prop.required}
+													<span class="text-xs text-red-500 font-medium">required</span>
+												{/if}
+												{#if prop.system}
+													<span class="text-xs text-blue-500 font-medium">system</span>
+												{/if}
+												{#if isModified}
+													<span class="text-xs text-orange-500 font-medium">modified</span>
+												{/if}
+												{#if !isEnabled}
+													<span class="text-xs text-muted-foreground">(unset)</span>
+												{/if}
 											</div>
-										{:else if inputType === 'select' && prop.options}
-											<Select
-												type="single"
-												value={String(currentValues[prop.key] ?? prop.defaultValue ?? '')}
-												onValueChange={(value) => handlePropertyChange(prop.key, value || undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
+											{#if prop.envVar}
+												<code class="text-xs text-muted-foreground font-mono">{prop.envVar}</code>
+											{/if}
+											{#if prop.description}
+												<p class="text-xs text-muted-foreground mt-1">{prop.description}</p>
+											{/if}
+										</div>
+										<div class="flex items-center gap-1">
+											<!-- Set/Unset Toggle -->
+											<button
+												class="p-1 rounded transition-colors
+													{canToggle ? 'hover:bg-muted cursor-pointer' : 'opacity-50 cursor-not-allowed'}"
+												onclick={() => canToggle && toggleFieldEnabled(prop.key, !isEnabled, prop)}
+												disabled={!canToggle}
+												title={isEnabled ? 'Click to unset (use default)' : 'Click to set a custom value'}
 											>
-												<SelectTrigger class="h-9">
-													<span>
-														{currentValues[prop.key] || prop.defaultValue || 'Select an option'}
-														{#if currentValues[prop.key] === undefined && prop.defaultValue}
-															<span class="text-xs text-muted-foreground ml-1">(default)</span>
-														{/if}
-													</span>
-												</SelectTrigger>
-												<SelectContent>
-													{#each prop.options as option}
-														<SelectItem value={option}>{option}</SelectItem>
-													{/each}
-												</SelectContent>
-											</Select>
-										{:else if inputType === 'number'}
-											<Input
-												id={prop.key}
-												type="number"
-												value={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? '') : ''}
-												placeholder={prop.defaultValue !== undefined ? String(prop.defaultValue) : ''}
-												oninput={(e) => handlePropertyChange(prop.key, e.currentTarget.value ? parseInt(e.currentTarget.value) : undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
-												class="h-9"
-											/>
-										{:else if inputType === 'password'}
-											<Input
-												id={prop.key}
-												type="password"
-												value={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? '') : ''}
-												placeholder={prop.defaultValue !== undefined ? String(prop.defaultValue) : ''}
-												oninput={(e) => handlePropertyChange(prop.key, e.currentTarget.value || undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
-												class="h-9"
-											/>
-										{:else}
-											<Input
-												id={prop.key}
-												type="text"
-												value={enabledFields.has(prop.key) ? (currentValues[prop.key] ?? '') : ''}
-												placeholder={prop.defaultValue !== undefined ? String(prop.defaultValue) : ''}
-												oninput={(e) => handlePropertyChange(prop.key, e.currentTarget.value || undefined)}
-												disabled={prop.system || !enabledFields.has(prop.key) || server?.status === ServerStatus.RUNNING}
-												class="h-9"
-											/>
-										{/if}
-										
-										{#if prop.defaultValue !== undefined}
-											<p class="text-xs text-muted-foreground">
-												Default: {String(prop.defaultValue)}
-											</p>
-										{/if}
-											</div>
+												{#if isEnabled}
+													<CircleDot class="h-4 w-4 text-green-500" />
+												{:else}
+													<Circle class="h-4 w-4 text-muted-foreground" />
+												{/if}
+											</button>
+											<Button
+												variant="ghost"
+												size="icon"
+												class="h-6 w-6 opacity-0 group-hover:opacity-100"
+												onclick={() => copyLinkToClipboard(prop.key)}
+											>
+												<Link class="h-3 w-3" />
+											</Button>
 										</div>
 									</div>
-								{/each}
-							</div>
-						</div>
-						{/if}
-					{/each}
-				</div>
-			{/if}
 
-			{#if server?.status === ServerStatus.RUNNING}
-				<div class="mt-4 p-4 bg-yellow-50 dark:bg-yellow-950 rounded-lg border border-yellow-200 dark:border-yellow-800">
+									<!-- Field Input -->
+									{#if prop.type === 'checkbox'}
+										<div class="flex items-center gap-3 py-1">
+											<Switch
+												id={prop.key}
+												checked={getBooleanValue(prop)}
+												onCheckedChange={(checked) => updateValue(prop.key, checked)}
+												disabled={prop.system || !isEnabled || isServerRunning}
+											/>
+											<span class="text-sm {!isEnabled ? 'text-muted-foreground' : ''}">
+												{getBooleanValue(prop) ? 'Enabled' : 'Disabled'}
+											</span>
+										</div>
+									{:else if prop.type === 'select' && prop.options?.length}
+										<Select
+											type="single"
+											value={getDisplayValue(prop)}
+											onValueChange={(value) => updateValue(prop.key, value ?? '')}
+											disabled={prop.system || !isEnabled || isServerRunning}
+										>
+											<SelectTrigger class="h-9 {!isEnabled ? 'opacity-60' : ''}">
+												<span class="truncate">
+													{getDisplayValue(prop) || 'Select...'}
+												</span>
+											</SelectTrigger>
+											<SelectContent>
+												{#each prop.options as option}
+													<SelectItem value={option}>{option || '(empty)'}</SelectItem>
+												{/each}
+											</SelectContent>
+										</Select>
+									{:else if prop.type === 'number'}
+										<Input
+											id={prop.key}
+											type="number"
+											value={getDisplayValue(prop)}
+											placeholder={prop.defaultValue ?? ''}
+											oninput={(e) => updateValue(prop.key, e.currentTarget.value)}
+											disabled={prop.system || !isEnabled || isServerRunning}
+											class="h-9 {!isEnabled ? 'opacity-60' : ''}"
+										/>
+									{:else if prop.type === 'password'}
+										<Input
+											id={prop.key}
+											type="password"
+											value={getDisplayValue(prop)}
+											placeholder={prop.defaultValue ?? ''}
+											oninput={(e) => updateValue(prop.key, e.currentTarget.value)}
+											disabled={prop.system || !isEnabled || isServerRunning}
+											class="h-9 {!isEnabled ? 'opacity-60' : ''}"
+										/>
+									{:else}
+										<Input
+											id={prop.key}
+											type="text"
+											value={getDisplayValue(prop)}
+											placeholder={prop.defaultValue ?? ''}
+											oninput={(e) => updateValue(prop.key, e.currentTarget.value)}
+											disabled={prop.system || !isEnabled || isServerRunning}
+											class="h-9 {!isEnabled ? 'opacity-60' : ''}"
+										/>
+									{/if}
+
+									{#if prop.defaultValue !== undefined && prop.defaultValue !== ''}
+										<p class="text-xs text-muted-foreground mt-2">
+											Default: <code class="bg-muted px-1 py-0.5 rounded">{prop.defaultValue}</code>
+										</p>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					</div>
+				</div>
+			</div>
+
+			{#if isServerRunning}
+				<div class="p-4 bg-yellow-50 dark:bg-yellow-950 border-t border-yellow-200 dark:border-yellow-800">
 					<p class="text-sm text-yellow-800 dark:text-yellow-200">
-						⚠️ Server must be stopped to modify configuration. Changes will take effect after restart.
+						Server must be stopped to modify configuration. Changes will take effect after restart.
 					</p>
 				</div>
 			{/if}
 		{/if}
-		<ScrollToTop />
 	</CardContent>
 </Card>
+
+<ScrollToTop />

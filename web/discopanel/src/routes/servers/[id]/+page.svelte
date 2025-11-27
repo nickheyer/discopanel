@@ -31,7 +31,7 @@
 	let activeTab = $state('overview');
 	let routingInfo = $state<any>(null);
 
-	let interval: number;
+	let interval: any;
 
 	// Helper function to convert protobuf Timestamp to Date
 	function timestampToDate(timestamp: Timestamp | undefined): Date {

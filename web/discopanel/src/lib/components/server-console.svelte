@@ -12,6 +12,7 @@
 	import { toast } from 'svelte-sonner';
 	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw } from '@lucide/svelte';
 	import AnsiToHtml from 'ansi-to-html';
+	import { getStringForEnum } from '$lib/utils';
 
 	// Create ansi-to-html converter with proper options
 	const ansiConverter = new AnsiToHtml({
@@ -172,7 +173,7 @@
 					<Terminal class="h-4 w-4 text-green-500" />
 					<span class="font-mono text-sm text-green-500">Server Console</span>
 					<Badge variant={(server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY) ? 'default' : 'secondary'} class="text-xs">
-						{server.status}
+						{getStringForEnum(ServerStatus, server.status)?.toLowerCase()}
 					</Badge>
 				</div>
 				<div class="flex items-center gap-1">

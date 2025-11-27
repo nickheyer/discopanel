@@ -275,7 +275,7 @@ func applyConfigUpdates(config any, updates map[string]string) error {
 		}
 
 		targetType := fieldValue.Type()
-		isPtr := targetType.Kind() == reflect.Ptr
+		isPtr := targetType.Kind() == reflect.Pointer
 		if isPtr {
 			targetType = targetType.Elem()
 		}
@@ -384,18 +384,6 @@ func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 			strValue = fmt.Sprintf("%v", fieldValue.Interface())
 		}
 
-		// If the default tag is empty but we need a zero value representation for the UI
-		strDefault := defaultTag
-		if strDefault == "" {
-			// Provide logical defaults for types if tag is missing
-			switch field.Type.Kind() {
-			case reflect.Bool:
-				strDefault = "false"
-			case reflect.Int, reflect.Int32, reflect.Int64:
-				strDefault = "0"
-			}
-		}
-
 		label := labelTag
 		if label == "" {
 			label = jsonTag
@@ -405,13 +393,17 @@ func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 			Key:          jsonTag,
 			Label:        label,
 			Value:        strValue,
-			DefaultValue: strDefault,
 			Type:         inputTag,
 			Description:  descTag,
 			Required:     requiredTag == "true",
 			System:       systemTag == "true",
 			Ephemeral:    ephemeralTag == "true",
 			EnvVar:       envTag,
+		}
+
+		// Only set default_value if it's explicitly specified in the struct tag
+		if defaultTag != "" {
+			prop.DefaultValue = &defaultTag
 		}
 
 		if inputTag == "select" {

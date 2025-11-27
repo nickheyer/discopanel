@@ -21,7 +21,7 @@ message ConfigProperty {
   string key = 1;
   string label = 2;
   string value = 3;
-  string default_value = 4;
+  optional string default_value = 4;
   string type = 5; // text, number, checkbox, select, password
   string description = 6;
   bool required = 7;

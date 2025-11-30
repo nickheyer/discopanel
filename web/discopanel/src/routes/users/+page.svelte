@@ -500,13 +500,13 @@
 					<Select
 						type="single"
 						value={editUserForm.role}
-<<<<<<< HEAD
-						onValueChange={(value: string | undefined) =>
-					<Select
-						type="single"
-						value={editUserForm.role}
 						onValueChange={(value: string | undefined) => editUserForm.role = (value || 'viewer') as 'admin' | 'editor' | 'viewer' | 'client'}
-					>	<SelectItem value="viewer">Viewer (Read-only)</SelectItem>
+					>
+						<SelectTrigger id="edit-role">
+							<span>{editUserForm.role || 'Select a role'}</span>
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="viewer">Viewer (Read-only)</SelectItem>
 							<SelectItem value="editor">Editor (Manage servers)</SelectItem>
 							<SelectItem value="client">Client (Manage assigned servers)</SelectItem>
 							<SelectItem value="admin">Admin (Full access)</SelectItem>

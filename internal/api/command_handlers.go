@@ -23,6 +23,12 @@ func (s *Server) handleSendCommand(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	serverID := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	// Get server from database
 	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {

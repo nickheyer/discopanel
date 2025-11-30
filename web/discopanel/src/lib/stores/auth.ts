@@ -6,10 +6,11 @@ interface User {
 	id: string;
 	username: string;
 	email: string;
-	role: 'admin' | 'editor' | 'viewer';
+	role: 'admin' | 'editor' | 'viewer' | 'client';
 	is_active: boolean;
 	created_at: string;
 	last_login?: string;
+	assigned_servers?: string[];
 }
 
 interface AuthState {
@@ -329,7 +330,8 @@ export const authStore = createAuthStore();
 export const isAuthenticated = derived(authStore, $auth => $auth.isAuthenticated);
 export const currentUser = derived(authStore, $auth => $auth.user);
 export const isAdmin = derived(authStore, $auth => $auth.user?.role === 'admin');
-export const isEditor = derived(authStore, $auth => $auth.user?.role === 'editor' || $auth.user?.role === 'admin');
+export const isEditor = derived(authStore, $auth => $auth.user?.role === 'editor' || $auth.user?.role === 'admin' || $auth.user?.role === 'client');
+export const isClient = derived(authStore, $auth => $auth.user?.role === 'client');
 export const authEnabled = derived(authStore, $auth => $auth.authEnabled);
 
 // Make auth store values accessible as a readable store

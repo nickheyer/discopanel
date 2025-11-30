@@ -57,16 +57,18 @@ type AuthStatusResponse struct {
 }
 
 type CreateUserRequest struct {
-	Username string      `json:"username"`
-	Email    string      `json:"email"`
-	Password string      `json:"password"`
-	Role     db.UserRole `json:"role"`
+	Username      string      `json:"username"`
+	Email         string      `json:"email"`
+	Password      string      `json:"password"`
+	Role          db.UserRole `json:"role"`
+	AssignedServers []string  `json:"assigned_servers,omitempty"` // For client role
 }
 
 type UpdateUserRequest struct {
-	Email    *string      `json:"email,omitempty"`
-	Role     *db.UserRole `json:"role,omitempty"`
-	IsActive *bool        `json:"is_active,omitempty"`
+	Email           *string      `json:"email,omitempty"`
+	Role            *db.UserRole `json:"role,omitempty"`
+	IsActive        *bool        `json:"is_active,omitempty"`
+	AssignedServers *[]string    `json:"assigned_servers,omitempty"` // For client role
 }
 
 // LoginError represents all possible login error types
@@ -388,6 +390,16 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load assigned servers for client users
+	for _, user := range users {
+		if user.Role == db.RoleClient {
+			assignedServers, err := s.store.GetUserServerAssignments(r.Context(), user.ID)
+			if err == nil {
+				user.AssignedServers = assignedServers
+			}
+		}
+	}
+
 	s.respondJSON(w, http.StatusOK, users)
 }
 
@@ -400,8 +412,14 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate role
-	if req.Role != db.RoleAdmin && req.Role != db.RoleEditor && req.Role != db.RoleViewer {
+	if req.Role != db.RoleAdmin && req.Role != db.RoleEditor && req.Role != db.RoleViewer && req.Role != db.RoleClient {
 		s.respondError(w, http.StatusBadRequest, "Invalid role")
+		return
+	}
+
+	// For client role, validate that assigned servers are provided
+	if req.Role == db.RoleClient && len(req.AssignedServers) == 0 {
+		s.respondError(w, http.StatusBadRequest, "Client role requires at least one assigned server")
 		return
 	}
 
@@ -410,6 +428,16 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("Failed to create user: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to create user")
 		return
+	}
+
+	// If client role, assign servers
+	if req.Role == db.RoleClient && len(req.AssignedServers) > 0 {
+		if err := s.store.SetUserServerAssignments(r.Context(), user.ID, req.AssignedServers); err != nil {
+			s.log.Error("Failed to assign servers to user: %v", err)
+			// Don't fail the request, but log the error
+		} else {
+			user.AssignedServers = req.AssignedServers
+		}
 	}
 
 	s.respondJSON(w, http.StatusCreated, user)
@@ -450,6 +478,33 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.UpdateUser(r.Context(), user); err != nil {
 		s.respondError(w, http.StatusInternalServerError, "Failed to update user")
 		return
+	}
+
+	// Update server assignments for client users
+	if req.AssignedServers != nil {
+		if user.Role == db.RoleClient {
+			if len(*req.AssignedServers) == 0 {
+				s.respondError(w, http.StatusBadRequest, "Client role requires at least one assigned server")
+				return
+			}
+			if err := s.store.SetUserServerAssignments(r.Context(), user.ID, *req.AssignedServers); err != nil {
+				s.log.Error("Failed to update server assignments: %v", err)
+				s.respondError(w, http.StatusInternalServerError, "Failed to update server assignments")
+				return
+			}
+			user.AssignedServers = *req.AssignedServers
+		} else {
+			// Clear server assignments for non-client users
+			if err := s.store.SetUserServerAssignments(r.Context(), user.ID, []string{}); err != nil {
+				s.log.Error("Failed to clear server assignments: %v", err)
+			}
+		}
+	} else if user.Role == db.RoleClient {
+		// Load current assignments for client users if not updating them
+		assignedServers, err := s.store.GetUserServerAssignments(r.Context(), user.ID)
+		if err == nil {
+			user.AssignedServers = assignedServers
+		}
 	}
 
 	s.respondJSON(w, http.StatusOK, user)

@@ -82,6 +82,7 @@ func (s *Store) Migrate() error {
 		&ProxyConfig{},
 		&ProxyListener{},
 		&User{},
+		&UserServerAssignment{},
 		&AuthConfig{},
 		&Session{},
 	)
@@ -792,4 +793,91 @@ func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
 
 func (s *Store) CleanExpiredSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
+}
+
+// UserServerAssignment operations
+
+// AssignServerToUser assigns a server to a client user
+func (s *Store) AssignServerToUser(ctx context.Context, userID, serverID string) error {
+	assignment := &UserServerAssignment{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		ServerID: serverID,
+	}
+	return s.db.WithContext(ctx).Create(assignment).Error
+}
+
+// RemoveServerFromUser removes a server assignment from a user
+func (s *Store) RemoveServerFromUser(ctx context.Context, userID, serverID string) error {
+	return s.db.WithContext(ctx).
+		Where("user_id = ? AND server_id = ?", userID, serverID).
+		Delete(&UserServerAssignment{}).Error
+}
+
+// GetUserServerAssignments returns all server IDs assigned to a user
+func (s *Store) GetUserServerAssignments(ctx context.Context, userID string) ([]string, error) {
+	var assignments []UserServerAssignment
+	err := s.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Find(&assignments).Error
+	if err != nil {
+		return nil, err
+	}
+
+	serverIDs := make([]string, len(assignments))
+	for i, a := range assignments {
+		serverIDs[i] = a.ServerID
+	}
+	return serverIDs, nil
+}
+
+// SetUserServerAssignments replaces all server assignments for a user
+func (s *Store) SetUserServerAssignments(ctx context.Context, userID string, serverIDs []string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete existing assignments
+		if err := tx.Where("user_id = ?", userID).Delete(&UserServerAssignment{}).Error; err != nil {
+			return err
+		}
+
+		// Create new assignments
+		for _, serverID := range serverIDs {
+			assignment := &UserServerAssignment{
+				ID:       uuid.New().String(),
+				UserID:   userID,
+				ServerID: serverID,
+			}
+			if err := tx.Create(assignment).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
+// IsServerAssignedToUser checks if a server is assigned to a user
+func (s *Store) IsServerAssignedToUser(ctx context.Context, userID, serverID string) (bool, error) {
+	var count int64
+	err := s.db.WithContext(ctx).
+		Model(&UserServerAssignment{}).
+		Where("user_id = ? AND server_id = ?", userID, serverID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// GetUsersAssignedToServer returns all users assigned to a server
+func (s *Store) GetUsersAssignedToServer(ctx context.Context, serverID string) ([]string, error) {
+	var assignments []UserServerAssignment
+	err := s.db.WithContext(ctx).
+		Where("server_id = ?", serverID).
+		Find(&assignments).Error
+	if err != nil {
+		return nil, err
+	}
+
+	userIDs := make([]string, len(assignments))
+	for i, a := range assignments {
+		userIDs[i] = a.UserID
+	}
+	return userIDs, nil
 }

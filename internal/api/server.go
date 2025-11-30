@@ -355,3 +355,39 @@ func (s *Server) respondJSON(w http.ResponseWriter, status int, data any) {
 func (s *Server) respondError(w http.ResponseWriter, status int, message string) {
 	s.respondJSON(w, status, map[string]string{"error": message})
 }
+
+// checkServerAccess verifies that the current user has access to the specified server
+// Returns true if access is allowed, false otherwise
+func (s *Server) checkServerAccess(ctx context.Context, serverID string) bool {
+	user := auth.GetUserFromContext(ctx)
+	if user == nil {
+		// No user in context - allow if auth is disabled
+		authConfig, _, err := s.store.GetAuthConfig(ctx)
+		if err != nil || !authConfig.Enabled {
+			return true
+		}
+		return false
+	}
+
+	// Admin and Editor have access to all servers
+	if user.Role == storage.RoleAdmin || user.Role == storage.RoleEditor {
+		return true
+	}
+
+	// Viewer has read-only access to all servers (handled by middleware)
+	if user.Role == storage.RoleViewer {
+		return true
+	}
+
+	// Client users can only access assigned servers
+	if user.Role == storage.RoleClient {
+		hasAccess, err := s.authManager.CheckServerAccess(ctx, user, serverID)
+		if err != nil {
+			s.log.Error("Failed to check server access: %v", err)
+			return false
+		}
+		return hasAccess
+	}
+
+	return false
+}

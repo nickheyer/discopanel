@@ -18,6 +18,12 @@ func (s *Server) handleListMods(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	serverID := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	// Get server to find data path and mod loader
 	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
@@ -131,6 +137,12 @@ func (s *Server) handleUploadMod(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	serverID := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	// Parse multipart form
 	err := r.ParseMultipartForm(100 << 20) // 100 MB max
 	if err != nil {
@@ -219,7 +231,14 @@ func (s *Server) handleUploadMod(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetMod(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
+	serverID := vars["id"]
 	modID := vars["modId"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 
 	mod, err := s.store.GetMod(ctx, modID)
 	if err != nil {
@@ -235,6 +254,12 @@ func (s *Server) handleUpdateMod(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	modID := vars["modId"]
 	serverID := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 
 	// Get server to find mod path
 	server, err := s.store.GetServer(ctx, serverID)
@@ -332,7 +357,14 @@ func (s *Server) handleUpdateMod(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteMod(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
+	serverID := vars["id"]
 	modID := vars["modId"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 
 	mod, err := s.store.GetMod(ctx, modID)
 	if err != nil {

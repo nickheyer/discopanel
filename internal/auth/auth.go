@@ -372,10 +372,41 @@ func CheckPermission(user *db.User, requiredRole db.UserRole) bool {
 		return true
 	}
 
+	// Client can do editor and viewer actions (but server-specific access is checked separately)
+	if user.Role == db.RoleClient && (requiredRole == db.RoleEditor || requiredRole == db.RoleViewer) {
+		return true
+	}
+
 	// Viewer can only do viewer actions
 	if user.Role == db.RoleViewer && requiredRole == db.RoleViewer {
 		return true
 	}
 
 	return false
+}
+
+// CheckServerAccess checks if a user has access to a specific server
+// For Client role, this checks against assigned servers
+// For other roles, it checks general permissions
+func (m *Manager) CheckServerAccess(ctx context.Context, user *db.User, serverID string) (bool, error) {
+	if user == nil {
+		return false, nil
+	}
+
+	// Admin and Editor have access to all servers
+	if user.Role == db.RoleAdmin || user.Role == db.RoleEditor {
+		return true, nil
+	}
+
+	// Client users can only access assigned servers
+	if user.Role == db.RoleClient {
+		return m.store.IsServerAssignedToUser(ctx, user.ID, serverID)
+	}
+
+	// Viewers have no write access to servers but can view them
+	if user.Role == db.RoleViewer {
+		return true, nil
+	}
+
+	return false, nil
 }

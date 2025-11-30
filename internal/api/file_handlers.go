@@ -29,6 +29,12 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	serverID := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	// Get server
 	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
@@ -73,6 +79,12 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	serverID := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 
 	// Get server
 	server, err := s.store.GetServer(ctx, serverID)
@@ -142,6 +154,12 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	serverID := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 	filePath := vars["path"]
 
 	// Get server
@@ -183,6 +201,12 @@ func (s *Server) handleUpdateFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	serverID := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 	filePath := vars["path"]
 
 	// Get server
@@ -231,6 +255,12 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	serverID := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 	filePath := vars["path"]
 
 	// Get server
@@ -284,6 +314,12 @@ func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	serverID := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 	filePath := vars["path"]
 
 	// Parse request body
@@ -366,6 +402,12 @@ func (s *Server) handleExtractArchive(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	serverID := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 	archivePath := vars["path"]
 
 	// Get server

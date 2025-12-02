@@ -181,17 +181,17 @@
 											{/snippet}
 										</SidebarMenuButton>
 									</SidebarMenuItem>
+									<SidebarMenuItem>
+										<SidebarMenuButton isActive={page.url.pathname === '/settings'}>
+											{#snippet child({ props })}
+												<a href="/settings" {...props}>
+													<Settings class="h-4 w-4" />
+													<span class="group-data-[collapsible=icon]:hidden">Settings</span>
+												</a>
+											{/snippet}
+										</SidebarMenuButton>
+									</SidebarMenuItem>
 								{/if}
-								<SidebarMenuItem>
-									<SidebarMenuButton isActive={page.url.pathname === '/settings'}>
-										{#snippet child({ props })}
-											<a href="/settings" {...props}>
-												<Settings class="h-4 w-4" />
-												<span class="group-data-[collapsible=icon]:hidden">Settings</span>
-											</a>
-										{/snippet}
-									</SidebarMenuButton>
-								</SidebarMenuItem>
 							</SidebarMenu>
 						</SidebarGroupContent>
 					</SidebarGroup>

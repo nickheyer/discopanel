@@ -38,6 +38,14 @@
 	let showEditDialog = $state(false);
 	let editingUser = $state<User | null>(null);
 	
+	// Redirect if user is not admin
+	$effect(() => {
+		if (!isUserAdmin) {
+			toast.error('You do not have permission to manage users');
+			goto('/');
+		}
+	});
+	
 	let newUserForm = $state({
 		username: '',
 		email: '',

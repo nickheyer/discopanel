@@ -19,6 +19,9 @@
 	import ServerMods from '$lib/components/server-mods.svelte';
 	import ServerFiles from '$lib/components/server-files.svelte';
 	import ServerRouting from '$lib/components/server-routing.svelte';
+	import { canDeleteServer } from '$lib/stores/auth';
+
+	let userCanDeleteServer = canDeleteServer();
 
 	let server = $state<Server | null>(null);
 	let loading = $state(true);
@@ -234,18 +237,20 @@
 						<span class="sm:inline">Stopping...</span>
 					</Button>
 				{/if}
-				<div class="ml-2 sm:ml-4 h-10 w-px bg-border/50 hidden sm:block"></div>
-				<Button 
-					variant="ghost" 
-					onclick={() => handleDeleteServer()}
-					disabled={actionLoading}
-					size="default"
-					class="text-destructive hover:text-white hover:bg-destructive transition-all hidden sm:flex"
-				>
-					<Trash2 class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
-					<span class="hidden lg:inline">Delete Server</span>
-					<span class="lg:hidden">Delete</span>
-				</Button>
+				{#if userCanDeleteServer}
+					<div class="ml-2 sm:ml-4 h-10 w-px bg-border/50 hidden sm:block"></div>
+					<Button 
+						variant="ghost" 
+						onclick={() => handleDeleteServer()}
+						disabled={actionLoading}
+						size="default"
+						class="text-destructive hover:text-white hover:bg-destructive transition-all hidden sm:flex"
+					>
+						<Trash2 class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
+						<span class="hidden lg:inline">Delete Server</span>
+						<span class="lg:hidden">Delete</span>
+					</Button>
+				{/if}
 			</div>
 		</div>
 

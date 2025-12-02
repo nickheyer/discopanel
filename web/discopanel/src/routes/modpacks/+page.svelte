@@ -10,6 +10,9 @@
 	import { toast } from 'svelte-sonner';
 	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload, Package, ArrowLeft, Trash2 } from '@lucide/svelte';
 	import type { IndexedModpack, ModpackSearchParams, ModpackSearchResponse } from '$lib/api/types';
+	import { isEditor } from '$lib/stores/auth';
+
+	let userIsEditor = $derived($isEditor);
 	
 	let searchParams = $state<ModpackSearchParams>({
 		q: '',
@@ -444,21 +447,23 @@
 					<Search class="h-5 w-5 mr-2" />
 					Search
 				</Button>
-				<Button onclick={syncModpacks} disabled={syncing || (selectedIndexer === 'fuego' && !indexerStatus?.indexers?.fuego?.apiKeyConfigured)} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
-					<RefreshCw class={`h-5 w-5 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-					Sync {indexerName}
-				</Button>
-				<Button onclick={() => fileInput?.click()} disabled={uploading} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
-					<Upload class="h-5 w-5 mr-2" />
-					Upload Modpack
-				</Button>
-				<input
-					bind:this={fileInput}
-					type="file"
-					accept=".zip"
-					onchange={handleModpackUpload}
-					class="hidden"
-				/>
+				{#if userIsEditor}
+					<Button onclick={syncModpacks} disabled={syncing || (selectedIndexer === 'fuego' && !indexerStatus?.indexers?.fuego?.apiKeyConfigured)} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
+						<RefreshCw class={`h-5 w-5 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+						Sync {indexerName}
+					</Button>
+					<Button onclick={() => fileInput?.click()} disabled={uploading} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
+						<Upload class="h-5 w-5 mr-2" />
+						Upload Modpack
+					</Button>
+					<input
+						bind:this={fileInput}
+						type="file"
+						accept=".zip"
+						onchange={handleModpackUpload}
+						class="hidden"
+					/>
+				{/if}
 			</div>
 			{#if searchResults?.total === 0 && !loading}
 				<p class="text-sm text-muted-foreground">
@@ -543,7 +548,7 @@
 									</Button>
 								</a>
 							{/if}
-							{#if modpack.indexer === 'manual'}
+							{#if modpack.indexer === 'manual' && userIsEditor}
 								<Button
 									variant="outline"
 									size="sm"

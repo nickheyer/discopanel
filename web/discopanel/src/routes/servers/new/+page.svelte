@@ -19,6 +19,17 @@
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
+	import { canManageServers } from '$lib/stores/auth';
+
+	let userCanManageServers = $derived($canManageServers);
+
+	// Redirect if user doesn't have permission to create servers
+	$effect(() => {
+		if (!userCanManageServers) {
+			toast.error('You do not have permission to create servers');
+			goto('/servers');
+		}
+	});
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);

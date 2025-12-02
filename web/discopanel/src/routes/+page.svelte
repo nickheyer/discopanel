@@ -210,14 +210,16 @@
 					<RefreshCw class="h-4 w-4 {isRefreshing ? 'animate-spin' : ''}" />
 					Refresh
 				</Button>
-			<Button 
-				href="/servers/new" 
-				size="default" 
-				class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl transition-all"
-			>
-				<Plus class="h-4 w-4 mr-2" />
-				New Server
-			</Button>
+			{#if userCanManageServers}
+				<Button 
+					href="/servers/new" 
+					size="default" 
+					class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl transition-all"
+				>
+					<Plus class="h-4 w-4 mr-2" />
+					New Server
+				</Button>
+			{/if}
 		</div>
 	</div>
 

@@ -31,7 +31,7 @@
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
 	import { serversStore, runningServers } from '$lib/stores/servers';
-	import { authStore, currentUser, isAdmin } from '$lib/stores/auth';
+	import { authStore, currentUser, isAdmin, canAccessSettings } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
@@ -44,6 +44,7 @@
 	let runningCount = $derived($runningServers.length);
 	let user = $derived($currentUser);
 	let isUserAdmin = $derived($isAdmin);
+	let userCanAccessSettings = $derived($canAccessSettings);
 	let loading = $state(true);
 	let isAuthEnabled = $derived($authStore.authEnabled);
 
@@ -181,6 +182,8 @@
 											{/snippet}
 										</SidebarMenuButton>
 									</SidebarMenuItem>
+								{/if}
+								{#if userCanAccessSettings}
 									<SidebarMenuItem>
 										<SidebarMenuButton isActive={page.url.pathname === '/settings'}>
 											{#snippet child({ props })}

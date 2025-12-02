@@ -39,6 +39,12 @@ func (s *Server) handleGetServerConfig(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	serverID := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	// Get server to ensure it exists and sync config
 	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
@@ -70,6 +76,12 @@ func (s *Server) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	serverID := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, serverID) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 
 	// Get server info
 	server, err := s.store.GetServer(ctx, serverID)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/nickheyer/discopanel/internal/auth"
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
@@ -29,6 +30,29 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("Failed to list servers: %v", err)
 		s.respondError(w, http.StatusInternalServerError, "Failed to list servers")
 		return
+	}
+
+	// Filter servers for client users
+	user := auth.GetUserFromContext(ctx)
+	if user != nil && user.Role == models.RoleClient {
+		assignedServers, err := s.store.GetUserServerAssignments(ctx, user.ID)
+		if err != nil {
+			s.log.Error("Failed to get user server assignments: %v", err)
+			s.respondError(w, http.StatusInternalServerError, "Failed to get server assignments")
+			return
+		}
+		
+		// Filter to only assigned servers
+		filteredServers := make([]*models.Server, 0)
+		for _, server := range servers {
+			for _, assignedID := range assignedServers {
+				if server.ID == assignedID {
+					filteredServers = append(filteredServers, server)
+					break
+				}
+			}
+		}
+		servers = filteredServers
 	}
 
 	// Check if full stats are requested (for dashboard)
@@ -555,6 +579,12 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	server, err := s.store.GetServer(ctx, id)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, "Server not found")
@@ -648,6 +678,12 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	id := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 
 	server, err := s.store.GetServer(ctx, id)
 	if err != nil {
@@ -919,6 +955,12 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	server, err := s.store.GetServer(ctx, id)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, "Server not found")
@@ -954,6 +996,12 @@ func (s *Server) handleStartServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	id := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 
 	server, err := s.store.GetServer(ctx, id)
 	if err != nil {
@@ -1008,6 +1056,12 @@ func (s *Server) handleStopServer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	server, err := s.store.GetServer(ctx, id)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, "Server not found")
@@ -1056,6 +1110,12 @@ func (s *Server) handleRestartServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	id := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 
 	server, err := s.store.GetServer(ctx, id)
 	if err != nil {
@@ -1171,6 +1231,12 @@ func (s *Server) handleGetServerLogs(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	// Parse tail parameter
 	tail := 100
 	if t := r.URL.Query().Get("tail"); t != "" {
@@ -1210,6 +1276,12 @@ func (s *Server) handleClearServerLogs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	id := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 	server, err := s.store.GetServer(ctx, id)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, "Server not found")

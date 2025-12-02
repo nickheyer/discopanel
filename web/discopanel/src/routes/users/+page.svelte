@@ -17,31 +17,67 @@
 		id: string;
 		username: string;
 		email: string;
-		role: 'admin' | 'editor' | 'viewer';
+		role: 'admin' | 'editor' | 'viewer' | 'client';
 		is_active: boolean;
 		created_at: string;
 		last_login?: string;
+		assigned_servers?: string[];
+	}
+
+	interface Server {
+		id: string;
+		name: string;
 	}
 
 	let users = $state<User[]>([]);
+	let servers = $state<Server[]>([]);
 	let loading = $state(true);
+	let loadingServers = $state(false);
 	let isUserAdmin = $derived($isAdmin);
 	let showCreateDialog = $state(false);
 	let showEditDialog = $state(false);
 	let editingUser = $state<User | null>(null);
 	
+	// Redirect if user is not admin
+	$effect(() => {
+		if (!isUserAdmin) {
+			toast.error('You do not have permission to manage users');
+			goto('/');
+		}
+	});
+	
 	let newUserForm = $state({
 		username: '',
 		email: '',
 		password: '',
-		role: 'viewer' as 'admin' | 'editor' | 'viewer'
+		role: 'viewer' as 'admin' | 'editor' | 'viewer' | 'client',
+		assigned_servers: [] as string[]
 	});
 	
 	let editUserForm = $state({
 		email: '',
-		role: 'viewer' as 'admin' | 'editor' | 'viewer',
-		is_active: true
+		role: 'viewer' as 'admin' | 'editor' | 'viewer' | 'client',
+		is_active: true,
+		assigned_servers: [] as string[]
 	});
+	
+	async function loadServers() {
+		loadingServers = true;
+		try {
+			const headers = authStore.getHeaders();
+			const response = await fetch('/api/v1/servers', { headers });
+			
+			if (!response.ok) {
+				throw new Error('Failed to load servers');
+			}
+			
+			servers = await response.json();
+		} catch (error) {
+			console.error('Failed to load servers:', error);
+		} finally {
+			loadingServers = false;
+		}
+	}
 	
 	async function loadUsers() {
 		loading = true;
@@ -101,7 +137,8 @@
 				username: '',
 				email: '',
 				password: '',
-				role: 'viewer'
+				role: 'viewer',
+				assigned_servers: []
 			};
 			await loadUsers();
 		} catch (error: any) {
@@ -167,7 +204,8 @@
 		editUserForm = {
 			email: user.email,
 			role: user.role,
-			is_active: user.is_active
+			is_active: user.is_active,
+			assigned_servers: user.assigned_servers || []
 		};
 		showEditDialog = true;
 	}
@@ -178,8 +216,28 @@
 				return { variant: 'destructive' as const, icon: Shield };
 			case 'editor':
 				return { variant: 'secondary' as const, icon: Edit };
+			case 'client':
+				return { variant: 'default' as const, icon: Users };
 			default:
 				return { variant: 'outline' as const, icon: Eye };
+		}
+	}
+	
+	function toggleServerAssignment(serverId: string, isEdit: boolean = false) {
+		if (isEdit) {
+			const index = editUserForm.assigned_servers.indexOf(serverId);
+			if (index > -1) {
+				editUserForm.assigned_servers = editUserForm.assigned_servers.filter(id => id !== serverId);
+			} else {
+				editUserForm.assigned_servers = [...editUserForm.assigned_servers, serverId];
+			}
+		} else {
+			const index = newUserForm.assigned_servers.indexOf(serverId);
+			if (index > -1) {
+				newUserForm.assigned_servers = newUserForm.assigned_servers.filter(id => id !== serverId);
+			} else {
+				newUserForm.assigned_servers = [...newUserForm.assigned_servers, serverId];
+			}
 		}
 	}
 	
@@ -200,6 +258,7 @@
 			return;
 		}
 		loadUsers();
+		loadServers();
 	});
 </script>
 
@@ -349,7 +408,7 @@
 				<Select 
 					type="single"
 					value={newUserForm.role}
-					onValueChange={(value: string | undefined) => newUserForm.role = (value || 'viewer') as 'admin' | 'editor' | 'viewer'}
+					onValueChange={(value: string | undefined) => newUserForm.role = (value || 'viewer') as 'admin' | 'editor' | 'viewer' | 'client'}
 				>
 					<SelectTrigger id="new-role">
 						<span>{newUserForm.role || 'Select a role'}</span>
@@ -357,10 +416,41 @@
 					<SelectContent>
 						<SelectItem value="viewer">Viewer (Read-only)</SelectItem>
 						<SelectItem value="editor">Editor (Manage servers)</SelectItem>
+						<SelectItem value="client">Client (Manage assigned servers)</SelectItem>
 						<SelectItem value="admin">Admin (Full access)</SelectItem>
 					</SelectContent>
 				</Select>
 			</div>
+			{#if newUserForm.role === 'client'}
+				<div class="space-y-2">
+					<Label>Assigned Servers</Label>
+					<div class="border rounded-lg p-3 max-h-48 overflow-y-auto space-y-2">
+						{#if loadingServers}
+							<div class="text-sm text-muted-foreground">Loading servers...</div>
+						{:else if servers.length === 0}
+							<div class="text-sm text-muted-foreground">No servers available</div>
+						{:else}
+							{#each servers as server}
+								<div class="flex items-center space-x-2">
+									<input
+										type="checkbox"
+										id="new-server-{server.id}"
+										checked={newUserForm.assigned_servers.includes(server.id)}
+										onchange={() => toggleServerAssignment(server.id, false)}
+										class="h-4 w-4"
+									/>
+									<Label for="new-server-{server.id}" class="text-sm font-normal">
+										{server.name}
+									</Label>
+								</div>
+							{/each}
+						{/if}
+					</div>
+					{#if newUserForm.assigned_servers.length === 0 && newUserForm.role === 'client'}
+						<p class="text-sm text-amber-600">⚠️ Client role requires at least one assigned server</p>
+					{/if}
+				</div>
+			{/if}
 		</div>
 		
 		<DialogFooter>
@@ -405,7 +495,7 @@
 					<Select 
 						type="single"
 						value={editUserForm.role}
-						onValueChange={(value: string | undefined) => editUserForm.role = (value || 'viewer') as 'admin' | 'editor' | 'viewer'}
+						onValueChange={(value: string | undefined) => editUserForm.role = (value || 'viewer') as 'admin' | 'editor' | 'viewer' | 'client'}
 					>
 						<SelectTrigger id="edit-role">
 							<span>{editUserForm.role || 'Select a role'}</span>
@@ -413,10 +503,41 @@
 						<SelectContent>
 							<SelectItem value="viewer">Viewer (Read-only)</SelectItem>
 							<SelectItem value="editor">Editor (Manage servers)</SelectItem>
+							<SelectItem value="client">Client (Manage assigned servers)</SelectItem>
 							<SelectItem value="admin">Admin (Full access)</SelectItem>
 						</SelectContent>
 					</Select>
 				</div>
+				{#if editUserForm.role === 'client'}
+					<div class="space-y-2">
+						<Label>Assigned Servers</Label>
+						<div class="border rounded-lg p-3 max-h-48 overflow-y-auto space-y-2">
+							{#if loadingServers}
+								<div class="text-sm text-muted-foreground">Loading servers...</div>
+							{:else if servers.length === 0}
+								<div class="text-sm text-muted-foreground">No servers available</div>
+							{:else}
+								{#each servers as server}
+									<div class="flex items-center space-x-2">
+										<input
+											type="checkbox"
+											id="edit-server-{server.id}"
+											checked={editUserForm.assigned_servers.includes(server.id)}
+											onchange={() => toggleServerAssignment(server.id, true)}
+											class="h-4 w-4"
+										/>
+										<Label for="edit-server-{server.id}" class="text-sm font-normal">
+											{server.name}
+										</Label>
+									</div>
+								{/each}
+							{/if}
+						</div>
+						{#if editUserForm.assigned_servers.length === 0 && editUserForm.role === 'client'}
+							<p class="text-sm text-amber-600">⚠️ Client role requires at least one assigned server</p>
+						{/if}
+					</div>
+				{/if}
 				<div class="flex items-center space-x-2">
 					<input
 						type="checkbox"

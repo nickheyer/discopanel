@@ -317,6 +317,12 @@ func (s *Server) handleGetServerRouting(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
+
 	server, err := s.store.GetServer(ctx, id)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, "Server not found")
@@ -367,6 +373,12 @@ func (s *Server) handleUpdateServerRouting(w http.ResponseWriter, r *http.Reques
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	id := vars["id"]
+
+	// Check server access for client users
+	if !s.checkServerAccess(ctx, id) {
+		s.respondError(w, http.StatusForbidden, "Access denied to this server")
+		return
+	}
 
 	server, err := s.store.GetServer(ctx, id)
 	if err != nil {

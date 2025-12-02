@@ -381,6 +381,7 @@ const (
 	RoleAdmin  UserRole = "admin"  // Full access to all features
 	RoleEditor UserRole = "editor" // Can manage servers but not system settings
 	RoleViewer UserRole = "viewer" // Read-only access
+	RoleClient UserRole = "client" // Can manage only assigned servers (Editor-level access for specific servers)
 )
 
 // User represents a user account
@@ -394,6 +395,19 @@ type User struct {
 	LastLogin    *time.Time `json:"last_login" gorm:"column:last_login"`
 	CreatedAt    time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt    time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+
+	// For client role: assigned servers
+	AssignedServers []string `json:"assigned_servers,omitempty" gorm:"-"` // Not persisted, loaded from UserServerAssignment
+}
+
+// UserServerAssignment represents a server assigned to a client user
+type UserServerAssignment struct {
+	ID        string    `json:"id" gorm:"primaryKey"`
+	UserID    string    `json:"user_id" gorm:"not null;index;column:user_id"`
+	ServerID  string    `json:"server_id" gorm:"not null;index;column:server_id"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	User      *User     `json:"-" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+	Server    *Server   `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
 
 // AuthConfig stores authentication configuration

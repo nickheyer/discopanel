@@ -10,6 +10,10 @@
 	import { toast } from 'svelte-sonner';
 	import { Plus, Search, MoreVertical, Play, Square, RotateCw, Settings, Package, Trash2, Server as ServerIcon } from '@lucide/svelte';
 	import type { Server } from '$lib/api/types';
+	import { canManageServers, canDeleteServer, canManageServer } from '$lib/stores/auth';
+
+	let userCanManageServers = $derived($canManageServers);
+	let userCanDeleteServer = canDeleteServer();
 
 	let servers = $derived($serversStore);
 	let filteredServers = $state<Server[]>([]);
@@ -114,12 +118,14 @@
 				<p class="text-base text-muted-foreground">Manage and monitor your Minecraft server instances</p>
 			</div>
 		</div>
-		<div class="flex items-center gap-2">
-			<Button href="/servers/new" size="default" class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
-				<Plus class="h-5 w-5 mr-2" />
-				New Server
-			</Button>
-		</div>
+		{#if userCanManageServers}
+			<div class="flex items-center gap-2">
+				<Button href="/servers/new" size="default" class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
+					<Plus class="h-5 w-5 mr-2" />
+					New Server
+				</Button>
+			</div>
+		{/if}
 	</div>
 
 	<div class="flex items-center gap-4">
@@ -140,13 +146,15 @@
 				{#if servers.length === 0}
 					<Plus class="mx-auto h-12 w-12 text-muted-foreground" />
 					<h3 class="mt-2 text-lg font-semibold">No servers</h3>
-					<p class="mt-1 text-sm text-muted-foreground">Get started by creating a new server.</p>
-					<div class="mt-6">
-						<Button href="/servers/new">
-							<Plus class="h-4 w-4 mr-2" />
-							New Server
-						</Button>
-					</div>
+					<p class="mt-1 text-sm text-muted-foreground">{userCanManageServers ? 'Get started by creating a new server.' : 'No servers are assigned to you yet.'}</p>
+					{#if userCanManageServers}
+						<div class="mt-6">
+							<Button href="/servers/new">
+								<Plus class="h-4 w-4 mr-2" />
+								New Server
+							</Button>
+						</div>
+					{/if}
 				{:else}
 					<Search class="mx-auto h-12 w-12 text-muted-foreground" />
 					<h3 class="mt-2 text-lg font-semibold">No results found</h3>
@@ -197,10 +205,12 @@
 											Restart
 										</DropdownMenuItem>
 									{/if}
-									<DropdownMenuItem class="flex flew-row text-destructive" onclick={() => deleteServer(server)}>
-										<Trash2 class="h-4 w-4 mr-2" />
-										Delete
-									</DropdownMenuItem>
+									{#if userCanDeleteServer}
+										<DropdownMenuItem class="flex flew-row text-destructive" onclick={() => deleteServer(server)}>
+											<Trash2 class="h-4 w-4 mr-2" />
+											Delete
+										</DropdownMenuItem>
+									{/if}
 									<DropdownMenuSeparator />
 									<DropdownMenuItem class="flex flew-row">
 										<a href="/servers/{server.id}">

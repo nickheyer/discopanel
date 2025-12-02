@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -10,6 +11,17 @@
 	import RoutingSettings from '$lib/components/routing-settings.svelte';
 	import AuthSettings from '$lib/components/auth-settings.svelte';
 	import SupportSettings from '$lib/components/support-settings.svelte';
+	import { canAccessSettings } from '$lib/stores/auth';
+
+	let userCanAccessSettings = $derived($canAccessSettings);
+
+	// Redirect if user doesn't have permission to access settings
+	$effect(() => {
+		if (!userCanAccessSettings) {
+			toast.error('You do not have permission to access settings');
+			goto('/');
+		}
+	});
 	
 	let globalConfig = $state<ConfigCategory[]>([]);
 	let loading = $state(true);

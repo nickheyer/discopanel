@@ -314,7 +314,51 @@ export const currentUser = derived(authStore, $auth => $auth.user);
 export const isAdmin = derived(authStore, $auth => $auth.user?.role === 'admin');
 export const isEditor = derived(authStore, $auth => $auth.user?.role === 'editor' || $auth.user?.role === 'admin' || $auth.user?.role === 'client');
 export const isClient = derived(authStore, $auth => $auth.user?.role === 'client');
+export const isViewer = derived(authStore, $auth => $auth.user?.role === 'viewer');
 export const authEnabled = derived(authStore, $auth => $auth.authEnabled);
 
 // Make auth store values accessible as a readable store
 export const $authStore = derived(authStore, $auth => $auth);
+
+// Helper function to check if user can create/delete servers (Admin or Editor only, not Client)
+export const canManageServers = derived(authStore, $auth => {
+	if (!$auth.authEnabled) return true;
+	if (!$auth.user) return true; // No user means auth is disabled or not logged in yet
+	return $auth.user.role === 'admin' || $auth.user.role === 'editor';
+});
+
+// Helper function to check if user can access settings (Admin only)
+export const canAccessSettings = derived(authStore, $auth => {
+	if (!$auth.authEnabled) return true;
+	if (!$auth.user) return true; // No user means auth is disabled or not logged in yet
+	return $auth.user.role === 'admin';
+});
+
+// Helper function to check if user can manage a specific server
+// Clients can only manage their assigned servers, Admin/Editor can manage all
+export function canManageServer(serverId: string): boolean {
+	const state = get(authStore);
+	if (!state.authEnabled) return true;
+	if (!state.user) return true; // No user means auth is disabled or not logged in yet
+	
+	// Admin and Editor can manage all servers
+	if (state.user.role === 'admin' || state.user.role === 'editor') {
+		return true;
+	}
+	
+	// Client can only manage assigned servers
+	if (state.user.role === 'client') {
+		return state.user.assigned_servers?.includes(serverId) ?? false;
+	}
+	
+	// Viewer cannot manage servers
+	return false;
+}
+
+// Helper function to check if user can delete a server (Admin or Editor only, not Client)
+export function canDeleteServer(): boolean {
+	const state = get(authStore);
+	if (!state.authEnabled) return true;
+	if (!state.user) return true; // No user means auth is disabled or not logged in yet
+	return state.user.role === 'admin' || state.user.role === 'editor';
+}

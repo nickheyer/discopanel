@@ -7,6 +7,7 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { formatBytes } from '$lib/utils';
 	import { serversStore } from '$lib/stores/servers';
+	import { canManageServers } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
 	import { 
 		Server, MemoryStick, Plus, LayoutDashboard, 
@@ -16,6 +17,9 @@
 		Database, Wifi, WifiOff, CheckCircle, XCircle, AlertTriangle, RefreshCw
 	} from '@lucide/svelte';
 	import type { Server as ServerType } from '$lib/api/types';
+
+	// Permission checks
+	let userCanManageServers = $derived($canManageServers);
 
 	// Dashboard data - not from the polling store
 	let dashboardServers: ServerType[] = $state([]);
@@ -367,11 +371,13 @@
 							<Server class="h-6 w-6 text-muted-foreground" />
 						</div>
 						<h3 class="text-sm font-semibold mb-1">No servers yet</h3>
-						<p class="text-sm text-muted-foreground mb-4">Create your first server to get started</p>
-						<Button href="/servers/new" size="sm">
-							<Plus class="h-4 w-4 mr-2" />
-							Create Server
-						</Button>
+						<p class="text-sm text-muted-foreground mb-4">{userCanManageServers ? 'Create your first server to get started' : 'No servers are assigned to you yet'}</p>
+						{#if userCanManageServers}
+							<Button href="/servers/new" size="sm">
+								<Plus class="h-4 w-4 mr-2" />
+								Create Server
+							</Button>
+						{/if}
 					</div>
 				{:else}
 					<div class="space-y-3">

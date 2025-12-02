@@ -323,14 +323,14 @@ export const $authStore = derived(authStore, $auth => $auth);
 // Helper function to check if user can create/delete servers (Admin or Editor only, not Client)
 export const canManageServers = derived(authStore, $auth => {
 	if (!$auth.authEnabled) return true;
-	if (!$auth.user) return false;
+	if (!$auth.user) return true; // No user means auth is disabled or not logged in yet
 	return $auth.user.role === 'admin' || $auth.user.role === 'editor';
 });
 
 // Helper function to check if user can access settings (Admin only)
 export const canAccessSettings = derived(authStore, $auth => {
 	if (!$auth.authEnabled) return true;
-	if (!$auth.user) return false;
+	if (!$auth.user) return true; // No user means auth is disabled or not logged in yet
 	return $auth.user.role === 'admin';
 });
 
@@ -339,7 +339,7 @@ export const canAccessSettings = derived(authStore, $auth => {
 export function canManageServer(serverId: string): boolean {
 	const state = get(authStore);
 	if (!state.authEnabled) return true;
-	if (!state.user) return false;
+	if (!state.user) return true; // No user means auth is disabled or not logged in yet
 	
 	// Admin and Editor can manage all servers
 	if (state.user.role === 'admin' || state.user.role === 'editor') {
@@ -359,6 +359,6 @@ export function canManageServer(serverId: string): boolean {
 export function canDeleteServer(): boolean {
 	const state = get(authStore);
 	if (!state.authEnabled) return true;
-	if (!state.user) return false;
+	if (!state.user) return true; // No user means auth is disabled or not logged in yet
 	return state.user.role === 'admin' || state.user.role === 'editor';
 }

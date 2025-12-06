@@ -1,0 +1,296 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// World editing and chunk management service
+service WorldService {
+  // List available worlds for a server
+  rpc ListWorlds(ListWorldsRequest) returns (ListWorldsResponse);
+  // Get world metadata and dimensions
+  rpc GetWorldInfo(GetWorldInfoRequest) returns (GetWorldInfoResponse);
+  // Load chunk data for rendering
+  rpc GetChunks(GetChunksRequest) returns (GetChunksResponse);
+  // Load a single chunk with full block data
+  rpc GetChunk(GetChunkRequest) returns (GetChunkResponse);
+  // Apply block changes to chunks
+  rpc SetBlocks(SetBlocksRequest) returns (SetBlocksResponse);
+  // Fill a region with a block type
+  rpc FillRegion(FillRegionRequest) returns (FillRegionResponse);
+  // Replace blocks within a region
+  rpc ReplaceBlocks(ReplaceBlocksRequest) returns (ReplaceBlocksResponse);
+  // Copy a region to clipboard
+  rpc CopyRegion(CopyRegionRequest) returns (CopyRegionResponse);
+  // Paste clipboard at position
+  rpc PasteRegion(PasteRegionRequest) returns (PasteRegionResponse);
+  // Undo last operation
+  rpc Undo(UndoRequest) returns (UndoResponse);
+  // Redo last undone operation
+  rpc Redo(RedoRequest) returns (RedoResponse);
+  // Get block registry for MC version
+  rpc GetBlockRegistry(GetBlockRegistryRequest) returns (GetBlockRegistryResponse);
+}
+
+// World directory entry
+message WorldInfo {
+  string name = 1;
+  string path = 2;
+  string dimension = 3;
+  int64 size_bytes = 4;
+  int64 last_modified = 5;
+  string level_name = 6;
+  string game_type = 7;
+  bool hardcore = 8;
+  int64 seed = 9;
+  int32 spawn_x = 10;
+  int32 spawn_y = 11;
+  int32 spawn_z = 12;
+  string generator_name = 13;
+  int32 data_version = 14;
+}
+
+// Request to list worlds
+message ListWorldsRequest {
+  string server_id = 1;
+}
+
+// Response with available worlds
+message ListWorldsResponse {
+  repeated WorldInfo worlds = 1;
+}
+
+// Request for world metadata
+message GetWorldInfoRequest {
+  string server_id = 1;
+  string world_name = 2;
+}
+
+// Response with world info
+message GetWorldInfoResponse {
+  WorldInfo world = 1;
+  repeated string dimensions = 2;
+  int32 min_y = 3;
+  int32 max_y = 4;
+}
+
+// 3D position
+message BlockPos {
+  int32 x = 1;
+  int32 y = 2;
+  int32 z = 3;
+}
+
+// Block state with properties
+message BlockState {
+  string name = 1;
+  map<string, string> properties = 2;
+}
+
+// Section data (16x16x16 blocks)
+message ChunkSection {
+  int32 y = 1;
+  repeated int32 palette_indices = 2;
+  repeated BlockState palette = 3;
+  bytes block_light = 4;
+  bytes sky_light = 5;
+}
+
+// Full chunk data
+message ChunkData {
+  int32 x = 1;
+  int32 z = 2;
+  repeated ChunkSection sections = 3;
+  bytes heightmap = 4;
+  int32 data_version = 5;
+}
+
+// Compact chunk for batch loading (optimized for rendering)
+message CompactChunk {
+  int32 x = 1;
+  int32 z = 2;
+  // Palette shared across all sections
+  repeated string palette = 3;
+  // Sections stored as section_y -> packed block data
+  map<int32, bytes> sections = 4;
+  // Heightmap for surface detection
+  bytes heightmap = 5;
+}
+
+// Request multiple chunks
+message GetChunksRequest {
+  string server_id = 1;
+  string world_name = 2;
+  string dimension = 3;
+  int32 center_x = 4;
+  int32 center_z = 5;
+  int32 radius = 6;
+  // If true, return compact format optimized for rendering
+  bool compact = 7;
+}
+
+// Response with chunk batch
+message GetChunksResponse {
+  repeated ChunkData chunks = 1;
+  repeated CompactChunk compact_chunks = 2;
+}
+
+// Request single chunk
+message GetChunkRequest {
+  string server_id = 1;
+  string world_name = 2;
+  string dimension = 3;
+  int32 chunk_x = 4;
+  int32 chunk_z = 5;
+}
+
+// Response with full chunk
+message GetChunkResponse {
+  ChunkData chunk = 1;
+}
+
+// Block change entry
+message BlockChange {
+  BlockPos position = 1;
+  BlockState block = 2;
+}
+
+// Request to set blocks
+message SetBlocksRequest {
+  string server_id = 1;
+  string world_name = 2;
+  string dimension = 3;
+  repeated BlockChange changes = 4;
+}
+
+// Response after setting blocks
+message SetBlocksResponse {
+  int32 blocks_changed = 1;
+  string operation_id = 2;
+}
+
+// Request to fill region
+message FillRegionRequest {
+  string server_id = 1;
+  string world_name = 2;
+  string dimension = 3;
+  BlockPos from = 4;
+  BlockPos to = 5;
+  BlockState block = 6;
+  // Optional: only fill if current block matches
+  BlockState filter = 7;
+}
+
+// Response after fill
+message FillRegionResponse {
+  int32 blocks_changed = 1;
+  string operation_id = 2;
+}
+
+// Request to replace blocks
+message ReplaceBlocksRequest {
+  string server_id = 1;
+  string world_name = 2;
+  string dimension = 3;
+  BlockPos from = 4;
+  BlockPos to = 5;
+  BlockState find = 6;
+  BlockState replace = 7;
+}
+
+// Response after replace
+message ReplaceBlocksResponse {
+  int32 blocks_replaced = 1;
+  string operation_id = 2;
+}
+
+// Region clipboard data
+message ClipboardData {
+  string id = 1;
+  int32 width = 2;
+  int32 height = 3;
+  int32 depth = 4;
+  repeated BlockState palette = 5;
+  bytes blocks = 6;
+  BlockPos origin = 7;
+}
+
+// Request to copy region
+message CopyRegionRequest {
+  string server_id = 1;
+  string world_name = 2;
+  string dimension = 3;
+  BlockPos from = 4;
+  BlockPos to = 5;
+}
+
+// Response with clipboard
+message CopyRegionResponse {
+  ClipboardData clipboard = 1;
+}
+
+// Request to paste
+message PasteRegionRequest {
+  string server_id = 1;
+  string world_name = 2;
+  string dimension = 3;
+  ClipboardData clipboard = 4;
+  BlockPos position = 5;
+  bool ignore_air = 6;
+}
+
+// Response after paste
+message PasteRegionResponse {
+  int32 blocks_pasted = 1;
+  string operation_id = 2;
+}
+
+// Request undo
+message UndoRequest {
+  string server_id = 1;
+  string world_name = 2;
+  string operation_id = 3;
+}
+
+// Response after undo
+message UndoResponse {
+  bool success = 1;
+  int32 blocks_reverted = 2;
+}
+
+// Request redo
+message RedoRequest {
+  string server_id = 1;
+  string world_name = 2;
+  string operation_id = 3;
+}
+
+// Response after redo
+message RedoResponse {
+  bool success = 1;
+  int32 blocks_applied = 2;
+}
+
+// Block definition from registry
+message BlockDefinition {
+  string name = 1;
+  int32 id = 2;
+  repeated string properties = 3;
+  map<string, string> default_state = 4;
+  bool is_solid = 5;
+  bool is_transparent = 6;
+  bool emits_light = 7;
+  int32 light_level = 8;
+  string render_type = 9;
+}
+
+// Request block registry
+message GetBlockRegistryRequest {
+  string mc_version = 1;
+}
+
+// Response with block registry
+message GetBlockRegistryResponse {
+  repeated BlockDefinition blocks = 1;
+  int32 data_version = 2;
+}

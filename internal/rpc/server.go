@@ -96,6 +96,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.ServerServiceName,
 		discopanelv1connect.SupportServiceName,
 		discopanelv1connect.UserServiceName,
+		discopanelv1connect.WorldServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
@@ -152,6 +153,10 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	userPath, userHandler := discopanelv1connect.NewUserServiceHandler(userService, opts...)
 	mux.Handle(userPath, userHandler)
+
+	worldService := services.NewWorldService(s.store, s.docker, s.log)
+	worldPath, worldHandler := discopanelv1connect.NewWorldServiceHandler(worldService, opts...)
+	mux.Handle(worldPath, worldHandler)
 }
 
 // The HTTP handler for the server

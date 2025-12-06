@@ -10,7 +10,7 @@
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { toast } from 'svelte-sonner';
-	import { Play, Square, RotateCw, Package, Activity, Loader2, Copy, ExternalLink, Trash2, Cpu, Info } from '@lucide/svelte';
+	import { Play, Square, RotateCw, Package, Activity, Loader2, Copy, ExternalLink, Trash2, Cpu, Info, Map } from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
@@ -23,6 +23,7 @@
 	import ServerMods from '$lib/components/server-mods.svelte';
 	import ServerFiles from '$lib/components/server-files.svelte';
 	import ServerRouting from '$lib/components/server-routing.svelte';
+	import WorldEditor from '$lib/components/world-editor.svelte';
 
 	let server = $state<Server | null>(null);
 	let loading = $state(true);
@@ -674,12 +675,13 @@
 			activeTab = value
 		}}>
 			<div class="flex-shrink-0 w-full overflow-x-auto">
-				<TabsList class="inline-flex w-full min-w-max sm:grid sm:grid-cols-6 h-12 sm:h-14 p-1 bg-muted/50 backdrop-blur-sm">
+				<TabsList class="inline-flex w-full min-w-max sm:grid sm:grid-cols-7 h-12 sm:h-14 p-1 bg-muted/50 backdrop-blur-sm">
 					<TabsTrigger value="overview" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Overview</TabsTrigger>
 					<TabsTrigger value="console" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Console</TabsTrigger>
 					<TabsTrigger value="configuration" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Config</TabsTrigger>
 					<TabsTrigger value="mods" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Mods</TabsTrigger>
 					<TabsTrigger value="files" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Files</TabsTrigger>
+					<TabsTrigger value="world" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">World</TabsTrigger>
 					<TabsTrigger value="routing" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Routing</TabsTrigger>
 				</TabsList>
 			</div>
@@ -711,6 +713,12 @@
 
 				<TabsContent value="files" class="h-full">
 					<ServerFiles {server} active={activeTab === 'files'} />
+				</TabsContent>
+
+				<TabsContent value="world" class="h-full">
+					{#if server}
+						<WorldEditor serverId={server.id} active={activeTab === 'world'} />
+					{/if}
 				</TabsContent>
 
 				<TabsContent value="routing" class="h-full overflow-y-auto">

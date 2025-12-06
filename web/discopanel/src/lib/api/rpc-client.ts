@@ -15,6 +15,7 @@ import { ProxyService } from '$lib/proto/discopanel/v1/proxy_pb';
 import { ServerService } from '$lib/proto/discopanel/v1/server_pb';
 import { SupportService } from '$lib/proto/discopanel/v1/support_pb';
 import { UserService } from '$lib/proto/discopanel/v1/user_pb';
+import { WorldService } from '$lib/proto/discopanel/v1/world_pb';
 
 // Login auth interception
 const authInterceptor: Interceptor = (next) => async (req) => {
@@ -66,6 +67,7 @@ export class RpcClient {
   public readonly server: Client<typeof ServerService>;
   public readonly support: Client<typeof SupportService>;
   public readonly user: Client<typeof UserService>;
+  public readonly world: Client<typeof WorldService>;
 
   constructor() {
     this.auth = createClient(AuthService, transport);
@@ -78,6 +80,7 @@ export class RpcClient {
     this.server = createClient(ServerService, transport);
     this.support = createClient(SupportService, transport);
     this.user = createClient(UserService, transport);
+    this.world = createClient(WorldService, transport);
   }
 }
 

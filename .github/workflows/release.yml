@@ -223,6 +223,8 @@ jobs:
         id: meta-dev
         if: ${{ endsWith(github.ref_name, '-dev') }}
         uses: docker/metadata-action@v5
+        flavor: |
+            latest=false
         with:
           images: |
             nickheyer/discopanel

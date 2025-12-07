@@ -223,14 +223,14 @@ jobs:
         id: meta-dev
         if: ${{ endsWith(github.ref_name, '-dev') }}
         uses: docker/metadata-action@v5
-        flavor: |
-            latest=false
         with:
           images: |
             nickheyer/discopanel
           tags: |
             type=ref,event=tag
             type=raw,value=dev
+          flavor: |
+            latest=false
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5

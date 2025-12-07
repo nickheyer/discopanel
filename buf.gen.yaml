@@ -1,19 +1,19 @@
 version: v2
 plugins:
   # Generate Go code with protoc-gen-go
-  - local: protoc-gen-go
+  - remote: buf.build/protocolbuffers/go
     out: pkg/proto
     opt:
       - paths=source_relative
 
-  # Generate Connect-Go code
-  - local: protoc-gen-connect-go
+  # Generate Connect-Go
+  - remote: buf.build/connectrpc/go
     out: pkg/proto
     opt:
       - paths=source_relative
 
-  # Generate TypeScript code (Protobuf-ES v2 w/ connect support)
-  - local: web/discopanel/node_modules/.bin/protoc-gen-es
+  # Generate TypeScript
+  - remote: buf.build/bufbuild/es
     out: web/discopanel/src/lib/proto
     opt:
       - target=ts

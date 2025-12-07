@@ -124,7 +124,7 @@
 				serverId: server.id,
 				path: `${getModsDirectory()}/${mod.fileName}`
 			});
-			const blob = new Blob([response.content]);
+			const blob = new Blob([new Uint8Array(response.content)]);
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;

@@ -15,9 +15,9 @@
 	import { create } from '@bufbuild/protobuf';
 	import type { CreateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
-	import { ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+	import { ModLoader, type ProxyListener } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ModLoaderInfo, DockerImage } from '$lib/proto/discopanel/v1/minecraft_pb';
-	import type { IndexedModpack } from '$lib/proto/discopanel/v1/modpack_pb';
+	import type { IndexedModpack, Version } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
@@ -32,7 +32,7 @@
 	let latestVersion = $state('');
 	let proxyEnabled = $state(false);
 	let proxyBaseURL = $state('');
-	let proxyListeners = $state<any[]>([]);
+	let proxyListeners = $state<ProxyListener[]>([]);
 	let usedPorts = $state<Record<number, boolean>>({});
 	let portError = $state('');
 	let useProxyMode = $state(false); // Track connection mode separately
@@ -41,7 +41,7 @@
 	let showModpackDialog = $state(false);
 	let selectedModpack = $state<IndexedModpack | null>(null);
 	let favoriteModpacks = $state<IndexedModpack[]>([]);
-	let modpackVersions = $state<any[]>([]);
+	let modpackVersions = $state<Version[]>([]);
 	let selectedVersionId = $state<string>('');
 	let loadingModpackVersions = $state(false);
 
@@ -83,7 +83,9 @@
 			dockerImages = imagesData.images;
 			proxyEnabled = proxyStatus.enabled;
 			proxyBaseURL = proxyStatus.baseUrl || '';
-			proxyListeners = listeners.listeners.map(l => l.listener).filter(l => l?.enabled);
+			proxyListeners = listeners.listeners
+				.map(l => l.listener)
+				.filter((l): l is ProxyListener => l !== undefined && l.enabled);
 
 			// Set default listener if available
 			const defaultListener = proxyListeners.find(l => l?.isDefault);
@@ -245,10 +247,10 @@
 		loading = true;
 		try {
 			// Add modpack ID and version to the request if selected
-			// For Modrinth, we need to send version_number instead of ID for better compatibility
+			// For Modrinth, we need to send versionNumber instead of ID for better compatibility
 			const selectedVersion = modpackVersions.find(v => v.id === selectedVersionId);
-			const versionToSend = selectedModpack?.indexer === 'modrinth' && selectedVersion?.version_number
-				? selectedVersion.version_number
+			const versionToSend = selectedModpack?.indexer === 'modrinth' && selectedVersion?.versionNumber
+				? selectedVersion.versionNumber
 				: selectedVersionId;
 
 			const createRequest = {
@@ -291,8 +293,7 @@
 
 	<form onsubmit={handleSubmit}>
 		<div class="grid gap-6 lg:grid-cols-2">
-			<Card class="relative overflow-hidden border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
-				<div class="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-primary/10 to-transparent rounded-full -mr-24 -mt-24"></div>
+			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
 				<CardHeader class="pb-6">
 					<div class="flex items-center gap-3">
 						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -375,7 +376,7 @@
 														<SelectTrigger id="modpack_version" class="h-8 mt-1">
 															<span class="text-sm">
 																{selectedVersionId
-																	? modpackVersions.find(v => v.id === selectedVersionId)?.display_name || 'Latest'
+																	? modpackVersions.find(v => v.id === selectedVersionId)?.displayName || 'Latest'
 																	: 'Latest version'}
 															</span>
 														</SelectTrigger>
@@ -385,10 +386,10 @@
 															</SelectItem>
 															{#each modpackVersions as version (version.id)}
 																<SelectItem value={version.id}>
-																	{version.display_name}
-																	{#if version.release_type}
-																		<Badge variant={version.release_type === 'release' ? 'default' : version.release_type === 'beta' ? 'secondary' : 'outline'} class="ml-2 text-xs">
-																			{version.release_type}
+																	{version.displayName}
+																	{#if version.releaseType}
+																		<Badge variant={version.releaseType === 'release' ? 'default' : version.releaseType === 'beta' ? 'secondary' : 'outline'} class="ml-2 text-xs">
+																			{version.releaseType}
 																		</Badge>
 																	{/if}
 																</SelectItem>
@@ -506,8 +507,7 @@
 				</CardContent>
 			</Card>
 
-			<Card class="relative overflow-hidden border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
-				<div class="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-primary/10 to-transparent rounded-full -mr-24 -mt-24"></div>
+			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
 				<CardHeader class="pb-6">
 					<div class="flex items-center gap-3">
 						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -583,7 +583,7 @@
 													{#each proxyListeners as listener (listener.id)}
 														<SelectItem value={listener.id}>
 															{listener.name} (Port {listener.port})
-															{#if listener.is_default}
+															{#if listener.isDefault}
 																<span class="text-xs text-muted-foreground ml-2">[Default]</span>
 															{/if}
 														</SelectItem>

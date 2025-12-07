@@ -187,7 +187,6 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 			user, err := s.authManager.ValidateSession(ctx, token)
 			if err == nil && user != nil {
 				ctx = context.WithValue(ctx, auth.UserContextKey, user)
-				s.log.Debug("Auth: User %s (%s) authenticated for %s", user.Username, user.Role, req.Spec().Procedure)
 			} else if err != nil {
 				s.log.Debug("Auth: Token validation failed for %s: %v", req.Spec().Procedure, err)
 			}

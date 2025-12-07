@@ -11,15 +11,16 @@
 	import { Loader2, Globe, Save, Copy, AlertCircle, CheckCircle2, XCircle } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { GetServerRoutingResponse, ProxyRoute } from '$lib/proto/discopanel/v1/proxy_pb';
 
-	let { server, active, router: routingInfo = $bindable(null) }: { server: Server, active?: boolean, router?:any } = $props();
+	let { server, active, router: routingInfo = $bindable(null) }: { server: Server, active?: boolean, router?: GetServerRoutingResponse | null } = $props();
 
 	let loading = $state(true);
 	let saving = $state(false);
 	let hostname = $state('');
 	let originalHostname = $state('');
 	let hasChanges = $derived(hostname !== originalHostname);
-	let allRoutes = $state<any[]>([]);
+	let allRoutes = $state<ProxyRoute[]>([]);
 	let hostnameError = $state('');
 	let initialized = $state(false);
 	let previousServerId = $state(server.id);

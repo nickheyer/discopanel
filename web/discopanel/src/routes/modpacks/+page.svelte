@@ -10,7 +10,7 @@
 	import { toast } from 'svelte-sonner';
 	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload, Package, ArrowLeft, Trash2 } from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
-	import type { IndexedModpack, SearchModpacksRequest, SearchModpacksResponse } from '$lib/proto/discopanel/v1/modpack_pb';
+	import type { IndexedModpack, SearchModpacksRequest, SearchModpacksResponse, GetIndexerStatusResponse } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { SearchModpacksRequestSchema } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
 	
@@ -30,7 +30,7 @@
 	let syncing = $state(false);
 	let showFavorites = $state(false);
 	let showUploaded = $state(false);
-	let indexerStatus = $state<any>(null);
+	let indexerStatus = $state<GetIndexerStatusResponse | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let uploading = $state(false);
 	let selectedIndexer = $state('modrinth'); // Default Modrinth since no API key initially
@@ -80,11 +80,7 @@
 	async function checkIndexerStatus() {
 		try {
 			const response = await rpcClient.modpack.getIndexerStatus({});
-			indexerStatus = {
-				indexersAvailable: response.indexersAvailable,
-				totalModpacks: response.totalModpacks,
-				modpacksByIndexer: response.modpacksByIndexer
-			};
+			indexerStatus = response;
 		} catch (error) {
 			console.error('Failed to check indexer status:', error);
 		}
@@ -348,19 +344,15 @@
 		</div>
 	</div>
 	
-	{#if selectedIndexer === 'fuego' && indexerStatus?.indexers?.fuego && !indexerStatus.indexers.fuego.apiKeyConfigured}
+	{#if selectedIndexer === 'fuego' && indexerStatus && !indexerStatus.indexersAvailable['fuego']}
 		<Alert>
 			<AlertCircle class="h-4 w-4" />
 			<AlertTitle>CurseForge API Key Required</AlertTitle>
 			<AlertDescription>
 				<div class="space-y-2">
-					<p>To sync modpacks from CurseForge, you need to configure a CurseForge API key.</p>
+					<p>To sync modpacks from CurseForge, you need to configure a CurseForge API key in the settings.</p>
 					<div class="flex items-center gap-2 mt-2">
-						<Button size="sm" href={indexerStatus.indexers.fuego.apiKeyUrl} target="_blank">
-							<ExternalLink class="h-4 w-4 mr-2" />
-							Get API Key
-						</Button>
-						<Button size="sm" variant="outline" href="/settings#curseforge">
+						<Button size="sm" href="/settings">
 							<Settings class="h-4 w-4 mr-2" />
 							Configure in Settings
 						</Button>
@@ -416,7 +408,7 @@
 					<Search class="h-5 w-5 mr-2" />
 					Search
 				</Button>
-				<Button onclick={syncModpacks} disabled={syncing || (selectedIndexer === 'fuego' && !indexerStatus?.indexers?.fuego?.apiKeyConfigured)} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
+				<Button onclick={syncModpacks} disabled={syncing || (selectedIndexer === 'fuego' && indexerStatus && !indexerStatus.indexersAvailable['fuego'])} variant="outline" class="border-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
 					<RefreshCw class={`h-5 w-5 mr-2 ${syncing ? 'animate-spin' : ''}`} />
 					Sync {indexerName}
 				</Button>

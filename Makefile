@@ -1,10 +1,17 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image proto proto-install proto-clean proto-lint
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image proto proto-clean proto-lint proto-format proto-breaking gen
 
-# Variables
 DATA_DIR := ./data
 DB_FILE := $(DATA_DIR)/discopanel.db
 FRONTEND_DIR := web/discopanel
-DISCOPANEL_BIN:= build/discopanel
+DISCOPANEL_BIN := build/discopanel
+BUF_IMAGE := bufbuild/buf:latest
+BUF_RUN := docker run --rm \
+	--volume "$(shell pwd):/workspace" \
+	--workdir /workspace \
+	--user "$(shell id -u):$(shell id -g)" \
+	--env HOME=/tmp \
+	$(BUF_IMAGE)
+
 #DISCOSUPPORT_URL := http://localhost:8911
 
 # Development mode - runs backend and frontend concurrently
@@ -72,8 +79,8 @@ kill-dev:
 deps:
 	@echo "Installing Go dependencies..."
 	go mod download
-	@echo "Updating buf dependencies..."
-	buf dep update
+	@echo "Updating buf dependencies (using Docker)..."
+	$(BUF_RUN) dep update
 	@echo "Installing frontend dependencies..."
 	cd $(FRONTEND_DIR) && npm install
 
@@ -99,18 +106,9 @@ check:
 	@echo "Type checking frontend..."
 	cd $(FRONTEND_DIR) && npm run check
 
-proto-install:
-	@echo "Installing buf..."
-	go install github.com/bufbuild/buf/cmd/buf@latest
-	@echo "Installing protoc-gen-go..."
-	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-	@echo "Installing protoc-gen-connect-go..."
-	go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
-	@echo "All proto tools installed successfully!"
-
 proto:
-	@echo "Generating protocol buffer code..."
-	buf generate
+	@echo "Generating protocol buffer code (using Docker)..."
+	$(BUF_RUN) generate
 	@echo "Proto generation complete!"
 
 proto-clean:
@@ -120,34 +118,40 @@ proto-clean:
 	@echo "Proto files cleaned!"
 
 proto-lint:
-	@echo "Linting proto files..."
-	buf lint || echo "Buf linting failed, but it's probably just missing comment documentation. Ignore it."
+	@echo "Linting proto files (using Docker)..."
+	$(BUF_RUN) lint || echo "Buf linting failed, but it's probably just missing comment documentation. Ignore it."
 	@echo "Proto linting complete!"
 
 gen: proto-clean proto
 
 proto-format:
-	@echo "Formatting proto files..."
-	buf format -w
+	@echo "Formatting proto files (using Docker)..."
+	$(BUF_RUN) format -w
 	@echo "Proto files formatted!"
+
+proto-breaking:
+	@echo "Checking for breaking changes (using Docker)..."
+	$(BUF_RUN) breaking --against '.git#branch=main'
+	@echo "Breaking change check complete!"
 
 # Help
 help:
 	@echo "Available commands:"
-	@echo "  make dev           - Run in development mode (frontend + backend)"
-	@echo "  make build         - Build standalone binary with embedded frontend"
-	@echo "  make prod          - Build and run in production mode"
-	@echo "  make image         - Build and push Docker image to :dev tag"
-	@echo "  make clean         - Remove data directory and build artifacts"
-	@echo "  make kill-dev      - Kill any orphaned dev processes"
-	@echo "  make deps          - Install all dependencies"
-	@echo "  make test          - Run tests"
-	@echo "  make fmt           - Format code"
-	@echo "  make lint          - Lint code"
-	@echo "  make check         - Type check frontend"
-	@echo "  make proto-install - Install required proto generation tools"
-	@echo "  make proto         - Generate Go and TypeScript code from proto files"
-	@echo "  make proto-clean   - Remove all generated proto files"
-	@echo "  make proto-lint    - Lint proto files for style and correctness"
-	@echo "  make gen     	    - Run clean, generate, and lint"
-	@echo "  make help          - Show this help message"
+	@echo "  make dev            - Run in development mode (frontend + backend)"
+	@echo "  make build          - Build standalone binary with embedded frontend"
+	@echo "  make prod           - Build and run in production mode"
+	@echo "  make image          - Build and push Docker image to :dev tag"
+	@echo "  make clean          - Remove data directory and build artifacts"
+	@echo "  make kill-dev       - Kill any orphaned dev processes"
+	@echo "  make deps           - Install all dependencies"
+	@echo "  make test           - Run tests"
+	@echo "  make fmt            - Format code"
+	@echo "  make lint           - Lint code"
+	@echo "  make check          - Type check frontend"
+	@echo "  make gen            - Clean and regenerate proto code (via Docker)"
+	@echo "  make proto          - Generate Go and TypeScript code from proto files (via Docker)"
+	@echo "  make proto-clean    - Remove all generated proto files"
+	@echo "  make proto-lint     - Lint proto files for style and correctness (via Docker)"
+	@echo "  make proto-format   - Format proto files (via Docker)"
+	@echo "  make proto-breaking - Check for breaking changes against main (via Docker)"
+	@echo "  make help           - Show this help message"

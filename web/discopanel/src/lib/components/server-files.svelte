@@ -152,7 +152,7 @@
 				serverId: server.id,
 				path: file.path
 			});
-			const blob = new Blob([response.content]);
+			const blob = new Blob([new Uint8Array(response.content)]);
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
@@ -475,8 +475,8 @@
 		showEditor = false;
 		editingFile = null;
 	}}
-	onSave={() => {
-		// TODO: reload files
+	onSave={async () => {
+		await loadFiles();
 	}}
 />
 

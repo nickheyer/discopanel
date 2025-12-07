@@ -15,6 +15,7 @@
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+	import type { GetServerRoutingResponse } from '$lib/proto/discopanel/v1/proxy_pb';
 	import { GetServerRequestSchema, DeleteServerRequestSchema, StartServerRequestSchema, StopServerRequestSchema, RestartServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import { formatBytes } from '$lib/utils';
 	import ServerConsole from '$lib/components/server-console.svelte';
@@ -29,9 +30,9 @@
 	let actionLoading = $state(false);
 	let serverId = $derived(page.params.id);
 	let activeTab = $state('overview');
-	let routingInfo = $state<any>(null);
+	let routingInfo = $state<GetServerRoutingResponse | null>(null);
 
-	let interval: any;
+	let interval: ReturnType<typeof setInterval> | undefined;
 
 	// Helper function to convert protobuf Timestamp to Date
 	function timestampToDate(timestamp: Timestamp | undefined): Date {

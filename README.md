@@ -24,6 +24,7 @@ Because managing Minecraft servers shouldn't be difficult:
 - **Modpack Support** - Native CurseForge integration that actually downloads the mods/modpacks you tell it to
 - **Web UI** - Clean interface that doesn't look like it crawled out of 2003
 - **Auto-everything** - Auto-start, auto-stop, auto-pause. Set it and forget it
+- **Easily extensible** - With a proto-based API (see proto/discopanel/v1), you can easily generate an api client within your own project
 
 ## Quick Start
 
@@ -37,6 +38,9 @@ Because managing Minecraft servers shouldn't be difficult:
 git clone https://github.com/nickheyer/discopanel
 cd discopanel
 
+# Generate the rpc/api code for server/client using buf in docker
+docker run --rm -v "$(pwd):/workspace" -w /workspace -u "$(id -u):$(id -g)" bufbuild/buf:latest generate
+
 # Get npm deps and build frontend first
 cd web/discopanel && npm install && npm run build && cd ../..
 
@@ -49,6 +53,8 @@ go build -o discopanel cmd/discopanel/main.go
 # Open it
 # http://localhost:8080
 ```
+
+> For development, just install `make` (on ubuntu/deb, `sudo apt install make`) and run `make gen` + `make dev` after the above `git clone` and `cd` step. Super easy!
 
 ## Docker Run
 
@@ -185,7 +191,7 @@ proxy:
 ## Requirements
 
 - Docker (obviously)
-- Go 1.21+ (only if building from source)
+- Go 1.24.5+ (only if building from source)
 - A functioning brain (optional but recommended)
 
 ## API
@@ -210,6 +216,20 @@ curl -X POST http://localhost:8080/api/v1/servers/{id}/start
 ## Contributing
 
 Found a bug? Want a feature? Open an issue or submit a PR. Just don't make it worse.
+
+### Generating Proto Code
+
+Proto files live in `proto/`. After making changes, regenerate Go and TypeScript code:
+
+```bash
+# With make (requires Docker)
+make gen
+
+# or
+
+# Without make (...also requires Docker)
+docker run --rm -v "$(pwd):/workspace" -w /workspace bufbuild/buf:latest generate
+```
 
 ## License
 

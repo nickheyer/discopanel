@@ -6,9 +6,6 @@ on:
       - 'v*'
   workflow_dispatch:
 
-env:
-  IS_DEV_RELEASE: ${{ endsWith(github.ref_name, '-dev') }}
-
 jobs:
   generate-proto:
     name: Generate Proto Code
@@ -42,7 +39,7 @@ jobs:
   build-frontend:
     name: Build Frontend
     needs: generate-proto
-    if: ${{ env.IS_DEV_RELEASE == 'false' }}
+    if: ${{ !endsWith(github.ref_name, '-dev') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -82,7 +79,7 @@ jobs:
   build-binaries:
     name: Build Binaries
     needs: [generate-proto, build-frontend]
-    if: ${{ env.IS_DEV_RELEASE == 'false' }}
+    if: ${{ !endsWith(github.ref_name, '-dev') }}
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -211,7 +208,7 @@ jobs:
 
       - name: Extract metadata (prod)
         id: meta
-        if: ${{ env.IS_DEV_RELEASE == 'false' }}
+        if: ${{ !endsWith(github.ref_name, '-dev') }}
         uses: docker/metadata-action@v5
         with:
           images: |
@@ -224,7 +221,7 @@ jobs:
 
       - name: Extract metadata (dev)
         id: meta-dev
-        if: ${{ env.IS_DEV_RELEASE == 'true' }}
+        if: ${{ endsWith(github.ref_name, '-dev') }}
         uses: docker/metadata-action@v5
         with:
           images: |
@@ -248,7 +245,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [build-binaries, build-docker]
-    if: ${{ env.IS_DEV_RELEASE == 'false' }}
+    if: ${{ !endsWith(github.ref_name, '-dev') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -304,7 +301,7 @@ jobs:
     name: Discord Notification
     needs: [create-release]
     runs-on: ubuntu-latest
-    if: ${{ env.IS_DEV_RELEASE == 'false' && always() }}
+    if: ${{ !endsWith(github.ref_name, '-dev') && always() }}
     
     steps:
       - name: Send Discord notification

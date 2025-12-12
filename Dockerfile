@@ -19,6 +19,7 @@ RUN npm ci
 
 COPY web/discopanel/ ./
 COPY --from=proto-builder /app/web/discopanel/src/lib/proto ./src/lib/proto/
+COPY --from=proto-builder /app/web/discopanel/static/*.v1.yaml ./static/.
 
 RUN npm run build
 

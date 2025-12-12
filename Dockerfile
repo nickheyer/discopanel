@@ -5,7 +5,7 @@ FROM bufbuild/buf:latest AS proto-builder
 WORKDIR /app
 COPY buf.yaml buf.gen.yaml ./
 COPY proto/ ./proto/
-RUN buf generate
+RUN mkdir -p web/discopanel/static pkg/proto web/discopanel/src/lib/proto && buf generate
 
 FROM node:22-alpine AS frontend-builder
 

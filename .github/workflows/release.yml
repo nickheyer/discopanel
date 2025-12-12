@@ -35,6 +35,13 @@ jobs:
           name: proto-ts
           path: web/discopanel/src/lib/proto
           retention-days: 1
+  
+      - name: Upload generated oapi schema
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-schema-yaml
+          path: web/discopanel/static/discopanel.v1.yaml
+          retention-days: 1
 
   build-frontend:
     name: Build Frontend
@@ -51,6 +58,12 @@ jobs:
         with:
           name: proto-ts
           path: web/discopanel/src/lib/proto
+
+      - name: Download generated oapi schema
+        uses: actions/download-artifact@v4
+        with:
+          name: api-schema-yaml
+          path: web/discopanel/static/discopanel.v1.yaml
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

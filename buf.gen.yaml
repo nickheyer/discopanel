@@ -1,5 +1,10 @@
 version: v2
 plugins:
+  - remote: buf.build/community/sudorandom-connect-openapi:v0.21.3
+    out: web/discopanel/static
+    opt:
+      - path=discopanel.v1.yaml
+
   # Generate Go code with protoc-gen-go
   - remote: buf.build/protocolbuffers/go
     out: pkg/proto

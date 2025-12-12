@@ -134,6 +134,9 @@ proto-breaking:
 	$(BUF_RUN) breaking --against '.git#branch=main'
 	@echo "Breaking change check complete!"
 
+# proto-install:
+# 	go install github.com/sudorandom/protoc-gen-connect-openapi@latest
+
 # Help
 help:
 	@echo "Available commands:"

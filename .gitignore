@@ -12,6 +12,7 @@ discopanel
 data/
 *.db
 config.yaml
+**/discopanel.v1.yaml
 
 # User-specific files
 *.rsuser

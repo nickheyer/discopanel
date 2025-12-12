@@ -30,7 +30,7 @@
 		"@types/lodash-es": "^4.17.12",
 		"@types/node": "^24.10.1",
 		"ansi-to-html": "^0.7.2",
-		"bits-ui": "^2.9.1",
+		"bits-ui": "^2.14.4",
 		"clsx": "^2.1.1",
 		"embla-carousel-svelte": "^8.6.0",
 		"eslint": "^9.18.0",

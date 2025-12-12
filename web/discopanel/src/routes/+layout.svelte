@@ -36,7 +36,7 @@
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
-	import { Server, Home, Settings, Package, User, Users, LogOut } from '@lucide/svelte';
+	import { Server, Home, Settings, Package, User, Users, LogOut, FileText } from '@lucide/svelte';
 	import { ServerStatus, UserRole } from '$lib/proto/discopanel/v1/common_pb';
 	import { getStringForEnum } from '$lib/utils';
 
@@ -190,6 +190,16 @@
 											<a href="/settings" {...props}>
 												<Settings class="h-4 w-4" />
 												<span class="group-data-[collapsible=icon]:hidden">Settings</span>
+											</a>
+										{/snippet}
+									</SidebarMenuButton>
+								</SidebarMenuItem>
+								<SidebarMenuItem>
+									<SidebarMenuButton isActive={page.url.pathname.startsWith('/docs/api')}>
+										{#snippet child({ props })}
+											<a href="/docs/api" {...props}>
+												<FileText class="h-4 w-4" />
+												<span class="group-data-[collapsible=icon]:hidden">API</span>
 											</a>
 										{/snippet}
 									</SidebarMenuButton>

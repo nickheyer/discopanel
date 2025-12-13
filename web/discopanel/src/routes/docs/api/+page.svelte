@@ -46,7 +46,7 @@
 					window.addEventListener('load', () => {
 						window.parent.postMessage({ type: 'scalar-progress', value: 50 }, '*');
 						window.Scalar.createApiReference('#api-reference', {
-							url: '/discopanel.v1.yaml',
+							url: '/schemav1.yaml',
 							hideClientButton: true,
               showDeveloperTools: 'never',
               showToolbar: 'never'

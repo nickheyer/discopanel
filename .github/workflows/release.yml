@@ -40,7 +40,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: api-schema-yaml
-          path: web/discopanel/static/discopanel.v1.yaml
+          path: web/discopanel/static/schemav1.yaml
           retention-days: 1
 
   build-frontend:
@@ -63,7 +63,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: api-schema-yaml
-          path: web/discopanel/static/discopanel.v1.yaml
+          path: web/discopanel/static/schemav1.yaml
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

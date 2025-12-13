@@ -568,7 +568,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 
 	// Return immediately with the server in "creating" state
 	// The client can poll the server status to check when it's ready
-	s.respondJSON(w, http.StatusCreated, server)
+	s.respondJSON(w, http.StatusCreated, enrichServerResponse(server))
 }
 
 func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
@@ -932,7 +932,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.respondJSON(w, http.StatusOK, server)
+	s.respondJSON(w, http.StatusOK, enrichServerResponse(server))
 }
 
 func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {

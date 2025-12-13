@@ -19,7 +19,22 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/files"
+	"github.com/nickheyer/discopanel/pkg/network"
 )
+
+// ServerResponse extends the Server model with runtime-computed fields
+type ServerResponse struct {
+	*models.Server
+	HostIP string `json:"host_ip"` // Host system IP address for direct connections
+}
+
+// enrichServerResponse adds computed fields to a server
+func enrichServerResponse(server *models.Server) *ServerResponse {
+	return &ServerResponse{
+		Server: server,
+		HostIP: network.GetHostIP(),
+	}
+}
 
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -117,7 +132,13 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.respondJSON(w, http.StatusOK, servers)
+	// Enrich all servers with host IP
+	enrichedServers := make([]*ServerResponse, len(servers))
+	for i, server := range servers {
+		enrichedServers[i] = enrichServerResponse(server)
+	}
+
+	s.respondJSON(w, http.StatusOK, enrichedServers)
 }
 
 func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
@@ -641,7 +662,7 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.respondJSON(w, http.StatusOK, server)
+	s.respondJSON(w, http.StatusOK, enrichServerResponse(server))
 }
 
 func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {

@@ -83,6 +83,7 @@ export interface Server {
   auto_start?: boolean;
   additional_ports?: string;  // JSON string of AdditionalPort[]
   docker_overrides?: string;  // JSON string of DockerOverrides
+  host_ip?: string; // Host system IP address for direct connections
 }
 
 export interface CreateServerRequest {

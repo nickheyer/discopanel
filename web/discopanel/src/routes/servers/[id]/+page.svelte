@@ -399,6 +399,8 @@
 								<span class="font-mono text-sm font-bold block truncate text-foreground/90">
 									{#if server.proxy_hostname}
 										{server.proxy_hostname}
+									{:else if server.host_ip}
+										{server.host_ip}:{server.port}
 									{:else}
 										localhost:{server.port}
 									{/if}
@@ -410,7 +412,7 @@
 								variant="ghost"
 								onclick={() => {
 									if (!server) return;
-									const connectionString = server.proxy_hostname || `localhost:${server.port}`;
+									const connectionString = server.proxy_hostname || (server.host_ip ? `${server.host_ip}:${server.port}` : `localhost:${server.port}`);
 									copyToClipboard(connectionString);
 								}}
 								class="hover:bg-primary/20 hover:text-primary transition-all duration-300 hover:scale-110"

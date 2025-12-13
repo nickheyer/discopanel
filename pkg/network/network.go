@@ -44,7 +44,8 @@ func GetHostIP() string {
 		}
 	}
 
-	// Sort to ensure consistent ordering
+	// Sort to ensure consistent ordering (lexicographic, not numerical)
+	// This provides deterministic selection when multiple IPs are available
 	sort.Strings(privateIPs)
 	sort.Strings(publicIPs)
 

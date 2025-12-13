@@ -19,7 +19,6 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/files"
-	"github.com/nickheyer/discopanel/pkg/network"
 )
 
 // ServerResponse extends the Server model with runtime-computed fields
@@ -29,10 +28,10 @@ type ServerResponse struct {
 }
 
 // enrichServerResponse adds computed fields to a server
-func enrichServerResponse(server *models.Server) *ServerResponse {
+func (s *Server) enrichServerResponse(server *models.Server) *ServerResponse {
 	return &ServerResponse{
 		Server: server,
-		HostIP: network.GetHostIP(),
+		HostIP: s.cachedHostIP,
 	}
 }
 
@@ -135,7 +134,7 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 	// Enrich all servers with host IP
 	enrichedServers := make([]*ServerResponse, len(servers))
 	for i, server := range servers {
-		enrichedServers[i] = enrichServerResponse(server)
+		enrichedServers[i] = s.enrichServerResponse(server)
 	}
 
 	s.respondJSON(w, http.StatusOK, enrichedServers)
@@ -568,7 +567,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 
 	// Return immediately with the server in "creating" state
 	// The client can poll the server status to check when it's ready
-	s.respondJSON(w, http.StatusCreated, enrichServerResponse(server))
+	s.respondJSON(w, http.StatusCreated, s.enrichServerResponse(server))
 }
 
 func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
@@ -662,7 +661,7 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.respondJSON(w, http.StatusOK, enrichServerResponse(server))
+	s.respondJSON(w, http.StatusOK, s.enrichServerResponse(server))
 }
 
 func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
@@ -932,7 +931,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.respondJSON(w, http.StatusOK, enrichServerResponse(server))
+	s.respondJSON(w, http.StatusOK, s.enrichServerResponse(server))
 }
 
 func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {

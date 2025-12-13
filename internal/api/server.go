@@ -13,6 +13,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/network"
 	web "github.com/nickheyer/discopanel/web/discopanel"
 )
 
@@ -26,6 +27,7 @@ type Server struct {
 	authManager    *auth.Manager
 	authMiddleware *auth.Middleware
 	logStreamer    *LogStreamer
+	cachedHostIP   string // Cached host IP to avoid repeated lookups
 }
 
 func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger) *Server {
@@ -41,6 +43,12 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	// Initialize log streamer
 	logStreamer := NewLogStreamer(docker.GetDockerClient(), log, 10000)
 
+	// Cache the host IP at startup to avoid repeated lookups
+	cachedHostIP := network.GetHostIP()
+	if cachedHostIP != "" {
+		log.Info("Detected host IP: %s", cachedHostIP)
+	}
+
 	s := &Server{
 		store:          store,
 		docker:         docker,
@@ -49,6 +57,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		authManager:    authManager,
 		authMiddleware: authMiddleware,
 		logStreamer:    logStreamer,
+		cachedHostIP:   cachedHostIP,
 	}
 
 	s.setupRoutes()

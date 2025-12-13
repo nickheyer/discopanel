@@ -21,6 +21,20 @@ import (
 	"github.com/nickheyer/discopanel/pkg/files"
 )
 
+// ServerResponse extends the Server model with runtime-computed fields
+type ServerResponse struct {
+	*models.Server
+	HostIP string `json:"host_ip"` // Host system IP address for direct connections
+}
+
+// enrichServerResponse adds computed fields to a server
+func (s *Server) enrichServerResponse(server *models.Server) *ServerResponse {
+	return &ServerResponse{
+		Server: server,
+		HostIP: s.cachedHostIP,
+	}
+}
+
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -117,7 +131,13 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.respondJSON(w, http.StatusOK, servers)
+	// Enrich all servers with host IP
+	enrichedServers := make([]*ServerResponse, len(servers))
+	for i, server := range servers {
+		enrichedServers[i] = s.enrichServerResponse(server)
+	}
+
+	s.respondJSON(w, http.StatusOK, enrichedServers)
 }
 
 func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
@@ -547,7 +567,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 
 	// Return immediately with the server in "creating" state
 	// The client can poll the server status to check when it's ready
-	s.respondJSON(w, http.StatusCreated, server)
+	s.respondJSON(w, http.StatusCreated, s.enrichServerResponse(server))
 }
 
 func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
@@ -641,7 +661,7 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.respondJSON(w, http.StatusOK, server)
+	s.respondJSON(w, http.StatusOK, s.enrichServerResponse(server))
 }
 
 func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
@@ -911,7 +931,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.respondJSON(w, http.StatusOK, server)
+	s.respondJSON(w, http.StatusOK, s.enrichServerResponse(server))
 }
 
 func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {

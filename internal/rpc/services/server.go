@@ -844,6 +844,33 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 	if msg.Description != "" {
 		server.Description = msg.Description
 	}
+	if msg.Port != nil && int(*msg.Port) != server.Port {
+		newPort := int(*msg.Port)
+
+		if server.ProxyHostname != "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("cannot change port for proxy-enabled servers"))
+		}
+
+		if newPort < 1 || newPort > 65535 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid port %d", newPort))
+		}
+
+		existing, err := s.store.GetServerByPort(ctx, newPort)
+		if err != nil {
+			s.log.Error("Failed to check port: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check port availability"))
+		}
+		if existing != nil && existing.ID != server.ID {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("port already in use"))
+		}
+
+		if s.config.Proxy.Enabled && slices.Contains(s.config.Proxy.ListenPorts, newPort) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("port is already in use by the proxy server"))
+		}
+
+		server.Port = newPort
+		needsRecreation = true
+	}
 	if msg.MaxPlayers > 0 {
 		server.MaxPlayers = int(msg.MaxPlayers)
 		needsRecreation = true

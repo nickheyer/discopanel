@@ -10,7 +10,8 @@
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
 	import type { Server, AdditionalPort, DockerOverrides } from '$lib/proto/discopanel/v1/common_pb';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import * as _ from 'lodash-es';
+	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { UpdateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import type { GetMinecraftVersionsResponse, GetModLoadersResponse, GetDockerImagesResponse } from '$lib/proto/discopanel/v1/minecraft_pb';
@@ -55,6 +56,7 @@
 			id: server.id,
 			name: server.name,
 			description: server.description || '',
+			port: server.port,
 			maxPlayers: server.maxPlayers,
 			memory: server.memory,
 			modLoader: String(server.modLoader),
@@ -89,6 +91,7 @@
 				id: server.id,
 				name: server.name,
 				description: server.description || '',
+				port: server.port,
 				maxPlayers: server.maxPlayers,
 				memory: server.memory,
 				modLoader: String(server.modLoader),
@@ -119,6 +122,7 @@
 		isDirty =
 			formData.name !== server.name ||
 			formData.description !== (server.description || '') ||
+			formData.port !== server.port ||
 			formData.maxPlayers !== server.maxPlayers ||
 			formData.memory !== server.memory ||
 			formData.modLoader !== String(server.modLoader) ||
@@ -229,6 +233,24 @@
 		</div>
 
 		<div class="space-y-2">
+			<Label for="port" class="text-sm font-medium">Port</Label>
+			<Input
+				id="port"
+				type="number"
+				bind:value={formData.port}
+				min="1"
+				max="65535"
+				disabled={server.proxyHostname !== ''}
+				class="h-10"
+			/>
+			{#if server.proxyHostname}
+				<p class="text-xs text-muted-foreground">
+					Port cannot be changed for proxy-enabled servers
+				</p>
+			{/if}
+		</div>
+
+		<div class="space-y-2">
 			<Label for="memory" class="text-sm font-medium">Memory (MB)</Label>
 			<Input
 				id="memory"
@@ -283,10 +305,10 @@
 				type="single"
 				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
 				value={formData.modLoader}
-				onValueChange={(value: string | undefined) => formData.modLoader = value || ''}
+				onValueChange={(value: string) => formData.modLoader = ModLoader[_.parseInt(value) || 1] || ''}
 			>
 				<SelectTrigger id="mod_loader" class="h-10">
-					<span>{formData.modLoader || 'Select a mod loader'}</span>
+					<span>{_.startCase(_.toLower((ModLoader[_.parseInt(formData.modLoader) || 1]))) || 'Select a mod loader'}</span>
 				</SelectTrigger>
 				<SelectContent>
 					{#if formData.mcVersion}

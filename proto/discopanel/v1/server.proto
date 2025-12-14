@@ -132,18 +132,19 @@ message UpdateServerRequest {
   string id = 1;
   string name = 2;
   string description = 3;
-  int32 max_players = 4;
-  int32 memory = 5;
-  string mod_loader = 6;
-  string mc_version = 7;
-  string docker_image = 8;
-  optional bool auto_start = 9;
-  optional bool detached = 10;
-  optional string tps_command = 11;
-  string modpack_id = 12;
-  string modpack_version_id = 13;
-  repeated AdditionalPort additional_ports = 14;
-  DockerOverrides docker_overrides = 15;
+  optional int32 port = 4;
+  int32 max_players = 5;
+  int32 memory = 6;
+  string mod_loader = 7;
+  string mc_version = 8;
+  string docker_image = 9;
+  optional bool auto_start = 10;
+  optional bool detached = 11;
+  optional string tps_command = 12;
+  string modpack_id = 13;
+  string modpack_version_id = 14;
+  repeated AdditionalPort additional_ports = 15;
+  DockerOverrides docker_overrides = 16;
 }
 
 // Updated server instance

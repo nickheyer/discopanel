@@ -247,7 +247,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		imageName = getDockerImage(server.ModLoader, server.MCVersion)
 	}
 
-	// Pull image if not exists
+	// Try pulling latest
 	if err := c.pullImage(ctx, imageName); err != nil {
 		return "", fmt.Errorf("failed to pull image: %w", err)
 	}
@@ -721,13 +721,17 @@ func (c *Client) ExecCommand(ctx context.Context, containerID string, command st
 func (c *Client) pullImage(ctx context.Context, imageName string) error {
 	reader, err := c.docker.ImagePull(ctx, imageName, image.PullOptions{})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
 	}
 	defer reader.Close()
 
 	// Read the output to ensure the pull completes
 	_, err = io.Copy(io.Discard, reader)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to complete image pull for %s: %w", imageName, err)
+	}
+
+	return nil
 }
 
 func (c *Client) GetDockerImages() []DockerImageTag {

@@ -1,4 +1,4 @@
-package api
+package logger
 
 import (
 	"bufio"
@@ -11,37 +11,31 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// A single log entry
-type LogEntry struct {
-	Timestamp time.Time
-	Content   string
-	Type      string // "stdout", "stderr", "command", "command_output"
-}
-
-// Log streaming for a single container
+// ContainerLogStream manages log streaming for a single container
 type ContainerLogStream struct {
 	containerID string
-	logs        []LogEntry
+	logs        []*v1.LogEntry
 	mu          sync.RWMutex
 	maxEntries  int
 	cancelFunc  context.CancelFunc
 	active      bool
 }
 
-// Log streaming for all containers
+// LogStreamer manages log streaming for all containers
 type LogStreamer struct {
 	docker     *client.Client
 	streams    map[string]*ContainerLogStream // containerID -> stream
 	mu         sync.RWMutex
-	log        *logger.Logger
+	log        *Logger
 	maxEntries int
 }
 
-// Creates a new log streamer
-func NewLogStreamer(dockerClient *client.Client, log *logger.Logger, maxEntriesPerContainer int) *LogStreamer {
+// NewLogStreamer creates a new log streamer
+func NewLogStreamer(dockerClient *client.Client, log *Logger, maxEntriesPerContainer int) *LogStreamer {
 	if maxEntriesPerContainer <= 0 {
 		maxEntriesPerContainer = 10000 // Default to 10k entries per container
 	}
@@ -53,7 +47,7 @@ func NewLogStreamer(dockerClient *client.Client, log *logger.Logger, maxEntriesP
 	}
 }
 
-// Start streaming logs for a container
+// StartStreaming starts streaming logs for a container
 func (ls *LogStreamer) StartStreaming(containerID string) error {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
@@ -67,7 +61,7 @@ func (ls *LogStreamer) StartStreaming(containerID string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	stream := &ContainerLogStream{
 		containerID: containerID,
-		logs:        make([]LogEntry, 0, ls.maxEntries),
+		logs:        make([]*v1.LogEntry, 0, ls.maxEntries),
 		maxEntries:  ls.maxEntries,
 		cancelFunc:  cancel,
 		active:      true,
@@ -81,7 +75,7 @@ func (ls *LogStreamer) StartStreaming(containerID string) error {
 	return nil
 }
 
-// Stop streaming logs for a container
+// StopStreaming stops streaming logs for a container
 func (ls *LogStreamer) StopStreaming(containerID string) {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
@@ -92,7 +86,7 @@ func (ls *LogStreamer) StopStreaming(containerID string) {
 	}
 }
 
-// Setup and start streaming of logs from Docker in the background
+// streamLogs sets up and starts streaming of logs from Docker in the background
 func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStream) {
 	defer func() {
 		stream.mu.Lock()
@@ -124,7 +118,7 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 	}
 	defer reader.Close()
 
-	// If TTY is disabled, Docker sends multiplexed stream demultiplexed
+	// If TTY is disabled, Docker sends multiplexed stream that needs demultiplexing
 	var logReader io.Reader
 	if !inspect.Config.Tty {
 		pr, pw := io.Pipe()
@@ -148,9 +142,9 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 		select {
 		case <-ctx.Done():
 			return
-		default: // To get rid of whatever the hell runtime is doing when TTY is enabled
+		default:
 			line := scanner.Text()
-			// Split on \r carriage and take last chunk
+			// Split on \r carriage return and take last chunk
 			if strings.Contains(line, "\r") {
 				parts := strings.Split(line, "\r")
 				line = parts[len(parts)-1]
@@ -162,10 +156,13 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 			}
 
 			if line != "" {
-				entry := LogEntry{
-					Timestamp: time.Now(),
-					Content:   line,
-					Type:      "stdout",
+				entry := &v1.LogEntry{
+					Timestamp: timestamppb.New(time.Now()),
+					Message:   line,
+					Level:     "info",
+					Source:    "stdout",
+					IsCommand: false,
+					IsError:   false,
 				}
 
 				stream.mu.Lock()
@@ -185,7 +182,7 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 	}
 }
 
-// Check if a log line should be filtered
+// shouldFilterLine checks if a log line should be filtered
 func (ls *LogStreamer) shouldFilterLine(line string) bool {
 	// Filter out RCON connection spam
 	filters := []string{
@@ -203,7 +200,7 @@ func (ls *LogStreamer) shouldFilterLine(line string) bool {
 	return false
 }
 
-// Prepend cmd execution w/ cmd input log
+// AddCommandEntry prepends command execution with command input log
 func (ls *LogStreamer) AddCommandEntry(containerID, command string, timestamp time.Time) {
 	ls.mu.RLock()
 	stream, exists := ls.streams[containerID]
@@ -214,7 +211,7 @@ func (ls *LogStreamer) AddCommandEntry(containerID, command string, timestamp ti
 		ls.mu.Lock()
 		stream = &ContainerLogStream{
 			containerID: containerID,
-			logs:        make([]LogEntry, 0, ls.maxEntries),
+			logs:        make([]*v1.LogEntry, 0, ls.maxEntries),
 			maxEntries:  ls.maxEntries,
 			active:      false,
 		}
@@ -226,11 +223,16 @@ func (ls *LogStreamer) AddCommandEntry(containerID, command string, timestamp ti
 	defer stream.mu.Unlock()
 
 	// Add command entry with the provided timestamp + ANSI to prevent color bleed
-	stream.logs = append(stream.logs, LogEntry{
-		Timestamp: timestamp,
-		Content:   "\u001b[0m" + command,
-		Type:      "command",
-	})
+	entry := &v1.LogEntry{
+		Timestamp: timestamppb.New(timestamp),
+		Message:   "\u001b[0m" + command,
+		Level:     "debug",
+		Source:    "command",
+		IsCommand: true,
+		IsError:   false,
+	}
+
+	stream.logs = append(stream.logs, entry)
 
 	// Trim if exceeding max entries
 	if len(stream.logs) > stream.maxEntries {
@@ -238,7 +240,7 @@ func (ls *LogStreamer) AddCommandEntry(containerID, command string, timestamp ti
 	}
 }
 
-// Add command output to the log stream (after execution)
+// AddCommandOutput adds command output to the log stream (after execution)
 func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool, timestamp time.Time) {
 	ls.mu.RLock()
 	stream, exists := ls.streams[containerID]
@@ -254,23 +256,31 @@ func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool
 	// Add output entry if present + ANSI to prevent color bleed
 	if output != "" {
 		output = "\u001b[0m" + output + "\u001b[0m"
-		lines := strings.SplitSeq(strings.TrimSpace(output), "\n")
-		for line := range lines {
+		lines := strings.Split(strings.TrimSpace(output), "\n")
+		for _, line := range lines {
 			if line != "" {
-				stream.logs = append(stream.logs, LogEntry{
-					Timestamp: timestamp,
-					Content:   line,
-					Type:      "command_output",
-				})
+				entry := &v1.LogEntry{
+					Timestamp: timestamppb.New(timestamp),
+					Message:   line,
+					Level:     "debug",
+					Source:    "command_output",
+					IsCommand: false,
+					IsError:   !success,
+				}
+				stream.logs = append(stream.logs, entry)
 			}
 		}
 	} else if !success {
 		// Add error message if command failed with no output
-		stream.logs = append(stream.logs, LogEntry{
-			Timestamp: timestamp,
-			Content:   "Command failed to execute",
-			Type:      "command_output",
-		})
+		entry := &v1.LogEntry{
+			Timestamp: timestamppb.New(timestamp),
+			Message:   "Command failed to execute",
+			Level:     "error",
+			Source:    "command_output",
+			IsCommand: false,
+			IsError:   true,
+		}
+		stream.logs = append(stream.logs, entry)
 	}
 
 	// Trim if exceeding max entries
@@ -279,23 +289,14 @@ func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool
 	}
 }
 
-// Log entry and output together for one cmd (NOTE: Should probably add before/after execution seperately and not use this)
-func (ls *LogStreamer) AddCommand(containerID, command, output string, success bool) {
-	timestamp := time.Now()
-	ls.AddCommandEntry(containerID, command, timestamp)
-	if output != "" || !success {
-		ls.AddCommandOutput(containerID, output, success, timestamp)
-	}
-}
-
-// Get logs for a container
-func (ls *LogStreamer) GetLogs(containerID string, tail int) []LogEntry {
+// GetLogs gets logs for a container
+func (ls *LogStreamer) GetLogs(containerID string, tail int) []*v1.LogEntry {
 	ls.mu.RLock()
 	stream, exists := ls.streams[containerID]
 	ls.mu.RUnlock()
 
 	if !exists {
-		return []LogEntry{}
+		return []*v1.LogEntry{}
 	}
 
 	stream.mu.RLock()
@@ -304,19 +305,19 @@ func (ls *LogStreamer) GetLogs(containerID string, tail int) []LogEntry {
 	// Return the requested tail of logs
 	if tail <= 0 || tail > len(stream.logs) {
 		// Return all logs
-		result := make([]LogEntry, len(stream.logs))
+		result := make([]*v1.LogEntry, len(stream.logs))
 		copy(result, stream.logs)
 		return result
 	}
 
 	// Return last 'tail' entries
 	start := len(stream.logs) - tail
-	result := make([]LogEntry, tail)
+	result := make([]*v1.LogEntry, tail)
 	copy(result, stream.logs[start:])
 	return result
 }
 
-// Clears logs for a container
+// ClearLogs clears logs for a container
 func (ls *LogStreamer) ClearLogs(containerID string) {
 	ls.mu.RLock()
 	stream, exists := ls.streams[containerID]
@@ -324,7 +325,7 @@ func (ls *LogStreamer) ClearLogs(containerID string) {
 
 	if exists {
 		stream.mu.Lock()
-		stream.logs = make([]LogEntry, 0, stream.maxEntries)
+		stream.logs = make([]*v1.LogEntry, 0, stream.maxEntries)
 		stream.mu.Unlock()
 	}
 }

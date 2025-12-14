@@ -12,6 +12,8 @@ import (
 type ModLoaderInfo struct {
 	Name              string
 	DisplayName       string
+	Description       string
+	Category          string
 	ModsDirectory     string
 	ConfigDirectory   string
 	SupportedVersions []string
@@ -26,6 +28,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Vanilla",
+			Description:     "Vanilla Minecraft server without mod support",
+			Category:        "Vanilla",
 			ModsDirectory:   "",
 			ConfigDirectory: "",
 			FileExtensions:  []string{},
@@ -36,6 +40,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Minecraft Forge",
+			Description:     "The original and most widely used modding platform",
+			Category:        "Forge",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -44,6 +50,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "NeoForge",
+			Description:     "Modern fork of Forge with improved features",
+			Category:        "Forge",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -54,6 +62,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Fabric",
+			Description:     "Lightweight and fast modding platform",
+			Category:        "Fabric",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -62,6 +72,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Quilt",
+			Description:     "Fork of Fabric with additional features",
+			Category:        "Fabric",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -72,6 +84,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Bukkit",
+			Description:     "The original plugin API for Minecraft servers",
+			Category:        "Bukkit",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
@@ -80,6 +94,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Spigot",
+			Description:     "High-performance fork of Bukkit",
+			Category:        "Bukkit",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
@@ -88,6 +104,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Paper",
+			Description:     "Performance-optimized fork of Spigot",
+			Category:        "Bukkit",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
@@ -96,6 +114,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Purpur",
+			Description:     "Fork of Paper with additional gameplay features",
+			Category:        "Bukkit",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
@@ -104,6 +124,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Pufferfish",
+			Description:     "Performance-focused fork of Paper",
+			Category:        "Bukkit",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
@@ -114,6 +136,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Magma",
+			Description:     "Hybrid server supporting both Forge mods and Bukkit plugins",
+			Category:        "Hybrid",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -122,6 +146,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Magma Maintained",
+			Description:     "Maintained fork of Magma hybrid server",
+			Category:        "Hybrid",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -130,6 +156,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Ketting",
+			Description:     "Modern hybrid server for Forge and Bukkit",
+			Category:        "Hybrid",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -138,6 +166,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Mohist",
+			Description:     "Hybrid server combining Forge and Paper",
+			Category:        "Hybrid",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -146,6 +176,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Youer",
+			Description:     "Hybrid server implementation",
+			Category:        "Hybrid",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -154,6 +186,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Banner",
+			Description:     "Hybrid server implementation",
+			Category:        "Hybrid",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -162,6 +196,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Catserver",
+			Description:     "Hybrid server implementation",
+			Category:        "Hybrid",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -170,6 +206,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Arclight",
+			Description:     "Modern hybrid implementation for Forge and Bukkit",
+			Category:        "Hybrid",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -180,6 +218,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "SpongeVanilla",
+			Description:     "Plugin platform with advanced API",
+			Category:        "Sponge",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -190,6 +230,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Limbo",
+			Description:     "Lightweight server for holding players",
+			Category:        "Lightweight",
 			ModsDirectory:   "",
 			ConfigDirectory: "",
 			FileExtensions:  []string{},
@@ -198,6 +240,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "NanoLimbo",
+			Description:     "Ultra-lightweight server for holding players",
+			Category:        "Lightweight",
 			ModsDirectory:   "",
 			ConfigDirectory: "",
 			FileExtensions:  []string{},
@@ -206,6 +250,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Crucible",
+			Description:     "Legacy hybrid server implementation",
+			Category:        "Other",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -214,6 +260,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Glowstone",
+			Description:     "Open-source Minecraft server implementation",
+			Category:        "Other",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -222,6 +270,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Custom",
+			Description:     "Custom server implementation",
+			Category:        "Other",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -232,6 +282,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Auto CurseForge",
+			Description:     "Automatic CurseForge modpack installer",
+			Category:        "Modpack",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -240,6 +292,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "CurseForge",
+			Description:     "Popular modpack platform",
+			Category:        "Modpack",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -248,6 +302,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Feed The Beast",
+			Description:     "Feed The Beast modpack platform",
+			Category:        "Modpack",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -256,6 +312,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Modrinth",
+			Description:     "Modern open-source modpack platform",
+			Category:        "Modpack",
 			ModsDirectory:   "mods",
 			ConfigDirectory: "config",
 			FileExtensions:  []string{".jar"},
@@ -265,6 +323,8 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     string(loader),
+			Description:     "Unknown mod loader",
+			Category:        "Other",
 			ModsDirectory:   "",
 			ConfigDirectory: "",
 			FileExtensions:  []string{},

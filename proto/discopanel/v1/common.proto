@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// User permission levels
+enum UserRole {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_VIEWER = 1;
+  USER_ROLE_EDITOR = 2;
+  USER_ROLE_ADMIN = 3;
+}
+
+// Container runtime state
+enum ServerStatus {
+  SERVER_STATUS_UNSPECIFIED = 0;
+  SERVER_STATUS_CREATING = 1;
+  SERVER_STATUS_STARTING = 2;
+  SERVER_STATUS_RUNNING = 3;
+  SERVER_STATUS_STOPPING = 4;
+  SERVER_STATUS_STOPPED = 5;
+  SERVER_STATUS_RESTARTING = 6;
+  SERVER_STATUS_ERROR = 7;
+  SERVER_STATUS_UNHEALTHY = 8;
+}
+
+// Minecraft server software type
+enum ModLoader {
+  MOD_LOADER_UNSPECIFIED = 0;
+  MOD_LOADER_VANILLA = 1;
+  MOD_LOADER_FORGE = 2;
+  MOD_LOADER_FABRIC = 3;
+  MOD_LOADER_QUILT = 4;
+  MOD_LOADER_PAPER = 5;
+  MOD_LOADER_SPIGOT = 6;
+  MOD_LOADER_BUKKIT = 7;
+  MOD_LOADER_PURPUR = 8;
+  MOD_LOADER_SPONGE_VANILLA = 9;
+  MOD_LOADER_SPONGE_FORGE = 10;
+  MOD_LOADER_MOHIST = 11;
+  MOD_LOADER_CATSERVER = 12;
+  MOD_LOADER_ARCLIGHT = 13;
+  MOD_LOADER_AUTO_CURSEFORGE = 14;
+  MOD_LOADER_MODRINTH = 15;
+  MOD_LOADER_NEOFORGE = 16;
+  MOD_LOADER_FOLIA = 17;
+}
+
+// System user account
+message User {
+  string id = 1;
+  string username = 2;
+  optional string email = 3;
+  UserRole role = 4;
+  bool is_active = 5;
+  optional string recovery_key = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// Minecraft server instance
+message Server {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  ModLoader mod_loader = 4;
+  string mc_version = 5;
+  ServerStatus status = 6;
+  int32 port = 7;
+  string proxy_hostname = 8;
+  string proxy_listener_id = 9;
+  int32 proxy_port = 10;
+  int32 max_players = 11;
+  int32 memory = 12;
+  string data_path = 13;
+  string container_id = 14;
+  optional google.protobuf.Timestamp last_started = 15;
+  int32 java_version = 16;
+  string docker_image = 17;
+  bool auto_start = 18;
+  bool detached = 19;
+  string tps_command = 20;
+
+  // Runtime stats
+  int64 memory_usage = 21;
+  double cpu_percent = 22;
+  int64 disk_usage = 23;
+  int64 disk_total = 24;
+  int32 players_online = 25;
+  double tps = 26;
+
+  // Additional configuration
+  string additional_ports = 27; // JSON string
+  string docker_overrides = 28; // JSON string
+
+  google.protobuf.Timestamp created_at = 29;
+  google.protobuf.Timestamp updated_at = 30;
+}
+
+// Extra port mapping for container
+message AdditionalPort {
+  int32 container_port = 1;
+  int32 host_port = 2;
+  string protocol = 3; // tcp or udp
+  string description = 4;
+}
+
+// Container runtime customization
+message DockerOverrides {
+  repeated string environment = 1;
+  repeated string volumes = 2;
+  repeated string capabilities = 3;
+  repeated string devices = 4;
+  string network_mode = 5;
+  bool privileged = 6;
+  string user = 7;
+  int64 memory_limit = 8;
+  int64 memory_reservation = 9;
+  double cpu_limit = 10;
+  string restart_policy = 11;
+  string entry_point = 12;
+}
+
+// TCP proxy listener endpoint
+message ProxyListener {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int32 port = 4;
+  bool enabled = 5;
+  bool is_default = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// Global proxy settings
+message ProxyConfig {
+  string id = 1;
+  bool enabled = 2;
+  string base_url = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// Authentication system settings
+message AuthConfig {
+  string id = 1;
+  bool enabled = 2;
+  int32 session_timeout = 3;
+  bool require_email_verify = 4;
+  bool allow_registration = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}

@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// Minecraft version and runtime information
+service MinecraftService {
+  // List all Minecraft versions
+  rpc GetMinecraftVersions(GetMinecraftVersionsRequest) returns (GetMinecraftVersionsResponse);
+  // List supported mod loaders
+  rpc GetModLoaders(GetModLoadersRequest) returns (GetModLoadersResponse);
+  // List available Docker images
+  rpc GetDockerImages(GetDockerImagesRequest) returns (GetDockerImagesResponse);
+}
+
+// Minecraft version metadata
+message MinecraftVersion {
+  string id = 1;
+  string type = 2; // release, snapshot, old_beta, old_alpha
+  string release_time = 3;
+  string url = 4;
+}
+
+// Empty versions request
+message GetMinecraftVersionsRequest {}
+
+// All available versions
+message GetMinecraftVersionsResponse {
+  repeated MinecraftVersion versions = 1;
+  string latest = 2;
+}
+
+// Mod loader capabilities
+message ModLoaderInfo {
+  string name = 1;
+  string display_name = 2;
+  string description = 3;
+  bool supports_mods = 4;
+  bool supports_plugins = 5;
+  string category = 6;
+}
+
+// Empty loaders request
+message GetModLoadersRequest {}
+
+// Available mod loaders
+message GetModLoadersResponse {
+  repeated ModLoaderInfo modloaders = 1;
+}
+
+// Container image option
+message DockerImage {
+  string tag = 1;
+  string display_name = 2;
+  string description = 3;
+  bool recommended = 4;
+}
+
+// Empty images request
+message GetDockerImagesRequest {}
+
+// Docker image catalog
+message GetDockerImagesResponse {
+  repeated DockerImage images = 1;
+}

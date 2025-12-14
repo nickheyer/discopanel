@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
@@ -9,16 +9,18 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, Globe, Save, Copy, AlertCircle, CheckCircle2, XCircle } from '@lucide/svelte';
-	import type { Server } from '$lib/api/types';
+	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { GetServerRoutingResponse, ProxyRoute } from '$lib/proto/discopanel/v1/proxy_pb';
 
-	let { server, active, router: routingInfo = $bindable(null) }: { server: Server, active?: boolean, router?:any } = $props();
+	let { server, active, router: routingInfo = $bindable(null) }: { server: Server, active?: boolean, router?: GetServerRoutingResponse | null } = $props();
 
 	let loading = $state(true);
 	let saving = $state(false);
 	let hostname = $state('');
 	let originalHostname = $state('');
 	let hasChanges = $derived(hostname !== originalHostname);
-	let allRoutes = $state<any[]>([]);
+	let allRoutes = $state<ProxyRoute[]>([]);
 	let hostnameError = $state('');
 	let initialized = $state(false);
 	let previousServerId = $state(server.id);
@@ -59,8 +61,9 @@
 	async function loadRoutingInfo() {
 		try {
 			loading = true;
-			routingInfo = await api.getServerRouting(server.id);
-			hostname = routingInfo.proxy_hostname || '';
+			const response = await rpcClient.proxy.getServerRouting({ serverId: server.id });
+			routingInfo = response;
+			hostname = response.proxyHostname || '';
 			originalHostname = hostname;
 		} catch (error) {
 			toast.error('Failed to load routing information');
@@ -71,7 +74,8 @@
 
 	async function loadAllRoutes() {
 		try {
-			allRoutes = await api.getProxyRoutes();
+			const response = await rpcClient.proxy.getProxyRoutes({});
+			allRoutes = response.routes;
 		} catch (error) {
 			// Not critical
 		}
@@ -91,9 +95,9 @@
 		}
 
 		// Check for conflicts
-		const conflict = allRoutes.find(route => 
-			route.hostname.toLowerCase() === value.toLowerCase() && 
-			route.server_id !== server.id
+		const conflict = allRoutes.find(route =>
+			route.hostname.toLowerCase() === value.toLowerCase() &&
+			route.serverId !== server.id
 		);
 		if (conflict) {
 			hostnameError = 'Hostname already in use by another server';
@@ -109,7 +113,10 @@
 
 		saving = true;
 		try {
-			await api.updateServerRouting(server.id, hostname);
+			await rpcClient.proxy.updateServerRouting({
+				serverId: server.id,
+				proxyHostname: hostname
+			});
 			toast.success('Routing configuration saved');
 			originalHostname = hostname;
 			// Reload routing info to get updated server state
@@ -133,13 +140,13 @@
 
 	function getFullHostname() {
 		if (hostname) return hostname;
-		if (routingInfo?.suggested_hostname) return routingInfo.suggested_hostname;
+		if (routingInfo?.suggestedHostname) return routingInfo.suggestedHostname;
 		return `${server.name.toLowerCase().replace(/\s+/g, '-')}.minecraft.local`;
 	}
 
 	function getConnectionString() {
 		const host = getFullHostname();
-		const port = routingInfo?.listen_port || 25565;
+		const port = routingInfo?.listenPort || 25565;
 		return port === 25565 ? host : `${host}:${port}`;
 	}
 </script>
@@ -148,7 +155,7 @@
 	<div class="flex items-center justify-center py-8">
 		<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 	</div>
-{:else if !routingInfo?.proxy_enabled}
+{:else if !routingInfo?.proxyEnabled}
 	<Alert>
 		<AlertCircle class="h-4 w-4" />
 		<AlertDescription>
@@ -169,7 +176,7 @@
 				</CardDescription>
 			</CardHeader>
 			<CardContent class="space-y-4">
-				{#if routingInfo.current_route || routingInfo.proxy_hostname}
+				{#if routingInfo.currentRoute || routingInfo.proxyHostname}
 					<div class="flex items-center gap-2">
 						<Badge variant="default" class="gap-1">
 							<CheckCircle2 class="h-3 w-3" />
@@ -179,7 +186,7 @@
 							Players can connect using the hostname below
 						</span>
 					</div>
-				{:else if server.status === 'running'}
+				{:else if server.status === ServerStatus.RUNNING}
 					<div class="flex items-center gap-2">
 						<Badge variant="secondary" class="gap-1">
 							<AlertCircle class="h-3 w-3" />
@@ -234,7 +241,7 @@
 						id="hostname"
 						type="text"
 						bind:value={hostname}
-						placeholder={routingInfo.suggested_hostname || 'minecraft.example.com'}
+						placeholder={routingInfo.suggestedHostname || 'minecraft.example.com'}
 						oninput={(e) => validateHostname(e.currentTarget.value)}
 						class={hostnameError ? 'border-destructive' : ''}
 					/>
@@ -251,7 +258,7 @@
 					{/if}
 				</div>
 
-				{#if routingInfo.base_url}
+				{#if routingInfo.baseUrl}
 					<Alert>
 						<AlertDescription>
 							<p class="font-medium mb-1">DNS Configuration Required</p>
@@ -301,7 +308,7 @@
 								<div>
 									<p class="font-mono text-sm">{route.hostname}</p>
 									<p class="text-xs text-muted-foreground">
-										{route.server_id === server.id ? '(This server)' : `Server: ${route.server_id.slice(0, 8)}...`}
+										{route.serverId === server.id ? '(This server)' : `Server: ${route.serverId.slice(0, 8)}...`}
 									</p>
 								</div>
 								{#if route.active}

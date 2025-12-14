@@ -1,13 +1,18 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { api } from '$lib/api/client';
+	import { rpcClient } from '$lib/api/rpc-client';
+	import { create } from '@bufbuild/protobuf';
+	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
+	import { GetServerLogsRequestSchema, ClearServerLogsRequestSchema, SendCommandRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import { ResizablePaneGroup, ResizablePane, ResizableHandle } from '$lib/components/ui/resizable';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
 	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw } from '@lucide/svelte';
 	import AnsiToHtml from 'ansi-to-html';
-	import type { Server, LogEntry } from '$lib/api/types';
+	import { getStringForEnum } from '$lib/utils';
 
 	// Create ansi-to-html converter with proper options
 	const ansiConverter = new AnsiToHtml({
@@ -103,12 +108,16 @@
 		if (loading) return;
 
 		// Don't try to fetch logs if server is not running
-		if (server.status === 'stopped') {
+		if (server.status === ServerStatus.STOPPED) {
 			return;
 		}
 
 		try {
-			const response = await api.getServerLogs(server.id, tailLines);
+			const request = create(GetServerLogsRequestSchema, {
+				id: server.id,
+				tail: tailLines
+			});
+			const response = await rpcClient.server.getServerLogs(request);
 			logEntries = response.logs || [];
 		} catch (error) {
 			console.error('Failed to fetch logs:', error);
@@ -120,7 +129,11 @@
 
 		loading = true;
 		try {
-			const response = await api.sendServerCommand(server.id, command);
+			const request = create(SendCommandRequestSchema, {
+				id: server.id,
+				command: command
+			});
+			const response = await rpcClient.server.sendCommand(request);
 			if (response.success) {
 				toast.success('Command sent successfully');
 			} else {
@@ -140,13 +153,16 @@
 	}
 
 	async function clearLogs() {
-		await api.clearServerLogs(server.id);
+		const request = create(ClearServerLogsRequestSchema, {
+			id: server.id
+		});
+		await rpcClient.server.clearServerLogs(request);
 		logEntries = [];
 		toast.success('Console cleared');
 	}
 
 	function downloadLogs() {
-		const logText = logEntries.map(entry => entry.Content).join('\n');
+		const logText = logEntries.map(entry => entry.message).join('\n');
 		const blob = new Blob([logText], { type: 'text/plain' });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
@@ -170,8 +186,8 @@
 				<div class="flex items-center gap-2">
 					<Terminal class="h-4 w-4 text-green-500" />
 					<span class="font-mono text-sm text-green-500">Server Console</span>
-					<Badge variant={(server.status === 'running' || server.status === 'unhealthy') ? 'default' : 'secondary'} class="text-xs">
-						{server.status}
+					<Badge variant={(server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY) ? 'default' : 'secondary'} class="text-xs">
+						{getStringForEnum(ServerStatus, server.status)?.toLowerCase()}
 					</Badge>
 				</div>
 				<div class="flex items-center gap-1">
@@ -216,12 +232,12 @@
 				<div class="font-mono text-xs text-zinc-300">
 					{#if logEntries.length === 0}
 						<div class="py-8 text-center text-zinc-500">
-							No logs available. {['running', 'starting', 'unhealthy'].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
+							No logs available. {[ServerStatus.RUNNING, ServerStatus.STARTING, ServerStatus.UNHEALTHY].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
 						</div>
 					{:else}
 						{#each logEntries as entry}
-							<div class="log-line whitespace-pre-wrap break-all" data-type={entry.Type}>
-								{@html ansiConverter.toHtml(entry.Content)}
+							<div class="log-line whitespace-pre-wrap break-all" data-type={entry.level}>
+								{@html ansiConverter.toHtml(entry.message)}
 							</div>
 						{/each}
 					{/if}
@@ -238,16 +254,16 @@
 				<span class="font-mono text-sm text-green-500">$</span>
 				<input
 					type="text"
-					placeholder={(server.status === 'running' || server.status === 'unhealthy')? 'Enter command...' : 'Server must be running'}
+					placeholder={(server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY)? 'Enter command...' : 'Server must be running'}
 					bind:value={command}
-					disabled={server.status !== 'running'}
+					disabled={server.status !== ServerStatus.RUNNING && server.status !== ServerStatus.UNHEALTHY}
 					onkeydown={(e) => e.key === 'Enter' && sendCommand()}
 					class="flex-1 bg-transparent font-mono text-sm text-white outline-none placeholder:text-zinc-600"
 				/>
 			</div>
 			<Button
 				onclick={sendCommand}
-				disabled={server.status === 'stopped' || !command.trim()}
+				disabled={server.status === ServerStatus.STOPPED || !command.trim()}
 				size="sm"
 				class="h-7 bg-zinc-800 px-3 text-white hover:bg-zinc-700"
 			>

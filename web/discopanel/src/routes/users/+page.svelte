@@ -12,16 +12,11 @@
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { toast } from 'svelte-sonner';
 	import { Users, UserPlus, Trash2, Edit, Shield, Eye, AlertCircle, Loader2 } from '@lucide/svelte';
-
-	interface User {
-		id: string;
-		username: string;
-		email: string;
-		role: 'admin' | 'editor' | 'viewer';
-		is_active: boolean;
-		created_at: string;
-		last_login?: string;
-	}
+	import { create } from '@bufbuild/protobuf';
+	import { rpcClient } from '$lib/api/rpc-client';
+	import type { User } from '$lib/proto/discopanel/v1/common_pb';
+	import { UserRole } from '$lib/proto/discopanel/v1/common_pb';
+	import { CreateUserRequestSchema, UpdateUserRequestSchema, DeleteUserRequestSchema } from '$lib/proto/discopanel/v1/user_pb';
 
 	let users = $state<User[]>([]);
 	let loading = $state(true);
@@ -29,37 +24,31 @@
 	let showCreateDialog = $state(false);
 	let showEditDialog = $state(false);
 	let editingUser = $state<User | null>(null);
-	
+
 	let newUserForm = $state({
 		username: '',
 		email: '',
 		password: '',
-		role: 'viewer' as 'admin' | 'editor' | 'viewer'
+		role: UserRole.VIEWER
 	});
-	
+
 	let editUserForm = $state({
 		email: '',
-		role: 'viewer' as 'admin' | 'editor' | 'viewer',
-		is_active: true
+		role: UserRole.VIEWER,
+		isActive: true
 	});
 	
 	async function loadUsers() {
 		loading = true;
 		try {
-			const headers = authStore.getHeaders();
-			const response = await fetch('/api/v1/users', { headers });
-			
-			if (!response.ok) {
-				if (response.status === 403) {
-					toast.error('Admin access required');
-					goto('/');
-					return;
-				}
-				throw new Error('Failed to load users');
+			const response = await rpcClient.user.listUsers({});
+			users = response.users;
+		} catch (error: any) {
+			if (error.code === 'PERMISSION_DENIED') {
+				toast.error('Admin access required');
+				goto('/');
+				return;
 			}
-			
-			users = await response.json();
-		} catch (error) {
 			toast.error('Failed to load users');
 			console.error(error);
 		} finally {
@@ -72,36 +61,23 @@
 			toast.error('Username and password are required');
 			return;
 		}
-		
+
 		if (newUserForm.password.length < 8) {
 			toast.error('Password must be at least 8 characters');
 			return;
 		}
-		
+
 		try {
-			const headers = {
-				...authStore.getHeaders(),
-				'Content-Type': 'application/json'
-			};
-			
-			const response = await fetch('/api/v1/users', {
-				method: 'POST',
-				headers,
-				body: JSON.stringify(newUserForm)
-			});
-			
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to create user');
-			}
-			
+			const request = create(CreateUserRequestSchema, newUserForm);
+			await rpcClient.user.createUser(request);
+
 			toast.success('User created successfully');
 			showCreateDialog = false;
 			newUserForm = {
 				username: '',
 				email: '',
 				password: '',
-				role: 'viewer'
+				role: UserRole.VIEWER
 			};
 			await loadUsers();
 		} catch (error: any) {
@@ -111,24 +87,16 @@
 	
 	async function updateUser() {
 		if (!editingUser) return;
-		
+
 		try {
-			const headers = {
-				...authStore.getHeaders(),
-				'Content-Type': 'application/json'
-			};
-			
-			const response = await fetch(`/api/v1/users/${editingUser.id}`, {
-				method: 'PUT',
-				headers,
-				body: JSON.stringify(editUserForm)
+			const request = create(UpdateUserRequestSchema, {
+				id: editingUser.id,
+				email: editUserForm.email,
+				role: editUserForm.role,
+				isActive: editUserForm.isActive
 			});
-			
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to update user');
-			}
-			
+			await rpcClient.user.updateUser(request);
+
 			toast.success('User updated successfully');
 			showEditDialog = false;
 			editingUser = null;
@@ -142,19 +110,11 @@
 		if (!confirm(`Are you sure you want to delete user "${user.username}"?`)) {
 			return;
 		}
-		
+
 		try {
-			const headers = authStore.getHeaders();
-			const response = await fetch(`/api/v1/users/${user.id}`, {
-				method: 'DELETE',
-				headers
-			});
-			
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to delete user');
-			}
-			
+			const request = create(DeleteUserRequestSchema, { id: user.id });
+			await rpcClient.user.deleteUser(request);
+
 			toast.success('User deleted successfully');
 			await loadUsers();
 		} catch (error: any) {
@@ -165,21 +125,36 @@
 	function openEditDialog(user: User) {
 		editingUser = user;
 		editUserForm = {
-			email: user.email,
+			email: user.email || '',
 			role: user.role,
-			is_active: user.is_active
+			isActive: user.isActive
 		};
 		showEditDialog = true;
 	}
 	
-	function getRoleBadge(role: string) {
+	function getRoleBadge(role: UserRole) {
 		switch (role) {
-			case 'admin':
+			case UserRole.ADMIN:
 				return { variant: 'destructive' as const, icon: Shield };
-			case 'editor':
+			case UserRole.EDITOR:
 				return { variant: 'secondary' as const, icon: Edit };
+			case UserRole.VIEWER:
+				return { variant: 'outline' as const, icon: Eye };
 			default:
 				return { variant: 'outline' as const, icon: Eye };
+		}
+	}
+
+	function getRoleDisplayName(role: UserRole): string {
+		switch (role) {
+			case UserRole.ADMIN:
+				return 'Admin';
+			case UserRole.EDITOR:
+				return 'Editor';
+			case UserRole.VIEWER:
+				return 'Viewer';
+			default:
+				return 'Unknown';
 		}
 	}
 	
@@ -246,7 +221,7 @@
 							<TableHead>Role</TableHead>
 							<TableHead>Status</TableHead>
 							<TableHead>Created</TableHead>
-							<TableHead>Last Login</TableHead>
+							<TableHead>Last Active</TableHead>
 							<TableHead class="text-right">Actions</TableHead>
 						</TableRow>
 					</TableHeader>
@@ -260,21 +235,21 @@
 									{@const Icon = badge.icon}
 									<Badge variant={badge.variant}>
 										<Icon class="mr-1 h-3 w-3" />
-										{user.role}
+										{getRoleDisplayName(user.role)}
 									</Badge>
 								</TableCell>
 								<TableCell>
-									{#if user.is_active}
+									{#if user.isActive}
 										<Badge variant="outline" class="text-green-600">Active</Badge>
 									{:else}
 										<Badge variant="outline" class="text-red-600">Inactive</Badge>
 									{/if}
 								</TableCell>
 								<TableCell class="text-sm text-muted-foreground">
-									{formatDate(user.created_at)}
+									{user.createdAt ? formatDate(new Date(Number(user.createdAt.seconds) * 1000).toISOString()) : 'Unknown'}
 								</TableCell>
 								<TableCell class="text-sm text-muted-foreground">
-									{user.last_login ? formatDate(user.last_login) : 'Never'}
+									{user.updatedAt ? formatDate(new Date(Number(user.updatedAt.seconds) * 1000).toISOString()) : 'Never'}
 								</TableCell>
 								<TableCell class="text-right">
 									<div class="flex justify-end gap-2">
@@ -346,18 +321,21 @@
 			</div>
 			<div class="space-y-2">
 				<Label for="new-role">Role</Label>
-				<Select 
+				<Select
 					type="single"
-					value={newUserForm.role}
-					onValueChange={(value: string | undefined) => newUserForm.role = (value || 'viewer') as 'admin' | 'editor' | 'viewer'}
+					value={newUserForm.role.toString()}
+					onValueChange={(value: string | undefined) => {
+						const roleValue = parseInt(value || '1');
+						newUserForm.role = roleValue as UserRole;
+					}}
 				>
 					<SelectTrigger id="new-role">
-						<span>{newUserForm.role || 'Select a role'}</span>
+						<span>{getRoleDisplayName(newUserForm.role)}</span>
 					</SelectTrigger>
 					<SelectContent>
-						<SelectItem value="viewer">Viewer (Read-only)</SelectItem>
-						<SelectItem value="editor">Editor (Manage servers)</SelectItem>
-						<SelectItem value="admin">Admin (Full access)</SelectItem>
+						<SelectItem value={UserRole.VIEWER.toString()}>Viewer (Read-only)</SelectItem>
+						<SelectItem value={UserRole.EDITOR.toString()}>Editor (Manage servers)</SelectItem>
+						<SelectItem value={UserRole.ADMIN.toString()}>Admin (Full access)</SelectItem>
 					</SelectContent>
 				</Select>
 			</div>
@@ -402,18 +380,21 @@
 				</div>
 				<div class="space-y-2">
 					<Label for="edit-role">Role</Label>
-					<Select 
+					<Select
 						type="single"
-						value={editUserForm.role}
-						onValueChange={(value: string | undefined) => editUserForm.role = (value || 'viewer') as 'admin' | 'editor' | 'viewer'}
+						value={editUserForm.role.toString()}
+						onValueChange={(value: string | undefined) => {
+							const roleValue = parseInt(value || '1');
+							editUserForm.role = roleValue as UserRole;
+						}}
 					>
 						<SelectTrigger id="edit-role">
-							<span>{editUserForm.role || 'Select a role'}</span>
+							<span>{getRoleDisplayName(editUserForm.role)}</span>
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="viewer">Viewer (Read-only)</SelectItem>
-							<SelectItem value="editor">Editor (Manage servers)</SelectItem>
-							<SelectItem value="admin">Admin (Full access)</SelectItem>
+							<SelectItem value={UserRole.VIEWER.toString()}>Viewer (Read-only)</SelectItem>
+							<SelectItem value={UserRole.EDITOR.toString()}>Editor (Manage servers)</SelectItem>
+							<SelectItem value={UserRole.ADMIN.toString()}>Admin (Full access)</SelectItem>
 						</SelectContent>
 					</Select>
 				</div>
@@ -421,7 +402,7 @@
 					<input
 						type="checkbox"
 						id="edit-active"
-						bind:checked={editUserForm.is_active}
+						bind:checked={editUserForm.isActive}
 						class="h-4 w-4"
 					/>
 					<Label for="edit-active">Account is active</Label>

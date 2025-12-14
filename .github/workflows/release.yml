@@ -316,7 +316,7 @@ jobs:
     name: Discord Notification
     needs: [create-release]
     runs-on: ubuntu-latest
-    if: ${{ !endsWith(github.ref_name, '-dev') && always() }}
+    if: ${{ !endsWith(github.ref_name, '-dev') && needs.create-release.result == 'success' }}
     
     steps:
       - name: Send Discord notification

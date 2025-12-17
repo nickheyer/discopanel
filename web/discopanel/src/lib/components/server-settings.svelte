@@ -19,6 +19,7 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
+	import { enumToString } from '$lib/utils';
 
 	interface Props {
 		server: Server;
@@ -59,7 +60,7 @@
 			port: server.port,
 			maxPlayers: server.maxPlayers,
 			memory: server.memory,
-			modLoader: String(server.modLoader),
+			modLoader: enumToString(ModLoader, server.modLoader),
 			mcVersion: server.mcVersion,
 			dockerImage: server.dockerImage,
 			detached: server.detached,
@@ -94,7 +95,7 @@
 				port: server.port,
 				maxPlayers: server.maxPlayers,
 				memory: server.memory,
-				modLoader: String(server.modLoader),
+				modLoader: enumToString(ModLoader, server.modLoader),
 				mcVersion: server.mcVersion,
 				dockerImage: server.dockerImage,
 				detached: server.detached,
@@ -125,7 +126,7 @@
 			formData.port !== server.port ||
 			formData.maxPlayers !== server.maxPlayers ||
 			formData.memory !== server.memory ||
-			formData.modLoader !== String(server.modLoader) ||
+			formData.modLoader !== enumToString(ModLoader, server.modLoader) ||
 			formData.mcVersion !== server.mcVersion ||
 			formData.dockerImage !== server.dockerImage ||
 			formData.detached !== server.detached ||
@@ -305,10 +306,10 @@
 				type="single"
 				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
 				value={formData.modLoader}
-				onValueChange={(value: string) => formData.modLoader = ModLoader[_.parseInt(value) || 1] || ''}
+				onValueChange={(value: string) => formData.modLoader = value}
 			>
 				<SelectTrigger id="mod_loader" class="h-10">
-					<span>{_.startCase(_.toLower((ModLoader[_.parseInt(formData.modLoader) || 1]))) || 'Select a mod loader'}</span>
+					<span>{modLoaders?.modloaders?.find(l => l.name === formData.modLoader)?.displayName || _.startCase(formData.modLoader) || 'Select a mod loader'}</span>
 				</SelectTrigger>
 				<SelectContent>
 					{#if formData.mcVersion}

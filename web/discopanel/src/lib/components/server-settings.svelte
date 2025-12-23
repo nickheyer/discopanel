@@ -9,7 +9,7 @@
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
-	import type { Server, AdditionalPort, DockerOverrides } from '$lib/proto/discopanel/v1/common_pb';
+  import type { Server, AdditionalPort } from '$lib/proto/discopanel/v1/common_pb';
 	import * as _ from 'lodash-es';
 	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
@@ -42,15 +42,15 @@
 		}
 	}
 
-	function parseDockerOverrides(jsonStr?: string): DockerOverrides | undefined {
-		if (!jsonStr) return undefined;
-		try {
-			return JSON.parse(jsonStr);
-		} catch (e) {
-			console.error('Failed to parse dockerOverrides:', e);
-			return undefined;
-		}
-	}
+  function stringifyForBigInt(data?: any): string | undefined {
+    if (!data) return undefined;
+    try {
+      return JSON.stringify(data, (_, value) => typeof value === 'bigint' ? value.toString() : value);
+    } catch (e) {
+      console.error('Failed to parse dockerOverrides:', e);
+      return undefined;
+    }
+  }
 
 	let formData = $state<UpdateServerRequest>(
 		create(UpdateServerRequestSchema, {
@@ -69,7 +69,7 @@
 			modpackId: '', // Not used in this context
 			modpackVersionId: '', // Not used in this context
 			additionalPorts: parseAdditionalPorts(server.additionalPorts),
-			dockerOverrides: parseDockerOverrides(server.dockerOverrides)
+			dockerOverrides: server.dockerOverrides
 		})
 	);
 
@@ -104,7 +104,7 @@
 				modpackId: '', // Not used in this context
 				modpackVersionId: '', // Not used in this context
 				additionalPorts: parseAdditionalPorts(server.additionalPorts),
-				dockerOverrides: parseDockerOverrides(server.dockerOverrides)
+				dockerOverrides: server.dockerOverrides
 			});
 			saving = false;
 			isDirty = false;
@@ -133,7 +133,7 @@
 			formData.autoStart !== server.autoStart ||
 			formData.tpsCommand !== (server.tpsCommand || '') ||
 			JSON.stringify(formData.additionalPorts) !== JSON.stringify(parseAdditionalPorts(server.additionalPorts)) ||
-			JSON.stringify(formData.dockerOverrides) !== JSON.stringify(parseDockerOverrides(server.dockerOverrides));
+			stringifyForBigInt($state.snapshot(formData.dockerOverrides)) !== stringifyForBigInt(server.dockerOverrides);
 	});
 
 	async function loadOptions() {

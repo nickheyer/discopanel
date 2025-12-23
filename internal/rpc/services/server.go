@@ -85,9 +85,15 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		PlayersOnline:   int32(server.PlayersOnline),
 		Tps:             server.TPS,
 		AdditionalPorts: server.AdditionalPorts,
-		DockerOverrides: server.DockerOverrides,
 		CreatedAt:       timestamppb.New(server.CreatedAt),
 		UpdatedAt:       timestamppb.New(server.UpdatedAt),
+	}
+
+	if server.DockerOverrides != "" {
+		var overrides v1.DockerOverrides
+		if err := json.Unmarshal([]byte(server.DockerOverrides), &overrides); err == nil {
+			protoServer.DockerOverrides = &overrides
+		}
 	}
 
 	// Map mod loader
@@ -200,6 +206,67 @@ func dbStatusToProto(status storage.ServerStatus) v1.ServerStatus {
 	default:
 		return v1.ServerStatus_SERVER_STATUS_UNSPECIFIED
 	}
+}
+
+// protoDockerOverridesToInternal converts proto docker overrides to internal docker model
+func protoDockerOverridesToInternal(protoOverrides *v1.DockerOverrides) *docker.DockerOverrides {
+	if protoOverrides == nil {
+		return nil
+	}
+
+	// Convert environment from []string to map[string]string
+	envMap := make(map[string]string)
+	for _, env := range protoOverrides.Environment {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	// Convert volumes from []string to []docker.VolumeMount
+	var volumes []docker.VolumeMount
+	for _, vol := range protoOverrides.Volumes {
+		parts := strings.Split(vol, ":")
+		if len(parts) >= 2 {
+			vm := docker.VolumeMount{
+				Source: parts[0],
+				Target: parts[1],
+			}
+			if len(parts) >= 3 {
+				vm.ReadOnly = parts[2] == "ro"
+			}
+			volumes = append(volumes, vm)
+		}
+	}
+
+	overrides := &docker.DockerOverrides{
+		Environment: envMap,
+		Volumes:     volumes,
+	}
+
+	if len(protoOverrides.Devices) > 0 {
+		overrides.Devices = protoOverrides.Devices
+	}
+	if protoOverrides.NetworkMode != "" {
+		overrides.NetworkMode = protoOverrides.NetworkMode
+	}
+	if protoOverrides.Privileged {
+		overrides.Privileged = protoOverrides.Privileged
+	}
+	if protoOverrides.User != "" {
+		overrides.User = protoOverrides.User
+	}
+	if protoOverrides.CpuLimit > 0 {
+		overrides.CPULimit = protoOverrides.CpuLimit
+	}
+	if protoOverrides.RestartPolicy != "" {
+		overrides.RestartPolicy = protoOverrides.RestartPolicy
+	}
+	if protoOverrides.EntryPoint != "" {
+		overrides.Entrypoint = []string{protoOverrides.EntryPoint}
+	}
+
+	return overrides
 }
 
 // ListServers lists all servers
@@ -594,17 +661,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			}
 		}
 
-		overrides := &docker.DockerOverrides{
-			Environment:   envMap,
-			Volumes:       volumes,
-			Devices:       msg.DockerOverrides.Devices,
-			NetworkMode:   msg.DockerOverrides.NetworkMode,
-			Privileged:    msg.DockerOverrides.Privileged,
-			User:          msg.DockerOverrides.User,
-			CPULimit:      msg.DockerOverrides.CpuLimit,
-			RestartPolicy: msg.DockerOverrides.RestartPolicy,
-			Entrypoint:    []string{msg.DockerOverrides.EntryPoint},
-		}
+		overrides := protoDockerOverridesToInternal(msg.DockerOverrides)
 		overridesBytes, err := json.Marshal(overrides)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to process docker overrides"))
@@ -989,15 +1046,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			}
 		}
 
-		overrides := &docker.DockerOverrides{
-			Environment: envMap,
-			Volumes:     volumes,
-			Devices:     msg.DockerOverrides.Devices,
-			NetworkMode: msg.DockerOverrides.NetworkMode,
-			Privileged:  msg.DockerOverrides.Privileged,
-			User:        msg.DockerOverrides.User,
-			CPULimit:    msg.DockerOverrides.CpuLimit,
-		}
+		overrides := protoDockerOverridesToInternal(msg.DockerOverrides)
 		overridesBytes, err := json.Marshal(overrides)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to process docker overrides"))

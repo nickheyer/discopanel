@@ -94,7 +94,7 @@ message Server {
 
   // Additional configuration
   string additional_ports = 27; // JSON string
-  string docker_overrides = 28; // JSON string
+  DockerOverrides docker_overrides = 28;
 
   google.protobuf.Timestamp created_at = 29;
   google.protobuf.Timestamp updated_at = 30;

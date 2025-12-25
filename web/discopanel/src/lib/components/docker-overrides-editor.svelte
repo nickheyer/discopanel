@@ -95,7 +95,7 @@
 		if (overrides.capabilities) updates.capabilities = [...overrides.capabilities];
 		if (overrides.devices) updates.devices = [...overrides.devices];
 		if (overrides.networkMode) updates.networkMode = overrides.networkMode;
-		if (overrides.privileged) updates.privileged = overrides.privileged;
+		if (overrides.privileged !== undefined) updates.privileged = overrides.privileged;
 		if (overrides.user) updates.user = overrides.user;
 		if (overrides.memoryLimit) updates.memoryLimit = overrides.memoryLimit;
 		if (overrides.memoryReservation) updates.memoryReservation = overrides.memoryReservation;
@@ -440,7 +440,7 @@
 							<label class="flex items-center gap-2">
 								<Switch
 									checked={overrides?.privileged || false}
-									onCheckedChange={(checked) => updateOverride('privileged', checked || undefined)}
+									onCheckedChange={(checked) => updateOverride('privileged', checked)}
 									disabled={disabled}
 								/>
 								<span class="text-sm">Privileged Mode</span>

@@ -42,7 +42,7 @@
 		}
 	}
 
-  function stringifyForBigInt(data?: any): string | undefined {
+  function safeToString(data?: any): string | undefined {
     if (!data) return undefined;
     try {
       return JSON.stringify(data, (_, value) => typeof value === 'bigint' ? value.toString() : value);
@@ -133,7 +133,7 @@
 			formData.autoStart !== server.autoStart ||
 			formData.tpsCommand !== (server.tpsCommand || '') ||
 			JSON.stringify(formData.additionalPorts) !== JSON.stringify(parseAdditionalPorts(server.additionalPorts)) ||
-			stringifyForBigInt($state.snapshot(formData.dockerOverrides)) !== stringifyForBigInt(server.dockerOverrides);
+			safeToString($state.snapshot(formData.dockerOverrides)) !== safeToString(server.dockerOverrides);
 	});
 
 	async function loadOptions() {

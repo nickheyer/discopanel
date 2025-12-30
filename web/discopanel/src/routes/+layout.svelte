@@ -36,7 +36,8 @@
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
-	import { Server, Home, Settings, Package, User, Users, LogOut, FileText } from '@lucide/svelte';
+	import { Server, Home, Settings, Package, User, Users, LogOut, FileText, Sun, Moon } from '@lucide/svelte';
+	import { toggleMode, mode } from 'mode-watcher';
 	import { ServerStatus, UserRole } from '$lib/proto/discopanel/v1/common_pb';
 	import { getStringForEnum } from '$lib/utils';
 
@@ -298,6 +299,13 @@
 					<Separator orientation="horizontal" class="mb-2" />
 					<div class="ml-auto flex items-center gap-2">
 						<span class="text-muted-foreground text-xs group-data-[collapsible=icon]:hidden">{__APP_VERSION__}</span>
+						<Button variant="ghost" size="icon" class="h-7 w-7 group-data-[collapsible=icon]:hidden" onclick={toggleMode}>
+							{#if mode.current === 'light'}
+								<Moon class="h-4 w-4 text-muted-foreground" />
+							{:else}
+								<Sun class="h-4 w-4 text-muted-foreground" />
+							{/if}
+						</Button>
 						<SidebarTrigger />
 					</div>
 				</SidebarFooter>

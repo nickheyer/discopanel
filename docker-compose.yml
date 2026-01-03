@@ -20,6 +20,7 @@ services:
 
     volumes:
       # Docker socket for managing containers
+      # NOTE FOR FEDORA/RHEL/CENTOS/ETC.: SE Linux requires :z to be added as a suffix to volume mounts. EX: - /var/run/docker.sock:/var/run/docker.sock:z
       - /var/run/docker.sock:/var/run/docker.sock
   
       # IMPORTANT: This is where your server(s) data will be stored on the host.

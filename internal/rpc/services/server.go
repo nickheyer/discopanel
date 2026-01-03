@@ -90,9 +90,53 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 	}
 
 	if server.DockerOverrides != "" {
-		var overrides v1.DockerOverrides
-		if err := json.Unmarshal([]byte(server.DockerOverrides), &overrides); err == nil {
-			protoServer.DockerOverrides = &overrides
+		// First unmarshal into the internal docker model format (what's stored in DB)
+		var internalOverrides docker.DockerOverrides
+		if err := json.Unmarshal([]byte(server.DockerOverrides), &internalOverrides); err == nil {
+			// Convert internal model to proto format
+			protoOverrides := &v1.DockerOverrides{}
+
+			// Convert environment to string type key=value
+			for key, value := range internalOverrides.Environment {
+				protoOverrides.Environment = append(protoOverrides.Environment, fmt.Sprintf("%s=%s", key, value))
+			}
+
+			// Convert volumes from []VolumeMount to []string ("source:target:mode" format)
+			for _, vol := range internalOverrides.Volumes {
+				volStr := vol.Source + ":" + vol.Target
+				if vol.ReadOnly {
+					volStr += ":ro"
+				}
+				protoOverrides.Volumes = append(protoOverrides.Volumes, volStr)
+			}
+
+			// Copy other fields
+			if internalOverrides.NetworkMode != "" {
+				protoOverrides.NetworkMode = internalOverrides.NetworkMode
+			}
+			if internalOverrides.Privileged {
+				protoOverrides.Privileged = internalOverrides.Privileged
+			}
+			if internalOverrides.User != "" {
+				protoOverrides.User = internalOverrides.User
+			}
+			if internalOverrides.CPULimit > 0 {
+				protoOverrides.CpuLimit = internalOverrides.CPULimit
+			}
+			if internalOverrides.RestartPolicy != "" {
+				protoOverrides.RestartPolicy = internalOverrides.RestartPolicy
+			}
+			if len(internalOverrides.Entrypoint) > 0 {
+				protoOverrides.EntryPoint = strings.Join(internalOverrides.Entrypoint, " ")
+			}
+			if len(internalOverrides.Devices) > 0 {
+				protoOverrides.Devices = internalOverrides.Devices
+			}
+			if len(internalOverrides.CapAdd) > 0 {
+				protoOverrides.Capabilities = internalOverrides.CapAdd
+			}
+
+			protoServer.DockerOverrides = protoOverrides
 		}
 	}
 
@@ -634,33 +678,6 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Convert docker overrides to JSON
 	dockerOverridesJSON := ""
 	if msg.DockerOverrides != nil {
-		// Convert environment from []string to map[string]string
-		// Proto sends as ["KEY=VALUE", ...] format
-		envMap := make(map[string]string)
-		for _, env := range msg.DockerOverrides.Environment {
-			parts := strings.SplitN(env, "=", 2)
-			if len(parts) == 2 {
-				envMap[parts[0]] = parts[1]
-			}
-		}
-
-		// Convert volumes from []string to []docker.VolumeMount
-		// Proto sends as ["source:target:mode", ...] format
-		var volumes []docker.VolumeMount
-		for _, vol := range msg.DockerOverrides.Volumes {
-			parts := strings.Split(vol, ":")
-			if len(parts) >= 2 {
-				vm := docker.VolumeMount{
-					Source: parts[0],
-					Target: parts[1],
-				}
-				if len(parts) >= 3 {
-					vm.ReadOnly = parts[2] == "ro"
-				}
-				volumes = append(volumes, vm)
-			}
-		}
-
 		overrides := protoDockerOverridesToInternal(msg.DockerOverrides)
 		overridesBytes, err := json.Marshal(overrides)
 		if err != nil {
@@ -1019,33 +1036,6 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 
 	// Handle docker overrides update
 	if msg.DockerOverrides != nil {
-		// Convert environment from []string to map[string]string
-		// Proto sends as ["KEY=VALUE", ...] format
-		envMap := make(map[string]string)
-		for _, env := range msg.DockerOverrides.Environment {
-			parts := strings.SplitN(env, "=", 2)
-			if len(parts) == 2 {
-				envMap[parts[0]] = parts[1]
-			}
-		}
-
-		// Convert volumes from []string to []docker.VolumeMount
-		// Proto sends as ["source:target:mode", ...] format
-		var volumes []docker.VolumeMount
-		for _, vol := range msg.DockerOverrides.Volumes {
-			parts := strings.Split(vol, ":")
-			if len(parts) >= 2 {
-				vm := docker.VolumeMount{
-					Source: parts[0],
-					Target: parts[1],
-				}
-				if len(parts) >= 3 {
-					vm.ReadOnly = parts[2] == "ro"
-				}
-				volumes = append(volumes, vm)
-			}
-		}
-
 		overrides := protoDockerOverridesToInternal(msg.DockerOverrides)
 		overridesBytes, err := json.Marshal(overrides)
 		if err != nil {
@@ -1111,24 +1101,30 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
 	}
 
-	// If container needs recreation and exists, recreate it
-	if needsRecreation && server.ContainerID != "" {
-		// Check if server was running
+	// If container needs recreation
+	if needsRecreation {
 		wasRunning := false
-		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
-		if err != nil {
-			s.log.Debug("Container %s not found during update, will create new one: %v", server.ContainerID, err)
-		} else if status == storage.StatusRunning || status == storage.StatusUnhealthy {
-			wasRunning = true
-			// Stop the container
-			if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
-				s.log.Error("Failed to stop container for recreation: %v", err)
+		// If container exists, check status and remove it
+		if server.ContainerID != "" {
+			status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+			if err != nil {
+				s.log.Debug("Container %s not found during update, will create new one: %v", server.ContainerID, err)
+			} else if status == storage.StatusRunning || status == storage.StatusUnhealthy {
+				wasRunning = true
+				// Stop log streaming before stopping container
+				if s.logStreamer != nil {
+					s.logStreamer.StopStreaming(server.ContainerID)
+				}
+				// Stop the container
+				if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+					s.log.Error("Failed to stop container for recreation: %v", err)
+				}
 			}
-		}
 
-		// Remove old container
-		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
-			s.log.Debug("Could not remove old container (may not exist): %v", err)
+			// Remove old container
+			if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
+				s.log.Debug("Could not remove old container (may not exist): %v", err)
+			}
 		}
 
 		// Get server config for container creation
@@ -1155,6 +1151,12 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 					server.Status = storage.StatusError
 				} else {
 					server.Status = storage.StatusRunning
+					// Start log streaming for new container
+					if s.logStreamer != nil {
+						if err := s.logStreamer.StartStreaming(newContainerID); err != nil {
+							s.log.Error("Failed to start log streaming after recreation: %v", err)
+						}
+					}
 				}
 			}
 		}

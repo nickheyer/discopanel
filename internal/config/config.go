@@ -35,12 +35,11 @@ type DatabaseConfig struct {
 }
 
 type DockerConfig struct {
-	SyncInterval  int    `mapstructure:"sync_interval"`
-	Host          string `mapstructure:"host"`
-	Version       string `mapstructure:"version"`
-	NetworkName   string `mapstructure:"network_name"`
-	NetworkSubnet string `mapstructure:"network_subnet"`
-	RegistryURL   string `mapstructure:"registry_url"`
+	SyncInterval int    `mapstructure:"sync_interval"`
+	Host         string `mapstructure:"host"`
+	Version      string `mapstructure:"version"`
+	NetworkName  string `mapstructure:"network_name"`
+	RegistryURL  string `mapstructure:"registry_url"`
 }
 
 type StorageConfig struct {
@@ -136,7 +135,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.host", "unix:///var/run/docker.sock")
 	v.SetDefault("docker.version", "")
 	v.SetDefault("docker.network_name", "discopanel-network")
-	v.SetDefault("docker.network_subnet", "172.20.0.0/16")
 	v.SetDefault("docker.registry_url", "")
 
 	// Storage defaults

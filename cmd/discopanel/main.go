@@ -86,10 +86,9 @@ func main() {
 
 	// Initialize Docker client with configuration
 	dockerClient, err := docker.NewClient(cfg.Docker.Host, docker.ClientConfig{
-		APIVersion:    cfg.Docker.Version,
-		NetworkName:   cfg.Docker.NetworkName,
-		NetworkSubnet: cfg.Docker.NetworkSubnet,
-		RegistryURL:   cfg.Docker.RegistryURL,
+		APIVersion:  cfg.Docker.Version,
+		NetworkName: cfg.Docker.NetworkName,
+		RegistryURL: cfg.Docker.RegistryURL,
 	})
 	if err != nil {
 		log.Fatal("Failed to initialize Docker client: %v", err)

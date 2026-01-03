@@ -184,10 +184,9 @@ func GetRequiredJavaVersion(mcVersion string, modLoader models.ModLoader) string
 }
 
 type ClientConfig struct {
-	APIVersion    string
-	NetworkName   string
-	NetworkSubnet string
-	RegistryURL   string
+	APIVersion  string
+	NetworkName string
+	RegistryURL string
 }
 
 type Client struct {
@@ -221,8 +220,7 @@ func NewClient(host string, config ...ClientConfig) (*Client, error) {
 	} else {
 		// Set defaults
 		c.config = ClientConfig{
-			NetworkName:   "discopanel-network",
-			NetworkSubnet: "172.20.0.0/16",
+			NetworkName: "discopanel-network",
 		}
 	}
 
@@ -775,21 +773,15 @@ func (c *Client) EnsureNetwork() error {
 		}
 	}
 
-	// Create network with subnet configuration
-	ipamConfig := &network.IPAMConfig{}
-	if c.config.NetworkSubnet != "" {
-		ipamConfig.Subnet = c.config.NetworkSubnet
-	}
-
-	_, err = c.docker.NetworkCreate(ctx, c.config.NetworkName, network.CreateOptions{
+	// Create network - let Docker allocate subnet from its configured default-address-pools
+	createOpts := network.CreateOptions{
 		Driver: "bridge",
-		IPAM: &network.IPAM{
-			Config: []network.IPAMConfig{*ipamConfig},
-		},
 		Labels: map[string]string{
 			"discopanel.managed": "true",
 		},
-	})
+	}
+
+	_, err = c.docker.NetworkCreate(ctx, c.config.NetworkName, createOpts)
 
 	if err != nil {
 		return fmt.Errorf("failed to create network: %w", err)

@@ -282,6 +282,9 @@
 				{:else if server.status === ServerStatus.STARTING}
 					<div class="absolute inset-0 bg-gradient-to-br from-yellow-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-yellow-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+				{:else if server.status === ServerStatus.CREATING}
+					<div class="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-blue-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{:else}
 					<div class="absolute inset-0 bg-gradient-to-br from-orange-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-orange-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
@@ -317,6 +320,11 @@
 							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-yellow-500/10 to-yellow-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<Loader2 class="h-7 w-7 text-yellow-500 animate-spin" />
 							</div>
+						{:else if server.status === ServerStatus.CREATING}
+							<div class="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-blue-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500/10 to-blue-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+								<Loader2 class="h-7 w-7 text-blue-500 animate-spin" />
+							</div>
 						{:else}
 							<div class="absolute inset-0 bg-gradient-to-br from-orange-500/20 to-orange-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-orange-500/10 to-orange-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
@@ -349,6 +357,12 @@
 											<div class="heartbeat-bar heartbeat-slow bg-yellow-500" style="animation-delay: {i * 0.2}s"></div>
 										{/each}
 									</div>
+								{:else if server.status === ServerStatus.CREATING}
+									<div class="heartbeat-container">
+										{#each Array(5) as _, i}
+											<div class="heartbeat-bar heartbeat-slow bg-blue-500" style="animation-delay: {i * 0.2}s"></div>
+										{/each}
+									</div>
 								{:else}
 									<div class="heartbeat-container">
 										{#each Array(5) as _, i}
@@ -358,7 +372,7 @@
 								{/if}
 							</div>
 						</div>
-						
+
 						<div class="text-center space-y-2">
 							<div class="text-2xl font-bold">
 								{#if server.status === ServerStatus.RUNNING}
@@ -371,6 +385,12 @@
 									<span class="text-yellow-500">STARTING</span>
 								{:else if server.status === ServerStatus.STOPPING}
 									<span class="text-orange-500">STOPPING</span>
+								{:else if server.status === ServerStatus.CREATING}
+									<span class="text-blue-500">CREATING</span>
+								{:else if server.status === ServerStatus.RESTARTING}
+									<span class="text-orange-500">RESTARTING</span>
+								{:else if server.status === ServerStatus.ERROR}
+									<span class="text-red-500">ERROR</span>
 								{:else}
 									<span class="text-muted-foreground">UNKNOWN</span>
 								{/if}
@@ -386,6 +406,12 @@
 									Initializing server components
 								{:else if server.status === ServerStatus.STOPPING}
 									Shutting down gracefully
+								{:else if server.status === ServerStatus.CREATING}
+									Setting up server container
+								{:else if server.status === ServerStatus.RESTARTING}
+									Server is restarting
+								{:else if server.status === ServerStatus.ERROR}
+									Server encountered an error
 								{:else}
 									Status: {server.status}
 								{/if}

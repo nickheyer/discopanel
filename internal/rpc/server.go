@@ -14,6 +14,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc/services"
+	"github.com/nickheyer/discopanel/internal/scheduler"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	web "github.com/nickheyer/discopanel/web/discopanel"
@@ -32,10 +33,11 @@ type Server struct {
 	authManager    *auth.Manager
 	authMiddleware *auth.Middleware
 	logStreamer    *logger.LogStreamer
+	scheduler      *scheduler.Scheduler
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, log *logger.Logger) *Server {
 	// Initialize auth manager
 	authManager := auth.NewManager(store)
 	authMiddleware := auth.NewMiddleware(authManager, store)
@@ -57,6 +59,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		authManager:    authManager,
 		authMiddleware: authMiddleware,
 		logStreamer:    logStreamer,
+		scheduler:      sched,
 	}
 
 	s.setupHandler()
@@ -95,6 +98,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.ProxyServiceName,
 		discopanelv1connect.ServerServiceName,
 		discopanelv1connect.SupportServiceName,
+		discopanelv1connect.TaskServiceName,
 		discopanelv1connect.UserServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
@@ -120,6 +124,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	proxyService := services.NewProxyService(s.store, s.proxyManager, s.config, s.log)
 	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
+	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 
 	// Register service handlers
@@ -149,6 +154,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	supportPath, supportHandler := discopanelv1connect.NewSupportServiceHandler(supportService, opts...)
 	mux.Handle(supportPath, supportHandler)
+
+	taskPath, taskHandler := discopanelv1connect.NewTaskServiceHandler(taskService, opts...)
+	mux.Handle(taskPath, taskHandler)
 
 	userPath, userHandler := discopanelv1connect.NewUserServiceHandler(userService, opts...)
 	mux.Handle(userPath, userHandler)

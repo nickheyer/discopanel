@@ -84,6 +84,8 @@ func (s *Store) Migrate() error {
 		&User{},
 		&AuthConfig{},
 		&Session{},
+		&ScheduledTask{},
+		&TaskExecution{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate: %w", err)
@@ -770,4 +772,155 @@ func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
 
 func (s *Store) CleanExpiredSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
+}
+
+// ScheduledTask operations
+func (s *Store) CreateScheduledTask(ctx context.Context, task *ScheduledTask) error {
+	if task.ID == "" {
+		task.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(task).Error
+}
+
+func (s *Store) GetScheduledTask(ctx context.Context, id string) (*ScheduledTask, error) {
+	var task ScheduledTask
+	err := s.db.WithContext(ctx).First(&task, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("scheduled task not found")
+		}
+		return nil, err
+	}
+	return &task, nil
+}
+
+func (s *Store) ListScheduledTasks(ctx context.Context, serverID string) ([]*ScheduledTask, error) {
+	var tasks []*ScheduledTask
+	query := s.db.WithContext(ctx)
+	if serverID != "" {
+		query = query.Where("server_id = ?", serverID)
+	}
+	err := query.Order("created_at DESC").Find(&tasks).Error
+	return tasks, err
+}
+
+func (s *Store) ListAllScheduledTasks(ctx context.Context) ([]*ScheduledTask, error) {
+	var tasks []*ScheduledTask
+	err := s.db.WithContext(ctx).Order("next_run ASC NULLS LAST").Find(&tasks).Error
+	return tasks, err
+}
+
+func (s *Store) ListDueScheduledTasks(ctx context.Context, before time.Time) ([]*ScheduledTask, error) {
+	var tasks []*ScheduledTask
+	err := s.db.WithContext(ctx).
+		Where("status = ? AND next_run IS NOT NULL AND next_run <= ?", TaskStatusEnabled, before).
+		Order("next_run ASC").
+		Find(&tasks).Error
+	return tasks, err
+}
+
+func (s *Store) UpdateScheduledTask(ctx context.Context, task *ScheduledTask) error {
+	return s.db.WithContext(ctx).Save(task).Error
+}
+
+func (s *Store) DeleteScheduledTask(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete executions first
+		if err := tx.Where("task_id = ?", id).Delete(&TaskExecution{}).Error; err != nil {
+			return err
+		}
+		// Delete task
+		return tx.Delete(&ScheduledTask{}, "id = ?", id).Error
+	})
+}
+
+func (s *Store) UpdateTaskNextRun(ctx context.Context, taskID string, nextRun *time.Time, lastRun *time.Time) error {
+	updates := map[string]interface{}{
+		"next_run": nextRun,
+	}
+	if lastRun != nil {
+		updates["last_run"] = lastRun
+	}
+	return s.db.WithContext(ctx).Model(&ScheduledTask{}).Where("id = ?", taskID).Updates(updates).Error
+}
+
+// TaskExecution operations
+func (s *Store) CreateTaskExecution(ctx context.Context, execution *TaskExecution) error {
+	if execution.ID == "" {
+		execution.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(execution).Error
+}
+
+func (s *Store) GetTaskExecution(ctx context.Context, id string) (*TaskExecution, error) {
+	var execution TaskExecution
+	err := s.db.WithContext(ctx).First(&execution, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("task execution not found")
+		}
+		return nil, err
+	}
+	return &execution, nil
+}
+
+func (s *Store) ListTaskExecutions(ctx context.Context, taskID string, limit int) ([]*TaskExecution, error) {
+	var executions []*TaskExecution
+	query := s.db.WithContext(ctx).Where("task_id = ?", taskID).Order("started_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Find(&executions).Error
+	return executions, err
+}
+
+func (s *Store) ListServerTaskExecutions(ctx context.Context, serverID string, limit int) ([]*TaskExecution, error) {
+	var executions []*TaskExecution
+	query := s.db.WithContext(ctx).Where("server_id = ?", serverID).Order("started_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Find(&executions).Error
+	return executions, err
+}
+
+func (s *Store) UpdateTaskExecution(ctx context.Context, execution *TaskExecution) error {
+	return s.db.WithContext(ctx).Save(execution).Error
+}
+
+func (s *Store) DeleteTaskExecutions(ctx context.Context, taskID string) error {
+	return s.db.WithContext(ctx).Where("task_id = ?", taskID).Delete(&TaskExecution{}).Error
+}
+
+func (s *Store) CleanOldTaskExecutions(ctx context.Context, olderThan time.Time, keepMinimum int) error {
+	// Get all task IDs
+	var taskIDs []string
+	if err := s.db.WithContext(ctx).Model(&ScheduledTask{}).Pluck("id", &taskIDs).Error; err != nil {
+		return err
+	}
+
+	for _, taskID := range taskIDs {
+		// Count total executions for this task
+		var count int64
+		if err := s.db.WithContext(ctx).Model(&TaskExecution{}).Where("task_id = ?", taskID).Count(&count).Error; err != nil {
+			continue
+		}
+
+		// Only delete if we have more than the minimum to keep
+		if count > int64(keepMinimum) {
+			// Get the IDs of executions we want to keep (the most recent ones)
+			var keepIDs []string
+			s.db.WithContext(ctx).Model(&TaskExecution{}).
+				Where("task_id = ?", taskID).
+				Order("started_at DESC").
+				Limit(keepMinimum).
+				Pluck("id", &keepIDs)
+
+			// Delete old executions that are not in the keep list
+			s.db.WithContext(ctx).
+				Where("task_id = ? AND started_at < ? AND id NOT IN ?", taskID, olderThan, keepIDs).
+				Delete(&TaskExecution{})
+		}
+	}
+	return nil
 }

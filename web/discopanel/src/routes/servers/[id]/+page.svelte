@@ -24,6 +24,7 @@
 	import ServerMods from '$lib/components/server-mods.svelte';
 	import ServerFiles from '$lib/components/server-files.svelte';
 	import ServerRouting from '$lib/components/server-routing.svelte';
+	import ServerTasks from '$lib/components/server-tasks.svelte';
 
 	let server = $state<Server | null>(null);
 	let loading = $state(true);
@@ -701,12 +702,13 @@
 			activeTab = value
 		}}>
 			<div class="flex-shrink-0 w-full overflow-x-auto">
-				<TabsList class="inline-flex w-full min-w-max sm:grid sm:grid-cols-6 h-12 sm:h-14 p-1 bg-muted/50 backdrop-blur-sm">
+				<TabsList class="inline-flex w-full min-w-max sm:grid sm:grid-cols-7 h-12 sm:h-14 p-1 bg-muted/50 backdrop-blur-sm">
 					<TabsTrigger value="overview" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Overview</TabsTrigger>
 					<TabsTrigger value="console" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Console</TabsTrigger>
 					<TabsTrigger value="configuration" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Config</TabsTrigger>
 					<TabsTrigger value="mods" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Mods</TabsTrigger>
 					<TabsTrigger value="files" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Files</TabsTrigger>
+					<TabsTrigger value="tasks" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Tasks</TabsTrigger>
 					<TabsTrigger value="routing" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Routing</TabsTrigger>
 				</TabsList>
 			</div>
@@ -738,6 +740,10 @@
 
 				<TabsContent value="files" class="h-full">
 					<ServerFiles {server} active={activeTab === 'files'} />
+				</TabsContent>
+
+				<TabsContent value="tasks" class="h-full overflow-y-auto">
+					<ServerTasks {server} active={activeTab === 'tasks'} />
 				</TabsContent>
 
 				<TabsContent value="routing" class="h-full overflow-y-auto">

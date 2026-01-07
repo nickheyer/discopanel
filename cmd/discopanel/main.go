@@ -15,6 +15,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc"
+	"github.com/nickheyer/discopanel/internal/scheduler"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -165,8 +166,19 @@ func main() {
 	}
 	defer proxyManager.Stop()
 
+	// Initialize task scheduler
+	taskScheduler := scheduler.NewScheduler(store, dockerClient, log, scheduler.Config{
+		CheckInterval: time.Duration(cfg.Docker.SyncInterval) * time.Second, // Use same interval as container status monitor
+	})
+
+	// Start the scheduler
+	if err := taskScheduler.Start(); err != nil {
+		log.Error("Failed to start task scheduler: %v", err)
+	}
+	defer taskScheduler.Stop()
+
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, log)
+	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, log)
 
 	// Auto-start servers that have auto_start enabled
 	log.Info("Checking for servers with auto-start enabled...")

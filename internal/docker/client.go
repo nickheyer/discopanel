@@ -638,7 +638,7 @@ func (c *Client) GetContainerStats(ctx context.Context, containerID string) (*Co
 	}
 	defer statsResponse.Body.Close()
 
-	var stats container.Stats
+	var stats container.StatsResponse
 	if err := json.NewDecoder(statsResponse.Body).Decode(&stats); err != nil {
 		return nil, err
 	}
@@ -672,15 +672,15 @@ func (c *Client) GetContainerStats(ctx context.Context, containerID string) (*Co
 	}, nil
 }
 
-// ExecCommand executes a command inside the container and returns the output
-func (c *Client) ExecCommand(ctx context.Context, containerID string, command string) (string, error) {
+// Runs shell command, script, or executable inside the container and returns the output
+func (c *Client) Exec(ctx context.Context, containerID string, execCmd []string) (string, error) {
 	// Create exec configuration
 	execConfig := container.ExecOptions{
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
 		Tty:          false,
-		Cmd:          []string{"rcon-cli", command},
+		Cmd:          execCmd, //[]string{"rcon-cli", command},
 	}
 
 	// Create exec instance
@@ -714,6 +714,11 @@ func (c *Client) ExecCommand(ctx context.Context, containerID string, command st
 	}
 
 	return outputBuf.String(), nil
+}
+
+// ExecCommand executes a command inside the container and returns the output
+func (c *Client) ExecCommand(ctx context.Context, containerID string, command string) (string, error) {
+	return c.Exec(ctx, containerID, []string{"rcon-cli", command})
 }
 
 func (c *Client) pullImage(ctx context.Context, imageName string) error {

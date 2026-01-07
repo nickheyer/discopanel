@@ -421,3 +421,98 @@ type Session struct {
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
 }
+
+// TaskType defines the type of scheduled task
+type TaskType string
+
+const (
+	TaskTypeCommand TaskType = "command"  // Execute an RCON command
+	TaskTypeBackup  TaskType = "backup"   // Create a backup
+	TaskTypeRestart TaskType = "restart"  // Restart the server
+	TaskTypeStart   TaskType = "start"    // Start the server
+	TaskTypeStop    TaskType = "stop"     // Stop the server
+	TaskTypeScript  TaskType = "script"   // Run a custom script
+)
+
+// TaskStatus defines the status of a scheduled task
+type TaskStatus string
+
+const (
+	TaskStatusEnabled  TaskStatus = "enabled"  // Task is active and will run
+	TaskStatusDisabled TaskStatus = "disabled" // Task exists but won't run
+	TaskStatusPaused   TaskStatus = "paused"   // Temporarily paused
+)
+
+// ScheduleType defines how the task is scheduled
+type ScheduleType string
+
+const (
+	ScheduleTypeCron     ScheduleType = "cron"     // Cron expression (e.g., "0 * * * *")
+	ScheduleTypeInterval ScheduleType = "interval" // Fixed interval in seconds
+	ScheduleTypeOnce     ScheduleType = "once"     // Run once at specific time
+)
+
+// ScheduledTask represents a scheduled task for a server
+type ScheduledTask struct {
+	ID          string       `json:"id" gorm:"primaryKey"`
+	ServerID    string       `json:"server_id" gorm:"not null;index;column:server_id"`
+	Name        string       `json:"name" gorm:"not null"`
+	Description string       `json:"description"`
+	TaskType    TaskType     `json:"task_type" gorm:"not null;column:task_type"`
+	Status      TaskStatus   `json:"status" gorm:"not null;default:enabled"`
+	Schedule    ScheduleType `json:"schedule" gorm:"not null"`
+
+	// Schedule configuration
+	CronExpr      string     `json:"cron_expr" gorm:"column:cron_expr"`          // For cron schedule type
+	IntervalSecs  int        `json:"interval_secs" gorm:"column:interval_secs"`  // For interval schedule type
+	RunAt         *time.Time `json:"run_at" gorm:"column:run_at"`                // For once schedule type
+	NextRun       *time.Time `json:"next_run" gorm:"index;column:next_run"`      // Computed next run time
+	LastRun       *time.Time `json:"last_run" gorm:"column:last_run"`            // Last execution time
+	Timezone      string     `json:"timezone" gorm:"default:UTC"`                // Timezone for schedule
+
+	// Task-specific configuration (JSON)
+	Config string `json:"config" gorm:"type:text"` // JSON config based on task type
+
+	// Execution settings
+	Timeout         int  `json:"timeout" gorm:"default:300"`          // Timeout in seconds (default 5 min)
+	RetryCount      int  `json:"retry_count" gorm:"default:0"`        // Number of retries on failure
+	RetryDelay      int  `json:"retry_delay" gorm:"default:60"`       // Delay between retries in seconds
+	RequireOnline   bool `json:"require_online" gorm:"default:true"`  // Only run if server is online
+	FailureNotify   bool `json:"failure_notify" gorm:"default:false"` // Notify on failure (future feature)
+
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+
+	Server *Server `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+}
+
+// ExecutionStatus defines the status of a task execution
+type ExecutionStatus string
+
+const (
+	ExecutionStatusPending   ExecutionStatus = "pending"   // Queued for execution
+	ExecutionStatusRunning   ExecutionStatus = "running"   // Currently executing
+	ExecutionStatusCompleted ExecutionStatus = "completed" // Finished successfully
+	ExecutionStatusFailed    ExecutionStatus = "failed"    // Failed with error
+	ExecutionStatusSkipped   ExecutionStatus = "skipped"   // Skipped (e.g., server offline)
+	ExecutionStatusCancelled ExecutionStatus = "cancelled" // Cancelled by user
+	ExecutionStatusTimeout   ExecutionStatus = "timeout"   // Timed out
+)
+
+// TaskExecution represents a single execution of a scheduled task
+type TaskExecution struct {
+	ID        string          `json:"id" gorm:"primaryKey"`
+	TaskID    string          `json:"task_id" gorm:"not null;index;column:task_id"`
+	ServerID  string          `json:"server_id" gorm:"not null;index;column:server_id"`
+	Status    ExecutionStatus `json:"status" gorm:"not null"`
+	StartedAt time.Time       `json:"started_at" gorm:"not null;column:started_at"`
+	EndedAt   *time.Time      `json:"ended_at" gorm:"column:ended_at"`
+	Duration  int64           `json:"duration" gorm:"default:0"` // Duration in milliseconds
+	Output    string          `json:"output" gorm:"type:text"`   // Output or result
+	Error     string          `json:"error" gorm:"type:text"`    // Error message if failed
+	RetryNum  int             `json:"retry_num" gorm:"default:0;column:retry_num"` // Which retry attempt (0 = first try)
+	Trigger   string          `json:"trigger" gorm:"default:scheduled"`            // "scheduled", "manual", "startup"
+
+	Task   *ScheduledTask `json:"-" gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE"`
+	Server *Server        `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+}

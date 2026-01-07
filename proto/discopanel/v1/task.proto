@@ -1,0 +1,301 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// Task scheduling and management service
+service TaskService {
+  // List all tasks for a server
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  // Get a specific task
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  // Create a new scheduled task
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+  // Update an existing task
+  rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
+  // Delete a task
+  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse);
+  // Toggle task enabled/disabled status
+  rpc ToggleTask(ToggleTaskRequest) returns (ToggleTaskResponse);
+  // Manually trigger a task execution
+  rpc TriggerTask(TriggerTaskRequest) returns (TriggerTaskResponse);
+  // Get execution history for a task
+  rpc ListTaskExecutions(ListTaskExecutionsRequest) returns (ListTaskExecutionsResponse);
+  // Get execution history for a server
+  rpc ListServerExecutions(ListServerExecutionsRequest) returns (ListServerExecutionsResponse);
+  // Get a specific execution
+  rpc GetTaskExecution(GetTaskExecutionRequest) returns (GetTaskExecutionResponse);
+  // Cancel a running execution
+  rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
+  // Get scheduler status
+  rpc GetSchedulerStatus(GetSchedulerStatusRequest) returns (GetSchedulerStatusResponse);
+}
+
+// Task type enumeration
+enum TaskType {
+  TASK_TYPE_UNSPECIFIED = 0;
+  TASK_TYPE_COMMAND = 1;   // Execute an RCON command
+  TASK_TYPE_BACKUP = 2;    // Create a backup
+  TASK_TYPE_RESTART = 3;   // Restart the server
+  TASK_TYPE_START = 4;     // Start the server
+  TASK_TYPE_STOP = 5;      // Stop the server
+  TASK_TYPE_SCRIPT = 6;    // Run a custom script
+}
+
+// Task status enumeration
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_ENABLED = 1;
+  TASK_STATUS_DISABLED = 2;
+  TASK_STATUS_PAUSED = 3;
+}
+
+// Schedule type enumeration
+enum ScheduleType {
+  SCHEDULE_TYPE_UNSPECIFIED = 0;
+  SCHEDULE_TYPE_CRON = 1;     // Cron expression
+  SCHEDULE_TYPE_INTERVAL = 2; // Fixed interval
+  SCHEDULE_TYPE_ONCE = 3;     // Run once at specific time
+}
+
+// Execution status enumeration
+enum ExecutionStatus {
+  EXECUTION_STATUS_UNSPECIFIED = 0;
+  EXECUTION_STATUS_PENDING = 1;
+  EXECUTION_STATUS_RUNNING = 2;
+  EXECUTION_STATUS_COMPLETED = 3;
+  EXECUTION_STATUS_FAILED = 4;
+  EXECUTION_STATUS_SKIPPED = 5;
+  EXECUTION_STATUS_CANCELLED = 6;
+  EXECUTION_STATUS_TIMEOUT = 7;
+}
+
+// Scheduled task definition
+message ScheduledTask {
+  string id = 1;
+  string server_id = 2;
+  string name = 3;
+  string description = 4;
+  TaskType task_type = 5;
+  TaskStatus status = 6;
+  ScheduleType schedule = 7;
+
+  // Schedule configuration
+  string cron_expr = 8;
+  int32 interval_secs = 9;
+  google.protobuf.Timestamp run_at = 10;
+  google.protobuf.Timestamp next_run = 11;
+  google.protobuf.Timestamp last_run = 12;
+  string timezone = 13;
+
+  // Task configuration (JSON string based on task type)
+  string config = 14;
+
+  // Execution settings
+  int32 timeout = 15;
+  int32 retry_count = 16;
+  int32 retry_delay = 17;
+  bool require_online = 18;
+  bool failure_notify = 19;
+
+  google.protobuf.Timestamp created_at = 20;
+  google.protobuf.Timestamp updated_at = 21;
+}
+
+// Task execution record
+message TaskExecution {
+  string id = 1;
+  string task_id = 2;
+  string server_id = 3;
+  ExecutionStatus status = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp ended_at = 6;
+  int64 duration = 7; // Duration in milliseconds
+  string output = 8;
+  string error = 9;
+  int32 retry_num = 10;
+  string trigger = 11; // "scheduled", "manual", "startup"
+}
+
+// Task configuration for different task types
+message CommandTaskConfig {
+  string command = 1; // RCON command to execute
+}
+
+// Configuration for backup tasks
+message BackupTaskConfig {
+  string backup_name = 1;    // Name pattern for backup
+  repeated string paths = 2; // Paths to include (empty = full backup)
+  bool compress = 3;         // Whether to compress
+  int32 retention_days = 4;  // Days to keep backup (0 = forever)
+}
+
+// Configuration for script execution tasks
+message ScriptTaskConfig {
+  string script_path = 1; // Path to script file
+  repeated string args = 2; // Script arguments
+}
+
+// List tasks request
+message ListTasksRequest {
+  string server_id = 1;
+}
+
+// List of scheduled tasks
+message ListTasksResponse {
+  repeated ScheduledTask tasks = 1;
+}
+
+// Get task request
+message GetTaskRequest {
+  string id = 1;
+}
+
+// Single task details
+message GetTaskResponse {
+  ScheduledTask task = 1;
+}
+
+// Create task request
+message CreateTaskRequest {
+  string server_id = 1;
+  string name = 2;
+  string description = 3;
+  TaskType task_type = 4;
+  ScheduleType schedule = 5;
+
+  // Schedule configuration (one of these based on schedule type)
+  string cron_expr = 6;
+  int32 interval_secs = 7;
+  google.protobuf.Timestamp run_at = 8;
+  string timezone = 9;
+
+  // Task configuration (JSON)
+  string config = 10;
+
+  // Execution settings
+  int32 timeout = 11;
+  int32 retry_count = 12;
+  int32 retry_delay = 13;
+  bool require_online = 14;
+}
+
+// Newly created task
+message CreateTaskResponse {
+  ScheduledTask task = 1;
+}
+
+// Update task request
+message UpdateTaskRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional TaskType task_type = 4;
+  optional ScheduleType schedule = 5;
+
+  // Schedule configuration
+  optional string cron_expr = 6;
+  optional int32 interval_secs = 7;
+  optional google.protobuf.Timestamp run_at = 8;
+  optional string timezone = 9;
+
+  // Task configuration
+  optional string config = 10;
+
+  // Execution settings
+  optional int32 timeout = 11;
+  optional int32 retry_count = 12;
+  optional int32 retry_delay = 13;
+  optional bool require_online = 14;
+}
+
+// Updated task details
+message UpdateTaskResponse {
+  ScheduledTask task = 1;
+}
+
+// Delete task request
+message DeleteTaskRequest {
+  string id = 1;
+}
+
+// Empty response for successful deletion
+message DeleteTaskResponse {}
+
+// Toggle task request
+message ToggleTaskRequest {
+  string id = 1;
+  TaskStatus status = 2;
+}
+
+// Task with updated status
+message ToggleTaskResponse {
+  ScheduledTask task = 1;
+}
+
+// Trigger task request
+message TriggerTaskRequest {
+  string id = 1;
+}
+
+// Triggered execution details
+message TriggerTaskResponse {
+  TaskExecution execution = 1;
+}
+
+// List task executions request
+message ListTaskExecutionsRequest {
+  string task_id = 1;
+  int32 limit = 2; // 0 = no limit
+}
+
+// List of task executions
+message ListTaskExecutionsResponse {
+  repeated TaskExecution executions = 1;
+}
+
+// List server executions request
+message ListServerExecutionsRequest {
+  string server_id = 1;
+  int32 limit = 2;
+}
+
+// List of server executions
+message ListServerExecutionsResponse {
+  repeated TaskExecution executions = 1;
+}
+
+// Get execution request
+message GetTaskExecutionRequest {
+  string id = 1;
+}
+
+// Single execution details
+message GetTaskExecutionResponse {
+  TaskExecution execution = 1;
+}
+
+// Cancel execution request
+message CancelExecutionRequest {
+  string id = 1;
+}
+
+// Cancelled execution details
+message CancelExecutionResponse {
+  TaskExecution execution = 1;
+}
+
+// Get scheduler status request
+message GetSchedulerStatusRequest {}
+
+// Current scheduler status
+message GetSchedulerStatusResponse {
+  bool running = 1;
+  int32 active_tasks = 2;
+  int32 running_executions = 3;
+  google.protobuf.Timestamp last_check = 4;
+  google.protobuf.Timestamp next_check = 5;
+}

@@ -14,6 +14,7 @@ import { ModpackService } from '$lib/proto/discopanel/v1/modpack_pb';
 import { ProxyService } from '$lib/proto/discopanel/v1/proxy_pb';
 import { ServerService } from '$lib/proto/discopanel/v1/server_pb';
 import { SupportService } from '$lib/proto/discopanel/v1/support_pb';
+import { TaskService } from '$lib/proto/discopanel/v1/task_pb';
 import { UserService } from '$lib/proto/discopanel/v1/user_pb';
 
 // Login auth interception
@@ -65,6 +66,7 @@ export class RpcClient {
   public readonly proxy: Client<typeof ProxyService>;
   public readonly server: Client<typeof ServerService>;
   public readonly support: Client<typeof SupportService>;
+  public readonly task: Client<typeof TaskService>;
   public readonly user: Client<typeof UserService>;
 
   constructor() {
@@ -77,6 +79,7 @@ export class RpcClient {
     this.proxy = createClient(ProxyService, transport);
     this.server = createClient(ServerService, transport);
     this.support = createClient(SupportService, transport);
+    this.task = createClient(TaskService, transport);
     this.user = createClient(UserService, transport);
   }
 }

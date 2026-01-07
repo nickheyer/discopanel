@@ -8,6 +8,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -21,18 +22,22 @@ var _ discopanelv1connect.ProxyServiceHandler = (*ProxyService)(nil)
 // ProxyService implements the Proxy service
 type ProxyService struct {
 	store        *storage.Store
+	docker       *docker.Client
 	proxyManager *proxy.Manager
 	config       *config.Config
 	log          *logger.Logger
+	logStreamer  *logger.LogStreamer
 }
 
 // NewProxyService creates a new proxy service
-func NewProxyService(store *storage.Store, proxyManager *proxy.Manager, cfg *config.Config, log *logger.Logger) *ProxyService {
+func NewProxyService(store *storage.Store, dockerClient *docker.Client, proxyManager *proxy.Manager, cfg *config.Config, logStreamer *logger.LogStreamer, log *logger.Logger) *ProxyService {
 	return &ProxyService{
 		store:        store,
+		docker:       dockerClient,
 		proxyManager: proxyManager,
 		config:       cfg,
 		log:          log,
+		logStreamer:  logStreamer,
 	}
 }
 
@@ -408,6 +413,9 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
+	// Store old proxy hostname to detect if container recreation is needed
+	oldProxyHostname := server.ProxyHostname
+
 	// Validate hostname
 	hostname := strings.TrimSpace(strings.ToLower(msg.ProxyHostname))
 	if hostname != "" {
@@ -429,16 +437,94 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 		}
 	}
 
+	// Determine if container recreation is needed
+	// Recreation is needed when proxy status changes (empty <-> non-empty)
+	// because Docker port bindings are set at container creation time
+	needsRecreation := (oldProxyHostname == "") != (hostname == "")
+
 	// Update server hostname
 	server.ProxyHostname = hostname
 	if err := s.store.UpdateServer(ctx, server); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
 	}
 
+	// Handle container recreation if proxy mode changed
+	if needsRecreation && server.ContainerID != "" && s.docker != nil {
+		wasRunning := false
+
+		// Check container status
+		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+		if err != nil {
+			s.log.Debug("Container %s not found during routing update: %v", server.ContainerID, err)
+		} else if status == storage.StatusRunning || status == storage.StatusUnhealthy {
+			wasRunning = true
+			// Stop log streaming before stopping container
+			if s.logStreamer != nil {
+				s.logStreamer.StopStreaming(server.ContainerID)
+			}
+			// Stop the container
+			if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+				s.log.Error("Failed to stop container for proxy mode change: %v", err)
+			}
+		}
+
+		// Remove old container
+		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
+			s.log.Debug("Could not remove old container (may not exist): %v", err)
+		}
+
+		// Get server config for container creation
+		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+		if err != nil {
+			s.log.Error("Failed to get server config: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
+		}
+
+		// Create new container with updated proxy settings (and thus correct port bindings)
+		newContainerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+		if err != nil {
+			s.log.Error("Failed to create new container: %v", err)
+			server.Status = storage.StatusError
+			server.ContainerID = ""
+		} else {
+			server.ContainerID = newContainerID
+			server.Status = storage.StatusStopped
+
+			// Start container if it was running before
+			if wasRunning {
+				if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
+					s.log.Error("Failed to restart container after proxy mode change: %v", err)
+					server.Status = storage.StatusError
+				} else {
+					server.Status = storage.StatusRunning
+					// Start log streaming for new container
+					if s.logStreamer != nil {
+						if err := s.logStreamer.StartStreaming(newContainerID); err != nil {
+							s.log.Error("Failed to start log streaming after proxy mode change: %v", err)
+						}
+					}
+				}
+			}
+		}
+
+		// Update server with new container ID and status
+		if err := s.store.UpdateServer(ctx, server); err != nil {
+			s.log.Error("Failed to update server after container recreation: %v", err)
+		}
+
+		s.log.Info("Container recreated for server %s due to proxy mode change (proxy: %v -> %v)",
+			server.Name, oldProxyHostname != "", hostname != "")
+	}
+
 	// Update proxy route
 	if s.proxyManager != nil {
-		if err := s.proxyManager.UpdateServerRoute(server); err != nil {
-			s.log.Error("Failed to update proxy route: %v", err)
+		if hostname != "" {
+			if err := s.proxyManager.UpdateServerRoute(server); err != nil {
+				s.log.Error("Failed to update proxy route: %v", err)
+			}
+		} else {
+			// Remove route when proxy is disabled
+			s.proxyManager.RemoveServerRoute(server.ID)
 		}
 	}
 

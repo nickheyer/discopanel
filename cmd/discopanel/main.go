@@ -13,6 +13,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc"
 	"github.com/nickheyer/discopanel/internal/scheduler"
@@ -177,8 +178,15 @@ func main() {
 	}
 	defer taskScheduler.Stop()
 
+	// Initialize metrics collector
+	metricsCollector := metrics.NewCollector(store, dockerClient, cfg, log)
+	if err := metricsCollector.Start(); err != nil {
+		log.Error("Failed to start metrics collector: %v", err)
+	}
+	defer metricsCollector.Stop()
+
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, log)
+	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, metricsCollector, log)
 
 	// Auto-start servers that have auto_start enabled
 	log.Info("Checking for servers with auto-start enabled...")

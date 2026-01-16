@@ -12,6 +12,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc/services"
 	"github.com/nickheyer/discopanel/internal/scheduler"
@@ -24,20 +25,21 @@ import (
 
 // Server represents the Connect RPC server
 type Server struct {
-	store          *storage.Store
-	docker         *docker.Client
-	config         *config.Config
-	log            *logger.Logger
-	handler        http.Handler
-	proxyManager   *proxy.Manager
-	authManager    *auth.Manager
-	authMiddleware *auth.Middleware
-	logStreamer    *logger.LogStreamer
-	scheduler      *scheduler.Scheduler
+	store            *storage.Store
+	docker           *docker.Client
+	config           *config.Config
+	log              *logger.Logger
+	handler          http.Handler
+	proxyManager     *proxy.Manager
+	authManager      *auth.Manager
+	authMiddleware   *auth.Middleware
+	logStreamer      *logger.LogStreamer
+	scheduler        *scheduler.Scheduler
+	metricsCollector *metrics.Collector
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, log *logger.Logger) *Server {
 	// Initialize auth manager
 	authManager := auth.NewManager(store)
 	authMiddleware := auth.NewMiddleware(authManager, store)
@@ -52,15 +54,16 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	docker.SetLogStreamer(logStreamer)
 
 	s := &Server{
-		store:          store,
-		docker:         docker,
-		config:         cfg,
-		log:            log,
-		proxyManager:   proxyManager,
-		authManager:    authManager,
-		authMiddleware: authMiddleware,
-		logStreamer:    logStreamer,
-		scheduler:      sched,
+		store:            store,
+		docker:           docker,
+		config:           cfg,
+		log:              log,
+		proxyManager:     proxyManager,
+		authManager:      authManager,
+		authMiddleware:   authMiddleware,
+		logStreamer:      logStreamer,
+		scheduler:        sched,
+		metricsCollector: metricsCollector,
 	}
 
 	s.setupHandler()
@@ -123,7 +126,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	modService := services.NewModService(s.store, s.docker, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)

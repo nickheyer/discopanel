@@ -17,6 +17,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/files"
@@ -31,23 +32,25 @@ var _ discopanelv1connect.ServerServiceHandler = (*ServerService)(nil)
 
 // ServerService implements the Server service
 type ServerService struct {
-	store       *storage.Store
-	docker      *docker.Client
-	config      *config.Config
-	proxy       *proxy.Manager
-	log         *logger.Logger
-	logStreamer *logger.LogStreamer
+	store            *storage.Store
+	docker           *docker.Client
+	config           *config.Config
+	proxy            *proxy.Manager
+	log              *logger.Logger
+	logStreamer      *logger.LogStreamer
+	metricsCollector *metrics.Collector
 }
 
 // NewServerService creates a new server service
-func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, logStreamer *logger.LogStreamer, log *logger.Logger) *ServerService {
+func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, log *logger.Logger) *ServerService {
 	return &ServerService{
-		store:       store,
-		docker:      docker,
-		config:      config,
-		proxy:       proxy,
-		log:         log,
-		logStreamer: logStreamer,
+		store:            store,
+		docker:           docker,
+		config:           config,
+		proxy:            proxy,
+		log:              log,
+		logStreamer:      logStreamer,
+		metricsCollector: metricsCollector,
 	}
 }
 
@@ -224,14 +227,7 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 		}
 	}
 
-	// Get total disk space available
-	diskTotal, err := files.GetDiskSpace(s.config.Storage.DataDir)
-	if err != nil {
-		s.log.Debug("Unable to get disk space available: %v", err)
-		diskTotal = 0
-	}
-
-	// Update status from Docker
+	// Update status from Docker and apply cached metrics
 	for _, server := range servers {
 		// If server uses proxy, ensure ProxyPort is populated from the listener
 		if server.ProxyHostname != "" && server.ProxyListenerID != "" && listeners != nil {
@@ -246,49 +242,15 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 				server.Status = status
 			}
 
-			// Only get expensive stats if requested
-			if req.Msg.FullStats && (status == storage.StatusRunning || status == storage.StatusUnhealthy) {
-				// Get container stats
-				stats, err := s.docker.GetContainerStats(ctx, server.ContainerID)
-				if err == nil {
-					server.MemoryUsage = stats.MemoryUsage
-					server.CPUPercent = stats.CPUPercent
-				}
-
-				// Calculate disk usage for world directory
-				worldPath, err := files.FindWorldDir(server.DataPath)
-				if err == nil {
-					totalSize, err := files.CalculateDirSize(worldPath)
-					if err == nil {
-						server.DiskUsage = totalSize
-					}
-				}
-
-				server.DiskTotal = diskTotal
-
-				// Get player count using rcon-cli
-				output, err := s.docker.ExecCommand(ctx, server.ContainerID, "list")
-				if err == nil && output != "" {
-					count, _ := minecraft.ParsePlayerListFromOutput(output)
-					server.PlayersOnline = count
-				}
-
-				// Get TPS if configured
-				if server.TPSCommand != "" {
-					for _, cmd := range strings.Split(server.TPSCommand, " ?? ") {
-						cmd = strings.TrimSpace(cmd)
-						if cmd == "" {
-							continue
-						}
-						output, err := s.docker.ExecCommand(ctx, server.ContainerID, cmd)
-						if err == nil && output != "" {
-							tps := minecraft.ParseTPSFromOutput(output)
-							if tps > 0 {
-								server.TPS = tps
-								break
-							}
-						}
-					}
+			// Apply cached metrics from the background collector
+			if s.metricsCollector != nil {
+				if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
+					server.MemoryUsage = m.MemoryUsage
+					server.CPUPercent = m.CPUPercent
+					server.DiskUsage = m.DiskUsage
+					server.DiskTotal = m.DiskTotal
+					server.PlayersOnline = m.PlayersOnline
+					server.TPS = m.TPS
 				}
 			}
 		}
@@ -320,62 +282,23 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 		}
 	}
 
-	// Update status and stats from Docker
+	// Update status from Docker
 	if server.ContainerID != "" {
 		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
 		if err == nil {
 			server.Status = status
+		}
+	}
 
-			// Only get stats if server is running or unhealthy
-			if status == storage.StatusRunning || status == storage.StatusUnhealthy {
-				stats, err := s.docker.GetContainerStats(ctx, server.ContainerID)
-				if err == nil {
-					server.MemoryUsage = stats.MemoryUsage
-					server.CPUPercent = stats.CPUPercent
-				}
-			}
-
-			if status == storage.StatusRunning {
-				// Calculate world directory size
-				worldPath, err := files.FindWorldDir(server.DataPath)
-				if err == nil {
-					totalSize, err := files.CalculateDirSize(worldPath)
-					if err == nil {
-						server.DiskUsage = totalSize
-					}
-				}
-
-				// Get total disk space
-				diskTotal, err := files.GetDiskSpace(server.DataPath)
-				if err == nil {
-					server.DiskTotal = diskTotal
-				}
-
-				// Get player count using rcon-cli
-				output, err := s.docker.ExecCommand(ctx, server.ContainerID, "list")
-				if err == nil && output != "" {
-					count, _ := minecraft.ParsePlayerListFromOutput(output)
-					server.PlayersOnline = count
-				}
-
-				// Get TPS if configured
-				if server.TPSCommand != "" {
-					for cmd := range strings.SplitSeq(server.TPSCommand, " ?? ") {
-						cmd = strings.TrimSpace(cmd)
-						if cmd == "" {
-							continue
-						}
-						output, err := s.docker.ExecCommand(ctx, server.ContainerID, cmd)
-						if err == nil && output != "" {
-							tps := minecraft.ParseTPSFromOutput(output)
-							if tps > 0 {
-								server.TPS = tps
-								break
-							}
-						}
-					}
-				}
-			}
+	// Apply cached metrics from the background collector
+	if s.metricsCollector != nil {
+		if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
+			server.MemoryUsage = m.MemoryUsage
+			server.CPUPercent = m.CPUPercent
+			server.DiskUsage = m.DiskUsage
+			server.DiskTotal = m.DiskTotal
+			server.PlayersOnline = m.PlayersOnline
+			server.TPS = m.TPS
 		}
 	}
 

@@ -205,7 +205,7 @@ func (s *ConfigService) recreateContainer(ctx context.Context, server *storage.S
 	wasRunning := false
 	if server.Status == storage.StatusRunning {
 		wasRunning = true
-		if err := s.docker.StopContainer(ctx, oldContainerID); err != nil {
+		if _, err := s.docker.StopContainer(ctx, oldContainerID); err != nil {
 			return err
 		}
 		time.Sleep(2 * time.Second)

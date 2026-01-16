@@ -31,6 +31,8 @@ service ServerService {
   rpc StopServer(StopServerRequest) returns (StopServerResponse);
   // Stop and start container
   rpc RestartServer(RestartServerRequest) returns (RestartServerResponse);
+  // Destroy and recreate container from scratch
+  rpc RecreateServer(RecreateServerRequest) returns (RecreateServerResponse);
   // Execute console command
   rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
 }
@@ -187,6 +189,16 @@ message RestartServerRequest {
 
 // Restart operation status
 message RestartServerResponse {
+  string status = 1;
+}
+
+// Server to recreate
+message RecreateServerRequest {
+  string id = 1;
+}
+
+// Recreate operation status
+message RecreateServerResponse {
   string status = 1;
 }
 

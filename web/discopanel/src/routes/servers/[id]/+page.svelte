@@ -10,13 +10,14 @@
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { toast } from 'svelte-sonner';
-	import { Play, Square, RotateCw, Package, Activity, Loader2, Copy, ExternalLink, Trash2, Cpu, Info } from '@lucide/svelte';
+	import { Play, Square, RotateCw, RefreshCcw, MoreVertical, Package, Activity, Loader2, Copy, ExternalLink, Trash2, Cpu, Info } from '@lucide/svelte';
+	import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '$lib/components/ui/dropdown-menu';
 	import { create } from '@bufbuild/protobuf';
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
 	import type { GetServerRoutingResponse } from '$lib/proto/discopanel/v1/proxy_pb';
-	import { GetServerRequestSchema, DeleteServerRequestSchema, StartServerRequestSchema, StopServerRequestSchema, RestartServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
+	import { GetServerRequestSchema, DeleteServerRequestSchema, StartServerRequestSchema, StopServerRequestSchema, RestartServerRequestSchema, RecreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import { formatBytes } from '$lib/utils';
 	import ServerConsole from '$lib/components/server-console.svelte';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
@@ -90,7 +91,7 @@
 		}
 	}
 
-	async function handleServerAction(action: 'start' | 'stop' | 'restart') {
+	async function handleServerAction(action: 'start' | 'stop' | 'restart' | 'recreate') {
 		if (!server) return;
 
 		actionLoading = true;
@@ -110,6 +111,11 @@
 					const restartRequest = create(RestartServerRequestSchema, { id: server.id });
 					await rpcClient.server.restartServer(restartRequest);
 					toast.success('Server is restarting...');
+					break;
+				case 'recreate':
+					const recreateRequest = create(RecreateServerRequestSchema, { id: server.id });
+					await rpcClient.server.recreateServer(recreateRequest);
+					toast.success('Server is being recreated...');
 					break;
 			}
 			await loadServer();
@@ -271,17 +277,26 @@
 					</Button>
 				{/if}
 				<div class="ml-2 sm:ml-4 h-10 w-px bg-border/50 hidden sm:block"></div>
-				<Button 
-					variant="ghost" 
-					onclick={() => handleDeleteServer()}
-					disabled={actionLoading}
-					size="default"
-					class="text-destructive hover:text-white hover:bg-destructive transition-all hidden sm:flex"
-				>
-					<Trash2 class="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
-					<span class="hidden lg:inline">Delete Server</span>
-					<span class="lg:hidden">Delete</span>
-				</Button>
+				<DropdownMenu>
+					<DropdownMenuTrigger>
+						{#snippet child({ props })}
+							<Button variant="ghost" size="icon" disabled={actionLoading} {...props} class="hidden sm:flex">
+								<MoreVertical class="h-4 w-4" />
+								<span class="sr-only">More actions</span>
+							</Button>
+						{/snippet}
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end">
+						<DropdownMenuItem class="flex flew-row" onclick={() => handleServerAction('recreate')}>
+							<RefreshCcw class="h-4 w-4 mr-2" />
+							Force Recreate
+						</DropdownMenuItem>
+						<DropdownMenuItem class="flex flew-row text-destructive" onclick={() => handleDeleteServer()}>
+							<Trash2 class="h-4 w-4 mr-2" />
+							Delete Server
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
 			</div>
 		</div>
 

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
@@ -488,7 +489,9 @@ func (c *Client) StartContainer(ctx context.Context, containerID string) error {
 	return nil
 }
 
-func (c *Client) StopContainer(ctx context.Context, containerID string) error {
+// StopContainer stops a container. Returns (containerFound, error).
+// If container doesn't exist, returns (false, nil) so caller can clean up stale references.
+func (c *Client) StopContainer(ctx context.Context, containerID string) (bool, error) {
 	// Stop log streaming before stopping container
 	if c.logStreamer != nil {
 		c.logStreamer.StopStreaming(containerID)
@@ -501,15 +504,24 @@ func (c *Client) StopContainer(ctx context.Context, containerID string) error {
 	})
 
 	if err != nil {
+		// If container non-existent on stop
+		if errdefs.IsNotFound(err) {
+			c.log.Debug("Container %s not found, treating as already stopped", containerID)
+			return false, nil
+		}
 		// If graceful stop fails, force kill the container
 		c.log.Warn("Graceful stop failed for container %s: %v, attempting force kill", containerID, err)
 		killErr := c.docker.ContainerKill(ctx, containerID, "KILL")
 		if killErr != nil {
-			return fmt.Errorf("failed to stop container: graceful stop error: %v, force kill error: %v", err, killErr)
+			// If container non-existent on kill
+			if errdefs.IsNotFound(killErr) {
+				return false, nil
+			}
+			return false, fmt.Errorf("failed to stop container: graceful stop error: %v, force kill error: %v", err, killErr)
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 func (c *Client) RemoveContainer(ctx context.Context, containerID string) error {
@@ -520,7 +532,7 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string) error 
 
 // Stops and starts a container with an optional delay between operations
 func (c *Client) RestartContainer(ctx context.Context, containerID string, delay time.Duration) error {
-	if err := c.StopContainer(ctx, containerID); err != nil {
+	if _, err := c.StopContainer(ctx, containerID); err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
@@ -557,7 +569,7 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 			c.log.Debug("Container %s not found during recreation: %v", oldContainerID, err)
 		} else if status == models.StatusRunning || status == models.StatusUnhealthy {
 			result.WasRunning = true
-			if err := c.StopContainer(ctx, oldContainerID); err != nil {
+			if _, err := c.StopContainer(ctx, oldContainerID); err != nil {
 				return nil, fmt.Errorf("failed to stop container: %w", err)
 			}
 		}

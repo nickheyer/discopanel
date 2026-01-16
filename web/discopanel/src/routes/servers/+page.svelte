@@ -8,7 +8,7 @@
 	import { serversStore } from '$lib/stores/servers';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import { Plus, Search, MoreVertical, Play, Square, RotateCw, Settings, Package, Trash2, Server as ServerIcon } from '@lucide/svelte';
+	import { Plus, Search, MoreVertical, Play, Square, RotateCw, RefreshCcw, Settings, Trash2, Server as ServerIcon } from '@lucide/svelte';
 	import { type Server, ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
 
 	let servers = $derived($serversStore);
@@ -34,7 +34,7 @@
 		}
 	}
 
-	async function handleServerAction(action: 'start' | 'stop' | 'restart', server: Server) {
+	async function handleServerAction(action: 'start' | 'stop' | 'restart' | 'recreate', server: Server) {
 		loading = true;
 		try {
 			switch (action) {
@@ -49,6 +49,10 @@
 				case 'restart':
 					await rpcClient.server.restartServer({ id: server.id });
 					toast.success(`Restarting ${server.name}...`);
+					break;
+				case 'recreate':
+					await rpcClient.server.recreateServer({ id: server.id });
+					toast.success(`Recreating ${server.name}...`);
 					break;
 			}
 		} catch (error) {
@@ -221,6 +225,10 @@
 											Restart
 										</DropdownMenuItem>
 									{/if}
+									<DropdownMenuItem class="flex flew-row" onclick={() => handleServerAction('recreate', server)}>
+										<RefreshCcw class="h-4 w-4 mr-2" />
+										Recreate
+									</DropdownMenuItem>
 									<DropdownMenuItem class="flex flew-row text-destructive" onclick={() => deleteServer(server)}>
 										<Trash2 class="h-4 w-4 mr-2" />
 										Delete

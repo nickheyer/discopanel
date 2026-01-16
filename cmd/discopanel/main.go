@@ -324,7 +324,7 @@ func main() {
 			log.Info("Skipping shutdown of detached server: %s", server.Name)
 		} else if server.Status == storage.StatusRunning {
 			log.Info("Stopping managed container for server: %s", server.Name)
-			if err := dockerClient.StopContainer(ctx, server.ContainerID); err != nil {
+			if _, err := dockerClient.StopContainer(ctx, server.ContainerID); err != nil {
 				log.Error("Failed to stop container %s: %v", server.ContainerID, err)
 			}
 		}

@@ -413,8 +413,15 @@ func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Serv
 	}
 
 	// Stop container
-	if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+	found, err := s.docker.StopContainer(ctx, server.ContainerID)
+	if err != nil {
 		return "", fmt.Errorf("failed to stop: %w", err)
+	}
+	if !found {
+		server.ContainerID = ""
+		server.Status = storage.StatusStopped
+		s.store.UpdateServer(ctx, server)
+		return "container not found, marked as stopped", nil
 	}
 
 	// Wait a moment
@@ -460,8 +467,15 @@ func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server,
 		return "", fmt.Errorf("server has no container")
 	}
 
-	if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+	found, err := s.docker.StopContainer(ctx, server.ContainerID)
+	if err != nil {
 		return "", fmt.Errorf("failed to stop: %w", err)
+	}
+	if !found {
+		server.ContainerID = ""
+		server.Status = storage.StatusStopped
+		s.store.UpdateServer(ctx, server)
+		return "container not found, marked as stopped", nil
 	}
 
 	server.Status = storage.StatusStopping

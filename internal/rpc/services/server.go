@@ -935,7 +935,7 @@ func (s *ServerService) DeleteServer(ctx context.Context, req *connect.Request[v
 
 	// Stop and remove container
 	if server.ContainerID != "" {
-		if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+		if _, err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
 			s.log.Error("Failed to stop container: %v", err)
 		}
 		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
@@ -964,14 +964,65 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
+	// If container doesn't exist, create it first
 	if server.ContainerID == "" {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("server container not created"))
+		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+		if err != nil {
+			s.log.Error("Failed to get server config: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
+		}
+
+		containerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+		if err != nil {
+			s.log.Error("Failed to create container: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server container"))
+		}
+
+		server.ContainerID = containerID
+		if err := s.store.UpdateServer(ctx, server); err != nil {
+			s.log.Error("Failed to update server with container ID: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
+		}
 	}
 
 	// Start container
 	if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
-		s.log.Error("Failed to start container: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server"))
+		s.log.Error("Failed to start container, attempting to recreate: %v", err)
+
+		// Get server config for container creation
+		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+		if err != nil {
+			s.log.Error("Failed to get server config: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
+		}
+
+		// Recreate container
+		result, err := s.docker.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
+		if err != nil {
+			s.log.Error("Failed to recreate container: %v", err)
+			if result != nil && result.NewContainerID != "" {
+				// Container was created but failed to start
+				server.ContainerID = result.NewContainerID
+				server.Status = storage.StatusError
+			} else {
+				// Complete failure
+				server.Status = storage.StatusError
+				server.ContainerID = ""
+			}
+		} else {
+			server.ContainerID = result.NewContainerID
+			if result.WasRunning {
+				server.Status = storage.StatusRunning
+			} else {
+				server.Status = storage.StatusStopped
+			}
+		}
+
+		// Update server with new container ID and status
+		if err := s.store.UpdateServer(ctx, server); err != nil {
+			s.log.Error("Failed to update server after container recreation: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server after container recreation"))
+		}
 	}
 
 	// Update server status
@@ -1019,13 +1070,20 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 	}
 
 	// Stop container
-	if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+	found, err := s.docker.StopContainer(ctx, server.ContainerID)
+	if err != nil {
 		s.log.Error("Failed to stop container: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop server"))
 	}
 
-	// Update server status
-	server.Status = storage.StatusStopping
+	// If container wasn't found, clean up stale reference
+	if !found {
+		s.log.Warn("Container %s not found, cleaning up stale reference", server.ContainerID)
+		server.ContainerID = ""
+		server.Status = storage.StatusStopped
+	} else {
+		server.Status = storage.StatusStopping
+	}
 
 	if err := s.store.UpdateServer(ctx, server); err != nil {
 		s.log.Error("Failed to update server status: %v", err)
@@ -1038,8 +1096,12 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 		}
 	}
 
+	status := "stopping"
+	if !found {
+		status = "stopped"
+	}
 	return connect.NewResponse(&v1.StopServerResponse{
-		Status: "stopping",
+		Status: status,
 	}), nil
 }
 
@@ -1118,6 +1180,87 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 
 	return connect.NewResponse(&v1.RestartServerResponse{
 		Status: "restarting",
+	}), nil
+}
+
+// Destroys and recreates a server container from scratch - brute force reset
+func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request[v1.RecreateServerRequest]) (*connect.Response[v1.RecreateServerResponse], error) {
+	server, err := s.store.GetServer(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+
+	// Get server config for container creation
+	serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+	if err != nil {
+		s.log.Error("Failed to get server config: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
+	}
+
+	// Stop and remove existing container if it exists
+	if server.ContainerID != "" {
+		// Stopping non existent containers...
+		if _, err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+			s.log.Debug("Failed to stop container during recreate (may not exist): %v", err)
+		}
+
+		// Removing non existent containers...
+		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
+			s.log.Debug("Failed to remove container during recreate (may not exist): %v", err)
+		}
+
+		server.ContainerID = ""
+	}
+
+	// Create new container
+	containerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+	if err != nil {
+		s.log.Error("Failed to create container: %v", err)
+		server.Status = storage.StatusError
+		if updateErr := s.store.UpdateServer(ctx, server); updateErr != nil {
+			s.log.Error("Failed to update server status: %v", updateErr)
+		}
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server container"))
+	}
+
+	server.ContainerID = containerID
+
+	// Start the container
+	if err := s.docker.StartContainer(ctx, containerID); err != nil {
+		s.log.Error("Failed to start container: %v", err)
+		server.Status = storage.StatusError
+		if updateErr := s.store.UpdateServer(ctx, server); updateErr != nil {
+			s.log.Error("Failed to update server status: %v", updateErr)
+		}
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server container"))
+	}
+
+	// Update server status
+	now := time.Now()
+	server.Status = storage.StatusStarting
+	server.LastStarted = &now
+
+	if err := s.store.UpdateServer(ctx, server); err != nil {
+		s.log.Error("Failed to update server: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
+	}
+
+	// Update proxy route if enabled
+	if s.proxy != nil && server.ProxyHostname != "" {
+		if err := s.proxy.UpdateServerRoute(server); err != nil {
+			s.log.Error("Failed to update proxy route: %v", err)
+		}
+	}
+
+	// Clear ephemeral configuration fields
+	if err := s.store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
+		s.log.Error("Failed to clear ephemeral config fields: %v", err)
+	}
+
+	s.log.Info("Server %s recreated successfully with new container %s", server.Name, containerID)
+
+	return connect.NewResponse(&v1.RecreateServerResponse{
+		Status: "recreated",
 	}), nil
 }
 

@@ -1,0 +1,341 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+import "discopanel/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// Sidecar module management service
+service ModuleService {
+  // List all modules for a server
+  rpc ListModules(ListModulesRequest) returns (ListModulesResponse);
+  // Get module details
+  rpc GetModule(GetModuleRequest) returns (GetModuleResponse);
+  // Create new module from template or custom config
+  rpc CreateModule(CreateModuleRequest) returns (CreateModuleResponse);
+  // Update module configuration
+  rpc UpdateModule(UpdateModuleRequest) returns (UpdateModuleResponse);
+  // Delete module and its container
+  rpc DeleteModule(DeleteModuleRequest) returns (DeleteModuleResponse);
+
+  // Start module container
+  rpc StartModule(StartModuleRequest) returns (StartModuleResponse);
+  // Stop module container
+  rpc StopModule(StopModuleRequest) returns (StopModuleResponse);
+  // Restart module container
+  rpc RestartModule(RestartModuleRequest) returns (RestartModuleResponse);
+  // Get module container logs
+  rpc GetModuleLogs(GetModuleLogsRequest) returns (GetModuleLogsResponse);
+
+  // List available module templates
+  rpc ListModuleTemplates(ListModuleTemplatesRequest) returns (ListModuleTemplatesResponse);
+  // Get template details
+  rpc GetModuleTemplate(GetModuleTemplateRequest) returns (GetModuleTemplateResponse);
+  // Create custom template
+  rpc CreateModuleTemplate(CreateModuleTemplateRequest) returns (CreateModuleTemplateResponse);
+  // Delete custom template
+  rpc DeleteModuleTemplate(DeleteModuleTemplateRequest) returns (DeleteModuleTemplateResponse);
+}
+
+// Module container runtime state
+enum ModuleStatus {
+  MODULE_STATUS_UNSPECIFIED = 0;
+  MODULE_STATUS_CREATING = 1;
+  MODULE_STATUS_STARTING = 2;
+  MODULE_STATUS_RUNNING = 3;
+  MODULE_STATUS_STOPPING = 4;
+  MODULE_STATUS_STOPPED = 5;
+  MODULE_STATUS_ERROR = 6;
+  MODULE_STATUS_UNHEALTHY = 7;
+}
+
+// Module type/purpose category
+enum ModuleCategory {
+  MODULE_CATEGORY_UNSPECIFIED = 0;
+  MODULE_CATEGORY_WEBUI = 1;    // Web-based interfaces (status panels)
+  MODULE_CATEGORY_VOICE = 2;    // Voice chat integrations
+  MODULE_CATEGORY_MAP = 3;      // Map renderers (BlueMap, Dynmap)
+  MODULE_CATEGORY_UTILITY = 4;  // Utility tools (backup, monitoring)
+  MODULE_CATEGORY_CUSTOM = 5;   // User-defined custom modules
+}
+
+// Protocol type for proxy routing
+enum ModuleProtocol {
+  MODULE_PROTOCOL_UNSPECIFIED = 0;
+  MODULE_PROTOCOL_HTTP = 1;     // HTTP - multiplexed on proxy port
+  MODULE_PROTOCOL_TCP = 2;      // Raw TCP - dedicated host port
+  MODULE_PROTOCOL_NONE = 3;     // No proxy routing
+}
+
+// Environment variable schema for templates
+message ModuleEnvVarDef {
+  string name = 1;
+  string description = 2;
+  string default_value = 3;
+  bool required = 4;
+  bool is_secret = 5;
+}
+
+// Port schema for templates
+message ModulePortDef {
+  string name = 1;
+  int32 container_port = 2;
+  ModuleProtocol protocol = 3;
+  bool required = 4;
+}
+
+// Configured port for module instance
+message ModulePort {
+  string name = 1;
+  int32 container_port = 2;
+  int32 host_port = 3;
+  ModuleProtocol protocol = 4;
+}
+
+// Module template blueprint
+message ModuleTemplate {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  ModuleCategory category = 4;
+  string docker_image = 5;
+  string icon_url = 6;
+
+  // Configuration schema
+  repeated ModuleEnvVarDef env_var_schema = 7;
+  repeated ModulePortDef port_schema = 8;
+  DockerOverrides default_overrides = 9;
+
+  // Server integration
+  bool inject_server_host = 10;
+  bool inject_rcon = 11;
+  bool share_server_data = 12;
+
+  // Default proxy settings
+  ModuleProtocol default_protocol = 13;
+  int32 default_port = 14;
+
+  // Metadata
+  bool is_builtin = 15;
+  string version = 16;
+
+  google.protobuf.Timestamp created_at = 17;
+  google.protobuf.Timestamp updated_at = 18;
+}
+
+// Module sidecar instance
+message Module {
+  string id = 1;
+  string server_id = 2;
+  string template_id = 3;
+  string name = 4;
+  string description = 5;
+  ModuleCategory category = 6;
+  ModuleStatus status = 7;
+
+  // Docker configuration
+  string docker_image = 8;
+  string container_id = 9;
+  map<string, string> environment = 10;
+  repeated ModulePort ports = 11;
+  DockerOverrides docker_overrides = 12;
+  int32 memory = 13;
+
+  // Proxy routing
+  ModuleProtocol proxy_protocol = 14;
+  string proxy_listener_id = 15;
+  int32 proxy_port = 16;
+
+  // Server integration
+  bool inject_server_host = 17;
+  bool inject_rcon = 18;
+  bool share_server_data = 19;
+
+  // Lifecycle
+  bool auto_start = 20;
+  bool auto_stop = 21;
+  optional google.protobuf.Timestamp last_started = 22;
+
+  // Runtime stats
+  double memory_usage = 23;
+  double cpu_percent = 24;
+
+  google.protobuf.Timestamp created_at = 25;
+  google.protobuf.Timestamp updated_at = 26;
+}
+
+// Log entry from module container
+message ModuleLogEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  string message = 2;
+  string stream = 3;
+}
+
+// List modules for a server
+message ListModulesRequest {
+  string server_id = 1;
+  optional ModuleCategory category = 2;
+}
+
+message ListModulesResponse {
+  repeated Module modules = 1;
+}
+
+// Get single module
+message GetModuleRequest {
+  string id = 1;
+}
+
+message GetModuleResponse {
+  Module module = 1;
+}
+
+// Create module
+message CreateModuleRequest {
+  string server_id = 1;
+  string name = 2;
+  string description = 3;
+
+  // Either template or custom config
+  optional string template_id = 4;
+  optional string docker_image = 5;
+  optional ModuleCategory category = 6;
+
+  // Configuration overrides
+  map<string, string> environment = 7;
+  repeated ModulePort ports = 8;
+  DockerOverrides docker_overrides = 9;
+  optional int32 memory = 10;
+
+  // Server integration
+  optional bool inject_server_host = 11;
+  optional bool inject_rcon = 12;
+  optional bool share_server_data = 13;
+
+  // Lifecycle
+  optional bool auto_start = 14;
+  optional bool auto_stop = 15;
+  bool start_immediately = 16;
+}
+
+message CreateModuleResponse {
+  Module module = 1;
+}
+
+// Update module
+message UpdateModuleRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string docker_image = 4;
+  map<string, string> environment = 5;
+  repeated ModulePort ports = 6;
+  DockerOverrides docker_overrides = 7;
+  optional int32 memory = 8;
+  optional bool inject_server_host = 9;
+  optional bool inject_rcon = 10;
+  optional bool share_server_data = 11;
+  optional bool auto_start = 12;
+  optional bool auto_stop = 13;
+}
+
+message UpdateModuleResponse {
+  Module module = 1;
+}
+
+// Delete module
+message DeleteModuleRequest {
+  string id = 1;
+}
+
+message DeleteModuleResponse {}
+
+// Start module
+message StartModuleRequest {
+  string id = 1;
+}
+
+message StartModuleResponse {
+  string status = 1;
+}
+
+// Stop module
+message StopModuleRequest {
+  string id = 1;
+}
+
+message StopModuleResponse {
+  string status = 1;
+}
+
+// Restart module
+message RestartModuleRequest {
+  string id = 1;
+}
+
+message RestartModuleResponse {
+  string status = 1;
+}
+
+// Get module logs
+message GetModuleLogsRequest {
+  string id = 1;
+  int32 tail = 2;
+}
+
+message GetModuleLogsResponse {
+  repeated ModuleLogEntry logs = 1;
+  int32 total = 2;
+}
+
+// List templates
+message ListModuleTemplatesRequest {
+  optional ModuleCategory category = 1;
+  optional bool include_custom = 2;
+}
+
+message ListModuleTemplatesResponse {
+  repeated ModuleTemplate templates = 1;
+}
+
+// Get template
+message GetModuleTemplateRequest {
+  string id = 1;
+}
+
+message GetModuleTemplateResponse {
+  ModuleTemplate template = 1;
+}
+
+// Create custom template
+message CreateModuleTemplateRequest {
+  string name = 1;
+  string description = 2;
+  ModuleCategory category = 3;
+  string docker_image = 4;
+  string icon_url = 5;
+
+  repeated ModuleEnvVarDef env_var_schema = 6;
+  repeated ModulePortDef port_schema = 7;
+  DockerOverrides default_overrides = 8;
+
+  bool inject_server_host = 9;
+  bool inject_rcon = 10;
+  bool share_server_data = 11;
+
+  ModuleProtocol default_protocol = 12;
+  int32 default_port = 13;
+}
+
+message CreateModuleTemplateResponse {
+  ModuleTemplate template = 1;
+}
+
+// Delete template
+message DeleteModuleTemplateRequest {
+  string id = 1;
+}
+
+message DeleteModuleTemplateResponse {}

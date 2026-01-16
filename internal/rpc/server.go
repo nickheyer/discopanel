@@ -99,6 +99,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.MinecraftServiceName,
 		discopanelv1connect.ModServiceName,
 		discopanelv1connect.ModpackServiceName,
+		discopanelv1connect.ModuleServiceName,
 		discopanelv1connect.ProxyServiceName,
 		discopanelv1connect.ServerServiceName,
 		discopanelv1connect.SupportServiceName,
@@ -125,6 +126,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.log)
+	moduleService := services.NewModuleService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
 	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
@@ -149,6 +151,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	modpackPath, modpackHandler := discopanelv1connect.NewModpackServiceHandler(modpackService, opts...)
 	mux.Handle(modpackPath, modpackHandler)
+
+	modulePath, moduleHandler := discopanelv1connect.NewModuleServiceHandler(moduleService, opts...)
+	mux.Handle(modulePath, moduleHandler)
 
 	proxyPath, proxyHandler := discopanelv1connect.NewProxyServiceHandler(proxyService, opts...)
 	mux.Handle(proxyPath, proxyHandler)

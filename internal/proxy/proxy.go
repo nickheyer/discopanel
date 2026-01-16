@@ -32,6 +32,10 @@ type Route struct {
 	BackendHost string
 	BackendPort int
 	Active      bool
+
+	// HTTPBackend is the backend for HTTP protocol traffic (for modules)
+	// When nil, HTTP requests to this hostname will return 503
+	HTTPBackend *ProtocolBackend
 }
 
 // Config holds proxy configuration
@@ -170,28 +174,53 @@ func (p *Proxy) acceptLoop() {
 	}
 }
 
-// handleConnection handles a single client connection
+// handleConnection handles a single client connection with protocol detection
 func (p *Proxy) handleConnection(clientConn net.Conn) {
 	defer clientConn.Close()
 
-	p.logger.Debug("Attempting to route incoming connection!\n")
+	p.logger.Debug("New connection from %s", clientConn.RemoteAddr())
 
-	// Set initial timeout for handshake
+	// Set initial timeout for protocol detection and handshake
 	clientConn.SetReadDeadline(time.Now().Add(10 * time.Second))
 
-	// Read the handshake packet
-	handshake, err := ReadHandshakePacket(clientConn)
+	// Wrap connection for peeking
+	peekConn := NewPeekingConn(clientConn)
+
+	// Detect protocol
+	protocol, err := DetectProtocol(peekConn)
 	if err != nil {
-		p.logger.Debug("Failed to read handshake from %s: %v", clientConn.RemoteAddr(), err)
+		p.logger.Debug("Protocol detection failed from %s: %v", clientConn.RemoteAddr(), err)
+		return
+	}
+
+	p.logger.Debug("Detected protocol: %s from %s", protocol, clientConn.RemoteAddr())
+
+	// Route based on detected protocol
+	switch protocol {
+	case ProtocolHTTP:
+		p.handleHTTP(peekConn)
+	case ProtocolMinecraft:
+		p.handleMinecraft(peekConn)
+	default:
+		p.logger.Debug("Unknown protocol from %s", clientConn.RemoteAddr())
+	}
+}
+
+// handleMinecraft handles Minecraft protocol connections
+func (p *Proxy) handleMinecraft(conn *PeekingConn) {
+	// Read the handshake packet using the buffered reader
+	handshake, err := ReadHandshakePacketFromReader(conn.reader)
+	if err != nil {
+		p.logger.Debug("Failed to read Minecraft handshake from %s: %v", conn.RemoteAddr(), err)
 		return
 	}
 
 	// Extract hostname from the handshake
-	p.logger.Debug("Extracting hostname from: %s\n", handshake.ServerAddress)
+	p.logger.Debug("Extracting hostname from: %s", handshake.ServerAddress)
 	hostname := strings.ToLower(strings.Split(handshake.ServerAddress, ":")[0])
 	if idx := strings.IndexByte(hostname, 0); idx != -1 {
 		hostname = hostname[:idx]
-		p.logger.Debug("Null byte(s) detected, trimmed suffix null termination: %s\n", hostname)
+		p.logger.Debug("Null byte(s) detected, trimmed suffix null termination: %s", hostname)
 	}
 
 	// Find the route
@@ -254,7 +283,7 @@ func (p *Proxy) handleConnection(clientConn net.Conn) {
 	}
 
 	// Clear timeouts for proxying
-	clientConn.SetReadDeadline(time.Time{})
+	conn.SetReadDeadline(time.Time{})
 	backendConn.SetReadDeadline(time.Time{})
 
 	// Start bidirectional proxying
@@ -264,15 +293,15 @@ func (p *Proxy) handleConnection(clientConn net.Conn) {
 	// Client -> Backend
 	go func() {
 		defer wg.Done()
-		io.Copy(backendConn, clientConn)
+		io.Copy(backendConn, conn)
 		backendConn.Close()
 	}()
 
 	// Backend -> Client
 	go func() {
 		defer wg.Done()
-		io.Copy(clientConn, backendConn)
-		clientConn.Close()
+		io.Copy(conn, backendConn)
+		conn.Close()
 	}()
 
 	wg.Wait()
@@ -296,4 +325,56 @@ func (p *Proxy) IsRunning() bool {
 	p.runningMutex.RLock()
 	defer p.runningMutex.RUnlock()
 	return p.running
+}
+
+// SetHTTPBackend sets the HTTP backend for a route (used by modules)
+func (p *Proxy) SetHTTPBackend(hostname, moduleID, backendHost string, backendPort int) {
+	p.routesMutex.Lock()
+	defer p.routesMutex.Unlock()
+
+	hostname = strings.ToLower(strings.Split(hostname, ":")[0])
+	route, exists := p.routes[hostname]
+	if !exists {
+		p.logger.Debug("Cannot set HTTP backend for non-existent route: %s", hostname)
+		return
+	}
+
+	route.HTTPBackend = &ProtocolBackend{
+		ModuleID:    moduleID,
+		BackendHost: backendHost,
+		BackendPort: backendPort,
+		Active:      true,
+	}
+
+	p.logger.Info("Set HTTP backend for route %s: module=%s backend=%s:%d", hostname, moduleID, backendHost, backendPort)
+}
+
+// RemoveHTTPBackend removes the HTTP backend for a route
+func (p *Proxy) RemoveHTTPBackend(hostname string) {
+	p.routesMutex.Lock()
+	defer p.routesMutex.Unlock()
+
+	hostname = strings.ToLower(strings.Split(hostname, ":")[0])
+	route, exists := p.routes[hostname]
+	if !exists {
+		return
+	}
+
+	route.HTTPBackend = nil
+	p.logger.Info("Removed HTTP backend for route: %s", hostname)
+}
+
+// SetHTTPBackendActive enables or disables the HTTP backend for a route
+func (p *Proxy) SetHTTPBackendActive(hostname string, active bool) {
+	p.routesMutex.Lock()
+	defer p.routesMutex.Unlock()
+
+	hostname = strings.ToLower(strings.Split(hostname, ":")[0])
+	route, exists := p.routes[hostname]
+	if !exists || route.HTTPBackend == nil {
+		return
+	}
+
+	route.HTTPBackend.Active = active
+	p.logger.Info("Set HTTP backend active for route %s: %v", hostname, active)
 }

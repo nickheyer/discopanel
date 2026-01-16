@@ -95,7 +95,7 @@ func (m *Manager) Start() error {
 			}
 
 			// Get container IP address
-			containerIP, err := getContainerIP(server.ContainerID, m.networkName)
+			containerIP, err := GetContainerIP(server.ContainerID, m.networkName)
 			if err != nil {
 				m.logger.Error("Failed to get container IP for server %s: %v", server.Name, err)
 				continue
@@ -181,7 +181,7 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 		// Get the container's IP address on the Docker network
 		containerIP := ""
 		if server.ContainerID != "" {
-			if ip, err := getContainerIP(server.ContainerID, m.networkName); err == nil {
+			if ip, err := GetContainerIP(server.ContainerID, m.networkName); err == nil {
 				containerIP = ip
 			} else {
 				m.logger.Error("Failed to get container IP for %s: %v", server.Name, err)
@@ -380,4 +380,128 @@ func (m *Manager) AllocateProxyPort(serverID string) (int, error) {
 	}
 
 	return 0, fmt.Errorf("no available proxy ports in range %d-%d", m.config.PortRangeMin, m.config.PortRangeMax)
+}
+
+// UpdateModuleRoute sets or updates the HTTP backend for a module
+// Modules inherit their server's proxy hostname and use HTTP protocol multiplexing
+func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server, containerIP string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.proxies) == 0 || !m.config.Enabled {
+		return nil
+	}
+
+	// Module uses server's proxy hostname
+	if server.ProxyHostname == "" || server.ProxyListenerID == "" {
+		return fmt.Errorf("server %s has no proxy hostname or listener configured", server.ID)
+	}
+
+	// Get the listener for this server
+	listener, err := m.store.GetProxyListener(context.Background(), server.ProxyListenerID)
+	if err != nil {
+		return fmt.Errorf("failed to get proxy listener: %w", err)
+	}
+
+	if !listener.Enabled {
+		return nil
+	}
+
+	// Get the proxy instance for this listener's port
+	proxy, ok := m.proxies[listener.Port]
+	if !ok {
+		return fmt.Errorf("no proxy instance for port %d", listener.Port)
+	}
+
+	// Get the module's HTTP port from its ports configuration
+	httpPort := 0
+	for _, port := range module.Ports {
+		if port.Protocol == db.ModuleProtocolHTTP {
+			httpPort = port.ContainerPort
+			break
+		}
+	}
+
+	if httpPort == 0 {
+		// Use proxy_port if set, otherwise error
+		if module.ProxyPort > 0 {
+			httpPort = module.ProxyPort
+		} else {
+			return fmt.Errorf("module %s has no HTTP port configured", module.ID)
+		}
+	}
+
+	// Set the HTTP backend for this hostname
+	proxy.SetHTTPBackend(server.ProxyHostname, module.ID, containerIP, httpPort)
+
+	m.logger.Info("Updated HTTP route for module %s on hostname %s -> %s:%d",
+		module.Name, server.ProxyHostname, containerIP, httpPort)
+
+	return nil
+}
+
+// RemoveModuleRoute removes the HTTP backend for a module
+func (m *Manager) RemoveModuleRoute(module *db.Module, server *db.Server) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.proxies) == 0 || !m.config.Enabled {
+		return nil
+	}
+
+	if server.ProxyHostname == "" || server.ProxyListenerID == "" {
+		return nil // No route to remove
+	}
+
+	// Get the listener for this server
+	listener, err := m.store.GetProxyListener(context.Background(), server.ProxyListenerID)
+	if err != nil {
+		m.logger.Debug("Failed to get proxy listener for module route removal: %v", err)
+		return nil
+	}
+
+	// Get the proxy instance for this listener's port
+	proxy, ok := m.proxies[listener.Port]
+	if !ok {
+		return nil
+	}
+
+	// Remove the HTTP backend for this hostname
+	proxy.RemoveHTTPBackend(server.ProxyHostname)
+
+	m.logger.Info("Removed HTTP route for module %s from hostname %s", module.Name, server.ProxyHostname)
+
+	return nil
+}
+
+// SetModuleRouteActive enables or disables the HTTP backend for a module
+func (m *Manager) SetModuleRouteActive(module *db.Module, server *db.Server, active bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.proxies) == 0 || !m.config.Enabled {
+		return nil
+	}
+
+	if server.ProxyHostname == "" || server.ProxyListenerID == "" {
+		return nil
+	}
+
+	// Get the listener for this server
+	listener, err := m.store.GetProxyListener(context.Background(), server.ProxyListenerID)
+	if err != nil {
+		return nil
+	}
+
+	// Get the proxy instance for this listener's port
+	proxy, ok := m.proxies[listener.Port]
+	if !ok {
+		return nil
+	}
+
+	proxy.SetHTTPBackendActive(server.ProxyHostname, active)
+
+	m.logger.Info("Set HTTP route active for module %s: %v", module.Name, active)
+
+	return nil
 }

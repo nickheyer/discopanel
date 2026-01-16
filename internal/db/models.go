@@ -518,3 +518,137 @@ type TaskExecution struct {
 	Task   *ScheduledTask `json:"-" gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE"`
 	Server *Server        `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
+
+// ModuleStatus defines the runtime state of a module container
+type ModuleStatus string
+
+const (
+	ModuleStatusStopped   ModuleStatus = "stopped"
+	ModuleStatusStarting  ModuleStatus = "starting"
+	ModuleStatusRunning   ModuleStatus = "running"
+	ModuleStatusStopping  ModuleStatus = "stopping"
+	ModuleStatusError     ModuleStatus = "error"
+	ModuleStatusUnhealthy ModuleStatus = "unhealthy"
+	ModuleStatusCreating  ModuleStatus = "creating"
+)
+
+// ModuleCategory defines the type/purpose of a module
+type ModuleCategory string
+
+const (
+	ModuleCategoryWebUI   ModuleCategory = "webui"   // Web-based interfaces (status panels, dashboards)
+	ModuleCategoryVoice   ModuleCategory = "voice"   // Voice chat integrations (Simple Voice Chat)
+	ModuleCategoryMap     ModuleCategory = "map"     // Map renderers (BlueMap, Dynmap)
+	ModuleCategoryUtility ModuleCategory = "utility" // Utility tools (backup, monitoring)
+	ModuleCategoryCustom  ModuleCategory = "custom"  // User-defined custom modules
+)
+
+// ModuleProtocol defines the protocol type for proxy routing
+type ModuleProtocol string
+
+const (
+	ModuleProtocolHTTP ModuleProtocol = "http" // HTTP/HTTPS - multiplexed on main proxy port
+	ModuleProtocolTCP  ModuleProtocol = "tcp"  // Raw TCP - requires dedicated host port
+	ModuleProtocolNone ModuleProtocol = "none" // No proxy routing needed
+)
+
+// ModuleEnvVarDef defines an environment variable schema for a module template
+type ModuleEnvVarDef struct {
+	Name        string `json:"name"`        // ENV_VAR_NAME
+	Description string `json:"description"` // User-facing description
+	Default     string `json:"default"`     // Default value
+	Required    bool   `json:"required"`    // Is this required?
+	IsSecret    bool   `json:"is_secret"`   // Should be masked in UI
+}
+
+// ModulePortDef defines a port schema for a module template
+type ModulePortDef struct {
+	Name          string         `json:"name"`           // User-friendly name (e.g., "Web Interface")
+	ContainerPort int            `json:"container_port"` // Port inside the container
+	Protocol      ModuleProtocol `json:"protocol"`       // http, tcp, or none
+	Required      bool           `json:"required"`       // Is this port required?
+}
+
+// ModulePort represents a configured port for a module instance
+type ModulePort struct {
+	Name          string         `json:"name"`
+	ContainerPort int            `json:"container_port"`
+	HostPort      int            `json:"host_port"`
+	Protocol      ModuleProtocol `json:"protocol"`
+}
+
+// ModuleTemplate represents a reusable blueprint for creating modules
+type ModuleTemplate struct {
+	ID          string         `json:"id" gorm:"primaryKey"`
+	Name        string         `json:"name" gorm:"not null"`
+	Description string         `json:"description"`
+	Category    ModuleCategory `json:"category" gorm:"not null"`
+	DockerImage string         `json:"docker_image" gorm:"column:docker_image;not null"`
+	IconURL     string         `json:"icon_url" gorm:"column:icon_url"`
+
+	// Configuration schema (JSON serialized)
+	EnvVarSchema     []*ModuleEnvVarDef  `json:"env_var_schema" gorm:"column:env_var_schema;serializer:json"`
+	PortSchema       []*ModulePortDef    `json:"port_schema" gorm:"column:port_schema;serializer:json"`
+	DefaultOverrides *v1.DockerOverrides `json:"default_overrides" gorm:"column:default_overrides;serializer:json"`
+
+	// Server integration settings
+	InjectServerHost bool `json:"inject_server_host" gorm:"default:true;column:inject_server_host"` // Inject MC_SERVER_HOST, MC_SERVER_PORT
+	InjectRCON       bool `json:"inject_rcon" gorm:"default:false;column:inject_rcon"`              // Inject RCON_HOST, RCON_PORT, RCON_PASSWORD
+	ShareServerData  bool `json:"share_server_data" gorm:"default:false;column:share_server_data"`  // Mount server data directory
+
+	// Default proxy settings
+	DefaultProtocol ModuleProtocol `json:"default_protocol" gorm:"column:default_protocol;default:http"`
+	DefaultPort     int            `json:"default_port" gorm:"column:default_port"`
+
+	// Metadata
+	IsBuiltin bool   `json:"is_builtin" gorm:"default:false;column:is_builtin"` // Pre-built vs user-created
+	Version   string `json:"version"`
+
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+// Module represents a sidecar container attached to a Minecraft server
+type Module struct {
+	ID          string         `json:"id" gorm:"primaryKey"`
+	ServerID    string         `json:"server_id" gorm:"not null;index;column:server_id"`
+	TemplateID  string         `json:"template_id" gorm:"column:template_id"` // Optional - empty for fully custom modules
+	Name        string         `json:"name" gorm:"not null"`
+	Description string         `json:"description"`
+	Category    ModuleCategory `json:"category" gorm:"not null"`
+	Status      ModuleStatus   `json:"status" gorm:"not null;default:stopped"`
+
+	// Docker configuration
+	DockerImage     string              `json:"docker_image" gorm:"column:docker_image;not null"`
+	ContainerID     string              `json:"container_id" gorm:"column:container_id"`
+	Environment     map[string]string   `json:"environment" gorm:"column:environment;serializer:json"`
+	Ports           []*ModulePort       `json:"ports" gorm:"column:ports;serializer:json"`
+	DockerOverrides *v1.DockerOverrides `json:"docker_overrides" gorm:"column:docker_overrides;serializer:json"`
+	Memory          int                 `json:"memory" gorm:"default:256"` // Memory allocation in MB
+
+	// Proxy routing (inherits server's hostname)
+	ProxyProtocol   ModuleProtocol `json:"proxy_protocol" gorm:"column:proxy_protocol;default:http"`
+	ProxyListenerID string         `json:"proxy_listener_id" gorm:"column:proxy_listener_id"`
+	ProxyPort       int            `json:"proxy_port" gorm:"column:proxy_port"` // Host port for TCP protocols
+
+	// Server integration settings (copied from template or set manually)
+	InjectServerHost bool `json:"inject_server_host" gorm:"default:true;column:inject_server_host"`
+	InjectRCON       bool `json:"inject_rcon" gorm:"default:false;column:inject_rcon"`
+	ShareServerData  bool `json:"share_server_data" gorm:"default:false;column:share_server_data"`
+
+	// Lifecycle settings
+	AutoStart   bool       `json:"auto_start" gorm:"default:true;column:auto_start"` // Start when server starts
+	AutoStop    bool       `json:"auto_stop" gorm:"default:true;column:auto_stop"`   // Stop when server stops
+	LastStarted *time.Time `json:"last_started" gorm:"column:last_started"`
+
+	// Runtime stats (not persisted to DB)
+	MemoryUsage float64 `json:"memory_usage" gorm:"-"` // Current memory usage in MB
+	CPUPercent  float64 `json:"cpu_percent" gorm:"-"`  // Current CPU usage percentage
+
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+
+	// Relationships
+	Server   *Server         `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+	Template *ModuleTemplate `json:"-" gorm:"foreignKey:TemplateID;constraint:OnDelete:SET NULL"`
+}

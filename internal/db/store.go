@@ -86,6 +86,8 @@ func (s *Store) Migrate() error {
 		&Session{},
 		&ScheduledTask{},
 		&TaskExecution{},
+		&Module{},
+		&ModuleTemplate{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate: %w", err)
@@ -922,5 +924,173 @@ func (s *Store) CleanOldTaskExecutions(ctx context.Context, olderThan time.Time,
 				Delete(&TaskExecution{})
 		}
 	}
+	return nil
+}
+
+// Module operations
+func (s *Store) CreateModule(ctx context.Context, module *Module) error {
+	if module.ID == "" {
+		module.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(module).Error
+}
+
+func (s *Store) GetModule(ctx context.Context, id string) (*Module, error) {
+	var module Module
+	err := s.db.WithContext(ctx).First(&module, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("module not found")
+		}
+		return nil, err
+	}
+	return &module, nil
+}
+
+func (s *Store) ListModules(ctx context.Context) ([]*Module, error) {
+	var modules []*Module
+	err := s.db.WithContext(ctx).Order("created_at DESC").Find(&modules).Error
+	return modules, err
+}
+
+func (s *Store) ListModulesByServer(ctx context.Context, serverID string) ([]*Module, error) {
+	var modules []*Module
+	err := s.db.WithContext(ctx).Where("server_id = ?", serverID).Order("created_at DESC").Find(&modules).Error
+	return modules, err
+}
+
+func (s *Store) ListModulesByCategory(ctx context.Context, serverID string, category ModuleCategory) ([]*Module, error) {
+	var modules []*Module
+	query := s.db.WithContext(ctx).Where("server_id = ?", serverID)
+	if category != "" {
+		query = query.Where("category = ?", category)
+	}
+	err := query.Order("created_at DESC").Find(&modules).Error
+	return modules, err
+}
+
+func (s *Store) UpdateModule(ctx context.Context, module *Module) error {
+	return s.db.WithContext(ctx).Save(module).Error
+}
+
+func (s *Store) DeleteModule(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Delete(&Module{}, "id = ?", id).Error
+}
+
+func (s *Store) DeleteModulesByServer(ctx context.Context, serverID string) error {
+	return s.db.WithContext(ctx).Where("server_id = ?", serverID).Delete(&Module{}).Error
+}
+
+// ModuleTemplate operations
+func (s *Store) CreateModuleTemplate(ctx context.Context, template *ModuleTemplate) error {
+	if template.ID == "" {
+		template.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(template).Error
+}
+
+func (s *Store) GetModuleTemplate(ctx context.Context, id string) (*ModuleTemplate, error) {
+	var template ModuleTemplate
+	err := s.db.WithContext(ctx).First(&template, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("module template not found")
+		}
+		return nil, err
+	}
+	return &template, nil
+}
+
+func (s *Store) ListModuleTemplates(ctx context.Context) ([]*ModuleTemplate, error) {
+	var templates []*ModuleTemplate
+	err := s.db.WithContext(ctx).Order("name ASC").Find(&templates).Error
+	return templates, err
+}
+
+func (s *Store) ListModuleTemplatesByCategory(ctx context.Context, category ModuleCategory) ([]*ModuleTemplate, error) {
+	var templates []*ModuleTemplate
+	query := s.db.WithContext(ctx)
+	if category != "" {
+		query = query.Where("category = ?", category)
+	}
+	err := query.Order("name ASC").Find(&templates).Error
+	return templates, err
+}
+
+func (s *Store) UpdateModuleTemplate(ctx context.Context, template *ModuleTemplate) error {
+	return s.db.WithContext(ctx).Save(template).Error
+}
+
+func (s *Store) DeleteModuleTemplate(ctx context.Context, id string) error {
+	// Don't delete if modules are using it
+	var count int64
+	s.db.Model(&Module{}).Where("template_id = ?", id).Count(&count)
+	if count > 0 {
+		return fmt.Errorf("cannot delete template: %d modules are using it", count)
+	}
+
+	return s.db.WithContext(ctx).Delete(&ModuleTemplate{}, "id = ?", id).Error
+}
+
+// SeedBuiltinTemplates creates the default builtin module templates
+func (s *Store) SeedBuiltinTemplates(ctx context.Context) error {
+	builtinTemplates := []*ModuleTemplate{
+		{
+			ID:          "builtin-bluemap",
+			Name:        "BlueMap",
+			Description: "3D web-based map viewer for Minecraft worlds. Renders your world in real-time and serves it via a web interface.",
+			Category:    ModuleCategoryMap,
+			DockerImage: "bluemap/bluemap:latest",
+			IconURL:     "https://raw.githubusercontent.com/BlueMap-Minecraft/BlueMap/master/media/logo.png",
+			EnvVarSchema: []*ModuleEnvVarDef{
+				{Name: "BLUEMAP_WEBROOT", Description: "Web root path", Default: "/", Required: false},
+			},
+			PortSchema: []*ModulePortDef{
+				{Name: "Web Interface", ContainerPort: 8100, Protocol: ModuleProtocolHTTP, Required: true},
+			},
+			InjectServerHost: true,
+			InjectRCON:       false,
+			ShareServerData:  true,
+			DefaultProtocol:  ModuleProtocolHTTP,
+			DefaultPort:      8100,
+			IsBuiltin:        true,
+			Version:          "1.0.0",
+		},
+		{
+			ID:          "builtin-status",
+			Name:        "Status Panel",
+			Description: "Real-time server status and metrics dashboard. Shows player count, TPS, memory usage, and more.",
+			Category:    ModuleCategoryWebUI,
+			DockerImage: "discopanel/status-module:latest",
+			IconURL:     "",
+			EnvVarSchema: []*ModuleEnvVarDef{
+				{Name: "REFRESH_INTERVAL", Description: "Dashboard refresh interval in seconds", Default: "5", Required: false},
+			},
+			PortSchema: []*ModulePortDef{
+				{Name: "Web Interface", ContainerPort: 8080, Protocol: ModuleProtocolHTTP, Required: true},
+			},
+			InjectServerHost: true,
+			InjectRCON:       true,
+			ShareServerData:  false,
+			DefaultProtocol:  ModuleProtocolHTTP,
+			DefaultPort:      8080,
+			IsBuiltin:        true,
+			Version:          "1.0.0",
+		},
+	}
+
+	for _, template := range builtinTemplates {
+		var existing ModuleTemplate
+		err := s.db.WithContext(ctx).Where("id = ?", template.ID).First(&existing).Error
+		if err == gorm.ErrRecordNotFound {
+			if err := s.db.WithContext(ctx).Create(template).Error; err != nil {
+				return fmt.Errorf("failed to create builtin template %s: %w", template.ID, err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("failed to check builtin template %s: %w", template.ID, err)
+		}
+		// If exists, don't update - user may have modified it
+	}
+
 	return nil
 }

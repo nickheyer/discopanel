@@ -798,6 +798,253 @@ func (c *Client) EnsureNetwork() error {
 	return nil
 }
 
+// CreateModuleContainer creates a Docker container for a module sidecar
+func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Module, server *models.Server, serverConfig *models.ServerConfig, template *models.ModuleTemplate) (string, error) {
+	imageName := module.DockerImage
+	if imageName == "" && template != nil {
+		imageName = template.DockerImage
+	}
+	if imageName == "" {
+		return "", fmt.Errorf("no docker image specified for module %s", module.ID)
+	}
+
+	// Try pulling latest
+	if err := c.pullImage(ctx, imageName); err != nil {
+		return "", fmt.Errorf("failed to pull image: %w", err)
+	}
+
+	// Build environment variables
+	env := buildModuleEnv(module, server, serverConfig, template)
+
+	c.log.Debug("Creating container for module %s with image %s", module.ID, imageName)
+
+	// Build exposed ports and port bindings
+	exposedPorts := nat.PortSet{}
+	portBindings := nat.PortMap{}
+
+	for _, port := range module.Ports {
+		protocol := "tcp"
+		portKey := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, protocol))
+		exposedPorts[portKey] = struct{}{}
+
+		// Only bind to host for TCP (non-HTTP) protocols
+		// HTTP protocols are handled through the proxy
+		if port.Protocol == models.ModuleProtocolTCP && port.HostPort > 0 {
+			portBindings[portKey] = []nat.PortBinding{
+				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", port.HostPort)},
+			}
+		}
+	}
+
+	// Build mounts
+	var mounts []mount.Mount
+
+	// Share server data directory if configured
+	shouldShareData := module.ShareServerData
+	if !shouldShareData && template != nil {
+		shouldShareData = template.ShareServerData
+	}
+	if shouldShareData && server.DataPath != "" {
+		// Handle path translation when DiscoPanel runs in a container
+		dataPath := server.DataPath
+		if hostDataPath := os.Getenv("DISCOPANEL_HOST_DATA_PATH"); hostDataPath != "" {
+			containerDataDir := os.Getenv("DISCOPANEL_DATA_DIR")
+			if containerDataDir == "" {
+				containerDataDir = "/app/data"
+			}
+			if relPath, err := filepath.Rel(containerDataDir, server.DataPath); err == nil {
+				dataPath = filepath.Join(hostDataPath, relPath)
+			}
+		}
+
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   dataPath,
+			Target:   "/server-data",
+			ReadOnly: false,
+		})
+	}
+
+	config := &container.Config{
+		Image:        imageName,
+		Env:          env,
+		Tty:          true,
+		AttachStdout: true,
+		AttachStderr: true,
+		ExposedPorts: exposedPorts,
+		Labels: map[string]string{
+			"discopanel.module.id":   module.ID,
+			"discopanel.module.name": module.Name,
+			"discopanel.server.id":   server.ID,
+			"discopanel.managed":     "true",
+		},
+	}
+
+	memoryMB := module.Memory
+	if memoryMB == 0 {
+		memoryMB = 256 // Default 256MB
+	}
+
+	hostConfig := &container.HostConfig{
+		PortBindings: portBindings,
+		Mounts:       mounts,
+		RestartPolicy: container.RestartPolicy{
+			Name: "unless-stopped",
+		},
+		Resources: container.Resources{
+			Memory:     int64(memoryMB) * 1024 * 1024,
+			MemorySwap: int64(memoryMB) * 1024 * 1024,
+		},
+		LogConfig: container.LogConfig{
+			Type:   "json-file",
+			Config: map[string]string{"max-size": "10m", "max-file": "3"},
+		},
+	}
+
+	// Apply docker overrides if any
+	ApplyOverrides(module.DockerOverrides, config, hostConfig)
+
+	// Network configuration - modules use the same network as servers
+	networkConfig := &network.NetworkingConfig{}
+	if c.config.NetworkName != "" && hostConfig.NetworkMode == "" {
+		networkConfig.EndpointsConfig = map[string]*network.EndpointSettings{
+			c.config.NetworkName: {},
+		}
+	}
+
+	resp, err := c.docker.ContainerCreate(
+		ctx, config, hostConfig, networkConfig, nil,
+		fmt.Sprintf("discopanel-module-%s", module.ID),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create module container: %w", err)
+	}
+
+	return resp.ID, nil
+}
+
+// RecreateModuleContainer stops, removes, and creates a new container for a module
+func (c *Client) RecreateModuleContainer(ctx context.Context, oldContainerID string, module *models.Module, server *models.Server, serverConfig *models.ServerConfig, template *models.ModuleTemplate) (*RecreateContainerResult, error) {
+	result := &RecreateContainerResult{}
+
+	// Check if container was running before we stop it
+	if oldContainerID != "" {
+		status, err := c.GetModuleContainerStatus(ctx, oldContainerID)
+		if err != nil {
+			c.log.Debug("Module container %s not found during recreation: %v", oldContainerID, err)
+		} else if status == models.ModuleStatusRunning {
+			result.WasRunning = true
+			if _, err := c.StopContainer(ctx, oldContainerID); err != nil {
+				return nil, fmt.Errorf("failed to stop module container: %w", err)
+			}
+		}
+
+		// Remove old container
+		if err := c.RemoveContainer(ctx, oldContainerID); err != nil {
+			c.log.Debug("Could not remove old module container (may not exist): %v", err)
+		}
+	}
+
+	// Create new container
+	newContainerID, err := c.CreateModuleContainer(ctx, module, server, serverConfig, template)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create module container: %w", err)
+	}
+	result.NewContainerID = newContainerID
+
+	// Start if it was running before
+	if result.WasRunning {
+		if err := c.StartContainer(ctx, newContainerID); err != nil {
+			return result, fmt.Errorf("failed to start new module container: %w", err)
+		}
+	}
+
+	return result, nil
+}
+
+// GetModuleContainerStatus returns the status of a module container
+func (c *Client) GetModuleContainerStatus(ctx context.Context, containerID string) (models.ModuleStatus, error) {
+	inspect, err := c.docker.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return models.ModuleStatusError, err
+	}
+
+	switch inspect.State.Status {
+	case "running":
+		if inspect.State.Health != nil {
+			switch inspect.State.Health.Status {
+			case "healthy":
+				return models.ModuleStatusRunning, nil
+			case "starting":
+				return models.ModuleStatusStarting, nil
+			case "unhealthy":
+				return models.ModuleStatusUnhealthy, nil
+			default:
+				return models.ModuleStatusRunning, nil
+			}
+		}
+		return models.ModuleStatusRunning, nil
+	case "restarting":
+		return models.ModuleStatusStarting, nil
+	case "exited", "dead":
+		return models.ModuleStatusStopped, nil
+	case "created", "paused", "removing":
+		return models.ModuleStatusStopped, nil
+	default:
+		return models.ModuleStatusError, nil
+	}
+}
+
+// buildModuleEnv builds environment variables for a module container
+func buildModuleEnv(module *models.Module, server *models.Server, serverConfig *models.ServerConfig, template *models.ModuleTemplate) []string {
+	env := []string{
+		fmt.Sprintf("DISCOPANEL_MODULE_ID=%s", module.ID),
+		fmt.Sprintf("DISCOPANEL_SERVER_ID=%s", server.ID),
+	}
+
+	// Determine injection flags
+	injectServerHost := module.InjectServerHost
+	injectRCON := module.InjectRCON
+	if template != nil {
+		if !injectServerHost {
+			injectServerHost = template.InjectServerHost
+		}
+		if !injectRCON {
+			injectRCON = template.InjectRCON
+		}
+	}
+
+	// Inject server connection info
+	if injectServerHost {
+		serverHost := fmt.Sprintf("discopanel-server-%s", server.ID)
+		env = append(env,
+			fmt.Sprintf("MC_SERVER_HOST=%s", serverHost),
+			"MC_SERVER_PORT=25565",
+		)
+	}
+
+	// Inject RCON credentials
+	if injectRCON && serverConfig != nil {
+		if serverConfig.EnableRCON != nil && *serverConfig.EnableRCON {
+			serverHost := fmt.Sprintf("discopanel-server-%s", server.ID)
+			env = append(env,
+				fmt.Sprintf("RCON_HOST=%s", serverHost),
+				"RCON_PORT=25575",
+			)
+			if serverConfig.RCONPassword != nil && *serverConfig.RCONPassword != "" {
+				env = append(env, fmt.Sprintf("RCON_PASSWORD=%s", *serverConfig.RCONPassword))
+			}
+		}
+	}
+
+	// Add user-defined environment variables
+	for k, v := range module.Environment {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	return env
+}
+
 // buildEnvFromConfig builds Docker environment variables from ServerConfig struct
 func buildEnvFromConfig(config *models.ServerConfig) []string {
 	env := []string{

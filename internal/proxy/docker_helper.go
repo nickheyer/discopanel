@@ -7,8 +7,8 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// getContainerIP gets the IP address of a container on the specified network
-func getContainerIP(containerID string, networkName string) (string, error) {
+// GetContainerIP gets the IP address of a container on the specified network
+func GetContainerIP(containerID string, networkName string) (string, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return "", err

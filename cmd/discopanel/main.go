@@ -86,6 +86,11 @@ func main() {
 		log.Info("Initialized global settings from config file")
 	}
 
+	// Seed builtin module templates
+	if err := store.SeedBuiltinTemplates(ctx); err != nil {
+		log.Error("Failed to seed builtin module templates: %v", err)
+	}
+
 	// Initialize Docker client with configuration
 	dockerClient, err := docker.NewClient(cfg.Docker.Host, log, docker.ClientConfig{
 		APIVersion:  cfg.Docker.Version,

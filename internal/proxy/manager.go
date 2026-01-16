@@ -231,6 +231,36 @@ func (m *Manager) RemoveServerRoute(serverID string) error {
 	return nil
 }
 
+// Removes a route using the hostname
+func (m *Manager) RemoveRouteByHostname(hostname string, listenerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.proxies) == 0 || !m.config.Enabled || hostname == "" {
+		return nil
+	}
+
+	// If listenerID provided, only remove from that specific listener's proxy
+	if listenerID != "" {
+		listener, err := m.store.GetProxyListener(context.Background(), listenerID)
+		if err == nil && listener != nil {
+			if proxy, ok := m.proxies[listener.Port]; ok {
+				proxy.RemoveRoute(hostname)
+				m.logger.Info("Removed route %s from listener port %d", hostname, listener.Port)
+				return nil
+			}
+		}
+	}
+
+	// Otherwise remove from all proxies
+	for port, proxy := range m.proxies {
+		proxy.RemoveRoute(hostname)
+		m.logger.Debug("Removed route %s from port %d", hostname, port)
+	}
+
+	return nil
+}
+
 // generateHostname generates the hostname for a server
 func (m *Manager) generateHostname(server *db.Server) string {
 	// Use custom hostname if set

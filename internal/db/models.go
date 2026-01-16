@@ -2,6 +2,8 @@ package db
 
 import (
 	"time"
+
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 type ServerStatus string
@@ -65,30 +67,30 @@ const (
 )
 
 type Server struct {
-	ID              string       `json:"id" gorm:"primaryKey"`
-	Name            string       `json:"name" gorm:"not null"`
-	Description     string       `json:"description"`
-	ModLoader       ModLoader    `json:"mod_loader" gorm:"not null"`
-	MCVersion       string       `json:"mc_version" gorm:"not null;column:mc_version"`
-	ContainerID     string       `json:"container_id" gorm:"column:container_id"`
-	Status          ServerStatus `json:"status" gorm:"not null"`
-	Port            int          `json:"port"`
-	ProxyPort       int          `json:"proxy_port" gorm:"column:proxy_port"`
-	ProxyHostname   string       `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
-	ProxyListenerID string       `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
-	MaxPlayers      int          `json:"max_players" gorm:"default:20;column:max_players"`
-	Memory          int          `json:"memory" gorm:"default:4096"` // in MB (allocated) - IMPORTANT: This applies to the container's memory allocation first, then used to calc the JVM min/max for mc server proc inside w/ overhead
-	CreatedAt       time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt       time.Time    `json:"updated_at" gorm:"autoUpdateTime"`
-	LastStarted     *time.Time   `json:"last_started" gorm:"column:last_started"`
-	JavaVersion     string       `json:"java_version" gorm:"column:java_version"`
-	DockerImage     string       `json:"docker_image" gorm:"column:docker_image"`
-	DataPath        string       `json:"data_path" gorm:"not null;column:data_path"`
-	Detached        bool         `json:"detached" gorm:"default:false;column:detached"`     // Detach server container from DiscoPanel lifecycle (default: false)
-	AutoStart       bool         `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
-	TPSCommand      string       `json:"tps_command" gorm:"column:tps_command"`             // The TPS command for this server (empty if not supported)
-	AdditionalPorts string       `json:"additional_ports" gorm:"column:additional_ports"`   // JSON array of additional port configurations
-	DockerOverrides string       `json:"docker_overrides" gorm:"column:docker_overrides;type:text"` // JSON object with docker container overrides
+	ID              string               `json:"id" gorm:"primaryKey"`
+	Name            string               `json:"name" gorm:"not null"`
+	Description     string               `json:"description"`
+	ModLoader       ModLoader            `json:"mod_loader" gorm:"not null"`
+	MCVersion       string               `json:"mc_version" gorm:"not null;column:mc_version"`
+	ContainerID     string               `json:"container_id" gorm:"column:container_id"`
+	Status          ServerStatus         `json:"status" gorm:"not null"`
+	Port            int                  `json:"port"`
+	ProxyPort       int                  `json:"proxy_port" gorm:"column:proxy_port"`
+	ProxyHostname   string               `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
+	ProxyListenerID string               `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
+	MaxPlayers      int                  `json:"max_players" gorm:"default:20;column:max_players"`
+	Memory          int                  `json:"memory" gorm:"default:4096"` // in MB (allocated) - IMPORTANT: This applies to the container's memory allocation first, then used to calc the JVM min/max for mc server proc inside w/ overhead
+	CreatedAt       time.Time            `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt       time.Time            `json:"updated_at" gorm:"autoUpdateTime"`
+	LastStarted     *time.Time           `json:"last_started" gorm:"column:last_started"`
+	JavaVersion     string               `json:"java_version" gorm:"column:java_version"`
+	DockerImage     string               `json:"docker_image" gorm:"column:docker_image"`
+	DataPath        string               `json:"data_path" gorm:"not null;column:data_path"`
+	Detached        bool                 `json:"detached" gorm:"default:false;column:detached"`                             // Detach server container from DiscoPanel lifecycle (default: false)
+	AutoStart       bool                 `json:"auto_start" gorm:"default:false;column:auto_start"`                         // Start server when DiscoPanel starts (default: false)
+	TPSCommand      string               `json:"tps_command" gorm:"column:tps_command"`                                     // The TPS command for this server (empty if not supported)
+	AdditionalPorts []*v1.AdditionalPort `json:"additional_ports" gorm:"column:additional_ports;serializer:json"`           // Additional port configurations
+	DockerOverrides *v1.DockerOverrides  `json:"docker_overrides" gorm:"column:docker_overrides;type:text;serializer:json"` // Docker container overrides
 
 	// Runtime stats (not persisted to DB)
 	MemoryUsage   float64 `json:"memory_usage" gorm:"-"`   // Current memory usage in MB
@@ -426,12 +428,12 @@ type Session struct {
 type TaskType string
 
 const (
-	TaskTypeCommand TaskType = "command"  // Execute an RCON command
-	TaskTypeBackup  TaskType = "backup"   // Create a backup
-	TaskTypeRestart TaskType = "restart"  // Restart the server
-	TaskTypeStart   TaskType = "start"    // Start the server
-	TaskTypeStop    TaskType = "stop"     // Stop the server
-	TaskTypeScript  TaskType = "script"   // Run a custom script
+	TaskTypeCommand TaskType = "command" // Execute an RCON command
+	TaskTypeBackup  TaskType = "backup"  // Create a backup
+	TaskTypeRestart TaskType = "restart" // Restart the server
+	TaskTypeStart   TaskType = "start"   // Start the server
+	TaskTypeStop    TaskType = "stop"    // Stop the server
+	TaskTypeScript  TaskType = "script"  // Run a custom script
 )
 
 // TaskStatus defines the status of a scheduled task
@@ -463,22 +465,22 @@ type ScheduledTask struct {
 	Schedule    ScheduleType `json:"schedule" gorm:"not null"`
 
 	// Schedule configuration
-	CronExpr      string     `json:"cron_expr" gorm:"column:cron_expr"`          // For cron schedule type
-	IntervalSecs  int        `json:"interval_secs" gorm:"column:interval_secs"`  // For interval schedule type
-	RunAt         *time.Time `json:"run_at" gorm:"column:run_at"`                // For once schedule type
-	NextRun       *time.Time `json:"next_run" gorm:"index;column:next_run"`      // Computed next run time
-	LastRun       *time.Time `json:"last_run" gorm:"column:last_run"`            // Last execution time
-	Timezone      string     `json:"timezone" gorm:"default:UTC"`                // Timezone for schedule
+	CronExpr     string     `json:"cron_expr" gorm:"column:cron_expr"`         // For cron schedule type
+	IntervalSecs int        `json:"interval_secs" gorm:"column:interval_secs"` // For interval schedule type
+	RunAt        *time.Time `json:"run_at" gorm:"column:run_at"`               // For once schedule type
+	NextRun      *time.Time `json:"next_run" gorm:"index;column:next_run"`     // Computed next run time
+	LastRun      *time.Time `json:"last_run" gorm:"column:last_run"`           // Last execution time
+	Timezone     string     `json:"timezone" gorm:"default:UTC"`               // Timezone for schedule
 
 	// Task-specific configuration (JSON)
 	Config string `json:"config" gorm:"type:text"` // JSON config based on task type
 
 	// Execution settings
-	Timeout         int  `json:"timeout" gorm:"default:300"`          // Timeout in seconds (default 5 min)
-	RetryCount      int  `json:"retry_count" gorm:"default:0"`        // Number of retries on failure
-	RetryDelay      int  `json:"retry_delay" gorm:"default:60"`       // Delay between retries in seconds
-	RequireOnline   bool `json:"require_online" gorm:"default:true"`  // Only run if server is online
-	FailureNotify   bool `json:"failure_notify" gorm:"default:false"` // Notify on failure (future feature)
+	Timeout       int  `json:"timeout" gorm:"default:300"`          // Timeout in seconds (default 5 min)
+	RetryCount    int  `json:"retry_count" gorm:"default:0"`        // Number of retries on failure
+	RetryDelay    int  `json:"retry_delay" gorm:"default:60"`       // Delay between retries in seconds
+	RequireOnline bool `json:"require_online" gorm:"default:true"`  // Only run if server is online
+	FailureNotify bool `json:"failure_notify" gorm:"default:false"` // Notify on failure (future feature)
 
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
@@ -507,9 +509,9 @@ type TaskExecution struct {
 	Status    ExecutionStatus `json:"status" gorm:"not null"`
 	StartedAt time.Time       `json:"started_at" gorm:"not null;column:started_at"`
 	EndedAt   *time.Time      `json:"ended_at" gorm:"column:ended_at"`
-	Duration  int64           `json:"duration" gorm:"default:0"` // Duration in milliseconds
-	Output    string          `json:"output" gorm:"type:text"`   // Output or result
-	Error     string          `json:"error" gorm:"type:text"`    // Error message if failed
+	Duration  int64           `json:"duration" gorm:"default:0"`                   // Duration in milliseconds
+	Output    string          `json:"output" gorm:"type:text"`                     // Output or result
+	Error     string          `json:"error" gorm:"type:text"`                      // Error message if failed
 	RetryNum  int             `json:"retry_num" gorm:"default:0;column:retry_num"` // Which retry attempt (0 = first try)
 	Trigger   string          `json:"trigger" gorm:"default:scheduled"`            // "scheduled", "manual", "startup"
 

@@ -86,7 +86,7 @@ func main() {
 	}
 
 	// Initialize Docker client with configuration
-	dockerClient, err := docker.NewClient(cfg.Docker.Host, docker.ClientConfig{
+	dockerClient, err := docker.NewClient(cfg.Docker.Host, log, docker.ClientConfig{
 		APIVersion:  cfg.Docker.Version,
 		NetworkName: cfg.Docker.NetworkName,
 		RegistryURL: cfg.Docker.RegistryURL,

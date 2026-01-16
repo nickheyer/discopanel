@@ -21,7 +21,7 @@
 
 	function addPort() {
 		const newPort = create(AdditionalPortSchema, {
-			description: '',
+			name: '',
 			containerPort: findNextAvailablePort(),
 			hostPort: findNextAvailablePort(),
 			protocol: 'tcp'
@@ -105,7 +105,7 @@
 			<div class="space-y-3">
 				<!-- Headers -->
 				<div class="grid grid-cols-12 gap-2 px-1 text-xs font-medium text-muted-foreground">
-					<div class="col-span-4">Description</div>
+					<div class="col-span-4">Name</div>
 					<div class="col-span-2">Container Port</div>
 					<div class="col-span-2">Host Port</div>
 					<div class="col-span-2">Protocol</div>
@@ -120,9 +120,9 @@
 								<Input
 									type="text"
 									placeholder="e.g., BlueMap Web"
-									bind:value={port.description}
+									bind:value={port.name}
 									disabled={disabled}
-									onchange={() => updatePort(index, 'description', port.description)}
+									onchange={() => updatePort(index, 'name', port.name)}
 									class="h-8 text-xs"
 								/>
 							</div>

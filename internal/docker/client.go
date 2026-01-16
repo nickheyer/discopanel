@@ -24,46 +24,9 @@ import (
 	"github.com/docker/go-connections/nat"
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
-
-// AdditionalPort represents a single additional port configuration
-type AdditionalPort struct {
-	Name          string `json:"name"`           // User-friendly name for the port (e.g., "BlueMap Web")
-	ContainerPort int    `json:"container_port"` // Port inside the container
-	HostPort      int    `json:"host_port"`      // Port on the host machine
-	Protocol      string `json:"protocol"`       // Protocol: "tcp" or "udp" (defaults to "tcp" if empty)
-}
-
-// DockerOverrides represents user-defined docker container overrides
-type DockerOverrides struct {
-	Environment    map[string]string `json:"environment,omitempty"`     // Additional environment variables
-	Volumes        []VolumeMount     `json:"volumes,omitempty"`         // Additional volume mounts
-	NetworkMode    string            `json:"network_mode,omitempty"`    // Override network mode
-	RestartPolicy  string            `json:"restart_policy,omitempty"`  // Override restart policy
-	CPULimit       float64           `json:"cpu_limit,omitempty"`       // CPU limit (e.g., 1.5 for 1.5 cores)
-	MemoryOverride int64             `json:"memory_override,omitempty"` // Override memory limit in MB
-	Labels         map[string]string `json:"labels,omitempty"`          // Additional labels
-	CapAdd         []string          `json:"cap_add,omitempty"`         // Linux capabilities to add
-	CapDrop        []string          `json:"cap_drop,omitempty"`        // Linux capabilities to drop
-	Devices        []string          `json:"devices,omitempty"`         // Device mappings (e.g., "/dev/ttyUSB0:/dev/ttyUSB0")
-	ExtraHosts     []string          `json:"extra_hosts,omitempty"`     // Extra entries for /etc/hosts
-	Privileged     bool              `json:"privileged,omitempty"`      // Run container in privileged mode
-	ReadOnly       bool              `json:"read_only,omitempty"`       // Mount root filesystem as read-only
-	SecurityOpt    []string          `json:"security_opt,omitempty"`    // Security options
-	ShmSize        int64             `json:"shm_size,omitempty"`        // Size of /dev/shm in bytes
-	User           string            `json:"user,omitempty"`            // User to run commands as
-	WorkingDir     string            `json:"working_dir,omitempty"`     // Working directory inside container
-	Entrypoint     []string          `json:"entrypoint,omitempty"`      // Override default entrypoint
-	Command        []string          `json:"command,omitempty"`         // Override default command
-}
-
-// VolumeMount represents a volume mount configuration
-type VolumeMount struct {
-	Source   string `json:"source"`              // Host path or volume name
-	Target   string `json:"target"`              // Container path
-	ReadOnly bool   `json:"read_only,omitempty"` // Mount as read-only
-	Type     string `json:"type,omitempty"`      // Mount type: "bind" or "volume" (defaults to "bind")
-}
 
 const (
 	// Docker images manifest URL from itzg/docker-minecraft-server repo
@@ -71,6 +34,15 @@ const (
 
 	// Cache for 1 hour
 	dockerImagesCacheDuration = time.Hour
+
+	// Default Minecraft server port inside containers
+	DefaultMinecraftPort = 25565
+
+	// Default RCON port inside containers
+	DefaultRCONPort = 25575
+
+	// Offset added to game port for RCON host binding
+	RCONPortOffset = 10
 )
 
 type ContainerStats struct {
@@ -189,12 +161,24 @@ type ClientConfig struct {
 	RegistryURL string
 }
 
-type Client struct {
-	docker *client.Client
-	config ClientConfig
+type ContainerLogStreamer interface {
+	StartStreaming(containerID string) error
+	StopStreaming(containerID string)
 }
 
-func NewClient(host string, config ...ClientConfig) (*Client, error) {
+type Client struct {
+	docker      *client.Client
+	config      ClientConfig
+	logStreamer ContainerLogStreamer
+	log         *logger.Logger
+}
+
+// Auto manage streams at the client level when set
+func (c *Client) SetLogStreamer(ls ContainerLogStreamer) {
+	c.logStreamer = ls
+}
+
+func NewClient(host string, log *logger.Logger, config ...ClientConfig) (*Client, error) {
 	opts := []client.Opt{
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -214,7 +198,7 @@ func NewClient(host string, config ...ClientConfig) (*Client, error) {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
 	}
 
-	c := &Client{docker: docker}
+	c := &Client{docker: docker, log: log}
 	if len(config) > 0 {
 		c.config = config[0]
 	} else {
@@ -236,6 +220,117 @@ func (c *Client) GetDockerClient() *client.Client {
 	return c.docker
 }
 
+// ApplyOverrides applies DockerOverrides to container and host configs
+func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hostConfig *container.HostConfig) {
+	if overrides == nil {
+		return
+	}
+
+	// Apply environment variable overrides
+	if len(overrides.GetEnvironment()) > 0 {
+		for key, value := range overrides.GetEnvironment() {
+			config.Env = append(config.Env, fmt.Sprintf("%s=%s", key, value))
+		}
+	}
+
+	// Apply additional volume mounts
+	for _, vol := range overrides.GetVolumes() {
+		mountType := mount.Type(vol.GetType())
+		if mountType == "" {
+			mountType = mount.TypeBind
+		}
+		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
+			Type:     mountType,
+			Source:   vol.GetSource(),
+			Target:   vol.GetTarget(),
+			ReadOnly: vol.GetReadOnly(),
+		})
+	}
+
+	// Apply restart policy override
+	if overrides.GetRestartPolicy() != "" {
+		hostConfig.RestartPolicy = container.RestartPolicy{
+			Name: container.RestartPolicyMode(overrides.GetRestartPolicy()),
+		}
+	}
+
+	// Apply resource limits
+	if overrides.GetCpuLimit() > 0 {
+		hostConfig.Resources.NanoCPUs = int64(overrides.GetCpuLimit() * 1e9)
+	}
+	if overrides.GetMemoryLimit() > 0 {
+		hostConfig.Resources.Memory = overrides.GetMemoryLimit() * 1024 * 1024
+		hostConfig.Resources.MemorySwap = overrides.GetMemoryLimit() * 1024 * 1024
+	}
+
+	// Apply additional labels
+	if len(overrides.GetLabels()) > 0 {
+		maps.Copy(config.Labels, overrides.GetLabels())
+	}
+
+	// Apply capabilities
+	if len(overrides.GetCapAdd()) > 0 {
+		hostConfig.CapAdd = overrides.GetCapAdd()
+	}
+	if len(overrides.GetCapDrop()) > 0 {
+		hostConfig.CapDrop = overrides.GetCapDrop()
+	}
+
+	// Apply devices
+	for _, device := range overrides.GetDevices() {
+		parts := strings.Split(device, ":")
+		if len(parts) >= 2 {
+			hostConfig.Devices = append(hostConfig.Devices, container.DeviceMapping{
+				PathOnHost:        parts[0],
+				PathInContainer:   parts[1],
+				CgroupPermissions: "rwm",
+			})
+		}
+	}
+
+	// Apply extra hosts
+	if len(overrides.GetExtraHosts()) > 0 {
+		hostConfig.ExtraHosts = overrides.GetExtraHosts()
+	}
+
+	// Apply security settings
+	hostConfig.Privileged = overrides.GetPrivileged()
+	hostConfig.ReadonlyRootfs = overrides.GetReadOnly()
+	if len(overrides.GetSecurityOpt()) > 0 {
+		hostConfig.SecurityOpt = overrides.GetSecurityOpt()
+	}
+
+	// Apply SHM size
+	if overrides.GetShmSize() > 0 {
+		hostConfig.ShmSize = overrides.GetShmSize()
+	}
+
+	// Apply user
+	if overrides.GetUser() != "" {
+		config.User = overrides.GetUser()
+	}
+
+	// Apply working directory
+	if overrides.GetWorkingDir() != "" {
+		config.WorkingDir = overrides.GetWorkingDir()
+	}
+
+	// Apply entrypoint
+	if len(overrides.GetEntrypoint()) > 0 {
+		config.Entrypoint = overrides.GetEntrypoint()
+	}
+
+	// Apply command
+	if len(overrides.GetCommand()) > 0 {
+		config.Cmd = overrides.GetCommand()
+	}
+
+	// Apply network mode override
+	if overrides.GetNetworkMode() != "" {
+		hostConfig.NetworkMode = container.NetworkMode(overrides.GetNetworkMode())
+	}
+}
+
 func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerConfig) (string, error) {
 	// Use server's DockerImage if specified, otherwise determine based on version and loader
 	var imageName string
@@ -250,66 +345,84 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		return "", fmt.Errorf("failed to pull image: %w", err)
 	}
 
-	// Build environment variables from ServerConfig
+	// Build environment variables
 	env := buildEnvFromConfig(serverConfig)
 
-	// Override SERVER_PORT when using proxy - all servers should use 25565 internally
-	if server.ProxyHostname != "" {
-		// Remove any existing SERVER_PORT env var
-		newEnv := []string{}
+	// Determine container port - proxy servers always use default port internally
+	useProxy := server.ProxyHostname != ""
+	containerPort := server.Port
+	if useProxy {
+		containerPort = DefaultMinecraftPort
+		// Override SERVER_PORT env var for proxy servers
+		filtered := make([]string, 0, len(env))
 		for _, e := range env {
 			if !strings.HasPrefix(e, "SERVER_PORT=") {
-				newEnv = append(newEnv, e)
+				filtered = append(filtered, e)
 			}
 		}
-		// Add SERVER_PORT=25565
-		newEnv = append(newEnv, "SERVER_PORT=25565")
-		env = newEnv
+		env = append(filtered, fmt.Sprintf("SERVER_PORT=%d", DefaultMinecraftPort))
 	}
 
-	// Log the environment variables for debugging
-	for _, e := range env {
-		fmt.Printf("Docker env: %s\n", e)
-	}
+	c.log.Debug("Creating container for server %s with image %s", server.ID, imageName)
 
-	// Container configuration
-	// Determine which port Minecraft will actually use inside the container
-	minecraftPort := server.Port
-	if server.ProxyHostname != "" {
-		minecraftPort = 25565 // Proxy servers always use 25565 internally
-	}
-
-	// Parse additional ports
-	var additionalPorts []AdditionalPort
-	if server.AdditionalPorts != "" {
-		if err := json.Unmarshal([]byte(server.AdditionalPorts), &additionalPorts); err != nil {
-			fmt.Printf("Warning: Failed to parse additional ports: %v\n", err)
-			additionalPorts = []AdditionalPort{}
-		}
-	}
-
-	// Build exposed ports including additional ports
+	// Build exposed ports
 	exposedPorts := nat.PortSet{
-		nat.Port(fmt.Sprintf("%d/tcp", minecraftPort)): struct{}{},
-		"25575/tcp": struct{}{}, // RCON port
+		nat.Port(fmt.Sprintf("%d/tcp", containerPort)):   struct{}{},
+		nat.Port(fmt.Sprintf("%d/tcp", DefaultRCONPort)): struct{}{},
+	}
+	for _, port := range server.AdditionalPorts {
+		protocol := port.GetProtocol()
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		exposedPorts[nat.Port(fmt.Sprintf("%d/%s", port.GetContainerPort(), protocol))] = struct{}{}
 	}
 
-	// Add additional ports to exposed ports
-	for _, port := range additionalPorts {
-		protocol := port.Protocol
-		if protocol == "" {
-			protocol = "tcp" // Default to TCP if not specified
+	// Build port bindings
+	portBindings := nat.PortMap{}
+	if !useProxy {
+		// Bind game port to host
+		portBindings[nat.Port(fmt.Sprintf("%d/tcp", containerPort))] = []nat.PortBinding{
+			{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", server.Port)},
 		}
-		portKey := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, protocol))
-		exposedPorts[portKey] = struct{}{}
+		// Bind RCON to localhost only
+		portBindings[nat.Port(fmt.Sprintf("%d/tcp", DefaultRCONPort))] = []nat.PortBinding{
+			{HostIP: "127.0.0.1", HostPort: fmt.Sprintf("%d", server.Port+RCONPortOffset)},
+		}
+	}
+	// Add additional port bindings
+	for _, port := range server.AdditionalPorts {
+		protocol := port.GetProtocol()
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		portKey := nat.Port(fmt.Sprintf("%d/%s", port.GetContainerPort(), protocol))
+		portBindings[portKey] = []nat.PortBinding{
+			{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", port.GetHostPort())},
+		}
+		c.log.Debug("Additional port mapping: %s (%d:%d/%s)", port.GetName(), port.GetHostPort(), port.GetContainerPort(), protocol)
+	}
+
+	// Handle path translation when DiscoPanel runs in a container
+	dataPath := server.DataPath
+	if hostDataPath := os.Getenv("DISCOPANEL_HOST_DATA_PATH"); hostDataPath != "" {
+		containerDataDir := os.Getenv("DISCOPANEL_DATA_DIR")
+		if containerDataDir == "" {
+			containerDataDir = "/app/data"
+		}
+		if relPath, err := filepath.Rel(containerDataDir, server.DataPath); err == nil {
+			dataPath = filepath.Join(hostDataPath, relPath)
+		}
+	}
+
+	if err := os.MkdirAll(server.DataPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create server data directory: %w", err)
 	}
 
 	config := &container.Config{
 		Image:        imageName,
 		Env:          env,
 		Tty:          true,
-		OpenStdin:    false,
-		AttachStdin:  false,
 		AttachStdout: true,
 		AttachStderr: true,
 		ExposedPorts: exposedPorts,
@@ -322,226 +435,26 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		},
 	}
 
-	// For RCON, use a dynamic port allocation or no host binding when using proxy
-	// This prevents conflicts when multiple servers are running
-	var rconPortBinding []nat.PortBinding
-	if server.ProxyHostname == "" {
-		// Only bind RCON to a specific port if not using proxy
-		rconPort := server.Port + 10
-		rconPortBinding = []nat.PortBinding{
-			{
-				HostIP:   "127.0.0.1",
-				HostPort: fmt.Sprintf("%d", rconPort),
-			},
-		}
-	} else {
-		// When using proxy, let Docker assign a random port or don't bind at all
-		// The container can still be accessed via Docker network for RCON
-		rconPortBinding = []nat.PortBinding{}
-	}
-
-	// Host configuration
-	// If server has a proxy hostname configured, don't bind the game port to avoid conflicts
-	portBindings := nat.PortMap{}
-
-	// Only bind the game port if not using proxy (no proxy_hostname set)
-	if server.ProxyHostname == "" {
-		portBindings[nat.Port(fmt.Sprintf("%d/tcp", minecraftPort))] = []nat.PortBinding{
-			{
-				HostIP:   "0.0.0.0",
-				HostPort: fmt.Sprintf("%d", server.Port),
-			},
-		}
-	}
-
-	// Set RCON port binding based on proxy configuration
-	if len(rconPortBinding) > 0 {
-		portBindings["25575/tcp"] = rconPortBinding
-	}
-
-	// Add additional port bindings
-	for _, port := range additionalPorts {
-		protocol := port.Protocol
-		if protocol == "" {
-			protocol = "tcp"
-		}
-		portKey := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, protocol))
-		portBindings[portKey] = []nat.PortBinding{
-			{
-				HostIP:   "0.0.0.0",
-				HostPort: fmt.Sprintf("%d", port.HostPort),
-			},
-		}
-		fmt.Printf("Adding additional port: %s - %d:%d/%s\n", port.Name, port.HostPort, port.ContainerPort, protocol)
-	}
-
-	// Handle path translation when DiscoPanel is running in a container
-	dataPath := server.DataPath
-	if hostDataPath := os.Getenv("DISCOPANEL_HOST_DATA_PATH"); hostDataPath != "" {
-		// When running in Docker, translate container path to host path
-		// Example: /app/data/servers/creative -> ./data/servers/creative
-		containerDataDir := os.Getenv("DISCOPANEL_DATA_DIR")
-		if containerDataDir == "" {
-			containerDataDir = "/app/data"
-		}
-
-		// Replace the container path prefix with the host path
-		relPath, err := filepath.Rel(containerDataDir, server.DataPath)
-		if err == nil {
-			dataPath = filepath.Join(hostDataPath, relPath)
-		}
-	}
-
-	// Ensure the directory exists
-	if err := os.MkdirAll(server.DataPath, 0755); err != nil {
-		return "", fmt.Errorf("failed to create server data directory: %w", err)
-	}
-
 	hostConfig := &container.HostConfig{
 		PortBindings: portBindings,
 		Mounts: []mount.Mount{
-			{
-				Type:   mount.TypeBind,
-				Source: dataPath,
-				Target: "/data",
-			},
+			{Type: mount.TypeBind, Source: dataPath, Target: "/data"},
 		},
-		RestartPolicy: container.RestartPolicy{
-			Name: "unless-stopped",
-		},
+		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
 		Resources: container.Resources{
 			Memory:     int64(server.Memory) * 1024 * 1024,
 			MemorySwap: int64(server.Memory) * 1024 * 1024,
 		},
 		LogConfig: container.LogConfig{
-			Type: "json-file",
-			Config: map[string]string{
-				"max-size": "10m",
-				"max-file": "3",
-			},
+			Type:   "json-file",
+			Config: map[string]string{"max-size": "10m", "max-file": "3"},
 		},
 	}
 
-	// Parse and apply docker overrides if present
-	if server.DockerOverrides != "" {
-		var overrides DockerOverrides
-		if err := json.Unmarshal([]byte(server.DockerOverrides), &overrides); err != nil {
-			fmt.Printf("Warning: Failed to parse docker overrides: %v\n", err)
-		} else {
-			// Apply environment variable overrides
-			if len(overrides.Environment) > 0 {
-				for key, value := range overrides.Environment {
-					// Add or override environment variables
-					env = append(env, fmt.Sprintf("%s=%s", key, value))
-				}
-				config.Env = env
-			}
+	// Apply docker overrides
+	ApplyOverrides(server.DockerOverrides, config, hostConfig)
 
-			// Apply additional volume mounts
-			if len(overrides.Volumes) > 0 {
-				for _, vol := range overrides.Volumes {
-					mountType := mount.Type(vol.Type)
-					if mountType == "" {
-						mountType = mount.TypeBind
-					}
-					hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
-						Type:     mountType,
-						Source:   vol.Source,
-						Target:   vol.Target,
-						ReadOnly: vol.ReadOnly,
-					})
-				}
-			}
-
-			// Apply restart policy override
-			if overrides.RestartPolicy != "" {
-				hostConfig.RestartPolicy = container.RestartPolicy{
-					Name: container.RestartPolicyMode(overrides.RestartPolicy),
-				}
-			}
-
-			// Apply resource limits
-			if overrides.CPULimit > 0 {
-				hostConfig.Resources.NanoCPUs = int64(overrides.CPULimit * 1e9) // Convert cores to nanocpus
-			}
-			if overrides.MemoryOverride > 0 {
-				hostConfig.Resources.Memory = overrides.MemoryOverride * 1024 * 1024
-				hostConfig.Resources.MemorySwap = overrides.MemoryOverride * 1024 * 1024
-			}
-
-			// Apply additional labels
-			if len(overrides.Labels) > 0 {
-				maps.Copy(config.Labels, overrides.Labels)
-			}
-
-			// Apply capabilities
-			if len(overrides.CapAdd) > 0 {
-				hostConfig.CapAdd = overrides.CapAdd
-			}
-			if len(overrides.CapDrop) > 0 {
-				hostConfig.CapDrop = overrides.CapDrop
-			}
-
-			// Apply devices
-			if len(overrides.Devices) > 0 {
-				hostConfig.Devices = []container.DeviceMapping{}
-				for _, device := range overrides.Devices {
-					parts := strings.Split(device, ":")
-					if len(parts) >= 2 {
-						hostConfig.Devices = append(hostConfig.Devices, container.DeviceMapping{
-							PathOnHost:        parts[0],
-							PathInContainer:   parts[1],
-							CgroupPermissions: "rwm",
-						})
-					}
-				}
-			}
-
-			// Apply extra hosts
-			if len(overrides.ExtraHosts) > 0 {
-				hostConfig.ExtraHosts = overrides.ExtraHosts
-			}
-
-			// Apply security settings
-			hostConfig.Privileged = overrides.Privileged
-			hostConfig.ReadonlyRootfs = overrides.ReadOnly
-			if len(overrides.SecurityOpt) > 0 {
-				hostConfig.SecurityOpt = overrides.SecurityOpt
-			}
-
-			// Apply SHM size
-			if overrides.ShmSize > 0 {
-				hostConfig.ShmSize = overrides.ShmSize
-			}
-
-			// Apply user
-			if overrides.User != "" {
-				config.User = overrides.User
-			}
-
-			// Apply working directory
-			if overrides.WorkingDir != "" {
-				config.WorkingDir = overrides.WorkingDir
-			}
-
-			// Apply entrypoint
-			if len(overrides.Entrypoint) > 0 {
-				config.Entrypoint = overrides.Entrypoint
-			}
-
-			// Apply command
-			if len(overrides.Command) > 0 {
-				config.Cmd = overrides.Command
-			}
-
-			// Apply network mode override
-			if overrides.NetworkMode != "" {
-				hostConfig.NetworkMode = container.NetworkMode(overrides.NetworkMode)
-			}
-		}
-	}
-
-	// Network configuration - use custom network if available
+	// Network configuration
 	networkConfig := &network.NetworkingConfig{}
 	if c.config.NetworkName != "" && hostConfig.NetworkMode == "" {
 		networkConfig.EndpointsConfig = map[string]*network.EndpointSettings{
@@ -549,16 +462,10 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		}
 	}
 
-	// Create container
 	resp, err := c.docker.ContainerCreate(
-		ctx,
-		config,
-		hostConfig,
-		networkConfig,
-		nil,
+		ctx, config, hostConfig, networkConfig, nil,
 		fmt.Sprintf("discopanel-server-%s", server.ID),
 	)
-
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
@@ -567,10 +474,26 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 }
 
 func (c *Client) StartContainer(ctx context.Context, containerID string) error {
-	return c.docker.ContainerStart(ctx, containerID, container.StartOptions{})
+	if err := c.docker.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		return err
+	}
+
+	// Start log streaming if configured
+	if c.logStreamer != nil {
+		if err := c.logStreamer.StartStreaming(containerID); err != nil {
+			c.log.Warn("Failed to start log streaming for container %s: %v", containerID, err)
+		}
+	}
+
+	return nil
 }
 
 func (c *Client) StopContainer(ctx context.Context, containerID string) error {
+	// Stop log streaming before stopping container
+	if c.logStreamer != nil {
+		c.logStreamer.StopStreaming(containerID)
+	}
+
 	// First try graceful stop with a short timeout
 	timeout := 5 // seconds
 	err := c.docker.ContainerStop(ctx, containerID, container.StopOptions{
@@ -579,7 +502,7 @@ func (c *Client) StopContainer(ctx context.Context, containerID string) error {
 
 	if err != nil {
 		// If graceful stop fails, force kill the container
-		fmt.Printf("Graceful stop failed for container %s: %v, attempting force kill\n", containerID, err)
+		c.log.Warn("Graceful stop failed for container %s: %v, attempting force kill", containerID, err)
 		killErr := c.docker.ContainerKill(ctx, containerID, "KILL")
 		if killErr != nil {
 			return fmt.Errorf("failed to stop container: graceful stop error: %v, force kill error: %v", err, killErr)
@@ -593,6 +516,74 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string) error 
 	return c.docker.ContainerRemove(ctx, containerID, container.RemoveOptions{
 		Force: true,
 	})
+}
+
+// Stops and starts a container with an optional delay between operations
+func (c *Client) RestartContainer(ctx context.Context, containerID string, delay time.Duration) error {
+	if err := c.StopContainer(ctx, containerID); err != nil {
+		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	if delay > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+
+	if err := c.StartContainer(ctx, containerID); err != nil {
+		return fmt.Errorf("failed to start container: %w", err)
+	}
+
+	return nil
+}
+
+// Result of a container recreation operation
+type RecreateContainerResult struct {
+	NewContainerID string
+	WasRunning     bool
+}
+
+// Stops, removes, and creates a new container - Returns new container ID and whether it was running before
+func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, server *models.Server, serverConfig *models.ServerConfig) (*RecreateContainerResult, error) {
+	result := &RecreateContainerResult{}
+
+	// Check if container was running before we stop it
+	if oldContainerID != "" {
+		status, err := c.GetContainerStatus(ctx, oldContainerID)
+		if err != nil {
+			// Container may not exist, that's ok - continue with creation
+			c.log.Debug("Container %s not found during recreation: %v", oldContainerID, err)
+		} else if status == models.StatusRunning || status == models.StatusUnhealthy {
+			result.WasRunning = true
+			if err := c.StopContainer(ctx, oldContainerID); err != nil {
+				return nil, fmt.Errorf("failed to stop container: %w", err)
+			}
+		}
+
+		// Remove old container
+		if err := c.RemoveContainer(ctx, oldContainerID); err != nil {
+			// Log but continue - container may already be removed
+			c.log.Debug("Could not remove old container (may not exist): %v", err)
+		}
+	}
+
+	// Create new container
+	newContainerID, err := c.CreateContainer(ctx, server, serverConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create container: %w", err)
+	}
+	result.NewContainerID = newContainerID
+
+	// Start if it was running before
+	if result.WasRunning {
+		if err := c.StartContainer(ctx, newContainerID); err != nil {
+			return result, fmt.Errorf("failed to start new container: %w", err)
+		}
+	}
+
+	return result, nil
 }
 
 func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (models.ServerStatus, error) {
@@ -740,7 +731,7 @@ func (c *Client) pullImage(ctx context.Context, imageName string) error {
 func (c *Client) GetDockerImages() []DockerImageTag {
 	images, err := fetchDockerImages()
 	if err != nil {
-		fmt.Printf("Error: failed to fetch docker images: %v\n", err)
+		c.log.Error("Failed to fetch docker images: %v", err)
 		return []DockerImageTag{}
 	}
 

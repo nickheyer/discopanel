@@ -17,6 +17,11 @@ import { SupportService } from '$lib/proto/discopanel/v1/support_pb';
 import { TaskService } from '$lib/proto/discopanel/v1/task_pb';
 import { UserService } from '$lib/proto/discopanel/v1/user_pb';
 
+// Header to mark requests as silent / no loader
+const SILENT_HEADER = 'X-Silent-Request';
+
+export const silentCallOptions = { headers: new Headers({ [SILENT_HEADER]: 'true' }) };
+
 // Login auth interception
 const authInterceptor: Interceptor = (next) => async (req) => {
   // Auth headers
@@ -25,11 +30,14 @@ const authInterceptor: Interceptor = (next) => async (req) => {
     req.header.set(key, value as string);
   });
 
+  // Check for silence
+  const isSilent = req.header.get(SILENT_HEADER) === 'true';
+
   // Operation ID for loading tracking
   const operationId = `rpc-${req.service.typeName}-${req.method.name}-${Date.now()}`;
 
   // Show loading indicator
-  const showLoading = !req.method.name.toLowerCase().includes('status');
+  const showLoading = !isSilent && !req.method.name.toLowerCase().includes('status');
   if (showLoading) {
     loadingStore.start(operationId);
   }

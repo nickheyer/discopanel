@@ -1,7 +1,7 @@
 import { writable, derived } from 'svelte/store';
 import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
-import { rpcClient } from '$lib/api/rpc-client';
+import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 import { create } from '@bufbuild/protobuf';
 import { ListServersRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 
@@ -10,10 +10,11 @@ function createServersStore() {
 
   return {
     subscribe,
-    fetchServers: async (skipLoading = true) => {
+    fetchServers: async (skipLoading = false) => {
       try {
         const request = create(ListServersRequestSchema, { fullStats: false });
-        const response = await rpcClient.server.listServers(request);
+        const callOptions = skipLoading ? silentCallOptions : undefined;
+        const response = await rpcClient.server.listServers(request, callOptions);
         set(response.servers);
         return response.servers;
       } catch (error) {

@@ -49,6 +49,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 
 	// Initialize log streamer
 	logStreamer := logger.NewLogStreamer(docker.GetDockerClient(), log, 10000)
+	docker.SetLogStreamer(logStreamer)
 
 	s := &Server{
 		store:          store,

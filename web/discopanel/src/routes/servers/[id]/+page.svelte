@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { onMount, untrack } from 'svelte';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { serversStore } from '$lib/stores/servers';
 	import { goto } from '$app/navigation';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -30,6 +30,7 @@
 	let loading = $state(true);
 	let actionLoading = $state(false);
 	let serverId = $derived(page.params.id);
+	let prevServerId = $state<string | undefined>(undefined);
 	let activeTab = $state('overview');
 	let routingInfo = $state<GetServerRoutingResponse | null>(null);
 
@@ -51,26 +52,41 @@
 	$effect(() => {
 		if (serverId) {
 			if (interval) clearInterval(interval);
-			loadServer();
+			// Reset state when switching servers to show loading
+			const prev = untrack(() => prevServerId);
+			if (prev !== serverId) {
+				untrack(() => {
+					loading = true;
+					server = null;
+					prevServerId = serverId;
+				});
+			}
+			// Initial load - full screen loader
+			// Initial tab data loading requests - corner loader
+			loadServer(true);
 			interval = setInterval(() => loadServer(true), 5000); // Poll every 5 seconds
 		}
 	});
 
 	async function loadServer(skipLoading = false) {
+		if (!serverId) return;
+		const requestedId = serverId;
 		try {
-			if (!serverId) return;
-			const request = create(GetServerRequestSchema, { id: serverId });
-			const response = await rpcClient.server.getServer(request);
-			if (response.server) {
+			const request = create(GetServerRequestSchema, { id: requestedId });
+			const callOptions = skipLoading ? silentCallOptions : undefined;
+			const response = await rpcClient.server.getServer(request, callOptions);
+			// Only update if we're still on the same server
+			if (response.server && serverId === requestedId) {
 				server = response.server;
 				serversStore.updateServer(server);
+				loading = false;
 			}
 		} catch (error) {
-			if (!server) {
+			// Only show error if still on the same server and no data yet
+			if (serverId === requestedId && !server) {
 				toast.error('Failed to load server');
+				loading = false;
 			}
-		} finally {
-			loading = false;
 		}
 	}
 

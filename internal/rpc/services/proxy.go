@@ -394,12 +394,21 @@ func (s *ProxyService) GetServerRouting(ctx context.Context, req *connect.Reques
 		}
 	}
 
+	// Get listen port from the listener if assigned
+	listenPort := int32(s.config.Proxy.ListenPort)
+	if server.ProxyListenerID != "" {
+		if listener, err := s.store.GetProxyListener(ctx, server.ProxyListenerID); err == nil {
+			listenPort = int32(listener.Port)
+		}
+	}
+
 	return connect.NewResponse(&v1.GetServerRoutingResponse{
 		ProxyEnabled:      s.config.Proxy.Enabled,
 		ProxyHostname:     server.ProxyHostname,
+		ProxyListenerId:   server.ProxyListenerID,
 		SuggestedHostname: suggestedHostname,
 		BaseUrl:           s.config.Proxy.BaseURL,
-		ListenPort:        int32(s.config.Proxy.ListenPort),
+		ListenPort:        listenPort,
 		CurrentRoute:      currentRoute,
 	}), nil
 }
@@ -413,13 +422,13 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
-	// Store old proxy hostname to detect if container recreation is needed
+	// Store old values to detect changes
 	oldProxyHostname := server.ProxyHostname
+	oldProxyListenerID := server.ProxyListenerID
 
-	// Validate hostname
+	// Validate and normalize hostname
 	hostname := strings.TrimSpace(strings.ToLower(msg.ProxyHostname))
 	if hostname != "" {
-		// Basic hostname validation
 		if strings.Contains(hostname, " ") || strings.Contains(hostname, "://") {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid hostname format"))
 		}
@@ -429,7 +438,6 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check hostname conflicts"))
 		}
-
 		for _, srv := range servers {
 			if srv.ID != server.ID && srv.ProxyHostname == hostname {
 				return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("hostname already in use by another server"))
@@ -437,99 +445,108 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 		}
 	}
 
-	// Determine if container recreation is needed
-	// Recreation is needed when proxy status changes (empty <-> non-empty)
-	// because Docker port bindings are set at container creation time
-	needsRecreation := (oldProxyHostname == "") != (hostname == "")
-
-	// Update server hostname
-	server.ProxyHostname = hostname
-	if err := s.store.UpdateServer(ctx, server); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
+	// Determine new listener ID
+	listenerID := msg.ProxyListenerId
+	if listenerID == "" && hostname != "" {
+		// If enabling proxy but no listener specified, use existing or get default
+		if oldProxyListenerID != "" {
+			listenerID = oldProxyListenerID
+		} else {
+			// Find default listener
+			listeners, err := s.store.GetProxyListeners(ctx)
+			if err == nil {
+				for _, l := range listeners {
+					if l.IsDefault && l.Enabled {
+						listenerID = l.ID
+						break
+					}
+				}
+				// If no default, use first enabled listener
+				if listenerID == "" {
+					for _, l := range listeners {
+						if l.Enabled {
+							listenerID = l.ID
+							break
+						}
+					}
+				}
+			}
+		}
+		if listenerID == "" && hostname != "" {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no proxy listener available"))
+		}
 	}
 
-	// Handle container recreation if proxy mode changed
+	// Clear listener if disabling proxy
+	if hostname == "" {
+		listenerID = ""
+	}
+
+	// Detect what changed
+	hostnameChanged := oldProxyHostname != hostname
+	listenerChanged := oldProxyListenerID != listenerID
+	proxyModeChanged := (oldProxyHostname == "") != (hostname == "")
+
+	// Container recreation needed if proxy mode changes OR listener changes while proxy is enabled
+	needsRecreation := proxyModeChanged || (listenerChanged && hostname != "" && oldProxyHostname != "")
+
+	// Removes old route BEFORE updating server in DB and using its hostname
+	if hostnameChanged && oldProxyHostname != "" && s.proxyManager != nil {
+		if err := s.proxyManager.RemoveRouteByHostname(oldProxyHostname, oldProxyListenerID); err != nil {
+			s.log.Error("Failed to remove old proxy route: %v", err)
+		}
+	}
+
+	// Update server fields
+	server.ProxyHostname = hostname
+	server.ProxyListenerID = listenerID
+
+	// Handle container recreation if needed
 	if needsRecreation && server.ContainerID != "" && s.docker != nil {
-		wasRunning := false
-
-		// Check container status
-		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
-		if err != nil {
-			s.log.Debug("Container %s not found during routing update: %v", server.ContainerID, err)
-		} else if status == storage.StatusRunning || status == storage.StatusUnhealthy {
-			wasRunning = true
-			// Stop log streaming before stopping container
-			if s.logStreamer != nil {
-				s.logStreamer.StopStreaming(server.ContainerID)
-			}
-			// Stop the container
-			if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
-				s.log.Error("Failed to stop container for proxy mode change: %v", err)
-			}
-		}
-
-		// Remove old container
-		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
-			s.log.Debug("Could not remove old container (may not exist): %v", err)
-		}
-
-		// Get server config for container creation
 		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
 		if err != nil {
 			s.log.Error("Failed to get server config: %v", err)
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
 		}
 
-		// Create new container with updated proxy settings (and thus correct port bindings)
-		newContainerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+		result, err := s.docker.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
 		if err != nil {
-			s.log.Error("Failed to create new container: %v", err)
-			server.Status = storage.StatusError
-			server.ContainerID = ""
+			s.log.Error("Failed to recreate container for proxy change: %v", err)
+			if result != nil && result.NewContainerID != "" {
+				server.ContainerID = result.NewContainerID
+				server.Status = storage.StatusError
+			} else {
+				server.Status = storage.StatusError
+				server.ContainerID = ""
+			}
 		} else {
-			server.ContainerID = newContainerID
-			server.Status = storage.StatusStopped
-
-			// Start container if it was running before
-			if wasRunning {
-				if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
-					s.log.Error("Failed to restart container after proxy mode change: %v", err)
-					server.Status = storage.StatusError
-				} else {
-					server.Status = storage.StatusRunning
-					// Start log streaming for new container
-					if s.logStreamer != nil {
-						if err := s.logStreamer.StartStreaming(newContainerID); err != nil {
-							s.log.Error("Failed to start log streaming after proxy mode change: %v", err)
-						}
-					}
-				}
+			server.ContainerID = result.NewContainerID
+			if result.WasRunning {
+				server.Status = storage.StatusRunning
+			} else {
+				server.Status = storage.StatusStopped
 			}
 		}
 
-		// Update server with new container ID and status
-		if err := s.store.UpdateServer(ctx, server); err != nil {
-			s.log.Error("Failed to update server after container recreation: %v", err)
-		}
-
-		s.log.Info("Container recreated for server %s due to proxy mode change (proxy: %v -> %v)",
-			server.Name, oldProxyHostname != "", hostname != "")
+		s.log.Info("Container recreated for server %s (proxy: %q -> %q, listener: %s -> %s)",
+			server.Name, oldProxyHostname, hostname, oldProxyListenerID, listenerID)
 	}
 
-	// Update proxy route
-	if s.proxyManager != nil {
-		if hostname != "" {
-			if err := s.proxyManager.UpdateServerRoute(server); err != nil {
-				s.log.Error("Failed to update proxy route: %v", err)
-			}
-		} else {
-			// Remove route when proxy is disabled
-			s.proxyManager.RemoveServerRoute(server.ID)
+	// Save server to database
+	if err := s.store.UpdateServer(ctx, server); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
+	}
+
+	// Add/update new route if proxy is enabled
+	if hostname != "" && s.proxyManager != nil {
+		if err := s.proxyManager.UpdateServerRoute(server); err != nil {
+			s.log.Error("Failed to update proxy route: %v", err)
 		}
 	}
 
 	return connect.NewResponse(&v1.UpdateServerRoutingResponse{
-		Status:   "Routing updated successfully",
-		Hostname: hostname,
+		Status:          "Routing updated successfully",
+		Hostname:        hostname,
+		ProxyListenerId: listenerID,
 	}), nil
 }

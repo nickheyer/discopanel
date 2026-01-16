@@ -6,8 +6,8 @@
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Plus, AlertCircle, Code, ChevronDown, ChevronRight, X } from '@lucide/svelte';
-	import type { DockerOverrides } from '$lib/proto/discopanel/v1/common_pb';
-	import { DockerOverridesSchema } from '$lib/proto/discopanel/v1/common_pb';
+	import type { DockerOverrides, VolumeMount } from '$lib/proto/discopanel/v1/common_pb';
+	import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/discopanel/v1/common_pb';
 	import { create } from '@bufbuild/protobuf';
 	import { Badge } from '$lib/components/ui/badge';
 
@@ -29,15 +29,15 @@
 	let activeCount = $derived(() => {
 		if (!overrides) return 0;
 		let count = 0;
-		if (overrides.environment && overrides.environment.length > 0) count++;
+		if (overrides.environment && Object.keys(overrides.environment).length > 0) count++;
 		if (overrides.volumes && overrides.volumes.length > 0) count++;
 		if (overrides.cpuLimit) count++;
 		if (overrides.memoryLimit) count++;
-		if (overrides.memoryReservation) count++;
 		if (overrides.networkMode) count++;
 		if (overrides.privileged) count++;
 		if (overrides.user) count++;
-		if (overrides.capabilities && overrides.capabilities.length > 0) count++;
+		if (overrides.capAdd && overrides.capAdd.length > 0) count++;
+		if (overrides.capDrop && overrides.capDrop.length > 0) count++;
 		if (overrides.devices && overrides.devices.length > 0) count++;
 		return count;
 	});
@@ -90,23 +90,24 @@
 		const updates: any = {};
 
 		// Copy existing values
-		if (overrides.environment) updates.environment = [...overrides.environment];
-		if (overrides.volumes) updates.volumes = [...overrides.volumes];
-		if (overrides.capabilities) updates.capabilities = [...overrides.capabilities];
-		if (overrides.devices) updates.devices = [...overrides.devices];
+		if (overrides.environment && Object.keys(overrides.environment).length > 0) updates.environment = { ...overrides.environment };
+		if (overrides.volumes && overrides.volumes.length > 0) updates.volumes = [...overrides.volumes];
+		if (overrides.capAdd && overrides.capAdd.length > 0) updates.capAdd = [...overrides.capAdd];
+		if (overrides.capDrop && overrides.capDrop.length > 0) updates.capDrop = [...overrides.capDrop];
+		if (overrides.devices && overrides.devices.length > 0) updates.devices = [...overrides.devices];
 		if (overrides.networkMode) updates.networkMode = overrides.networkMode;
 		if (overrides.privileged !== undefined) updates.privileged = overrides.privileged;
 		if (overrides.user) updates.user = overrides.user;
 		if (overrides.memoryLimit) updates.memoryLimit = overrides.memoryLimit;
-		if (overrides.memoryReservation) updates.memoryReservation = overrides.memoryReservation;
 		if (overrides.cpuLimit) updates.cpuLimit = overrides.cpuLimit;
 		if (overrides.restartPolicy) updates.restartPolicy = overrides.restartPolicy;
-		if (overrides.entryPoint) updates.entryPoint = overrides.entryPoint;
+		if (overrides.entrypoint && overrides.entrypoint.length > 0) updates.entrypoint = [...overrides.entrypoint];
 
 		// Update the specific field
 		if (value === undefined || value === null ||
 		    (typeof value === 'string' && !value) ||
 		    (Array.isArray(value) && value.length === 0) ||
+		    (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) ||
 		    (typeof value === 'number' && value === 0) ||
 		    (typeof value === 'bigint' && value === 0n)) {
 			delete updates[key];
@@ -117,7 +118,8 @@
 		// Check if any values remain
 		const hasValues = Object.values(updates).some(v =>
 			v !== undefined && v !== null && v !== '' && v !== 0 && v !== 0n &&
-			(!Array.isArray(v) || v.length > 0)
+			(!Array.isArray(v) || v.length > 0) &&
+			(typeof v !== 'object' || Array.isArray(v) || Object.keys(v).length > 0)
 		);
 
 		if (hasValues) {
@@ -129,78 +131,76 @@
 		onchange?.(overrides);
 	}
 
-	// Environment Variables (stored as "KEY=VALUE" strings)
+	// Environment Variables (stored as map object)
 	function addEnvVar() {
-		const envArray = [...(overrides?.environment || [])];
+		const envMap = { ...(overrides?.environment || {}) };
 		// Generate unique key name
 		let newKey = `VAR_${envVarCounter}`;
-		const envMap = envArrayToMap(envArray);
-		while (envMap.has(newKey)) {
+		while (newKey in envMap) {
 			envVarCounter++;
 			newKey = `VAR_${envVarCounter}`;
 		}
 		envVarCounter++;
-		envArray.push(`${newKey}=`);
-		updateOverride('environment', envArray);
+		envMap[newKey] = '';
+		updateOverride('environment', envMap);
 	}
 
 	function updateEnvVar(oldKey: string, newKey: string, value: string) {
-		const envArray = [...(overrides?.environment || [])];
-		const envMap = envArrayToMap(envArray);
+		const envMap = { ...(overrides?.environment || {}) };
 
 		// If key changed, remove old key
 		if (oldKey !== newKey) {
-			envMap.delete(oldKey);
+			delete envMap[oldKey];
 		}
 
-		// Add new key/value if both are present
+		// Add new key/value if key is present
 		if (newKey) {
-			envMap.set(newKey, value);
+			envMap[newKey] = value;
 		}
 
-		const newArray = mapToEnvArray(envMap);
-		updateOverride('environment', newArray.length > 0 ? newArray : undefined);
+		const hasKeys = Object.keys(envMap).length > 0;
+		updateOverride('environment', hasKeys ? envMap : undefined);
 	}
 
 	function removeEnvVar(key: string) {
-		const envArray = [...(overrides?.environment || [])];
-		const envMap = envArrayToMap(envArray);
-		envMap.delete(key);
-		const newArray = mapToEnvArray(envMap);
-		updateOverride('environment', newArray.length > 0 ? newArray : undefined);
+		const envMap = { ...(overrides?.environment || {}) };
+		delete envMap[key];
+		const hasKeys = Object.keys(envMap).length > 0;
+		updateOverride('environment', hasKeys ? envMap : undefined);
 	}
 
-	// Helper functions for environment variable conversion
-	function envArrayToMap(envArray: string[]): Map<string, string> {
-		const map = new Map<string, string>();
-		for (const env of envArray) {
-			const [key, ...valueParts] = env.split('=');
-			if (key) {
-				map.set(key, valueParts.join('='));
-			}
-		}
-		return map;
-	}
-
-	function mapToEnvArray(envMap: Map<string, string>): string[] {
-		return Array.from(envMap.entries()).map(([key, value]) => `${key}=${value}`);
-	}
-
-	// Volumes (stored as "source:target" or "source:target:mode" strings)
+	// Volumes (stored as VolumeMount objects)
 	function addVolume() {
 		const volumes = [...(overrides?.volumes || [])];
-		volumes.push('');
+		const newVolume = create(VolumeMountSchema, {
+			source: '',
+			target: '',
+			readOnly: false,
+			type: 'bind'
+		});
+		volumes.push(newVolume);
 		updateOverride('volumes', volumes);
 	}
 
-	function updateVolume(index: number, volumeStr: string | null) {
+	function updateVolume(index: number, volume: VolumeMount | null) {
 		const volumes = [...(overrides?.volumes || [])];
-		if (volumeStr) {
-			volumes[index] = volumeStr;
+		if (volume) {
+			volumes[index] = volume;
 		} else {
 			volumes.splice(index, 1);
 		}
 		updateOverride('volumes', volumes.length > 0 ? volumes : undefined);
+	}
+
+	function updateVolumeField(index: number, field: keyof VolumeMount, value: any) {
+		const volumes = [...(overrides?.volumes || [])];
+		if (volumes[index]) {
+			volumes[index] = create(VolumeMountSchema, {
+				...volumes[index],
+				[field]: value
+			});
+			updateOverride('volumes', volumes);
+		}
 	}
 </script>
 
@@ -288,10 +288,10 @@
 								Add Variable
 							</Button>
 						</div>
-						{#if overrides?.environment && overrides.environment.length > 0}
+						{#if overrides?.environment && Object.keys(overrides.environment).length > 0}
 							<div class="rounded-lg border bg-muted/20 p-3">
 								<div class="space-y-2">
-									{#each Array.from(envArrayToMap(overrides.environment).entries()) as [key, value]}
+									{#each Object.entries(overrides.environment) as [key, value]}
 										<div class="flex items-center gap-2">
 											<Input
 												value={key}
@@ -345,26 +345,58 @@
 						</div>
 						{#if overrides?.volumes && overrides.volumes.length > 0}
 							<div class="rounded-lg border bg-muted/20 p-3">
-								<div class="space-y-2">
+								<div class="space-y-3">
 									{#each overrides.volumes as volume, i}
-										<div class="flex items-center gap-2">
-											<Input
-												value={volume}
-												onchange={(e) => updateVolume(i, e.currentTarget.value)}
-												placeholder="/host/path:/container/path:ro"
-												disabled={disabled}
-												class="h-8 text-xs flex-1 font-mono"
-											/>
-											<Button
-												type="button"
-												variant="ghost"
-												size="icon"
-												onclick={() => updateVolume(i, null)}
-												disabled={disabled}
-												class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
-											>
-												<X class="h-3 w-3" />
-											</Button>
+										<div class="space-y-2 p-2 rounded border bg-background/50">
+											<div class="flex items-center gap-2">
+												<div class="flex-1 grid grid-cols-2 gap-2">
+													<Input
+														value={volume.source}
+														onchange={(e) => updateVolumeField(i, 'source', e.currentTarget.value)}
+														placeholder="/host/path or volume-name"
+														disabled={disabled}
+														class="h-8 text-xs font-mono"
+													/>
+													<Input
+														value={volume.target}
+														onchange={(e) => updateVolumeField(i, 'target', e.currentTarget.value)}
+														placeholder="/container/path"
+														disabled={disabled}
+														class="h-8 text-xs font-mono"
+													/>
+												</div>
+												<Button
+													type="button"
+													variant="ghost"
+													size="icon"
+													onclick={() => updateVolume(i, null)}
+													disabled={disabled}
+													class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+												>
+													<X class="h-3 w-3" />
+												</Button>
+											</div>
+											<div class="flex items-center gap-4 pl-1">
+												<label class="flex items-center gap-2">
+													<input
+														type="checkbox"
+														checked={volume.readOnly}
+														onchange={(e) => updateVolumeField(i, 'readOnly', e.currentTarget.checked)}
+														disabled={disabled}
+														class="h-3 w-3"
+													/>
+													<span class="text-xs text-muted-foreground">Read Only</span>
+												</label>
+												<select
+													value={volume.type || 'bind'}
+													onchange={(e) => updateVolumeField(i, 'type', e.currentTarget.value)}
+													disabled={disabled}
+													class="h-6 text-xs border rounded px-1 bg-background"
+												>
+													<option value="bind">Bind Mount</option>
+													<option value="volume">Volume</option>
+												</select>
+											</div>
 										</div>
 									{/each}
 								</div>
@@ -467,12 +499,21 @@
 						<Input
 							id="entrypoint"
 							type="text"
-							placeholder='echo "foobar"'
-							value={overrides?.entryPoint || ''}
-							onchange={(e) => updateOverride('entryPoint', e.currentTarget.value || undefined)}
+							placeholder='/bin/sh, -c, echo "hello"'
+							value={overrides?.entrypoint?.join(', ') || ''}
+							onchange={(e) => {
+								const value = e.currentTarget.value;
+								if (!value) {
+									updateOverride('entrypoint', undefined);
+								} else {
+									const parts = value.split(',').map(s => s.trim()).filter(s => s);
+									updateOverride('entrypoint', parts.length > 0 ? parts : undefined);
+								}
+							}}
 							disabled={disabled}
 							class="h-8 text-xs"
 						/>
+						<p class="text-xs text-muted-foreground">Comma-separated arguments</p>
 					</div>
 				</CardContent>
 			{/if}

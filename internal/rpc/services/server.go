@@ -89,56 +89,8 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		UpdatedAt:       timestamppb.New(server.UpdatedAt),
 	}
 
-	if server.DockerOverrides != "" {
-		// First unmarshal into the internal docker model format (what's stored in DB)
-		var internalOverrides docker.DockerOverrides
-		if err := json.Unmarshal([]byte(server.DockerOverrides), &internalOverrides); err == nil {
-			// Convert internal model to proto format
-			protoOverrides := &v1.DockerOverrides{}
-
-			// Convert environment to string type key=value
-			for key, value := range internalOverrides.Environment {
-				protoOverrides.Environment = append(protoOverrides.Environment, fmt.Sprintf("%s=%s", key, value))
-			}
-
-			// Convert volumes from []VolumeMount to []string ("source:target:mode" format)
-			for _, vol := range internalOverrides.Volumes {
-				volStr := vol.Source + ":" + vol.Target
-				if vol.ReadOnly {
-					volStr += ":ro"
-				}
-				protoOverrides.Volumes = append(protoOverrides.Volumes, volStr)
-			}
-
-			// Copy other fields
-			if internalOverrides.NetworkMode != "" {
-				protoOverrides.NetworkMode = internalOverrides.NetworkMode
-			}
-			if internalOverrides.Privileged {
-				protoOverrides.Privileged = internalOverrides.Privileged
-			}
-			if internalOverrides.User != "" {
-				protoOverrides.User = internalOverrides.User
-			}
-			if internalOverrides.CPULimit > 0 {
-				protoOverrides.CpuLimit = internalOverrides.CPULimit
-			}
-			if internalOverrides.RestartPolicy != "" {
-				protoOverrides.RestartPolicy = internalOverrides.RestartPolicy
-			}
-			if len(internalOverrides.Entrypoint) > 0 {
-				protoOverrides.EntryPoint = strings.Join(internalOverrides.Entrypoint, " ")
-			}
-			if len(internalOverrides.Devices) > 0 {
-				protoOverrides.Devices = internalOverrides.Devices
-			}
-			if len(internalOverrides.CapAdd) > 0 {
-				protoOverrides.Capabilities = internalOverrides.CapAdd
-			}
-
-			protoServer.DockerOverrides = protoOverrides
-		}
-	}
+	// Apply overrides
+	protoServer.DockerOverrides = server.DockerOverrides
 
 	// Map mod loader
 	protoServer.ModLoader = dbModLoaderToProto(server.ModLoader)
@@ -250,67 +202,6 @@ func dbStatusToProto(status storage.ServerStatus) v1.ServerStatus {
 	default:
 		return v1.ServerStatus_SERVER_STATUS_UNSPECIFIED
 	}
-}
-
-// protoDockerOverridesToInternal converts proto docker overrides to internal docker model
-func protoDockerOverridesToInternal(protoOverrides *v1.DockerOverrides) *docker.DockerOverrides {
-	if protoOverrides == nil {
-		return nil
-	}
-
-	// Convert environment from []string to map[string]string
-	envMap := make(map[string]string)
-	for _, env := range protoOverrides.Environment {
-		parts := strings.SplitN(env, "=", 2)
-		if len(parts) == 2 {
-			envMap[parts[0]] = parts[1]
-		}
-	}
-
-	// Convert volumes from []string to []docker.VolumeMount
-	var volumes []docker.VolumeMount
-	for _, vol := range protoOverrides.Volumes {
-		parts := strings.Split(vol, ":")
-		if len(parts) >= 2 {
-			vm := docker.VolumeMount{
-				Source: parts[0],
-				Target: parts[1],
-			}
-			if len(parts) >= 3 {
-				vm.ReadOnly = parts[2] == "ro"
-			}
-			volumes = append(volumes, vm)
-		}
-	}
-
-	overrides := &docker.DockerOverrides{
-		Environment: envMap,
-		Volumes:     volumes,
-	}
-
-	if len(protoOverrides.Devices) > 0 {
-		overrides.Devices = protoOverrides.Devices
-	}
-	if protoOverrides.NetworkMode != "" {
-		overrides.NetworkMode = protoOverrides.NetworkMode
-	}
-	if protoOverrides.Privileged {
-		overrides.Privileged = protoOverrides.Privileged
-	}
-	if protoOverrides.User != "" {
-		overrides.User = protoOverrides.User
-	}
-	if protoOverrides.CpuLimit > 0 {
-		overrides.CPULimit = protoOverrides.CpuLimit
-	}
-	if protoOverrides.RestartPolicy != "" {
-		overrides.RestartPolicy = protoOverrides.RestartPolicy
-	}
-	if protoOverrides.EntryPoint != "" {
-		overrides.Entrypoint = []string{protoOverrides.EntryPoint}
-	}
-
-	return overrides
 }
 
 // ListServers lists all servers
@@ -469,7 +360,7 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 
 				// Get TPS if configured
 				if server.TPSCommand != "" {
-					for _, cmd := range strings.Split(server.TPSCommand, " ?? ") {
+					for cmd := range strings.SplitSeq(server.TPSCommand, " ?? ") {
 						cmd = strings.TrimSpace(cmd)
 						if cmd == "" {
 							continue
@@ -621,8 +512,8 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		dockerImage = docker.GetOptimalDockerTag(msg.McVersion, modLoader, false)
 	}
 
-	// Validate and convert additional ports
-	var additionalPorts []docker.AdditionalPort
+	// Validate additional ports
+	var additionalPorts []*v1.AdditionalPort
 	usedPorts := make(map[string]bool)
 
 	for _, protoPort := range msg.AdditionalPorts {
@@ -657,33 +548,12 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("port %d is already in use by the proxy server", protoPort.HostPort))
 		}
 
-		additionalPorts = append(additionalPorts, docker.AdditionalPort{
-			ContainerPort: int(protoPort.ContainerPort),
-			HostPort:      int(protoPort.HostPort),
+		additionalPorts = append(additionalPorts, &v1.AdditionalPort{
+			ContainerPort: protoPort.ContainerPort,
+			HostPort:      protoPort.HostPort,
 			Protocol:      protocol,
-			Name:          protoPort.Description,
+			Name:          protoPort.Name,
 		})
-	}
-
-	// Convert additional ports to JSON
-	additionalPortsJSON := ""
-	if len(additionalPorts) > 0 {
-		portsBytes, err := json.Marshal(additionalPorts)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to process additional ports"))
-		}
-		additionalPortsJSON = string(portsBytes)
-	}
-
-	// Convert docker overrides to JSON
-	dockerOverridesJSON := ""
-	if msg.DockerOverrides != nil {
-		overrides := protoDockerOverridesToInternal(msg.DockerOverrides)
-		overridesBytes, err := json.Marshal(overrides)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to process docker overrides"))
-		}
-		dockerOverridesJSON = string(overridesBytes)
 	}
 
 	// Create server object
@@ -709,8 +579,8 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		AutoStart:       msg.AutoStart,
 		Detached:        msg.Detached,
 		TPSCommand:      minecraft.GetTPSCommand(modLoader),
-		AdditionalPorts: additionalPortsJSON,
-		DockerOverrides: dockerOverridesJSON,
+		AdditionalPorts: additionalPorts,
+		DockerOverrides: msg.DockerOverrides,
 	}
 
 	// Set defaults
@@ -861,12 +731,6 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 				server.Status = storage.StatusError
 			} else {
 				server.Status = storage.StatusStarting
-				// Start log streaming if available
-				if s.logStreamer != nil {
-					if err := s.logStreamer.StartStreaming(containerID); err != nil {
-						s.log.Error("Failed to start log streaming: %v", err)
-					}
-				}
 				// Update last started time
 				now := time.Now()
 				server.LastStarted = &now
@@ -878,6 +742,12 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			// Update status in database
 			if err := s.store.UpdateServer(bgCtx, server); err != nil {
 				s.log.Error("Failed to update server status: %v", err)
+			}
+			// Update proxy route if enabled
+			if s.proxy != nil && server.ProxyHostname != "" {
+				if err := s.proxy.UpdateServerRoute(server); err != nil {
+					s.log.Error("Failed to update proxy route for newly created server: %v", err)
+				}
 			}
 		} else {
 			// Update status to stopped once container is ready
@@ -981,8 +851,8 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 
 	// Handle additional ports update
 	if len(msg.AdditionalPorts) > 0 {
-		// Validate and convert additional ports
-		var additionalPorts []docker.AdditionalPort
+		// Validate additional ports
+		var additionalPorts []*v1.AdditionalPort
 		usedPorts := make(map[string]bool)
 
 		for _, protoPort := range msg.AdditionalPorts {
@@ -1017,31 +887,21 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("port %d is already in use by the proxy server", protoPort.HostPort))
 			}
 
-			additionalPorts = append(additionalPorts, docker.AdditionalPort{
-				ContainerPort: int(protoPort.ContainerPort),
-				HostPort:      int(protoPort.HostPort),
+			additionalPorts = append(additionalPorts, &v1.AdditionalPort{
+				ContainerPort: protoPort.ContainerPort,
+				HostPort:      protoPort.HostPort,
 				Protocol:      protocol,
-				Name:          protoPort.Description,
+				Name:          protoPort.Name,
 			})
 		}
 
-		// Convert to JSON
-		portsBytes, err := json.Marshal(additionalPorts)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to process additional ports"))
-		}
-		server.AdditionalPorts = string(portsBytes)
+		server.AdditionalPorts = additionalPorts
 		needsRecreation = true
 	}
 
 	// Handle docker overrides update
 	if msg.DockerOverrides != nil {
-		overrides := protoDockerOverridesToInternal(msg.DockerOverrides)
-		overridesBytes, err := json.Marshal(overrides)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to process docker overrides"))
-		}
-		server.DockerOverrides = string(overridesBytes)
+		server.DockerOverrides = msg.DockerOverrides
 		needsRecreation = true
 	}
 
@@ -1103,30 +963,6 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 
 	// If container needs recreation
 	if needsRecreation {
-		wasRunning := false
-		// If container exists, check status and remove it
-		if server.ContainerID != "" {
-			status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
-			if err != nil {
-				s.log.Debug("Container %s not found during update, will create new one: %v", server.ContainerID, err)
-			} else if status == storage.StatusRunning || status == storage.StatusUnhealthy {
-				wasRunning = true
-				// Stop log streaming before stopping container
-				if s.logStreamer != nil {
-					s.logStreamer.StopStreaming(server.ContainerID)
-				}
-				// Stop the container
-				if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
-					s.log.Error("Failed to stop container for recreation: %v", err)
-				}
-			}
-
-			// Remove old container
-			if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
-				s.log.Debug("Could not remove old container (may not exist): %v", err)
-			}
-		}
-
 		// Get server config for container creation
 		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
 		if err != nil {
@@ -1134,30 +970,25 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
 		}
 
-		// Create new container with updated settings
-		newContainerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+		// Recreate container
+		result, err := s.docker.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
 		if err != nil {
-			s.log.Error("Failed to create new container: %v", err)
-			server.Status = storage.StatusError
-			server.ContainerID = ""
+			s.log.Error("Failed to recreate container: %v", err)
+			if result != nil && result.NewContainerID != "" {
+				// Container was created but failed to start
+				server.ContainerID = result.NewContainerID
+				server.Status = storage.StatusError
+			} else {
+				// Complete failure
+				server.Status = storage.StatusError
+				server.ContainerID = ""
+			}
 		} else {
-			server.ContainerID = newContainerID
-			server.Status = storage.StatusStopped
-
-			// Start container if it was running before
-			if wasRunning {
-				if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
-					s.log.Error("Failed to restart container after recreation: %v", err)
-					server.Status = storage.StatusError
-				} else {
-					server.Status = storage.StatusRunning
-					// Start log streaming for new container
-					if s.logStreamer != nil {
-						if err := s.logStreamer.StartStreaming(newContainerID); err != nil {
-							s.log.Error("Failed to start log streaming after recreation: %v", err)
-						}
-					}
-				}
+			server.ContainerID = result.NewContainerID
+			if result.WasRunning {
+				server.Status = storage.StatusRunning
+			} else {
+				server.Status = storage.StatusStopped
 			}
 		}
 
@@ -1220,13 +1051,6 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server"))
 	}
 
-	// Start log streaming if available
-	if s.logStreamer != nil {
-		if err := s.logStreamer.StartStreaming(server.ContainerID); err != nil {
-			s.log.Error("Failed to start log streaming: %v", err)
-		}
-	}
-
 	// Update server status
 	now := time.Now()
 	server.Status = storage.StatusStarting
@@ -1275,11 +1099,6 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 	if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
 		s.log.Error("Failed to stop container: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop server"))
-	}
-
-	// Stop log streaming if available
-	if s.logStreamer != nil {
-		s.logStreamer.StopStreaming(server.ContainerID)
 	}
 
 	// Update server status
@@ -1336,13 +1155,6 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server"))
 		}
 
-		// Start log streaming if available
-		if s.logStreamer != nil {
-			if err := s.logStreamer.StartStreaming(server.ContainerID); err != nil {
-				s.log.Error("Failed to start log streaming: %v", err)
-			}
-		}
-
 		// Update server status
 		now := time.Now()
 		server.Status = storage.StatusStarting
@@ -1362,44 +1174,16 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		}), nil
 	}
 
-	// Stop log streaming before restart
-	if s.logStreamer != nil {
-		s.logStreamer.StopStreaming(server.ContainerID)
-	}
-
-	// Stop container
-	if err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
-		s.log.Error("Failed to stop container: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop server"))
-	}
-
-	// Update server status to stopping
-	server.Status = storage.StatusStopping
-	if err := s.store.UpdateServer(ctx, server); err != nil {
-		s.log.Error("Failed to update server status: %v", err)
-	}
-
-	// Wait a bit for clean shutdown
-	time.Sleep(2 * time.Second)
-
-	// Start container
-	if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
-		s.log.Error("Failed to start container: %v", err)
+	// Restart container
+	if err := s.docker.RestartContainer(ctx, server.ContainerID, 2*time.Second); err != nil {
+		s.log.Error("Failed to restart container: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart server"))
-	}
-
-	// Restart log streaming if available
-	if s.logStreamer != nil {
-		if err := s.logStreamer.StartStreaming(server.ContainerID); err != nil {
-			s.log.Error("Failed to restart log streaming: %v", err)
-		}
 	}
 
 	// Update server status
 	now := time.Now()
 	server.Status = storage.StatusStarting
 	server.LastStarted = &now
-
 	if err := s.store.UpdateServer(ctx, server); err != nil {
 		s.log.Error("Failed to update server status: %v", err)
 	}

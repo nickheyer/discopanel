@@ -31,17 +31,6 @@
 	let saving = $state(false);
 	let isDirty = $state(false);
 	
-	// Parse additional ports and docker overrides from JSON strings
-	function parseAdditionalPorts(jsonStr?: string): AdditionalPort[] {
-		if (!jsonStr) return [];
-		try {
-			return JSON.parse(jsonStr);
-		} catch (e) {
-			console.error('Failed to parse additionalPorts:', e);
-			return [];
-		}
-	}
-
   function safeToString(data?: any): string | undefined {
     if (!data) return undefined;
     try {
@@ -68,7 +57,7 @@
 			tpsCommand: server.tpsCommand || '',
 			modpackId: '', // Not used in this context
 			modpackVersionId: '', // Not used in this context
-			additionalPorts: parseAdditionalPorts(server.additionalPorts),
+			additionalPorts: server.additionalPorts || [],
 			dockerOverrides: server.dockerOverrides
 		})
 	);
@@ -103,7 +92,7 @@
 				tpsCommand: server.tpsCommand || '',
 				modpackId: '', // Not used in this context
 				modpackVersionId: '', // Not used in this context
-				additionalPorts: parseAdditionalPorts(server.additionalPorts),
+				additionalPorts: server.additionalPorts || [],
 				dockerOverrides: server.dockerOverrides
 			});
 			saving = false;
@@ -132,7 +121,7 @@
 			formData.detached !== server.detached ||
 			formData.autoStart !== server.autoStart ||
 			formData.tpsCommand !== (server.tpsCommand || '') ||
-			JSON.stringify(formData.additionalPorts) !== JSON.stringify(parseAdditionalPorts(server.additionalPorts)) ||
+			safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
 			safeToString($state.snapshot(formData.dockerOverrides)) !== safeToString(server.dockerOverrides);
 	});
 

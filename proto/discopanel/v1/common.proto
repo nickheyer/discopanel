@@ -93,7 +93,7 @@ message Server {
   double tps = 26;
 
   // Additional configuration
-  string additional_ports = 27; // JSON string
+  repeated AdditionalPort additional_ports = 27;
   DockerOverrides docker_overrides = 28;
 
   google.protobuf.Timestamp created_at = 29;
@@ -102,26 +102,41 @@ message Server {
 
 // Extra port mapping for container
 message AdditionalPort {
-  int32 container_port = 1;
-  int32 host_port = 2;
-  string protocol = 3; // tcp or udp
-  string description = 4;
+  string name = 1;            // User-friendly name for the port (e.g., "BlueMap Web")
+  int32 container_port = 2;   // Port inside the container
+  int32 host_port = 3;        // Port on the host machine
+  string protocol = 4;        // Protocol: "tcp" or "udp" (defaults to "tcp" if empty)
+}
+
+// Volume mount configuration for container
+message VolumeMount {
+  string source = 1;    // Host path or volume name
+  string target = 2;    // Container path
+  bool read_only = 3;   // Mount as read-only
+  string type = 4;      // Mount type: "bind" or "volume" (defaults to "bind")
 }
 
 // Container runtime customization
 message DockerOverrides {
-  repeated string environment = 1;
-  repeated string volumes = 2;
-  repeated string capabilities = 3;
-  repeated string devices = 4;
-  string network_mode = 5;
-  bool privileged = 6;
-  string user = 7;
-  int64 memory_limit = 8;
-  int64 memory_reservation = 9;
-  double cpu_limit = 10;
-  string restart_policy = 11;
-  string entry_point = 12;
+  map<string, string> environment = 1;    // Additional environment variables
+  repeated VolumeMount volumes = 2;       // Additional volume mounts
+  string network_mode = 3;                // Override network mode
+  string restart_policy = 4;              // Override restart policy
+  double cpu_limit = 5;                   // CPU limit (e.g., 1.5 for 1.5 cores)
+  int64 memory_limit = 6;                 // Override memory limit in MB
+  map<string, string> labels = 7;         // Additional labels
+  repeated string cap_add = 8;            // Linux capabilities to add
+  repeated string cap_drop = 9;           // Linux capabilities to drop
+  repeated string devices = 10;           // Device mappings (e.g., "/dev/ttyUSB0:/dev/ttyUSB0")
+  repeated string extra_hosts = 11;       // Extra entries for /etc/hosts
+  bool privileged = 12;                   // Run container in privileged mode
+  bool read_only = 13;                    // Mount root filesystem as read-only
+  repeated string security_opt = 14;      // Security options
+  int64 shm_size = 15;                    // Size of /dev/shm in bytes
+  string user = 16;                       // User to run commands as
+  string working_dir = 17;                // Working directory inside container
+  repeated string entrypoint = 18;        // Override default entrypoint
+  repeated string command = 19;           // Override default command
 }
 
 // TCP proxy listener endpoint

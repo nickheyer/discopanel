@@ -1036,32 +1036,11 @@ func (s *Store) DeleteModuleTemplate(ctx context.Context, id string) error {
 func (s *Store) SeedBuiltinTemplates(ctx context.Context) error {
 	builtinTemplates := []*ModuleTemplate{
 		{
-			ID:          "builtin-bluemap",
-			Name:        "BlueMap",
-			Description: "3D web-based map viewer for Minecraft worlds. Renders your world in real-time and serves it via a web interface.",
-			Category:    ModuleCategoryMap,
-			DockerImage: "bluemap/bluemap:latest",
-			IconURL:     "https://raw.githubusercontent.com/BlueMap-Minecraft/BlueMap/master/media/logo.png",
-			EnvVarSchema: []*ModuleEnvVarDef{
-				{Name: "BLUEMAP_WEBROOT", Description: "Web root path", Default: "/", Required: false},
-			},
-			PortSchema: []*ModulePortDef{
-				{Name: "Web Interface", ContainerPort: 8100, Protocol: ModuleProtocolHTTP, Required: true},
-			},
-			InjectServerHost: true,
-			InjectRCON:       false,
-			ShareServerData:  true,
-			DefaultProtocol:  ModuleProtocolHTTP,
-			DefaultPort:      8100,
-			IsBuiltin:        true,
-			Version:          "1.0.0",
-		},
-		{
 			ID:          "builtin-status",
 			Name:        "Status Panel",
 			Description: "Real-time server status and metrics dashboard. Shows player count, TPS, memory usage, and more.",
 			Category:    ModuleCategoryWebUI,
-			DockerImage: "discopanel/status-module:latest",
+			DockerImage: "nickheyer/discopanel-status-panel:latest",
 			IconURL:     "",
 			EnvVarSchema: []*ModuleEnvVarDef{
 				{Name: "REFRESH_INTERVAL", Description: "Dashboard refresh interval in seconds", Default: "5", Required: false},
@@ -1073,7 +1052,7 @@ func (s *Store) SeedBuiltinTemplates(ctx context.Context) error {
 			InjectRCON:       true,
 			ShareServerData:  false,
 			DefaultProtocol:  ModuleProtocolHTTP,
-			DefaultPort:      8080,
+			DefaultPort:      8081,
 			IsBuiltin:        true,
 			Version:          "1.0.0",
 		},

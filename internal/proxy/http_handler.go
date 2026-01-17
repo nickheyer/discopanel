@@ -24,11 +24,13 @@ type HTTPRequest struct {
 // It reads from a PeekingConn and returns the parsed request
 func ParseHTTPRequest(conn *PeekingConn) (*HTTPRequest, error) {
 	// Peek enough bytes to find the end of headers (max 8KB)
+	// Use a smaller initial peek to avoid blocking on slow clients
 	const maxHeaderSize = 8192
 	data, err := conn.Peek(maxHeaderSize)
 	if err != nil && len(data) == 0 {
-		return nil, fmt.Errorf("failed to peek HTTP headers: %w", err)
+		return nil, fmt.Errorf("failed to peek HTTP headers (got 0 bytes): %w", err)
 	}
+	// Continue with whatever data we got, even if there was an error (e.g., EOF)
 
 	// Find end of headers (\r\n\r\n)
 	headerEnd := bytes.Index(data, []byte("\r\n\r\n"))
@@ -85,6 +87,8 @@ func ParseHTTPRequest(conn *PeekingConn) (*HTTPRequest, error) {
 
 // handleHTTP handles HTTP protocol connections by routing based on Host header
 func (p *Proxy) handleHTTP(conn *PeekingConn) {
+	p.logger.Debug("handleHTTP called from %s", conn.RemoteAddr())
+
 	// Parse HTTP request to extract Host header
 	httpReq, err := ParseHTTPRequest(conn)
 	if err != nil {
@@ -92,6 +96,8 @@ func (p *Proxy) handleHTTP(conn *PeekingConn) {
 		p.sendHTTPError(conn, 400, "Bad Request")
 		return
 	}
+
+	p.logger.Debug("Parsed HTTP request: method=%s host=%s path=%s", httpReq.Method, httpReq.Host, httpReq.Path)
 
 	if httpReq.Host == "" {
 		p.logger.Debug("HTTP request missing Host header from %s", conn.RemoteAddr())
@@ -106,15 +112,17 @@ func (p *Proxy) handleHTTP(conn *PeekingConn) {
 	route, exists := p.routes[hostname]
 	p.routesMutex.RUnlock()
 
+	p.logger.Debug("Route lookup for %s: exists=%v", hostname, exists)
+
 	if !exists || !route.Active {
-		p.logger.Debug("No route for HTTP hostname: %s", hostname)
+		p.logger.Debug("No active route for HTTP hostname: %s", hostname)
 		p.sendHTTPError(conn, 404, "Not Found")
 		return
 	}
 
 	// Check if there's an HTTP backend for this route
 	if route.HTTPBackend == nil || !route.HTTPBackend.Active {
-		p.logger.Debug("No HTTP backend for hostname: %s", hostname)
+		p.logger.Debug("No HTTP backend for hostname: %s (HTTPBackend=%v)", hostname, route.HTTPBackend)
 		p.sendHTTPError(conn, 503, "Service Unavailable - No HTTP backend configured")
 		return
 	}

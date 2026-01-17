@@ -14,7 +14,8 @@ import (
 
 // Manager handles the lifecycle of the proxy and manages routes
 type Manager struct {
-	proxies     map[int]*Proxy // Map of port -> Proxy instance
+	proxies     map[int]*Proxy     // Map of port -> Proxy instance (for protocol detection, e.g., Minecraft)
+	forwarders  map[string]*Forwarder // Map of moduleID -> Forwarder instance (simple TCP/UDP forwarding)
 	store       *db.Store
 	config      *config.ProxyConfig
 	logger      *logger.Logger
@@ -26,10 +27,11 @@ type Manager struct {
 func NewManager(store *db.Store, cfg *config.Config, logger *logger.Logger) *Manager {
 	return &Manager{
 		proxies:     make(map[int]*Proxy),
+		forwarders:  make(map[string]*Forwarder),
 		store:       store,
 		config:      &cfg.Proxy,
 		logger:      logger,
-		networkName: cfg.Docker.NetworkName, // TODO: Get from main config
+		networkName: cfg.Docker.NetworkName,
 	}
 }
 
@@ -382,126 +384,95 @@ func (m *Manager) AllocateProxyPort(serverID string) (int, error) {
 	return 0, fmt.Errorf("no available proxy ports in range %d-%d", m.config.PortRangeMin, m.config.PortRangeMax)
 }
 
-// UpdateModuleRoute sets or updates the HTTP backend for a module
-// Modules inherit their server's proxy hostname and use HTTP protocol multiplexing
+// UpdateModuleRoute sets or updates the forwarder for a module
+// Modules get their own dedicated port with simple TCP/UDP forwarding
 func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server, containerIP string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if len(m.proxies) == 0 || !m.config.Enabled {
+	if !m.config.Enabled {
 		return nil
 	}
 
-	// Module uses server's proxy hostname
-	if server.ProxyHostname == "" || server.ProxyListenerID == "" {
-		return fmt.Errorf("server %s has no proxy hostname or listener configured", server.ID)
-	}
-
-	// Get the listener for this server
-	listener, err := m.store.GetProxyListener(context.Background(), server.ProxyListenerID)
-	if err != nil {
-		return fmt.Errorf("failed to get proxy listener: %w", err)
-	}
-
-	if !listener.Enabled {
-		return nil
-	}
-
-	// Get the proxy instance for this listener's port
-	proxy, ok := m.proxies[listener.Port]
-	if !ok {
-		return fmt.Errorf("no proxy instance for port %d", listener.Port)
-	}
-
-	// Get the module's HTTP port from its ports configuration
-	httpPort := 0
+	// Get the module's port configuration
+	var containerPort, hostPort int
+	var protocol string
 	for _, port := range module.Ports {
-		if port.Protocol == db.ModuleProtocolHTTP {
-			httpPort = port.ContainerPort
-			break
+		containerPort = port.ContainerPort
+		hostPort = port.HostPort
+		// Map module protocol to forwarder protocol
+		switch port.Protocol {
+		case db.ModuleProtocolHTTP, db.ModuleProtocolTCP:
+			protocol = "tcp"
+		default:
+			protocol = "tcp"
 		}
+		break // Use first port
 	}
 
-	if httpPort == 0 {
-		// Use proxy_port if set, otherwise error
-		if module.ProxyPort > 0 {
-			httpPort = module.ProxyPort
-		} else {
-			return fmt.Errorf("module %s has no HTTP port configured", module.ID)
-		}
+	if containerPort == 0 {
+		return fmt.Errorf("module %s has no port configured", module.ID)
 	}
 
-	// Set the HTTP backend for this hostname
-	proxy.SetHTTPBackend(server.ProxyHostname, module.ID, containerIP, httpPort)
+	// Use containerPort as hostPort if not specified
+	if hostPort == 0 {
+		hostPort = containerPort
+	}
 
-	m.logger.Info("Updated HTTP route for module %s on hostname %s -> %s:%d",
-		module.Name, server.ProxyHostname, containerIP, httpPort)
+	backendAddr := fmt.Sprintf("%s:%d", containerIP, containerPort)
+
+	// Check if forwarder already exists for this module
+	forwarder, exists := m.forwarders[module.ID]
+	if exists {
+		// Update backend address
+		forwarder.SetBackend(backendAddr)
+		m.logger.Info("Updated forwarder for module %s: :%d -> %s", module.Name, hostPort, backendAddr)
+		return nil
+	}
+
+	// Create new forwarder
+	listenAddr := fmt.Sprintf(":%d", hostPort)
+	forwarder = NewForwarder(&ForwarderConfig{
+		ListenAddr:  listenAddr,
+		BackendAddr: backendAddr,
+		Protocol:    protocol,
+		Logger:      m.logger,
+	})
+
+	if err := forwarder.Start(); err != nil {
+		return fmt.Errorf("failed to start forwarder on port %d: %w", hostPort, err)
+	}
+
+	m.forwarders[module.ID] = forwarder
+	m.logger.Info("Created forwarder for module %s: :%d -> %s", module.Name, hostPort, backendAddr)
 
 	return nil
 }
 
-// RemoveModuleRoute removes the HTTP backend for a module
+// RemoveModuleRoute stops and removes the forwarder for a module
 func (m *Manager) RemoveModuleRoute(module *db.Module, server *db.Server) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if len(m.proxies) == 0 || !m.config.Enabled {
+	if !m.config.Enabled {
 		return nil
 	}
 
-	if server.ProxyHostname == "" || server.ProxyListenerID == "" {
-		return nil // No route to remove
-	}
-
-	// Get the listener for this server
-	listener, err := m.store.GetProxyListener(context.Background(), server.ProxyListenerID)
-	if err != nil {
-		m.logger.Debug("Failed to get proxy listener for module route removal: %v", err)
+	forwarder, exists := m.forwarders[module.ID]
+	if !exists {
 		return nil
 	}
 
-	// Get the proxy instance for this listener's port
-	proxy, ok := m.proxies[listener.Port]
-	if !ok {
-		return nil
-	}
+	forwarder.Stop()
+	delete(m.forwarders, module.ID)
 
-	// Remove the HTTP backend for this hostname
-	proxy.RemoveHTTPBackend(server.ProxyHostname)
-
-	m.logger.Info("Removed HTTP route for module %s from hostname %s", module.Name, server.ProxyHostname)
+	m.logger.Info("Removed forwarder for module %s", module.Name)
 
 	return nil
 }
 
-// SetModuleRouteActive enables or disables the HTTP backend for a module
+// SetModuleRouteActive is a no-op for forwarders (they're either running or stopped)
 func (m *Manager) SetModuleRouteActive(module *db.Module, server *db.Server, active bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if len(m.proxies) == 0 || !m.config.Enabled {
-		return nil
-	}
-
-	if server.ProxyHostname == "" || server.ProxyListenerID == "" {
-		return nil
-	}
-
-	// Get the listener for this server
-	listener, err := m.store.GetProxyListener(context.Background(), server.ProxyListenerID)
-	if err != nil {
-		return nil
-	}
-
-	// Get the proxy instance for this listener's port
-	proxy, ok := m.proxies[listener.Port]
-	if !ok {
-		return nil
-	}
-
-	proxy.SetHTTPBackendActive(server.ProxyHostname, active)
-
-	m.logger.Info("Set HTTP route active for module %s: %v", module.Name, active)
-
+	// Forwarders don't have an "active" toggle - use UpdateModuleRoute/RemoveModuleRoute instead
 	return nil
 }

@@ -11,6 +11,7 @@ import { FileService } from '$lib/proto/discopanel/v1/file_pb';
 import { MinecraftService } from '$lib/proto/discopanel/v1/minecraft_pb';
 import { ModService } from '$lib/proto/discopanel/v1/mod_pb';
 import { ModpackService } from '$lib/proto/discopanel/v1/modpack_pb';
+import { ModuleService } from '$lib/proto/discopanel/v1/module_pb';
 import { ProxyService } from '$lib/proto/discopanel/v1/proxy_pb';
 import { ServerService } from '$lib/proto/discopanel/v1/server_pb';
 import { SupportService } from '$lib/proto/discopanel/v1/support_pb';
@@ -71,6 +72,7 @@ export class RpcClient {
   public readonly minecraft: Client<typeof MinecraftService>;
   public readonly mod: Client<typeof ModService>;
   public readonly modpack: Client<typeof ModpackService>;
+  public readonly module: Client<typeof ModuleService>;
   public readonly proxy: Client<typeof ProxyService>;
   public readonly server: Client<typeof ServerService>;
   public readonly support: Client<typeof SupportService>;
@@ -84,6 +86,7 @@ export class RpcClient {
     this.minecraft = createClient(MinecraftService, transport);
     this.mod = createClient(ModService, transport);
     this.modpack = createClient(ModpackService, transport);
+    this.module = createClient(ModuleService, transport);
     this.proxy = createClient(ProxyService, transport);
     this.server = createClient(ServerService, transport);
     this.support = createClient(SupportService, transport);

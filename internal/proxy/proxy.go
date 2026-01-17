@@ -328,15 +328,21 @@ func (p *Proxy) IsRunning() bool {
 }
 
 // SetHTTPBackend sets the HTTP backend for a route (used by modules)
-func (p *Proxy) SetHTTPBackend(hostname, moduleID, backendHost string, backendPort int) {
+func (p *Proxy) SetHTTPBackend(hostname, serverID, moduleID, backendHost string, backendPort int) {
 	p.routesMutex.Lock()
 	defer p.routesMutex.Unlock()
 
 	hostname = strings.ToLower(strings.Split(hostname, ":")[0])
 	route, exists := p.routes[hostname]
 	if !exists {
-		p.logger.Debug("Cannot set HTTP backend for non-existent route: %s", hostname)
-		return
+		// Create an HTTP-only route for this hostname
+		route = &Route{
+			ServerID: serverID,
+			Hostname: hostname,
+			Active:   true,
+		}
+		p.routes[hostname] = route
+		p.logger.Info("Created HTTP-only route for hostname: %s", hostname)
 	}
 
 	route.HTTPBackend = &ProtocolBackend{

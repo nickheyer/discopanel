@@ -1,6 +1,7 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image proto proto-clean proto-lint proto-format proto-breaking gen
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image proto proto-clean proto-lint proto-format proto-breaking gen modules modules-push
 
 DATA_DIR := ./data
+MODULES_REGISTRY := nickheyer
 DB_FILE := $(DATA_DIR)/discopanel.db
 FRONTEND_DIR := web/discopanel
 DISCOPANEL_BIN := build/discopanel
@@ -137,6 +138,22 @@ proto-breaking:
 # proto-install:
 # 	go install github.com/sudorandom/protoc-gen-connect-openapi@latest
 
+# Build all module images
+modules:
+	@for dir in cmd/modules/*/; do \
+		name=$$(basename $$dir); \
+		echo "Building module: $$name"; \
+		docker build -t $(MODULES_REGISTRY)/discopanel-$$name:latest -f $$dir/Dockerfile .; \
+	done
+
+# Build and push all module images
+modules-push: modules
+	@for dir in cmd/modules/*/; do \
+		name=$$(basename $$dir); \
+		echo "Pushing module: $$name"; \
+		docker push $(MODULES_REGISTRY)/discopanel-$$name:latest; \
+	done
+
 # Help
 help:
 	@echo "Available commands:"
@@ -144,6 +161,8 @@ help:
 	@echo "  make build          - Build standalone binary with embedded frontend"
 	@echo "  make prod           - Build and run in production mode"
 	@echo "  make image          - Build and push Docker image to :dev tag"
+	@echo "  make modules        - Build module Docker images"
+	@echo "  make modules-push   - Build and push module images to registry"
 	@echo "  make clean          - Remove data directory and build artifacts"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"
 	@echo "  make deps           - Install all dependencies"

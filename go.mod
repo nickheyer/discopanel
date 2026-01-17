@@ -21,6 +21,8 @@ require (
 	gorm.io/gorm v1.30.1
 )
 
+require github.com/gorcon/rcon v1.4.0
+
 require (
 	github.com/Microsoft/go-winio v0.4.21 // indirect
 	github.com/STARRY-S/zip v0.2.3 // indirect

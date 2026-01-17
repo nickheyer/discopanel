@@ -827,8 +827,8 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		portKey := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, protocol))
 		exposedPorts[portKey] = struct{}{}
 
-		// Only bind to host for TCP (non-HTTP) protocols
-		// HTTP protocols are handled through the proxy
+		// Only bind TCP ports directly to host (non-HTTP)
+		// HTTP ports are accessed through the proxy listener
 		if port.Protocol == models.ModuleProtocolTCP && port.HostPort > 0 {
 			portBindings[portKey] = []nat.PortBinding{
 				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", port.HostPort)},
@@ -1034,6 +1034,14 @@ func buildModuleEnv(module *models.Module, server *models.Server, serverConfig *
 			if serverConfig.RCONPassword != nil && *serverConfig.RCONPassword != "" {
 				env = append(env, fmt.Sprintf("RCON_PASSWORD=%s", *serverConfig.RCONPassword))
 			}
+		}
+	}
+
+	// Add PORT env var for HTTP modules (first HTTP port found)
+	for _, port := range module.Ports {
+		if port.Protocol == models.ModuleProtocolHTTP {
+			env = append(env, fmt.Sprintf("PORT=%d", port.ContainerPort))
+			break
 		}
 	}
 

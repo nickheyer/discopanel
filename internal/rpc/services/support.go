@@ -716,3 +716,45 @@ func getVersionInfo() string {
 
 	return "unknown"
 }
+
+// GetApplicationLogs returns the application log file content
+func (s *SupportService) GetApplicationLogs(ctx context.Context, req *connect.Request[v1.GetApplicationLogsRequest]) (*connect.Response[v1.GetApplicationLogsResponse], error) {
+	logFilePath := s.log.GetLogFilePath()
+	if logFilePath == "" {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("logging to file is not enabled"))
+	}
+
+	if !fileExists(logFilePath) {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("log file not found"))
+	}
+
+	// Get file info for size
+	fileInfo, err := os.Stat(logFilePath)
+	if err != nil {
+		s.log.Error("Failed to stat log file: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get log file info"))
+	}
+
+	// Read log file content
+	content, err := os.ReadFile(logFilePath)
+	if err != nil {
+		s.log.Error("Failed to read log file: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read log file"))
+	}
+
+	// If tail is specified, only return the last N lines
+	tail := int(req.Msg.Tail)
+	if tail > 0 {
+		lines := strings.Split(string(content), "\n")
+		if len(lines) > tail {
+			lines = lines[len(lines)-tail:]
+		}
+		content = []byte(strings.Join(lines, "\n"))
+	}
+
+	return connect.NewResponse(&v1.GetApplicationLogsResponse{
+		Content:  string(content),
+		Filename: filepath.Base(logFilePath),
+		Size:     fileInfo.Size(),
+	}), nil
+}

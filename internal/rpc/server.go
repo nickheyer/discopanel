@@ -214,7 +214,9 @@ func (s *Server) isPollingProcedure(procedure string) bool {
 		"/discopanel.v1.AuthService/GetAuthStatus",
 		"/discopanel.v1.ServerService/ListServers",
 		"/discopanel.v1.ServerService/GetServer",
+		"/discopanel.v1.ServerService/GetServerLogs",
 		"/discopanel.v1.ProxyService/GetProxyStatus",
+		"/discopanel.v1.SupportService/GetApplicationLogs",
 	}
 
 	return slices.Contains(pollingProcedures, procedure)

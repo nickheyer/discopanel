@@ -14,6 +14,20 @@ service SupportService {
   rpc DownloadSupportBundle(DownloadSupportBundleRequest) returns (DownloadSupportBundleResponse);
   // Upload support bundle to support server
   rpc UploadSupportBundle(UploadSupportBundleRequest) returns (UploadSupportBundleResponse);
+  // Get application logs
+  rpc GetApplicationLogs(GetApplicationLogsRequest) returns (GetApplicationLogsResponse);
+}
+
+// Application logs request
+message GetApplicationLogsRequest {
+  int32 tail = 1; // Number of lines from end, 0 for all
+}
+
+// Application logs response
+message GetApplicationLogsResponse {
+  string content = 1; // Log file content
+  string filename = 2; // Log file name
+  int64 size = 3; // Total file size in bytes
 }
 
 // Bundle generation options

@@ -5,12 +5,13 @@
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
-	import { Settings, Globe, Server, Shield, HelpCircle } from '@lucide/svelte';
+	import { Settings, Globe, Server, Shield, HelpCircle, ScrollText } from '@lucide/svelte';
 	import type { ConfigCategory } from '$lib/proto/discopanel/v1/config_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import RoutingSettings from '$lib/components/routing-settings.svelte';
 	import AuthSettings from '$lib/components/auth-settings.svelte';
 	import SupportSettings from '$lib/components/support-settings.svelte';
+	import LogsSettings from '$lib/components/logs-settings.svelte';
 	
 	let globalConfig = $state<ConfigCategory[]>([]);
 	let loading = $state(true);
@@ -66,7 +67,7 @@
 	</div>
 	
 	<Tabs value={activeTab} onValueChange={(v) => activeTab = v || 'server-config'} class="space-y-6">
-		<TabsList class="grid w-full max-w-2xl grid-cols-4">
+		<TabsList class="grid w-full max-w-3xl grid-cols-5">
 			<TabsTrigger value="server-config" class="flex items-center gap-2">
 				<Server class="h-4 w-4" />
 				Server Defaults
@@ -78,6 +79,10 @@
 			<TabsTrigger value="auth" class="flex items-center gap-2">
 				<Shield class="h-4 w-4" />
 				Authentication
+			</TabsTrigger>
+			<TabsTrigger value="logs" class="flex items-center gap-2">
+				<ScrollText class="h-4 w-4" />
+				Logs
 			</TabsTrigger>
 			<TabsTrigger value="support" class="flex items-center gap-2">
 				<HelpCircle class="h-4 w-4" />
@@ -114,6 +119,10 @@
 		
 		<TabsContent value="auth" class="space-y-4">
 			<AuthSettings />
+		</TabsContent>
+
+		<TabsContent value="logs" class="space-y-4">
+			<LogsSettings />
 		</TabsContent>
 
 		<TabsContent value="support" class="space-y-4">

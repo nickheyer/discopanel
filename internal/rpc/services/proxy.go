@@ -150,6 +150,15 @@ func (s *ProxyService) UpdateProxyConfig(ctx context.Context, req *connect.Reque
 
 	s.log.Info("Proxy configuration saved to database: enabled=%v, base_url=%v", msg.Enabled, msg.BaseUrl)
 
+	// If enabling proxy and it's not currently running, start it
+	if msg.Enabled && s.proxyManager != nil && !s.proxyManager.IsRunning() {
+		if err := s.proxyManager.Start(); err != nil {
+			s.log.Error("Failed to start proxy manager: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start proxy: %w", err))
+		}
+		s.log.Info("Proxy manager started")
+	}
+
 	// Return updated status (same as GetProxyStatus response)
 	statusResp, err := s.GetProxyStatus(ctx, connect.NewRequest(&v1.GetProxyStatusRequest{}))
 	if err != nil {
@@ -518,6 +527,10 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 			} else {
 				server.Status = storage.StatusError
 				server.ContainerID = ""
+				// Remove route since there's no valid container
+				if s.proxyManager != nil && hostname != "" {
+					s.proxyManager.RemoveRouteByHostname(hostname, listenerID)
+				}
 			}
 		} else {
 			server.ContainerID = result.NewContainerID

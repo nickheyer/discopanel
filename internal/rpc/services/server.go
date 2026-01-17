@@ -933,6 +933,13 @@ func (s *ServerService) DeleteServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
+	// Remove proxy route if configured
+	if s.proxy != nil && server.ProxyHostname != "" {
+		if err := s.proxy.RemoveServerRoute(server.ID); err != nil {
+			s.log.Error("Failed to remove proxy route: %v", err)
+		}
+	}
+
 	// Stop and remove container
 	if server.ContainerID != "" {
 		if _, err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {

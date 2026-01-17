@@ -271,9 +271,16 @@ func main() {
 					if server.ContainerID != "" {
 						status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID)
 						if err == nil && server.Status != status {
+							oldStatus := server.Status
 							server.Status = status
 							if err := store.UpdateServer(ctx, server); err != nil {
 								log.Error("Failed to update server status: %v", err)
+							}
+							// Update proxy route if status changed and server has proxy configured
+							if server.ProxyHostname != "" && oldStatus != status {
+								if err := proxyManager.UpdateServerRoute(server); err != nil {
+									log.Error("Failed to update proxy route for %s: %v", server.Name, err)
+								}
 							}
 						}
 					}

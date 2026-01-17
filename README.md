@@ -172,6 +172,23 @@ services:
 - Recovery key system (because passwords get forgotten)
 - Session management and JWT tokens
 
+## FAQ
+
+#### Please look here if you have any issues with running Discopanel or Minecraft servers through Discopanel.
+<details>
+  <summary>
+    Failed to start server: [failed_precondition] server container not created or 'ERROR: Failed to create container: failed to create container: Error response from daemon: invalid mount config for type "bind": bind source path does not exist:'
+  </summary>
+  This is usually due to a permissions issue. Discopanel runs minecraft server containers as PUID:GID 1000:1000 by default so if that user or group does not have access to the directory that Discopanel is installed in, then that will cause this issue. Using `ls -a` to show permissions on files and directories, `chown` to change ownership of files and directories and `chmod` to change the permissions of files and directories will be very helpful for troubleshooting and solving the issue on a Linux host.
+</details>
+
+<details>
+  <summary>
+    Anything related to fuego, Curseforge API or other issues
+  </summary>
+  These are likely not something that we can help with unfortunately. Either your DNS is not working properly, Curseforge's API is having issues or your connection to Curseforge's servers are otherwise hindered, for example, by a firewall.
+</details>
+
 ## Configuration
 
 DiscoPanel uses a `config.yaml` file. Here's what matters:
@@ -201,18 +218,19 @@ DiscoPanel has a full REST API if you're into that sort of thing:
 
 ```bash
 # List servers
-curl http://localhost:8080/api/v1/servers
+curl http://localhost:8080//discopanel.v1.ServerService/ListServers
 
 # Create a server
-curl -X POST http://localhost:8080/api/v1/servers \
+curl -X POST http://localhost:8080/discopanel.v1.ServerService/CreateServers \
   -H "Content-Type: application/json" \
   -d '{"name":"My Server","mc_version":"1.20.1","mod_loader":"vanilla"}'
 
 # Start a server
-curl -X POST http://localhost:8080/api/v1/servers/{id}/start
+curl -X POST http://localhost:8080/discopanel.v1.ServerService/RestartServer \
+-data '{ "id": "${id}"}'
 ```
 
->> NOTE: See `proto/discopanel/v1` for all the routes, or join the discord and ask about it!
+>> NOTE: See the API section in the left sidebar of the Discopanel WebUI for all the routes, or join the discord and ask about it!
 
 ## Contributing
 

@@ -10,66 +10,73 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Docker    DockerConfig    `mapstructure:"docker"`
-	Storage   StorageConfig   `mapstructure:"storage"`
-	Proxy     ProxyConfig     `mapstructure:"proxy"`
-	Minecraft MinecraftConfig `mapstructure:"minecraft"`
-	Logging   LoggingConfig   `mapstructure:"logging"`
+	Server    ServerConfig    `mapstructure:"server" json:"server"`
+	Database  DatabaseConfig  `mapstructure:"database" json:"database"`
+	Docker    DockerConfig    `mapstructure:"docker" json:"docker"`
+	Storage   StorageConfig   `mapstructure:"storage" json:"storage"`
+	Proxy     ProxyConfig     `mapstructure:"proxy" json:"proxy"`
+	Module    ModuleConfig    `mapstructure:"module" json:"module"`
+	Minecraft MinecraftConfig `mapstructure:"minecraft" json:"minecraft"`
+	Logging   LoggingConfig   `mapstructure:"logging" json:"logging"`
 }
 
 type ServerConfig struct {
-	Port         string `mapstructure:"port"`
-	Host         string `mapstructure:"host"`
-	ReadTimeout  int    `mapstructure:"read_timeout"`
-	WriteTimeout int    `mapstructure:"write_timeout"`
-	IdleTimeout  int    `mapstructure:"idle_timeout"`
+	Port         string `mapstructure:"port" json:"port"`
+	Host         string `mapstructure:"host" json:"host"`
+	ReadTimeout  int    `mapstructure:"read_timeout" json:"read_timeout"`
+	WriteTimeout int    `mapstructure:"write_timeout" json:"write_timeout"`
+	IdleTimeout  int    `mapstructure:"idle_timeout" json:"idle_timeout"`
 }
 
 type DatabaseConfig struct {
-	Path            string `mapstructure:"path"`
-	MaxConnections  int    `mapstructure:"max_connections"`
-	MaxIdleConns    int    `mapstructure:"max_idle_conns"`
-	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime"`
+	Path            string `mapstructure:"path" json:"path"`
+	MaxConnections  int    `mapstructure:"max_connections" json:"max_connections"`
+	MaxIdleConns    int    `mapstructure:"max_idle_conns" json:"max_idle_conns"`
+	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime" json:"conn_max_lifetime"`
 }
 
 type DockerConfig struct {
-	SyncInterval int    `mapstructure:"sync_interval"`
-	Host         string `mapstructure:"host"`
-	Version      string `mapstructure:"version"`
-	NetworkName  string `mapstructure:"network_name"`
-	RegistryURL  string `mapstructure:"registry_url"`
+	SyncInterval int    `mapstructure:"sync_interval" json:"sync_interval"`
+	Host         string `mapstructure:"host" json:"host"`
+	Version      string `mapstructure:"version" json:"version"`
+	NetworkName  string `mapstructure:"network_name" json:"network_name"`
+	RegistryURL  string `mapstructure:"registry_url" json:"registry_url"`
 }
 
 type StorageConfig struct {
-	DataDir       string `mapstructure:"data_dir"`
-	BackupDir     string `mapstructure:"backup_dir"`
-	TempDir       string `mapstructure:"temp_dir"`
-	MaxUploadSize int64  `mapstructure:"max_upload_size"`
+	DataDir       string `mapstructure:"data_dir" json:"data_dir"`
+	BackupDir     string `mapstructure:"backup_dir" json:"backup_dir"`
+	TempDir       string `mapstructure:"temp_dir" json:"temp_dir"`
+	MaxUploadSize int64  `mapstructure:"max_upload_size" json:"max_upload_size"`
 }
 
 type ProxyConfig struct {
-	Enabled      bool   `mapstructure:"enabled"`
-	BaseURL      string `mapstructure:"base_url"`
-	ListenPort   int    `mapstructure:"listen_port"`  // Primary listen port
-	ListenPorts  []int  `mapstructure:"listen_ports"` // Multiple listen ports
-	PortRangeMin int    `mapstructure:"port_range_min"`
-	PortRangeMax int    `mapstructure:"port_range_max"`
+	Enabled      bool   `mapstructure:"enabled" json:"enabled"`
+	BaseURL      string `mapstructure:"base_url" json:"base_url"`
+	ListenPort   int    `mapstructure:"listen_port" json:"listen_port"`   // Primary listen port
+	ListenPorts  []int  `mapstructure:"listen_ports" json:"listen_ports"` // Multiple listen ports
+	PortRangeMin int    `mapstructure:"port_range_min" json:"port_range_min"`
+	PortRangeMax int    `mapstructure:"port_range_max" json:"port_range_max"`
+}
+
+type ModuleConfig struct {
+	Enabled      bool `mapstructure:"enabled" json:"enabled"`
+	PortRangeMin int  `mapstructure:"port_range_min" json:"port_range_min"`
+	PortRangeMax int  `mapstructure:"port_range_max" json:"port_range_max"`
 }
 
 type MinecraftConfig struct {
-	ResetGlobal  bool            `mapstructure:"reset_global"`
-	GlobalConfig db.ServerConfig `mapstructure:"global_config"`
+	ResetGlobal  bool            `mapstructure:"reset_global" json:"reset_global"`
+	GlobalConfig db.ServerConfig `mapstructure:"global_config" json:"global_config"`
 }
 
 type LoggingConfig struct {
-	Enabled    bool   `mapstructure:"enabled"`
-	FilePath   string `mapstructure:"file_path"`
-	MaxSize    int    `mapstructure:"max_size"`
-	MaxBackups int    `mapstructure:"max_backups"`
-	MaxAge     int    `mapstructure:"max_age"`
-	Compress   bool   `mapstructure:"compress"`
+	Enabled    bool   `mapstructure:"enabled" json:"enabled"`
+	FilePath   string `mapstructure:"file_path" json:"file_path"`
+	MaxSize    int    `mapstructure:"max_size" json:"max_size"`
+	MaxBackups int    `mapstructure:"max_backups" json:"max_backups"`
+	MaxAge     int    `mapstructure:"max_age" json:"max_age"`
+	Compress   bool   `mapstructure:"compress" json:"compress"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -155,6 +162,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("proxy.port_range_min", 25565)
 	v.SetDefault("proxy.port_range_max", 25665)
 
+	// Module defaults
+	v.SetDefault("module.enabled", true)
+	v.SetDefault("module.port_range_min", 8100)
+	v.SetDefault("module.port_range_max", 8199)
+
 	v.SetDefault("minecraft.reset_global", false)
 
 	// Logging defaults
@@ -192,6 +204,10 @@ func validateConfig(cfg *Config) error {
 	// Validate port ranges
 	if cfg.Proxy.PortRangeMin >= cfg.Proxy.PortRangeMax {
 		return fmt.Errorf("proxy port range min must be less than max")
+	}
+
+	if cfg.Module.PortRangeMin >= cfg.Module.PortRangeMax {
+		return fmt.Errorf("module port range min must be less than max")
 	}
 
 	// Ensure ListenPorts includes Primary ListenPort

@@ -14,6 +14,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/metrics"
+	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc"
 	"github.com/nickheyer/discopanel/internal/scheduler"
@@ -185,8 +186,20 @@ func main() {
 	}
 	defer metricsCollector.Stop()
 
+	// Initialize builtin module templates
+	if err := module.InitBuiltinTemplates(store); err != nil {
+		log.Error("Failed to initialize builtin module templates: %v", err)
+	}
+
+	// Initialize module manager
+	moduleManager := module.NewManager(store, dockerClient, cfg, proxyManager, log)
+	if err := moduleManager.Start(); err != nil {
+		log.Error("Failed to start module manager: %v", err)
+	}
+	defer moduleManager.Stop()
+
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, metricsCollector, log)
+	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, log)
 
 	// Auto-start servers that have auto_start enabled
 	log.Info("Checking for servers with auto-start enabled...")
@@ -247,6 +260,11 @@ func main() {
 				}
 
 				log.Info("Successfully auto-started server: %s", server.Name)
+
+				// Start modules with auto-start enabled
+				if err := moduleManager.OnServerStart(ctx, server.ID); err != nil {
+					log.Error("Failed to auto-start modules for server %s: %v", server.Name, err)
+				}
 			}()
 		}
 	}

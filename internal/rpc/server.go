@@ -13,6 +13,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/metrics"
+	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc/services"
 	"github.com/nickheyer/discopanel/internal/scheduler"
@@ -36,10 +37,11 @@ type Server struct {
 	logStreamer      *logger.LogStreamer
 	scheduler        *scheduler.Scheduler
 	metricsCollector *metrics.Collector
+	moduleManager    *module.Manager
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, moduleManager *module.Manager, log *logger.Logger) *Server {
 	// Initialize auth manager
 	authManager := auth.NewManager(store)
 	authMiddleware := auth.NewMiddleware(authManager, store)
@@ -64,6 +66,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		logStreamer:      logStreamer,
 		scheduler:        sched,
 		metricsCollector: metricsCollector,
+		moduleManager:    moduleManager,
 	}
 
 	s.setupHandler()
@@ -99,6 +102,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.MinecraftServiceName,
 		discopanelv1connect.ModServiceName,
 		discopanelv1connect.ModpackServiceName,
+		discopanelv1connect.ModuleServiceName,
 		discopanelv1connect.ProxyServiceName,
 		discopanelv1connect.ServerServiceName,
 		discopanelv1connect.SupportServiceName,
@@ -126,10 +130,11 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	modService := services.NewModService(s.store, s.docker, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
+	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.config, s.logStreamer, s.log)
 
 	// Register service handlers
 	authPath, authHandler := discopanelv1connect.NewAuthServiceHandler(authService, opts...)
@@ -164,6 +169,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	userPath, userHandler := discopanelv1connect.NewUserServiceHandler(userService, opts...)
 	mux.Handle(userPath, userHandler)
+
+	modulePath, moduleHandler := discopanelv1connect.NewModuleServiceHandler(moduleService, opts...)
+	mux.Handle(modulePath, moduleHandler)
 }
 
 // The HTTP handler for the server

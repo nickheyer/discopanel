@@ -13,7 +13,7 @@ import (
 func (c *Client) CleanupOrphanedContainers(ctx context.Context, trackedContainerIDs map[string]bool, log *logger.Logger) error {
 	// List all containers with the discopanel prefix
 	filterArgs := filters.NewArgs()
-	filterArgs.Add("name", "discopanel-server-")
+	filterArgs.Add("name", "discopanel-")
 
 	containers, err := c.docker.ContainerList(ctx, container.ListOptions{
 		All:     true,

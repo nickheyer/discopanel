@@ -11,7 +11,7 @@ echo "Building ${FULL_IMAGE_NAME}..."
 
 docker build \
     -t "${FULL_IMAGE_NAME}" \
-    -f Dockerfile \
+    -f docker/Dockerfile.discopanel \
     .
 
 echo "Pushing ${FULL_IMAGE_NAME}..."

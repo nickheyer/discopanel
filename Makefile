@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image proto proto-clean proto-lint proto-format proto-breaking gen
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image modules proto proto-clean proto-lint proto-format proto-breaking gen
 
 DATA_DIR := ./data
 DB_FILE := $(DATA_DIR)/discopanel.db
@@ -48,6 +48,20 @@ build: build-frontend
 image:
 	@echo "Building and pushing Docker image..."
 	@bash scripts/build.sh
+
+# Build and push all module Docker images
+modules:
+	@echo "Building and pushing module images..."
+	@for dockerfile in docker/Dockerfile.*; do \
+		name=$$(basename $$dockerfile | sed 's/Dockerfile\.//'); \
+		if [ "$$name" != "discopanel" ]; then \
+			echo "Building nickheyer/discopanel-$$name:latest..."; \
+			docker build -t "nickheyer/discopanel-$$name:latest" -f "$$dockerfile" . && \
+			echo "Pushing nickheyer/discopanel-$$name:latest..." && \
+			docker push "nickheyer/discopanel-$$name:latest"; \
+		fi \
+	done
+	@echo "Module builds complete!"
 
 # Clean development data
 clean:
@@ -144,6 +158,7 @@ help:
 	@echo "  make build          - Build standalone binary with embedded frontend"
 	@echo "  make prod           - Build and run in production mode"
 	@echo "  make image          - Build and push Docker image to :dev tag"
+	@echo "  make modules        - Build and push all module Docker images"
 	@echo "  make clean          - Remove data directory and build artifacts"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"
 	@echo "  make deps           - Install all dependencies"

@@ -518,3 +518,123 @@ type TaskExecution struct {
 	Task   *ScheduledTask `json:"-" gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE"`
 	Server *Server        `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
+
+// ModuleTemplateType defines whether a module template is built-in or custom
+type ModuleTemplateType string
+
+const (
+	ModuleTemplateTypeBuiltin ModuleTemplateType = "builtin"
+	ModuleTemplateTypeCustom  ModuleTemplateType = "custom"
+)
+
+// ModuleStatus defines the runtime state of a module
+type ModuleStatus string
+
+const (
+	ModuleStatusStopped  ModuleStatus = "stopped"
+	ModuleStatusStarting ModuleStatus = "starting"
+	ModuleStatusRunning  ModuleStatus = "running"
+	ModuleStatusStopping ModuleStatus = "stopping"
+	ModuleStatusError    ModuleStatus = "error"
+	ModuleStatusCreating ModuleStatus = "creating"
+)
+
+// ModuleTemplate represents a blueprint for creating modules
+type ModuleTemplate struct {
+	ID              string             `json:"id" gorm:"primaryKey"`
+	Name            string             `json:"name" gorm:"not null;uniqueIndex"`
+	Description     string             `json:"description"`
+	Type            ModuleTemplateType `json:"type" gorm:"not null;default:custom"`
+	DockerImage     string             `json:"docker_image" gorm:"not null;column:docker_image"`
+	ConfigSchema    string             `json:"config_schema" gorm:"type:text;column:config_schema"` // JSON Schema for UI generation
+	DefaultEnv      string             `json:"default_env" gorm:"type:text;column:default_env"`     // JSON map of default env vars
+	DefaultVolumes  string             `json:"default_volumes" gorm:"type:text;column:default_volumes"`
+	HealthCheckPath string             `json:"health_check_path" gorm:"column:health_check_path"`
+	HealthCheckPort int                `json:"health_check_port" gorm:"column:health_check_port"`
+	RequiresServer  bool               `json:"requires_server" gorm:"default:true;column:requires_server"`
+	SupportsProxy   bool               `json:"supports_proxy" gorm:"default:true;column:supports_proxy"`
+	Icon            string             `json:"icon"`
+	Category        string             `json:"category"`
+	Documentation   string             `json:"documentation"`
+	CreatedAt       time.Time          `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt       time.Time          `json:"updated_at" gorm:"autoUpdateTime"`
+
+	// Port configuration: host:container, tcp/udp, proxy
+	Ports []*v1.ModulePort `json:"ports" gorm:"column:ports;serializer:json"`
+
+	// Suggested module dependencies
+	SuggestedDependencies []string `json:"suggested_dependencies" gorm:"column:suggested_dependencies;serializer:json"`
+
+	// Default event hooks for server lifecycle integration
+	DefaultHooks []*v1.ModuleEventHook `json:"default_hooks" gorm:"column:default_hooks;serializer:json"`
+
+	// Display metadata (key:value pairs for notes, instructions, links, etc.)
+	Metadata map[string]string `json:"metadata" gorm:"column:metadata;serializer:json"`
+
+	// Optional command to run in the container (overrides image CMD, not ENTRYPOINT)
+	DefaultCmd string `json:"default_cmd" gorm:"column:default_cmd"`
+
+	// Default access URL templates
+	DefaultAccessUrls []string `json:"default_access_urls" gorm:"column:default_access_urls;serializer:json"`
+}
+
+// Module represents a running instance of a module template attached to a server
+type Module struct {
+	ID          string       `json:"id" gorm:"primaryKey"`
+	Name        string       `json:"name" gorm:"not null"`
+	ServerID    string       `json:"server_id" gorm:"not null;index;column:server_id"`
+	TemplateID  string       `json:"template_id" gorm:"not null;index;column:template_id"`
+	ContainerID string       `json:"container_id" gorm:"column:container_id"`
+	Status      ModuleStatus `json:"status" gorm:"not null;default:stopped"`
+
+	// Instance configuration (JSON - merged with template defaults)
+	Config          string `json:"config" gorm:"type:text"`
+	EnvOverrides    string `json:"env_overrides" gorm:"type:text;column:env_overrides"`
+	VolumeOverrides string `json:"volume_overrides" gorm:"type:text;column:volume_overrides"`
+
+	// Resource limits
+	Memory   int     `json:"memory" gorm:"default:512"`
+	CPULimit float64 `json:"cpu_limit" gorm:"column:cpu_limit"`
+
+	// Lifecycle
+	AutoStart             bool   `json:"auto_start" gorm:"default:false;column:auto_start"`
+	FollowServerLifecycle bool   `json:"follow_server_lifecycle" gorm:"default:true;column:follow_server_lifecycle"`
+	Detached              bool   `json:"detached" gorm:"default:false"`
+	DataPath              string `json:"data_path" gorm:"column:data_path"`
+
+	// Timestamps
+	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt   time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+	LastStarted *time.Time `json:"last_started" gorm:"column:last_started"`
+
+	// Port configuration: host:container, tcp/udp, proxy
+	Ports []*v1.ModulePort `json:"ports" gorm:"column:ports;serializer:json"`
+
+	// Module dependencies (started before this module)
+	Dependencies []*v1.ModuleDependency `json:"dependencies" gorm:"column:dependencies;serializer:json"`
+
+	// Health check configuration for dependency waiting
+	HealthCheckInterval int `json:"health_check_interval" gorm:"column:health_check_interval;default:30"`
+	HealthCheckTimeout  int `json:"health_check_timeout" gorm:"column:health_check_timeout;default:5"`
+	HealthCheckRetries  int `json:"health_check_retries" gorm:"column:health_check_retries;default:3"`
+
+	// Event hooks for server lifecycle integration
+	EventHooks []*v1.ModuleEventHook `json:"event_hooks" gorm:"column:event_hooks;serializer:json"`
+
+	// Instance metadata (merged with/overrides template metadata)
+	Metadata map[string]string `json:"metadata" gorm:"column:metadata;serializer:json"`
+
+	// Optional command override (overrides template's default_cmd)
+	CmdOverride string `json:"cmd_override" gorm:"column:cmd_override"`
+
+	// Access URL templates
+	AccessUrls []string `json:"access_urls" gorm:"column:access_urls;serializer:json"`
+
+	// Relationships
+	Server   *Server         `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+	Template *ModuleTemplate `json:"-" gorm:"foreignKey:TemplateID;constraint:OnDelete:RESTRICT"`
+
+	// Runtime stats (not persisted)
+	MemoryUsage float64 `json:"memory_usage" gorm:"-"`
+	CPUPercent  float64 `json:"cpu_percent" gorm:"-"`
+}

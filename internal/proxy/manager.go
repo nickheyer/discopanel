@@ -14,7 +14,7 @@ import (
 
 // Manager handles the lifecycle of the proxy and manages routes
 type Manager struct {
-	proxies     map[int]*Proxy // Map of port -> Proxy instance
+	proxies     map[int]Proxier // Map of port -> Proxy instance (TCP or UDP)
 	store       *db.Store
 	config      *config.ProxyConfig
 	logger      *logger.Logger
@@ -25,11 +25,11 @@ type Manager struct {
 // NewManager creates a new proxy manager
 func NewManager(store *db.Store, cfg *config.Config, logger *logger.Logger) *Manager {
 	return &Manager{
-		proxies:     make(map[int]*Proxy),
+		proxies:     make(map[int]Proxier),
 		store:       store,
 		config:      &cfg.Proxy,
 		logger:      logger,
-		networkName: cfg.Docker.NetworkName, // TODO: Get from main config
+		networkName: cfg.Docker.NetworkName,
 	}
 }
 
@@ -56,13 +56,13 @@ func (m *Manager) Start() error {
 		}
 
 		listenAddr := fmt.Sprintf(":%d", listener.Port)
-		proxy := New(&Config{
+		proxy := NewMinecraftProxy(&Config{
 			ListenAddr: listenAddr,
 			Logger:     m.logger,
 		})
 
 		m.proxies[listener.Port] = proxy
-		m.logger.Info("Created proxy for listener %s on port %d", listener.Name, listener.Port)
+		m.logger.Info("Created Minecraft proxy for listener %s on port %d", listener.Name, listener.Port)
 	}
 
 	// Load existing server routes
@@ -140,7 +140,7 @@ func (m *Manager) Stop() error {
 		}
 	}
 
-	m.proxies = make(map[int]*Proxy)
+	m.proxies = make(map[int]Proxier)
 	m.logger.Info("Proxy manager stopped")
 	return lastErr
 }
@@ -320,7 +320,7 @@ func (m *Manager) AddListener(listener *db.ProxyListener) error {
 
 	// Create new proxy instance
 	listenAddr := fmt.Sprintf(":%d", listener.Port)
-	proxy := New(&Config{
+	proxy := NewMinecraftProxy(&Config{
 		ListenAddr: listenAddr,
 		Logger:     m.logger,
 	})
@@ -331,7 +331,7 @@ func (m *Manager) AddListener(listener *db.ProxyListener) error {
 	}
 
 	m.proxies[listener.Port] = proxy
-	m.logger.Info("Added and started proxy for listener %s on port %d", listener.Name, listener.Port)
+	m.logger.Info("Added and started Minecraft proxy for listener %s on port %d", listener.Name, listener.Port)
 
 	return nil
 }
@@ -380,4 +380,216 @@ func (m *Manager) AllocateProxyPort(serverID string) (int, error) {
 	}
 
 	return 0, fmt.Errorf("no available proxy ports in range %d-%d", m.config.PortRangeMin, m.config.PortRangeMax)
+}
+
+// AddModuleRoute adds a proxy route for a module's ports
+// Modules use their own ports on the same hostname as their parent server
+func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.config.Enabled || server.ProxyHostname == "" {
+		return nil
+	}
+
+	// Get the container IP first
+	if module.ContainerID == "" {
+		return fmt.Errorf("module has no container ID")
+	}
+
+	containerIP, err := getContainerIP(module.ContainerID, m.networkName)
+	if err != nil {
+		return fmt.Errorf("failed to get module container IP: %w", err)
+	}
+
+	// Add routes for all proxy-enabled ports
+	for _, port := range module.Ports {
+		if port == nil || !port.ProxyEnabled || port.HostPort == 0 {
+			continue
+		}
+
+		protocol := port.Protocol
+		if protocol == "" {
+			protocol = "tcp"
+		}
+
+		routeID := fmt.Sprintf("%s-port-%d", module.ID, port.HostPort)
+		if err := m.addPortRouteUnlocked(routeID, server.ProxyHostname, containerIP,
+			int(port.HostPort), int(port.ContainerPort), protocol, module.Name, port.Name); err != nil {
+			m.logger.Error("Failed to add port route for %s: %v", port.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// addPortRouteUnlocked adds a single port route (must be called with lock held)
+func (m *Manager) addPortRouteUnlocked(routeID, hostname, containerIP string, hostPort, containerPort int, protocol, moduleName, portName string) error {
+	if containerPort == 0 {
+		containerPort = 8081
+	}
+
+	// Check if a proxy already exists for this port
+	proxy, exists := m.proxies[hostPort]
+	if !exists {
+		listenAddr := fmt.Sprintf(":%d", hostPort)
+		cfg := &Config{
+			ListenAddr: listenAddr,
+			Logger:     m.logger,
+		}
+
+		// Create appropriate proxy type based on protocol
+		switch protocol {
+		case "udp":
+			proxy = NewUDPProxy(cfg)
+			m.logger.Info("Created UDP proxy for port %d", hostPort)
+		case "minecraft":
+			proxy = NewMinecraftProxy(cfg)
+			m.logger.Info("Created Minecraft proxy for port %d", hostPort)
+		case "http":
+			proxy = NewHTTPProxy(cfg)
+			m.logger.Info("Created HTTP proxy for port %d", hostPort)
+		default:
+			// Raw TCP forwarding (includes "tcp")
+			proxy = NewTCPProxy(cfg)
+			m.logger.Info("Created TCP proxy for port %d", hostPort)
+		}
+
+		// Start the proxy
+		if err := proxy.Start(); err != nil {
+			return fmt.Errorf("failed to start module proxy on port %d: %w", hostPort, err)
+		}
+
+		m.proxies[hostPort] = proxy
+	}
+
+	// Add route
+	proxy.AddRoute(routeID, hostname, containerIP, containerPort)
+	m.logger.Info("Added module route: %s:%d -> %s:%d (module: %s, port: %s, protocol: %s)",
+		hostname, hostPort, containerIP, containerPort, moduleName, portName, protocol)
+
+	return nil
+}
+
+// RemoveModuleRoute removes proxy routes for a module's ports
+func (m *Manager) RemoveModuleRoute(moduleID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.config.Enabled {
+		return nil
+	}
+
+	// Find the module to get its ports
+	module, err := m.store.GetModule(context.Background(), moduleID)
+	if err != nil {
+		return err
+	}
+
+	// Get the server to find the hostname
+	server, err := m.store.GetServer(context.Background(), module.ServerID)
+	if err != nil {
+		return err
+	}
+
+	// Remove all port routes
+	for _, port := range module.Ports {
+		if port == nil || port.HostPort == 0 {
+			continue
+		}
+		m.removePortRouteUnlocked(int(port.HostPort), server.ProxyHostname, module.Name, port.Name)
+	}
+
+	return nil
+}
+
+// removePortRouteUnlocked removes a single port route and cleans up empty proxies (must be called with lock held)
+func (m *Manager) removePortRouteUnlocked(hostPort int, hostname, moduleName, portName string) {
+	proxy, exists := m.proxies[hostPort]
+	if !exists {
+		return // No proxy for this port
+	}
+
+	if hostname != "" {
+		proxy.RemoveRoute(hostname)
+		m.logger.Info("Removed module route: %s:%d (module: %s, port: %s)", hostname, hostPort, moduleName, portName)
+	}
+
+	// Check if this proxy has any remaining routes
+	routes := proxy.GetRoutes()
+	if len(routes) == 0 {
+		// Stop and remove the proxy since it's no longer needed
+		if err := proxy.Stop(); err != nil {
+			m.logger.Error("Failed to stop module proxy on port %d: %v", hostPort, err)
+		}
+		delete(m.proxies, hostPort)
+		m.logger.Info("Removed unused module proxy for port %d", hostPort)
+	}
+}
+
+// UpdateModuleRoute updates proxy routes for a module's ports
+func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error {
+	if !m.config.Enabled || server.ProxyHostname == "" {
+		return nil
+	}
+
+	if module.ContainerID == "" {
+		return nil
+	}
+
+	// Get the container IP
+	containerIP, err := getContainerIP(module.ContainerID, m.networkName)
+	if err != nil {
+		return fmt.Errorf("failed to get module container IP: %w", err)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Update routes for all proxy-enabled ports
+	for _, port := range module.Ports {
+		if port == nil || !port.ProxyEnabled || port.HostPort == 0 {
+			continue
+		}
+
+		proxy, exists := m.proxies[int(port.HostPort)]
+		if !exists {
+			// Need to add it
+			protocol := port.Protocol
+			if protocol == "" {
+				protocol = "tcp"
+			}
+			routeID := fmt.Sprintf("%s-port-%d", module.ID, port.HostPort)
+			if err := m.addPortRouteUnlocked(routeID, server.ProxyHostname, containerIP,
+				int(port.HostPort), int(port.ContainerPort), protocol, module.Name, port.Name); err != nil {
+				m.logger.Error("Failed to add port route for %s: %v", port.Name, err)
+			}
+			continue
+		}
+
+		proxy.UpdateRoute(server.ProxyHostname, containerIP, int(port.ContainerPort))
+		m.logger.Info("Updated module route: %s:%d -> %s:%d (module: %s, port: %s)",
+			server.ProxyHostname, port.HostPort, containerIP, port.ContainerPort, module.Name, port.Name)
+	}
+
+	return nil
+}
+
+// GetModuleRoutes returns all module proxy routes
+func (m *Manager) GetModuleRoutes() map[int]map[string]*Route {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	moduleRoutes := make(map[int]map[string]*Route)
+
+	// Module proxies use ports outside the standard MC port range (e.g., 8100+)
+	for port, proxy := range m.proxies {
+		// Skip standard Minecraft proxy ports
+		if port >= 25565 && port <= 25665 {
+			continue
+		}
+		moduleRoutes[port] = proxy.GetRoutes()
+	}
+
+	return moduleRoutes
 }

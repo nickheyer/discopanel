@@ -4,6 +4,7 @@
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 .vscode/
 build/
+backups/
 discopanel
 !cmd/discopanel
 !web/discopanel

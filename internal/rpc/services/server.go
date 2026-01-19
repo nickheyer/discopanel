@@ -19,6 +19,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -39,10 +40,11 @@ type ServerService struct {
 	log              *logger.Logger
 	logStreamer      *logger.LogStreamer
 	metricsCollector *metrics.Collector
+	moduleManager    *module.Manager
 }
 
 // NewServerService creates a new server service
-func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, log *logger.Logger) *ServerService {
+func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, moduleManager *module.Manager, log *logger.Logger) *ServerService {
 	return &ServerService{
 		store:            store,
 		docker:           docker,
@@ -51,6 +53,7 @@ func NewServerService(store *storage.Store, docker *docker.Client, config *confi
 		log:              log,
 		logStreamer:      logStreamer,
 		metricsCollector: metricsCollector,
+		moduleManager:    moduleManager,
 	}
 }
 
@@ -940,6 +943,24 @@ func (s *ServerService) DeleteServer(ctx context.Context, req *connect.Request[v
 		}
 	}
 
+	// Stop and remove module containers before deleting the server
+	// (database cascade will delete module records, but containers need cleanup)
+	if s.moduleManager != nil {
+		modules, err := s.store.ListServerModules(ctx, server.ID)
+		if err == nil {
+			for _, mod := range modules {
+				if mod.ContainerID != "" {
+					if err := s.moduleManager.StopModule(ctx, mod.ID); err != nil {
+						s.log.Error("Failed to stop module %s: %v", mod.ID, err)
+					}
+					if err := s.moduleManager.DeleteModule(ctx, mod.ID); err != nil {
+						s.log.Error("Failed to delete module %s: %v", mod.ID, err)
+					}
+				}
+			}
+		}
+	}
+
 	// Stop and remove container
 	if server.ContainerID != "" {
 		if _, err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
@@ -1053,6 +1074,13 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		s.log.Error("Failed to clear ephemeral config fields: %v", err)
 	}
 
+	// Start modules that have AutoStart enabled
+	if s.moduleManager != nil {
+		if err := s.moduleManager.OnServerStart(ctx, server.ID); err != nil {
+			s.log.Error("Failed to start modules for server %s: %v", server.ID, err)
+		}
+	}
+
 	return connect.NewResponse(&v1.StartServerResponse{
 		Status: "starting",
 	}), nil
@@ -1100,6 +1128,13 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 	if s.proxy != nil && server.ProxyHostname != "" {
 		if err := s.proxy.RemoveServerRoute(server.ID); err != nil {
 			s.log.Error("Failed to remove proxy route: %v", err)
+		}
+	}
+
+	// Stop modules that follow server lifecycle
+	if s.moduleManager != nil {
+		if err := s.moduleManager.OnServerStop(ctx, server.ID); err != nil {
+			s.log.Error("Failed to stop modules for server %s: %v", server.ID, err)
 		}
 	}
 

@@ -86,6 +86,8 @@ func (s *Store) Migrate() error {
 		&Session{},
 		&ScheduledTask{},
 		&TaskExecution{},
+		&ModuleTemplate{},
+		&Module{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate: %w", err)
@@ -262,6 +264,7 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 		EULA:         stringPtr("TRUE"),
 		EnableRCON:   boolPtr(true),
 		RCONPassword: stringPtr(rconPassword),
+		RCONPort:     intPtr(25575),
 		Version:      stringPtr("LATEST"),
 		Type:         stringPtr("VANILLA"),
 		Difficulty:   stringPtr("easy"),
@@ -294,7 +297,7 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 			}
 
 			globalField := globalValue.FieldByName(field.Name)
-			if globalField.IsValid() && globalField.Kind() == reflect.Ptr && !globalField.IsNil() {
+			if globalField.IsValid() && globalField.Kind() == reflect.Pointer && !globalField.IsNil() {
 				configValue.Field(i).Set(globalField)
 			}
 		}
@@ -923,4 +926,236 @@ func (s *Store) CleanOldTaskExecutions(ctx context.Context, olderThan time.Time,
 		}
 	}
 	return nil
+}
+
+// ModuleTemplate operations
+func (s *Store) CreateModuleTemplate(ctx context.Context, template *ModuleTemplate) error {
+	if template.ID == "" {
+		template.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(template).Error
+}
+
+func (s *Store) GetModuleTemplate(ctx context.Context, id string) (*ModuleTemplate, error) {
+	var template ModuleTemplate
+	err := s.db.WithContext(ctx).First(&template, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("module template not found")
+		}
+		return nil, err
+	}
+	return &template, nil
+}
+
+func (s *Store) GetModuleTemplateByName(ctx context.Context, name string) (*ModuleTemplate, error) {
+	var template ModuleTemplate
+	err := s.db.WithContext(ctx).First(&template, "name = ?", name).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("module template not found")
+		}
+		return nil, err
+	}
+	return &template, nil
+}
+
+func (s *Store) ListModuleTemplates(ctx context.Context) ([]*ModuleTemplate, error) {
+	var templates []*ModuleTemplate
+	err := s.db.WithContext(ctx).Order("type ASC, name ASC").Find(&templates).Error
+	return templates, err
+}
+
+func (s *Store) ListBuiltinModuleTemplates(ctx context.Context) ([]*ModuleTemplate, error) {
+	var templates []*ModuleTemplate
+	err := s.db.WithContext(ctx).Where("type = ?", ModuleTemplateTypeBuiltin).Order("name ASC").Find(&templates).Error
+	return templates, err
+}
+
+func (s *Store) UpdateModuleTemplate(ctx context.Context, template *ModuleTemplate) error {
+	return s.db.WithContext(ctx).Save(template).Error
+}
+
+func (s *Store) DeleteModuleTemplate(ctx context.Context, id string) error {
+	// Check if any modules use this template
+	var count int64
+	s.db.Model(&Module{}).Where("template_id = ?", id).Count(&count)
+	if count > 0 {
+		return fmt.Errorf("cannot delete template: %d modules are using it", count)
+	}
+	return s.db.WithContext(ctx).Delete(&ModuleTemplate{}, "id = ?", id).Error
+}
+
+// UpsertModuleTemplate creates or updates a module template by ID
+func (s *Store) UpsertModuleTemplate(ctx context.Context, template *ModuleTemplate) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing ModuleTemplate
+		err := tx.Where("id = ?", template.ID).First(&existing).Error
+		if err == gorm.ErrRecordNotFound {
+			return tx.Create(template).Error
+		}
+		if err != nil {
+			return err
+		}
+		// Preserve created_at when updating
+		template.CreatedAt = existing.CreatedAt
+		// Use Select("*") to force update of all columns including JSON-serialized fields
+		return tx.Model(&existing).Select("*").Omit("created_at").Updates(template).Error
+	})
+}
+
+// Module operations
+func (s *Store) CreateModule(ctx context.Context, module *Module) error {
+	if module.ID == "" {
+		module.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(module).Error
+}
+
+func (s *Store) GetModule(ctx context.Context, id string) (*Module, error) {
+	var module Module
+	err := s.db.WithContext(ctx).First(&module, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("module not found")
+		}
+		return nil, err
+	}
+	return &module, nil
+}
+
+func (s *Store) ListModules(ctx context.Context) ([]*Module, error) {
+	var modules []*Module
+	err := s.db.WithContext(ctx).Order("created_at DESC").Find(&modules).Error
+	return modules, err
+}
+
+func (s *Store) ListServerModules(ctx context.Context, serverID string) ([]*Module, error) {
+	var modules []*Module
+	err := s.db.WithContext(ctx).Where("server_id = ?", serverID).Order("name ASC").Find(&modules).Error
+	return modules, err
+}
+
+func (s *Store) ListModulesByTemplate(ctx context.Context, templateID string) ([]*Module, error) {
+	var modules []*Module
+	err := s.db.WithContext(ctx).Where("template_id = ?", templateID).Order("created_at DESC").Find(&modules).Error
+	return modules, err
+}
+
+func (s *Store) UpdateModule(ctx context.Context, module *Module) error {
+	return s.db.WithContext(ctx).Save(module).Error
+}
+
+func (s *Store) DeleteModule(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Delete(&Module{}, "id = ?", id).Error
+}
+
+// GetModuleByHostPort finds a module that uses the specified host port
+func (s *Store) GetModuleByHostPort(ctx context.Context, port int) (*Module, error) {
+	var modules []*Module
+	if err := s.db.WithContext(ctx).Find(&modules).Error; err != nil {
+		return nil, err
+	}
+
+	for _, module := range modules {
+		for _, p := range module.Ports {
+			if p != nil && int(p.HostPort) == port {
+				return module, nil
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+// PortConflict represents a port conflict with details
+type PortConflict struct {
+	Module   *Module
+	Port     int
+	Protocol string
+	Reason   string
+}
+
+// CheckPortAvailability checks if a port can be used by a module, considering:
+// - Non-proxied ports: exclusive (Docker binds to host)
+// - Proxied TCP: can share if different hostname (TCP proxy routes by hostname)
+// - Proxied UDP: exclusive (UDP proxy only supports one route per port)
+//
+// Returns nil if port is available, or a PortConflict if not.
+// excludeModuleID allows excluding the current module when updating.
+func (s *Store) CheckPortAvailability(ctx context.Context, hostPort int, protocol string, proxyEnabled bool, hostname string, excludeModuleID string) (*PortConflict, error) {
+	var modules []*Module
+	if err := s.db.WithContext(ctx).Find(&modules).Error; err != nil {
+		return nil, err
+	}
+
+	for _, module := range modules {
+		if module.ID == excludeModuleID {
+			continue
+		}
+
+		for _, p := range module.Ports {
+			if p == nil || int(p.HostPort) != hostPort {
+				continue
+			}
+
+			existingProtocol := p.Protocol
+			if existingProtocol == "" {
+				existingProtocol = "tcp"
+			}
+
+			// TCP and UDP use separate port spaces
+			if existingProtocol != protocol {
+				continue
+			}
+
+			// Non-proxied ports bind directly to host
+			if !proxyEnabled || !p.ProxyEnabled {
+				return &PortConflict{
+					Module:   module,
+					Port:     hostPort,
+					Protocol: protocol,
+					Reason:   "port is bound directly to host by another module",
+				}, nil
+			}
+
+			// Proxied UDP: exclusive (no hostname routing)
+			if protocol == "udp" {
+				return &PortConflict{
+					Module:   module,
+					Port:     hostPort,
+					Protocol: protocol,
+					Reason:   "UDP proxy port already in use",
+				}, nil
+			}
+
+			// Proxied TCP: allows hostname-based routing, no conflict here
+		}
+	}
+
+	return nil, nil
+}
+
+func (s *Store) GetModuleByContainerID(ctx context.Context, containerID string) (*Module, error) {
+	var module Module
+	err := s.db.WithContext(ctx).Where("container_id = ?", containerID).First(&module).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &module, nil
+}
+
+func (s *Store) ListAutoStartModules(ctx context.Context) ([]*Module, error) {
+	var modules []*Module
+	err := s.db.WithContext(ctx).Where("auto_start = ? AND detached = ?", true, false).Find(&modules).Error
+	return modules, err
+}
+
+func (s *Store) ListModulesFollowingServerLifecycle(ctx context.Context, serverID string) ([]*Module, error) {
+	var modules []*Module
+	err := s.db.WithContext(ctx).Where("server_id = ? AND follow_server_lifecycle = ?", serverID, true).Find(&modules).Error
+	return modules, err
 }

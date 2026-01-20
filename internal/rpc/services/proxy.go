@@ -150,13 +150,18 @@ func (s *ProxyService) UpdateProxyConfig(ctx context.Context, req *connect.Reque
 
 	s.log.Info("Proxy configuration saved to database: enabled=%v, base_url=%v", msg.Enabled, msg.BaseUrl)
 
-	// If enabling proxy and it's not currently running, start it
-	if msg.Enabled && s.proxyManager != nil && !s.proxyManager.IsRunning() {
-		if err := s.proxyManager.Start(); err != nil {
-			s.log.Error("Failed to start proxy manager: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start proxy: %w", err))
+	// If enabling proxy, ensure a default listener exists and start if not running
+	if msg.Enabled && s.proxyManager != nil {
+		if _, err := s.proxyManager.EnsureDefaultListener(); err != nil {
+			s.log.Error("Failed to ensure default listener: %v", err)
 		}
-		s.log.Info("Proxy manager started")
+
+		if !s.proxyManager.IsRunning() {
+			if err := s.proxyManager.Start(); err != nil {
+				s.log.Error("Failed to start proxy manager: %v", err)
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start proxy: %w", err))
+			}
+		}
 	}
 
 	// Return updated status (same as GetProxyStatus response)

@@ -112,7 +112,7 @@ func (p *HTTPProxy) handleWebSocket(w http.ResponseWriter, r *http.Request, rout
 	defer clientConn.Close()
 
 	// Connect to backend
-	backendAddr := fmt.Sprintf("%s:%d", route.BackendHost, route.BackendPort)
+	backendAddr := net.JoinHostPort(route.BackendHost, fmt.Sprintf("%d", route.BackendPort))
 	backendConn, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
 	if err != nil {
 		p.logger.Error("WebSocket: Failed to connect to backend %s: %v", backendAddr, err)

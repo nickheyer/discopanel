@@ -1427,9 +1427,11 @@ func (s *ServerService) GetNextAvailablePort(ctx context.Context, req *connect.R
 		}
 	}
 
-	// Mark proxy listening ports as used
-	for _, port := range s.config.Proxy.ListenPorts {
-		usedPortsMap[int32(port)] = true
+	// Mark proxy listening ports as used (only if proxy is enabled)
+	if s.config.Proxy.Enabled {
+		for _, port := range s.config.Proxy.ListenPorts {
+			usedPortsMap[int32(port)] = true
+		}
 	}
 
 	// Find the next available port starting from 25565

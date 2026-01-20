@@ -588,22 +588,6 @@ func (s *Store) GetProxyListeners(ctx context.Context) ([]*ProxyListener, error)
 	if err != nil {
 		return nil, err
 	}
-
-	// If no listeners exist, create a default one
-	if len(listeners) == 0 {
-		defaultListener := &ProxyListener{
-			ID:        "default",
-			Port:      25565,
-			Name:      "Primary",
-			IsDefault: true,
-			Enabled:   true,
-		}
-		if err := s.CreateProxyListener(ctx, defaultListener); err != nil {
-			return nil, err
-		}
-		listeners = []*ProxyListener{defaultListener}
-	}
-
 	return listeners, nil
 }
 
@@ -645,6 +629,56 @@ func (s *Store) DeleteProxyListener(ctx context.Context, id string) error {
 	}
 
 	return s.db.WithContext(ctx).Delete(&ProxyListener{}, "id = ?", id).Error
+}
+
+// Finds first available port for a proxy listener
+func (s *Store) FindAvailableListenerPort(ctx context.Context) (int, error) {
+	const startPort = 25565
+	const maxPort = 65535
+
+	// Get existing proxy listeners
+	listeners, err := s.GetProxyListeners(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get proxy listeners: %w", err)
+	}
+
+	// Get all servers
+	servers, err := s.ListServers(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to list servers: %w", err)
+	}
+
+	// Build set of used ports from listeners and non-proxied servers
+	usedPorts := make(map[int]bool)
+	for _, l := range listeners {
+		usedPorts[l.Port] = true
+	}
+	for _, srv := range servers {
+		if srv.ProxyHostname == "" && srv.Port > 0 {
+			usedPorts[srv.Port] = true
+		}
+	}
+
+	// Find first available port
+	for port := startPort; port <= maxPort; port++ {
+		if usedPorts[port] {
+			continue
+		}
+
+		// Check if any non-proxied module is using this port
+		// proxyEnabled=false means we're checking for direct host binding
+		conflict, err := s.CheckPortAvailability(ctx, port, "tcp", false, "", "")
+		if err != nil {
+			return 0, fmt.Errorf("failed to check port availability: %w", err)
+		}
+		if conflict != nil {
+			continue
+		}
+
+		return port, nil
+	}
+
+	return 0, fmt.Errorf("no available ports found starting from %d", startPort)
 }
 
 // User operations

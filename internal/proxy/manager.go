@@ -43,6 +43,11 @@ func (m *Manager) Start() error {
 		return nil
 	}
 
+	// Ensure a default listener exists when proxy is enabled
+	if _, err := m.ensureDefaultListenerLocked(); err != nil {
+		m.logger.Error("Failed to ensure default listener: %v", err)
+	}
+
 	// Get all proxy listeners from database
 	listeners, err := m.store.GetProxyListeners(context.Background())
 	if err != nil {
@@ -592,4 +597,49 @@ func (m *Manager) GetModuleRoutes() map[int]map[string]*Route {
 	}
 
 	return moduleRoutes
+}
+
+// Creates default proxy listener if proxy is enabled
+func (m *Manager) EnsureDefaultListener() (*db.ProxyListener, error) {
+	if !m.config.Enabled {
+		return nil, nil
+	}
+	return m.ensureDefaultListenerLocked()
+}
+
+// Assumes caller has already verified proxy is enabled
+func (m *Manager) ensureDefaultListenerLocked() (*db.ProxyListener, error) {
+	ctx := context.Background()
+
+	// Check if any listeners exist
+	listeners, err := m.store.GetProxyListeners(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get proxy listeners: %w", err)
+	}
+
+	if len(listeners) > 0 {
+		return nil, nil
+	}
+
+	// Find an available port using the store function
+	port, err := m.store.FindAvailableListenerPort(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find available port: %w", err)
+	}
+
+	// Create default listener
+	defaultListener := &db.ProxyListener{
+		ID:        "default",
+		Port:      port,
+		Name:      "Primary",
+		IsDefault: true,
+		Enabled:   true,
+	}
+
+	if err := m.store.CreateProxyListener(ctx, defaultListener); err != nil {
+		return nil, fmt.Errorf("failed to create default listener: %w", err)
+	}
+
+	m.logger.Info("Created default proxy listener on port %d", port)
+	return defaultListener, nil
 }

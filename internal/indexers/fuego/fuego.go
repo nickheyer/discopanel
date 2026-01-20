@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/nickheyer/discopanel/internal/config"
 )
 
 const (
@@ -18,12 +21,14 @@ const (
 
 type Client struct {
 	apiKey     string
+	config     *config.Config
 	httpClient *http.Client
 }
 
-func NewClient(apiKey string) *Client {
+func NewClient(apiKey string, cfg *config.Config) *Client {
 	return &Client{
 		apiKey: apiKey,
+		config: cfg,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -196,6 +201,7 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 
 	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", c.config.Server.UserAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -204,7 +210,7 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fuego API error: %s", resp.Status)
+		return nil, c.formatError(req, resp)
 	}
 
 	var result SearchModsResponse
@@ -227,6 +233,7 @@ func (c *Client) GetModpackFiles(ctx context.Context, modID int) ([]File, error)
 
 	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", c.config.Server.UserAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -235,7 +242,7 @@ func (c *Client) GetModpackFiles(ctx context.Context, modID int) ([]File, error)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fuego API error: %s", resp.Status)
+		return nil, c.formatError(req, resp)
 	}
 
 	var result struct {
@@ -260,6 +267,7 @@ func (c *Client) GetModpack(ctx context.Context, modID int) (*Modpack, error) {
 
 	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", c.config.Server.UserAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -268,7 +276,7 @@ func (c *Client) GetModpack(ctx context.Context, modID int) (*Modpack, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fuego API error: %s", resp.Status)
+		return nil, c.formatError(req, resp)
 	}
 
 	var result struct {
@@ -279,4 +287,13 @@ func (c *Client) GetModpack(ctx context.Context, modID int) (*Modpack, error) {
 	}
 
 	return &result.Data, nil
+}
+
+func (c *Client) formatError(req *http.Request, resp *http.Response) error {
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	body := string(bodyBytes)
+	if body != "" {
+		return fmt.Errorf("fuego API error: %s (url=%s body=%s)", resp.Status, req.URL.String(), body)
+	}
+	return fmt.Errorf("fuego API error: %s (url=%s)", resp.Status, req.URL.String())
 }

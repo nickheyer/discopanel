@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nickheyer/discopanel/internal/config"
 	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
@@ -19,9 +20,9 @@ type ModrinthIndexer struct {
 
 // Creates a new Modrinth indexer
 // Note: Modrinth API does not require an API key for public operations
-func NewIndexer() *ModrinthIndexer {
+func NewIndexer(cfg *config.Config) *ModrinthIndexer {
 	return &ModrinthIndexer{
-		client: NewClient(),
+		client: NewClient(cfg),
 	}
 }
 

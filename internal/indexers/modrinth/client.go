@@ -4,24 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nickheyer/discopanel/internal/config"
 )
 
 const (
-	BaseURL   = "https://api.modrinth.com/v2"
-	UserAgent = "discopanel/1.0 (github.com/nickheyer/discopanel)"
+	BaseURL = "https://api.modrinth.com/v2"
 )
 
 type Client struct {
+	config     *config.Config
 	httpClient *http.Client
 }
 
-func NewClient() *Client {
+func NewClient(cfg *config.Config) *Client {
 	return &Client{
+		config: cfg,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -38,59 +42,59 @@ type SearchResponse struct {
 
 // Project represents a Modrinth project (modpack)
 type Project struct {
-	Slug            string   `json:"slug"`
-	Title           string   `json:"title"`
-	Description     string   `json:"description"`
-	Categories      []string `json:"categories"`
-	ClientSide      string   `json:"client_side"`
-	ServerSide      string   `json:"server_side"`
-	ProjectType     string   `json:"project_type"`
-	Downloads       int64    `json:"downloads"`
-	IconURL         string   `json:"icon_url"`
-	ProjectID       string   `json:"project_id"`
-	Author          string   `json:"author"`
+	Slug              string   `json:"slug"`
+	Title             string   `json:"title"`
+	Description       string   `json:"description"`
+	Categories        []string `json:"categories"`
+	ClientSide        string   `json:"client_side"`
+	ServerSide        string   `json:"server_side"`
+	ProjectType       string   `json:"project_type"`
+	Downloads         int64    `json:"downloads"`
+	IconURL           string   `json:"icon_url"`
+	ProjectID         string   `json:"project_id"`
+	Author            string   `json:"author"`
 	DisplayCategories []string `json:"display_categories"`
-	Versions        []string `json:"versions"`
-	Follows         int      `json:"follows"`
-	DateCreated     string   `json:"date_created"`
-	DateModified    string   `json:"date_modified"`
-	LatestVersion   string   `json:"latest_version"`
-	License         string   `json:"license"`
-	Gallery         []string `json:"gallery"`
-	FeaturedGallery string   `json:"featured_gallery"`
-	Color           *int     `json:"color"`
+	Versions          []string `json:"versions"`
+	Follows           int      `json:"follows"`
+	DateCreated       string   `json:"date_created"`
+	DateModified      string   `json:"date_modified"`
+	LatestVersion     string   `json:"latest_version"`
+	License           string   `json:"license"`
+	Gallery           []string `json:"gallery"`
+	FeaturedGallery   string   `json:"featured_gallery"`
+	Color             *int     `json:"color"`
 }
 
 // ProjectDetails represents full project details from GET /project/{id}
 type ProjectDetails struct {
-	ID                  string        `json:"id"`
-	Slug                string        `json:"slug"`
-	Title               string        `json:"title"`
-	Description         string        `json:"description"`
-	Body                string        `json:"body"`
-	ProjectType         string        `json:"project_type"`
-	ClientSide          string        `json:"client_side"`
-	ServerSide          string        `json:"server_side"`
-	GameVersions        []string      `json:"game_versions"`
-	Loaders             []string      `json:"loaders"`
-	Categories          []string      `json:"categories"`
-	AdditionalCategories []string     `json:"additional_categories"`
-	Status              string        `json:"status"`
-	Published           string        `json:"published"`
-	Updated             string        `json:"updated"`
-	Downloads           int64         `json:"downloads"`
-	Followers           int           `json:"followers"`
-	IconURL             string        `json:"icon_url"`
-	Color               *int          `json:"color"`
-	Gallery             []GalleryItem `json:"gallery"`
-	SourceURL           string        `json:"source_url"`
-	IssuesURL           string        `json:"issues_url"`
-	WikiURL             string        `json:"wiki_url"`
-	DiscordURL          string        `json:"discord_url"`
-	DonationURLs        []DonationURL `json:"donation_urls"`
-	Team                string        `json:"team"`
-	Versions            []string      `json:"versions"`
-	License             License       `json:"license"`
+	ID                   string        `json:"id"`
+	Slug                 string        `json:"slug"`
+	Title                string        `json:"title"`
+	Description          string        `json:"description"`
+	Body                 string        `json:"body"`
+	ProjectType          string        `json:"project_type"`
+	ClientSide           string        `json:"client_side"`
+	ServerSide           string        `json:"server_side"`
+	GameVersions         []string      `json:"game_versions"`
+	Loaders              []string      `json:"loaders"`
+	Categories           []string      `json:"categories"`
+	AdditionalCategories []string      `json:"additional_categories"`
+	Status               string        `json:"status"`
+	Published            string        `json:"published"`
+	Updated              string        `json:"updated"`
+	Downloads            int64         `json:"downloads"`
+	Followers            int           `json:"followers"`
+	IconURL              string        `json:"icon_url"`
+	Color                *int          `json:"color"`
+	Gallery              []GalleryItem `json:"gallery"`
+	SourceURL            string        `json:"source_url"`
+	IssuesURL            string        `json:"issues_url"`
+	WikiURL              string        `json:"wiki_url"`
+	DiscordURL           string        `json:"discord_url"`
+	DonationURLs         []DonationURL `json:"donation_urls"`
+	Team                 string        `json:"team"`
+	Versions             []string      `json:"versions"`
+	License              License       `json:"license"`
 }
 
 type GalleryItem struct {
@@ -192,16 +196,21 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", c.config.Server.UserAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err := resp.Body.Close()
+		if err != nil {
+			fmt.Printf("failed to close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		return nil, c.formatError(req, resp)
 	}
 
 	var searchResp SearchResponse
@@ -221,16 +230,21 @@ func (c *Client) GetModpack(ctx context.Context, modpackID string) (*ProjectDeta
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", c.config.Server.UserAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err := resp.Body.Close()
+		if err != nil {
+			fmt.Printf("failed to close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		return nil, c.formatError(req, resp)
 	}
 
 	var project ProjectDetails
@@ -250,16 +264,21 @@ func (c *Client) GetModpackVersions(ctx context.Context, modpackID string) ([]Ve
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", c.config.Server.UserAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err := resp.Body.Close()
+		if err != nil {
+			fmt.Printf("failed to close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		return nil, c.formatError(req, resp)
 	}
 
 	var versions []Version
@@ -268,4 +287,13 @@ func (c *Client) GetModpackVersions(ctx context.Context, modpackID string) ([]Ve
 	}
 
 	return versions, nil
+}
+
+func (c *Client) formatError(req *http.Request, resp *http.Response) error {
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	body := string(bodyBytes)
+	if body != "" {
+		return fmt.Errorf("modrinth API error: %s (url=%s body=%s)", resp.Status, req.URL.String(), body)
+	}
+	return fmt.Errorf("modrinth API error: %s (url=%s)", resp.Status, req.URL.String())
 }

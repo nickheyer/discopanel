@@ -26,6 +26,7 @@ type ServerConfig struct {
 	ReadTimeout  int    `mapstructure:"read_timeout" json:"read_timeout"`
 	WriteTimeout int    `mapstructure:"write_timeout" json:"write_timeout"`
 	IdleTimeout  int    `mapstructure:"idle_timeout" json:"idle_timeout"`
+	UserAgent    string `mapstructure:"user_agent" json:"user_agent"`
 }
 
 type DatabaseConfig struct {
@@ -130,6 +131,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.read_timeout", 15)
 	v.SetDefault("server.write_timeout", 15)
 	v.SetDefault("server.idle_timeout", 60)
+	v.SetDefault("server.user_agent", "DiscoPanel/1.0 (github.com/nickheyer/discopanel)")
 
 	// Database defaults
 	v.SetDefault("database.path", "./data/discopanel.db")

@@ -246,9 +246,9 @@ func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Re
 		if apiKey == "" {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("CurseForge API key not configured"))
 		}
-		indexerClient = fuego.NewIndexer(apiKey)
+		indexerClient = fuego.NewIndexer(apiKey, s.config)
 	case "modrinth":
-		indexerClient = modrinth.NewIndexer()
+		indexerClient = modrinth.NewIndexer(s.config)
 	case "manual":
 		// For manual modpacks, return empty list
 		return connect.NewResponse(&v1.GetModpackVersionsResponse{
@@ -318,10 +318,10 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("fuego API key not configured in global settings"))
 		}
 
-		indexerClient = fuego.NewIndexer(apiKey)
+		indexerClient = fuego.NewIndexer(apiKey, s.config)
 	case "modrinth":
 		// Modrinth doesn't require an API key for public operations
-		indexerClient = modrinth.NewIndexer()
+		indexerClient = modrinth.NewIndexer(s.config)
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown indexer: %s", indexer))
 	}
@@ -801,10 +801,10 @@ func (s *ModpackService) SyncModpackFiles(ctx context.Context, req *connect.Requ
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("fuego API key not configured in global settings"))
 		}
 
-		indexerClient = fuego.NewIndexer(apiKey)
+		indexerClient = fuego.NewIndexer(apiKey, s.config)
 	case "modrinth":
 		// Modrinth doesn't require an API key for public operations
-		indexerClient = modrinth.NewIndexer()
+		indexerClient = modrinth.NewIndexer(s.config)
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown indexer: %s", modpack.Indexer))
 	}

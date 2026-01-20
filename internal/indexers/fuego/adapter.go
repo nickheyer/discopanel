@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/nickheyer/discopanel/internal/config"
 	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
@@ -18,9 +19,9 @@ type FuegoIndexer struct {
 }
 
 // Creates a new Fuego indexer
-func NewIndexer(apiKey string) *FuegoIndexer {
+func NewIndexer(apiKey string, cfg *config.Config) *FuegoIndexer {
 	return &FuegoIndexer{
-		client: NewClient(apiKey),
+		client: NewClient(apiKey, cfg),
 	}
 }
 

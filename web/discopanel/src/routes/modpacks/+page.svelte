@@ -13,6 +13,7 @@
 	import type { IndexedModpack, SearchModpacksRequest, SearchModpacksResponse, GetIndexerStatusResponse } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { SearchModpacksRequestSchema } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { debounce } from 'lodash-es';
 	
 	let searchParams = $state<SearchModpacksRequest>(create(SearchModpacksRequestSchema, {
 		query: '',
@@ -106,7 +107,7 @@
 		}
 	}
 	
-	async function syncModpacks() {
+	async function _syncModpacks() {
 		syncing = true;
 		try {
 			const result = await rpcClient.modpack.syncModpacks({
@@ -125,6 +126,9 @@
 			syncing = false;
 		}
 	}
+
+	// Debounce sync to prevent indexer rate limiting the backend
+	const syncModpacks = debounce(_syncModpacks, 1000, { leading: true, trailing: false });
 	
 	async function toggleFavorite(modpack: IndexedModpack) {
 		try {
@@ -297,14 +301,14 @@
 	);
 </script>
 
-<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-gradient-to-br from-background to-muted/10">
+<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-linear-to-br from-background to-muted/10">
 	<div class="flex items-center justify-between pb-6 border-b-2 border-border/50">
 		<div class="flex items-center gap-4">
-			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+			<div class="h-16 w-16 rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
 				<Package class="h-8 w-8 text-primary" />
 			</div>
 			<div class="space-y-1">
-				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Modpacks</h2>
+				<h2 class="text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Modpacks</h2>
 				<p class="text-base text-muted-foreground">Browse and install modpacks for your servers</p>
 			</div>
 		</div>
@@ -372,7 +376,7 @@
 					class="flex-1"
 				/>
 				<Select type="single" value={searchParams.gameVersion} onValueChange={(v: string | undefined) => searchParams.gameVersion = v || ''} disabled={loading}>
-					<SelectTrigger class="w-[180px]">
+					<SelectTrigger class="w-45">
 						<span>{searchParams.gameVersion || 'All Versions'}</span>
 					</SelectTrigger>
 					<SelectContent>
@@ -383,7 +387,7 @@
 					</SelectContent>
 				</Select>
 				<Select type="single" value={searchParams.modLoader} onValueChange={(v: string | undefined) => searchParams.modLoader = v || ''} disabled={loading}>
-					<SelectTrigger class="w-[180px]">
+					<SelectTrigger class="w-45">
 						<span>{searchParams.modLoader ? modLoaders.find(l => l.value === searchParams.modLoader)?.label : 'All Loaders'}</span>
 					</SelectTrigger>
 					<SelectContent>
@@ -396,7 +400,7 @@
 					selectedIndexer = v || 'modrinth';
 					syncModpacks();
 				}} disabled={syncing}>
-					<SelectTrigger class="w-[180px]">
+					<SelectTrigger class="w-45">
 						<span>{indexerName}</span>
 					</SelectTrigger>
 					<SelectContent>
@@ -404,7 +408,7 @@
 						<SelectItem value="fuego">CurseForge</SelectItem>
 					</SelectContent>
 				</Select>
-				<Button onclick={() => searchModpacks(true)} disabled={loading} class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-md hover:shadow-lg transition-all hover:scale-[1.02]">
+				<Button onclick={() => searchModpacks(true)} disabled={loading} class="bg-linear-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-md hover:shadow-lg transition-all hover:scale-[1.02]">
 					<Search class="h-5 w-5 mr-2" />
 					Search
 				</Button>
@@ -434,8 +438,8 @@
 	
 	<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 		{#each displayModpacks as modpack}
-			<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+			<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
+				<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 				<CardHeader class="relative">
 					<div class="flex items-start gap-4">
 						{#if modpack.logoUrl}

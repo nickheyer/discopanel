@@ -64,3 +64,59 @@ message GetDockerImagesRequest {}
 message GetDockerImagesResponse {
   repeated DockerImage images = 1;
 }
+
+// SLP Handshake packet
+message SLPHandshake {
+  int32 protocol_version = 1;
+  string server_address = 2;
+  int32 server_port = 3;
+  int32 next_state = 4; // 1 = status, 2 = login
+}
+
+// Status Request empty payload, packet ID 0x00
+message SLPStatusRequest {}
+
+// Status Response packet ID 0x00, JSON payload
+message SLPStatusResponse {
+  string json_payload = 1;
+}
+
+// Ping packet ID 0x01, 8-byte timestamp
+message SLPPing {
+  int64 payload = 1;
+}
+
+// Pong packet ID 0x01, echoed payload
+message SLPPong {
+  int64 payload = 1;
+}
+
+// Complete status from SLP
+message SLPServerStatus {
+  SLPVersion version = 1;
+  SLPPlayers players = 2;
+  string description = 3; // Parsed MOTD text
+  optional string description_json = 4; // Raw JSON for rich formatting
+  optional string favicon = 5; // Base64 PNG (data:image/png;base64,...)
+  bool enforces_secure_chat = 6;
+  int64 latency_ms = 7;
+}
+
+// Server version information
+message SLPVersion {
+  string name = 1; // ie: "1.21.4"
+  int32 protocol = 2; // Protocol version number
+}
+
+// Player count and sample
+message SLPPlayers {
+  int32 max = 1;
+  int32 online = 2;
+  repeated SLPPlayerSample sample = 3;
+}
+
+// Individual player sample entry
+message SLPPlayerSample {
+  string name = 1;
+  string id = 2; // UUID
+}

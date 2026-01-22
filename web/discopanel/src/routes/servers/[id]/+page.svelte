@@ -137,6 +137,16 @@
 		}
 	}
 
+	function getPlayerCountColors(percent: number) {
+		// gray (0%) -> blue (1-25%) -> cyan (26-50%) -> green (51-75%) -> amber (76-90%) -> red (91-100%)
+		if (percent === 0) return { bg: '107 114 128', text: '107 114 128', barFrom: '156 163 175', barTo: '107 114 128' }; // gray
+		if (percent <= 25) return { bg: '59 130 246', text: '59 130 246', barFrom: '59 130 246', barTo: '99 102 241' }; // blue -> indigo
+		if (percent <= 50) return { bg: '6 182 212', text: '6 182 212', barFrom: '6 182 212', barTo: '20 184 166' }; // cyan -> teal
+		if (percent <= 75) return { bg: '34 197 94', text: '34 197 94', barFrom: '34 197 94', barTo: '16 185 129' }; // green -> emerald
+		if (percent <= 90) return { bg: '245 158 11', text: '245 158 11', barFrom: '245 158 11', barTo: '234 179 8' }; // amber -> yellow
+		return { bg: '239 68 68', text: '239 68 68', barFrom: '239 68 68', barTo: '249 115 22' }; // red -> orange
+	}
+
 	async function handleDeleteServer() {
 		if (!server) return;
 
@@ -500,24 +510,25 @@
 				</CardContent>
 			</Card>
 
-			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-background via-background/95 to-background/90 hover:-translate-y-1">
+			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-background via-background/95 to-background/90 hover:-translate-y-1 flex flex-col">
 				<div class="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-purple-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-					<div class="space-y-1">
-						<CardTitle class="text-xs font-bold text-muted-foreground/70 uppercase tracking-widest">Server Info</CardTitle>
-						<p class="text-xs text-muted-foreground/50">Details & versions</p>
-					</div>
-					<div class="relative">
-						<div class="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-						<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-purple-500/10 to-purple-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
-							<Info class="h-7 w-7 text-purple-500 group-hover:animate-pulse" />
+
+				<!-- Server Info Section (2/3) -->
+				<div class="flex-[2] flex flex-col min-h-0">
+					<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
+						<div class="space-y-1">
+							<CardTitle class="text-xs font-bold text-muted-foreground/70 uppercase tracking-widest">Server Info</CardTitle>
+							<p class="text-xs text-muted-foreground/50">Details & versions</p>
 						</div>
-					</div>
-				</CardHeader>
-				<CardContent class="pt-1">
-					<div class="space-y-2.5 max-h-[180px] overflow-y-auto scrollbar-thin">
-						<!-- Versions Section -->
+						<div class="relative">
+							<div class="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-12 w-12 rounded-2xl bg-gradient-to-br from-purple-500/10 to-purple-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+								<Info class="h-6 w-6 text-purple-500 group-hover:animate-pulse" />
+							</div>
+						</div>
+					</CardHeader>
+					<CardContent class="pt-0 pb-2 flex-1 overflow-y-auto scrollbar-thin">
 						<div class="space-y-1.5">
 							<div class="flex items-center justify-between">
 								<span class="text-[10px] text-muted-foreground/60">Minecraft</span>
@@ -533,15 +544,15 @@
 								<span class="text-[10px] text-muted-foreground/60">Mod Loader</span>
 								{#if server.modLoader === ModLoader.VANILLA}
 									<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 bg-yellow-500/10 border-yellow-500/20">
-										⚡ Vanilla
+										Vanilla
 									</Badge>
 								{:else if server.modLoader === ModLoader.FORGE || server.modLoader === ModLoader.NEOFORGE}
 									<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 bg-orange-500/10 border-orange-500/20">
-										🔨 {server.modLoader === ModLoader.FORGE ? 'Forge' : 'NeoForge'}
+										{server.modLoader === ModLoader.FORGE ? 'Forge' : 'NeoForge'}
 									</Badge>
 								{:else if server.modLoader === ModLoader.FABRIC}
 									<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 bg-blue-500/10 border-blue-500/20">
-										🧵 Fabric
+										Fabric
 									</Badge>
 								{:else}
 									<Badge variant="secondary" class="capitalize text-[10px] px-1.5 py-0 h-4">
@@ -549,11 +560,7 @@
 									</Badge>
 								{/if}
 							</div>
-						</div>
-						
-						<!-- IDs Section -->
-						<div class="pt-1.5 border-t border-border/20 space-y-1.5">
-							<div class="flex items-center justify-between group/copy cursor-pointer" 
+							<div class="flex items-center justify-between group/copy cursor-pointer"
 								onclick={() => copyToClipboard(server?.id)}>
 								<span class="text-[10px] text-muted-foreground/60">Server ID</span>
 								<div class="flex items-center gap-1">
@@ -563,31 +570,63 @@
 									<Copy class="h-2.5 w-2.5 text-muted-foreground/40 opacity-0 group-hover/copy:opacity-100 transition-opacity" />
 								</div>
 							</div>
-							{#if server.containerId}
-								<div class="flex items-center justify-between group/copy cursor-pointer" 
-									onclick={() => copyToClipboard(server?.containerId)}>
-									<span class="text-[10px] text-muted-foreground/60">Container</span>
-									<div class="flex items-center gap-1">
-										<span class="text-[10px] font-mono text-muted-foreground/70 truncate max-w-[80px]">
-											{server.containerId}
-										</span>
-										<Copy class="h-2.5 w-2.5 text-muted-foreground/40 opacity-0 group-hover/copy:opacity-100 transition-opacity" />
-									</div>
+						</div>
+					</CardContent>
+				</div>
+
+				<!-- Players Section (1/3) -->
+				{#if server.playersOnline !== undefined}
+					{@const maxPlayers = server.maxPlayersSlp || server.maxPlayers}
+					{@const playersPercent = (server.playersOnline / maxPlayers) * 100}
+					{@const colors = getPlayerCountColors(playersPercent)}
+					<div class="flex-1 border-t border-border/30 transition-colors duration-500"
+						style="background: linear-gradient(to bottom, rgb({colors.bg} / 0.05), transparent);">
+						<div class="px-6 py-3">
+							<div class="flex items-center justify-between mb-2">
+								<span class="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-widest">Players</span>
+								<span class="text-sm font-mono font-bold transition-colors duration-500"
+									style="color: rgb({colors.text});">{server.playersOnline}/{maxPlayers}</span>
+							</div>
+							<div class="relative h-2 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden mb-2">
+								<div class="relative h-full rounded-full transition-all duration-700"
+									style="width: {Math.min(playersPercent, 100)}%; background: linear-gradient(to right, rgb({colors.barFrom}), rgb({colors.barTo}));">
+									<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
 								</div>
+							</div>
+							{#if server.playerSample && server.playerSample.length > 0}
+								<div class="flex flex-wrap gap-1.5">
+									{#each server.playerSample as playerName}
+										<div class="flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors duration-500"
+											style="background: rgb({colors.bg} / 0.1); border-color: rgb({colors.bg} / 0.2);">
+											<img
+												src="https://mc-heads.net/avatar/{playerName}/16"
+												alt={playerName}
+												class="w-4 h-4 rounded-sm"
+												onerror={(e) => {
+													const target = e.currentTarget as HTMLImageElement;
+													target.style.display = 'none';
+												}}
+											/>
+											<span class="text-[10px] font-medium text-foreground/80">{playerName}</span>
+										</div>
+									{/each}
+								</div>
+							{:else}
+								<p class="text-[10px] text-muted-foreground/50">No players online</p>
 							{/if}
 						</div>
-						
-						<!-- Data Path (tooltip on hover) -->
-						<div class="pt-1.5 border-t border-border/20">
-							<div class="flex items-center justify-between group/path">
-								<span class="text-[10px] text-muted-foreground/60">Data Path</span>
-								<span class="text-[10px] font-mono text-muted-foreground/70 truncate max-w-[100px]" title={server.dataPath}>
-									.../{server.dataPath.split('/').slice(-2).join('/')}
-								</span>
+					</div>
+				{:else}
+					<div class="flex-1 border-t border-border/30 bg-gradient-to-b from-gray-500/5 to-transparent">
+						<div class="px-6 py-3">
+							<div class="flex items-center justify-between mb-2">
+								<span class="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-widest">Players</span>
+								<span class="text-sm font-mono text-muted-foreground/50">--</span>
 							</div>
+							<p class="text-[10px] text-muted-foreground/50">Server offline</p>
 						</div>
 					</div>
-				</CardContent>
+				{/if}
 			</Card>
 
 			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-background via-background/95 to-background/90 hover:-translate-y-1">
@@ -690,24 +729,6 @@
 							{/if}
 						</div>
 
-						<!-- Players Online -->
-						{#if server.playersOnline !== undefined}
-							{@const playersPercent = (server.playersOnline / server.maxPlayers) * 100}
-							<div>
-								<div class="flex items-center justify-between mb-1.5">
-									<span class="text-xs font-semibold text-muted-foreground/70">PLAYERS</span>
-									<span class="text-xs font-mono text-indigo-500">{server.playersOnline}/{server.maxPlayers}</span>
-								</div>
-								<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
-									
-									<div class="relative h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full transition-all duration-700" 
-										style="width: {Math.min(playersPercent, 100)}%">
-										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
-									</div>
-								</div>
-							</div>
-						{/if}
-
 						<!-- TPS -->
 						{#if server.tpsCommand !== '' && server.tps !== undefined}
 							{@const tpsPercent = (server.tps / 20) * 100}
@@ -717,8 +738,8 @@
 									<span class="text-xs font-mono text-green-500">{server.tps.toFixed(1)}</span>
 								</div>
 								<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
-									
-									<div class="relative h-full bg-gradient-to-r from-green-500 to-emerald-500 rounded-full transition-all duration-700" 
+
+									<div class="relative h-full bg-gradient-to-r from-green-500 to-emerald-500 rounded-full transition-all duration-700"
 										style="width: {Math.min(tpsPercent, 100)}%">
 										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
 									</div>
@@ -728,6 +749,7 @@
 					</div>
 				</CardContent>
 			</Card>
+
 		</div>
 
 		<Tabs value="overview" class="flex-1 flex flex-col min-h-0 gap-4" onValueChange={(value) => {

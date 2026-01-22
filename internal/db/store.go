@@ -242,6 +242,7 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 	config.Type = stringPtr(string(server.ModLoader))
 	config.Version = stringPtr(server.MCVersion)
 	config.ServerPort = intPtr(server.Port)
+	config.MaxPlayers = intPtr(server.MaxPlayers)
 
 	return s.SaveServerConfig(ctx, config)
 }
@@ -292,7 +293,8 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 			if field.Name == "ID" || field.Name == "ServerID" || field.Name == "UpdatedAt" ||
 				field.Name == "Server" || field.Name == "RCONPassword" ||
 				field.Name == "Type" || field.Name == "Version" || field.Name == "Memory" ||
-				field.Name == "InitMemory" || field.Name == "MaxMemory" || field.Name == "ServerPort" {
+				field.Name == "InitMemory" || field.Name == "MaxMemory" || field.Name == "ServerPort" ||
+				field.Name == "MaxPlayers" {
 				continue
 			}
 
@@ -359,6 +361,30 @@ func (s *Store) GetIndexedModpack(ctx context.Context, id string) (*IndexedModpa
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("modpack not found")
+		}
+		return nil, err
+	}
+	return &modpack, nil
+}
+
+func (s *Store) GetModpackBySlug(ctx context.Context, slug string) (*IndexedModpack, error) {
+	var modpack IndexedModpack
+	err := s.db.WithContext(ctx).Where("slug = ?", slug).First(&modpack).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &modpack, nil
+}
+
+func (s *Store) GetModpackByWebsiteURL(ctx context.Context, url string) (*IndexedModpack, error) {
+	var modpack IndexedModpack
+	err := s.db.WithContext(ctx).Where("website_url = ?", url).First(&modpack).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
 		}
 		return nil, err
 	}

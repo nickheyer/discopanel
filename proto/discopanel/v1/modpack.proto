@@ -12,6 +12,10 @@ service ModpackService {
   rpc SearchModpacks(SearchModpacksRequest) returns (SearchModpacksResponse);
   // Get modpack details
   rpc GetModpack(GetModpackRequest) returns (GetModpackResponse);
+  // Get modpack by slug
+  rpc GetModpackBySlug(GetModpackBySlugRequest) returns (GetModpackBySlugResponse);
+  // Get modpack by website URL
+  rpc GetModpackByURL(GetModpackByURLRequest) returns (GetModpackByURLResponse);
   // Fetch modpacks from external sources
   rpc SyncModpacks(SyncModpacksRequest) returns (SyncModpacksResponse);
   // Import local modpack file
@@ -99,6 +103,26 @@ message GetModpackRequest {
 
 // Single modpack details
 message GetModpackResponse {
+  IndexedModpack modpack = 1;
+}
+
+// Slug lookup
+message GetModpackBySlugRequest {
+  string slug = 1;
+}
+
+// Slug lookup response (modpack may be null if not found)
+message GetModpackBySlugResponse {
+  IndexedModpack modpack = 1;
+}
+
+// URL lookup
+message GetModpackByURLRequest {
+  string url = 1;
+}
+
+// URL lookup response (modpack may be null if not found)
+message GetModpackByURLResponse {
   IndexedModpack modpack = 1;
 }
 

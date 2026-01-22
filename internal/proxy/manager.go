@@ -100,7 +100,7 @@ func (m *Manager) Start() error {
 			}
 
 			// Get container IP address
-			containerIP, err := getContainerIP(server.ContainerID, m.networkName)
+			containerIP, err := GetContainerIP(server.ContainerID, m.networkName)
 			if err != nil {
 				m.logger.Error("Failed to get container IP for server %s: %v", server.Name, err)
 				continue
@@ -186,7 +186,7 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 		// Get the container's IP address on the Docker network
 		containerIP := ""
 		if server.ContainerID != "" {
-			if ip, err := getContainerIP(server.ContainerID, m.networkName); err == nil {
+			if ip, err := GetContainerIP(server.ContainerID, m.networkName); err == nil {
 				containerIP = ip
 			} else {
 				m.logger.Error("Failed to get container IP for %s: %v", server.Name, err)
@@ -402,7 +402,7 @@ func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
 		return fmt.Errorf("module has no container ID")
 	}
 
-	containerIP, err := getContainerIP(module.ContainerID, m.networkName)
+	containerIP, err := GetContainerIP(module.ContainerID, m.networkName)
 	if err != nil {
 		return fmt.Errorf("failed to get module container IP: %w", err)
 	}
@@ -543,7 +543,7 @@ func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error 
 	}
 
 	// Get the container IP
-	containerIP, err := getContainerIP(module.ContainerID, m.networkName)
+	containerIP, err := GetContainerIP(module.ContainerID, m.networkName)
 	if err != nil {
 		return fmt.Errorf("failed to get module container IP: %w", err)
 	}

@@ -27,16 +27,6 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				{Name: "Bedrock", ContainerPort: 19132, HostPort: 0, Protocol: "udp", ProxyEnabled: true},
 			},
 			DefaultAccessUrls: []string{"http://{{server.proxy_hostname}}:{{module.ports.Bedrock.host_port}}"},
-			ConfigSchema: `{
-				"type": "object",
-				"properties": {
-					"bedrock_port": {"type": "integer", "default": 19132},
-					"motd1": {"type": "string", "default": "GeyserMC"},
-					"motd2": {"type": "string", "default": "Minecraft Server"},
-					"server_name": {"type": "string", "default": "Geyser"},
-					"remote_auth_type": {"type": "string", "enum": ["offline", "online", "floodgate"], "default": "floodgate"}
-				}
-			}`,
 			DefaultEnv: `{
 				"PUID": "{{host.uid}}",
 				"PGID": "{{host.gid}}",
@@ -53,6 +43,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultVolumes:  `[{"source": "{{server.data_path}}/modules/geyser", "target": "/data", "read_only": false}]`,
 			Documentation:   "Geyser acts as a proxy, translating Bedrock packets to Java packets.",
 			HealthCheckPort: 19132,
+			DefaultMemory:   1024,
 		},
 		{
 			ID:             "builtin-mc-backup",
@@ -64,19 +55,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			SupportsProxy:  false,
 			RequiresServer: true,
 			Icon:           "archive",
-			Ports:          []*v1.ModulePort{}, // No ports needed
-			ConfigSchema: `{
-				"type": "object",
-				"properties": {
-					"backup_interval": {"type": "string", "default": "24h", "description": "How often to run backups (e.g., 24h, 1.5d, 2h 30m)"},
-					"initial_delay": {"type": "string", "default": "2m", "description": "Delay before first backup"},
-					"backup_on_startup": {"type": "boolean", "default": true, "description": "Run backup immediately on startup"},
-					"prune_backups_days": {"type": "integer", "default": 7, "description": "Delete backups older than this many days"},
-					"pause_if_no_players": {"type": "boolean", "default": false, "description": "Skip backups when no players are online"},
-					"backup_name": {"type": "string", "default": "world", "description": "Name prefix for backup files"},
-					"excludes": {"type": "string", "default": "*.jar,cache,logs,*.tmp", "description": "Comma-separated patterns to exclude from backup"}
-				}
-			}`,
+			Ports:          []*v1.ModulePort{},
 			DefaultEnv: `{
 				"RCON_HOST": "discopanel-server-{{server.id}}",
 				"RCON_PORT": "{{server.config.rconPort}}",
@@ -95,6 +74,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			}`,
 			DefaultVolumes: `[{"source": "{{server.data_path}}", "target": "/data", "read_only": true}, {"source": "{{config.storage.backup_dir}}", "target": "/backups", "read_only": false}]`,
 			Documentation:  "Coordinates backups with the Minecraft server via RCON. Automatically flushes data, pauses writes, and resumes after backup. RCON settings are pulled from server config. Backups stored in global backup directory.",
+			DefaultMemory:  256,
 		},
 		{
 			ID:             "builtin-rcon-web",
@@ -111,12 +91,6 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				{Name: "WS", ContainerPort: 4327, HostPort: 0, Protocol: "http", ProxyEnabled: true},
 			},
 			DefaultAccessUrls: []string{"http://{{server.proxy_hostname}}:{{module.ports.Web.host_port}}"},
-			ConfigSchema: `{
-				"type": "object",
-				"properties": {
-					"rcon_password": {"type": "string", "description": "RCON password (must match server)"}
-				}
-			}`,
 			DefaultEnv: `{
 				"RWA_ADMIN": "true",
 				"RWA_PASSWORD": "admin",
@@ -129,6 +103,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			HealthCheckPath: "/",
 			HealthCheckPort: 4326,
 			Documentation:   "Provides a web interface for RCON commands. RCON settings are pulled from server config. Web UI on port 4326, WebSocket on port 4327 - both need to be accessible.",
+			DefaultMemory:   256,
 		},
 		{
 			ID:             "builtin-minecraft-exporter",
@@ -145,12 +120,6 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				{Name: "Metrics", ContainerPort: 9225, HostPort: 0, Protocol: "http", ProxyEnabled: true},
 			},
 			DefaultAccessUrls: []string{"http://{{server.proxy_hostname}}:{{module.ports.Metrics.host_port}}/metrics"},
-			ConfigSchema: `{
-				"type": "object",
-				"properties": {
-					"export_port": {"type": "integer", "default": {{module.ports.Metrics.container_port}}}
-				}
-			}`,
 			DefaultEnv: `{
 				"EXPORT_SERVERS": "discopanel-server-{{server.id}}:25565",
 				"EXPORT_PORT": "{{module.ports.Metrics.container_port}}"
@@ -159,6 +128,32 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			HealthCheckPath: "/metrics",
 			HealthCheckPort: 9225,
 			Documentation:   "Exports server status, player count, TPS, and other metrics in Prometheus format. Connect to /metrics endpoint to scrape metrics.",
+			DefaultMemory:   512,
+		},
+		{
+			ID:             "builtin-status-panel",
+			Name:           "Status Panel",
+			Description:    "Real-time server status dashboard showing player count, TPS, memory usage, and server info via the DiscoPanel API.",
+			Type:           storage.ModuleTemplateTypeBuiltin,
+			DockerImage:    "nickheyer/discopanel-status:latest",
+			Category:       "monitoring",
+			SupportsProxy:  true,
+			RequiresServer: true,
+			Icon:           "monitor",
+			Ports: []*v1.ModulePort{
+				{Name: "Web", ContainerPort: 8181, HostPort: 0, Protocol: "http", ProxyEnabled: true},
+			},
+			DefaultAccessUrls: []string{"http://{{server.proxy_hostname}}:{{module.ports.Web.host_port}}"},
+			DefaultEnv: `{
+				"DISCOPANEL_URL": "http://host.docker.internal:{{config.server.port}}",
+				"POLL_INTERVAL": "10s",
+				"PORT": "{{module.ports.Web.container_port}}"
+			}`,
+			DefaultVolumes:  `[]`,
+			HealthCheckPath: "/health",
+			HealthCheckPort: 8181,
+			Documentation:   "Displays a real-time status dashboard for the attached Minecraft server. Fetches status via the DiscoPanel API including player count, TPS, CPU/memory usage, and server configuration. Automatically refreshes every 10 seconds.",
+			DefaultMemory:   512,
 		},
 	}
 

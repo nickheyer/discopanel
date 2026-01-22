@@ -130,7 +130,6 @@ func dbModuleTemplateToProto(t *storage.ModuleTemplate) *v1.ModuleTemplate {
 		Description:           t.Description,
 		Type:                  dbModuleTemplateTypeToProto(t.Type),
 		DockerImage:           t.DockerImage,
-		ConfigSchema:          t.ConfigSchema,
 		DefaultEnv:            t.DefaultEnv,
 		DefaultVolumes:        t.DefaultVolumes,
 		HealthCheckPath:       t.HealthCheckPath,
@@ -148,6 +147,7 @@ func dbModuleTemplateToProto(t *storage.ModuleTemplate) *v1.ModuleTemplate {
 		Metadata:              t.Metadata,
 		DefaultCmd:            t.DefaultCmd,
 		DefaultAccessUrls:     t.DefaultAccessUrls,
+		DefaultMemory:         int32(t.DefaultMemory),
 	}
 }
 
@@ -262,7 +262,6 @@ func (s *ModuleService) CreateModuleTemplate(ctx context.Context, req *connect.R
 		Description:           msg.Description,
 		Type:                  storage.ModuleTemplateTypeCustom, // User-created templates are always custom
 		DockerImage:           msg.DockerImage,
-		ConfigSchema:          msg.ConfigSchema,
 		DefaultEnv:            msg.DefaultEnv,
 		DefaultVolumes:        msg.DefaultVolumes,
 		HealthCheckPath:       msg.HealthCheckPath,
@@ -314,9 +313,6 @@ func (s *ModuleService) UpdateModuleTemplate(ctx context.Context, req *connect.R
 	}
 	if msg.DockerImage != nil {
 		template.DockerImage = *msg.DockerImage
-	}
-	if msg.ConfigSchema != nil {
-		template.ConfigSchema = *msg.ConfigSchema
 	}
 	if msg.DefaultEnv != nil {
 		template.DefaultEnv = *msg.DefaultEnv
@@ -590,7 +586,11 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 	}
 
 	if module.Memory == 0 {
-		module.Memory = 512 // Default 512MB
+		if template.DefaultMemory > 0 {
+			module.Memory = template.DefaultMemory
+		} else {
+			module.Memory = 512 // Default 512MB
+		}
 	}
 
 	if err := s.store.CreateModule(ctx, module); err != nil {

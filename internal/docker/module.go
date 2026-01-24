@@ -139,6 +139,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 			Type:   "json-file",
 			Config: map[string]string{"max-size": "10m", "max-file": "3"},
 		},
+		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 
 	// Apply CPU limit if specified

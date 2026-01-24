@@ -289,3 +289,88 @@ func FindMostRecentMinecraftVersion(versions []string) string {
 	}
 	return ""
 }
+
+const (
+	protocolVersionsURL = "https://raw.githubusercontent.com/PrismarineJS/minecraft-data/master/data/pc/common/protocolVersions.json"
+)
+
+type ProtocolVersionEntry struct {
+	MinecraftVersion string `json:"minecraftVersion"`
+	Version          int    `json:"version"`
+	DataVersion      int    `json:"dataVersion"`
+	UsesNetty        bool   `json:"usesNetty"`
+	MajorVersion     string `json:"majorVersion"`
+	ReleaseType      string `json:"releaseType"`
+}
+
+// Protocol cache
+type protocolCache struct {
+	mu            sync.RWMutex
+	versions      map[string]int // mcVersion -> protocolVersion
+	lastFetchTime time.Time
+}
+
+var protoCache = &protocolCache{
+	versions: make(map[string]int),
+}
+
+// Fetches PrismarineJS minecraft-data
+func fetchProtocolVersions() (map[string]int, error) {
+	// Check cache first
+	protoCache.mu.RLock()
+	if len(protoCache.versions) > 0 && time.Since(protoCache.lastFetchTime) < cacheDuration {
+		versions := protoCache.versions
+		protoCache.mu.RUnlock()
+		return versions, nil
+	}
+	protoCache.mu.RUnlock()
+
+	// Fetch new data
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(protocolVersionsURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch protocol versions: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch protocol versions: status code %d", resp.StatusCode)
+	}
+
+	var entries []ProtocolVersionEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, fmt.Errorf("failed to decode protocol versions: %w", err)
+	}
+
+	// Build version map
+	versions := make(map[string]int)
+	for _, entry := range entries {
+		versions[entry.MinecraftVersion] = entry.Version
+	}
+
+	// Update cache
+	protoCache.mu.Lock()
+	protoCache.versions = versions
+	protoCache.lastFetchTime = time.Now()
+	protoCache.mu.Unlock()
+
+	return versions, nil
+}
+
+// Get protocol version for a Minecraft version string
+func GetProtocolVersion(mcVersion string) int {
+	versions, err := fetchProtocolVersions()
+	if err != nil {
+		return -1
+	}
+
+	if proto, ok := versions[mcVersion]; ok {
+		return proto
+	}
+
+	// Return -1 for unknown versions - servers accept this for status pings
+	return -1
+}

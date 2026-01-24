@@ -52,8 +52,6 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Extract hostname from Host header
 	hostname := strings.ToLower(strings.Split(r.Host, ":")[0])
 
-	p.logger.Debug("HTTP request: %s %s Host: %s", r.Method, r.URL.Path, hostname)
-
 	// Find the route
 	p.routesMutex.RLock()
 	route, exists := p.routes[hostname]

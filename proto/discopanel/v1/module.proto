@@ -204,6 +204,8 @@ message ModuleTemplate {
   string default_cmd = 22;
   // Default access URL templates
   repeated string default_access_urls = 23;
+  // Default memory allocation in MB
+  int32 default_memory = 24;
 }
 
 // Module represents a running module instance attached to a server.

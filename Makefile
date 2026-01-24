@@ -50,7 +50,7 @@ image:
 	@bash scripts/build.sh
 
 # Build and push all module Docker images
-modules:
+modules: gen
 	@echo "Building and pushing module images..."
 	@for dockerfile in docker/Dockerfile.*; do \
 		name=$$(basename $$dockerfile | sed 's/Dockerfile\.//'); \
@@ -62,6 +62,20 @@ modules:
 		fi \
 	done
 	@echo "Module builds complete!"
+
+# Build and push a specific module (e.g., make module-status, make module-geyser)
+module-%: gen
+	@if [ ! -f "docker/Dockerfile.$*" ]; then \
+		echo "Error: docker/Dockerfile.$* not found"; \
+		echo "Available modules:"; \
+		ls docker/Dockerfile.* 2>/dev/null | sed 's/docker\/Dockerfile\./  /g' | grep -v discopanel; \
+		exit 1; \
+	fi
+	@echo "Building nickheyer/discopanel-$*:latest..."
+	@docker build -t "nickheyer/discopanel-$*:latest" -f "docker/Dockerfile.$*" .
+	@echo "Pushing nickheyer/discopanel-$*:latest..."
+	@docker push "nickheyer/discopanel-$*:latest"
+	@echo "Module $* build complete!"
 
 # Clean development data
 clean:

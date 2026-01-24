@@ -11,15 +11,41 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
+
+type ServerMetrics struct {
+	ServerID      string
+	CPUPercent    float64
+	MemoryUsage   float64 // MB
+	DiskUsage     int64   // bytes
+	DiskTotal     int64   // bytes
+	PlayersOnline int
+	TPS           float64
+	LastUpdated   time.Time
+
+	// SLP fields
+	SLPAvailable    bool
+	SLPLatencyMs    int64
+	MOTD            string
+	ServerVersion   string
+	ProtocolVersion int
+	PlayerSample    []string
+	MaxPlayers      int
+	Favicon         string // Base64 PNG (data:image/png;base64,...)
+	SLPLastUpdated  time.Time
+}
 
 // Configuration for metrics collector
 type CollectorConfig struct {
 	StatsInterval time.Duration // default 5s
 	RCONInterval  time.Duration // default 10s
 	DiskInterval  time.Duration // default 60s
+	SLPInterval   time.Duration // default 15s
+	SLPTimeout    time.Duration // default 5s
+	SLPEnabled    bool          // default true
 }
 
 // Get default collector configuration
@@ -28,6 +54,9 @@ func DefaultConfig() CollectorConfig {
 		StatsInterval: 5 * time.Second,
 		RCONInterval:  10 * time.Second,
 		DiskInterval:  60 * time.Second,
+		SLPInterval:   15 * time.Second,
+		SLPTimeout:    5 * time.Second,
+		SLPEnabled:    true,
 	}
 }
 
@@ -79,10 +108,17 @@ func (c *Collector) Start() error {
 	c.log.Info("Starting metrics collector")
 
 	// Start collection goroutines
-	c.wg.Add(3)
+	loopCount := 3
+	if c.collectorConfig.SLPEnabled {
+		loopCount += 1
+	}
+	c.wg.Add(loopCount)
 	go c.collectDockerStatsLoop()
 	go c.collectRCONDataLoop()
 	go c.collectDiskUsageLoop()
+	if c.collectorConfig.SLPEnabled {
+		go c.collectSLPDataLoop()
+	}
 
 	return nil
 }
@@ -238,14 +274,21 @@ func (c *Collector) collectRCONData() {
 			continue
 		}
 
-		// Get player count
-		output, err := c.docker.ExecCommand(ctx, server.ContainerID, "list")
-		if err == nil && output != "" {
-			count, _ := minecraft.ParsePlayerListFromOutput(output)
-			c.updateMetrics(server.ID, func(m *ServerMetrics) {
-				m.PlayersOnline = count
-				m.LastUpdated = time.Now()
-			})
+		existingMetrics := c.GetMetrics(server.ID)
+		slpHasPlayerData := existingMetrics != nil &&
+			existingMetrics.SLPAvailable &&
+			time.Since(existingMetrics.SLPLastUpdated) < c.collectorConfig.SLPInterval*2
+
+		// Get player count from RCON
+		if !slpHasPlayerData {
+			output, err := c.docker.ExecCommand(ctx, server.ContainerID, "list")
+			if err == nil && output != "" {
+				count, _ := minecraft.ParsePlayerListFromOutput(output)
+				c.updateMetrics(server.ID, func(m *ServerMetrics) {
+					m.PlayersOnline = count
+					m.LastUpdated = time.Now()
+				})
+			}
 		}
 
 		// Get TPS if configured
@@ -331,4 +374,91 @@ func (c *Collector) RemoveMetrics(serverID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.metrics, serverID)
+}
+
+// Collects SLP data
+func (c *Collector) collectSLPDataLoop() {
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(c.collectorConfig.SLPInterval)
+	defer ticker.Stop()
+
+	// Collect on start
+	c.collectSLPData()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.collectSLPData()
+		case <-c.stopChan:
+			return
+		}
+	}
+}
+
+func (c *Collector) collectSLPData() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	servers, err := c.store.ListServers(ctx)
+	if err != nil {
+		c.log.Debug("Metrics collector SLP: failed to list servers: %v", err)
+		return
+	}
+
+	slpClient := minecraft.NewSLPClient(c.collectorConfig.SLPTimeout)
+
+	for _, server := range servers {
+		if server.ContainerID == "" {
+			continue
+		}
+
+		// Check if server is running
+		status, err := c.docker.GetContainerStatus(ctx, server.ContainerID)
+		if err != nil || status != storage.StatusRunning {
+			// Mark SLP as unavailable for no op
+			c.updateMetrics(server.ID, func(m *ServerMetrics) {
+				m.SLPAvailable = false
+			})
+			continue
+		}
+
+		// Get container IP
+		containerIP, err := proxy.GetContainerIP(server.ContainerID, c.config.Docker.NetworkName)
+		if err != nil {
+			c.log.Debug("Metrics collector SLP: failed to get container IP for %s: %v", server.ID, err)
+			c.updateMetrics(server.ID, func(m *ServerMetrics) {
+				m.SLPAvailable = false
+			})
+			continue
+		}
+
+		// SLP ping w/ server version for protocol
+		slpCtx, slpCancel := context.WithTimeout(ctx, c.collectorConfig.SLPTimeout)
+		result, err := slpClient.Ping(slpCtx, containerIP, 25565, server.MCVersion)
+		slpCancel()
+
+		if err != nil {
+			c.log.Debug("Metrics collector SLP: failed to ping %s (%s:25565): %v", server.ID, containerIP, err)
+			c.updateMetrics(server.ID, func(m *ServerMetrics) {
+				m.SLPAvailable = false
+			})
+			continue
+		}
+
+		// Update
+		c.updateMetrics(server.ID, func(m *ServerMetrics) {
+			m.SLPAvailable = true
+			m.SLPLatencyMs = result.LatencyMs
+			m.MOTD = result.MOTD
+			m.ServerVersion = result.Version.Name
+			m.ProtocolVersion = result.Version.Protocol
+			m.PlayerSample = result.PlayerNames
+			m.MaxPlayers = result.Players.Max
+			m.PlayersOnline = result.Players.Online
+			m.Favicon = result.Favicon
+			m.SLPLastUpdated = time.Now()
+			m.LastUpdated = time.Now()
+		})
+	}
 }

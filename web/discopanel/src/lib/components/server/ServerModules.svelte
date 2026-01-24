@@ -8,8 +8,7 @@
 	import type { Module, ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
 	import { ModuleStatus, ModuleEventType } from '$lib/proto/discopanel/v1/module_pb';
 	import { Loader2, Plus, Play, Square, RotateCw, Settings, Trash2, Terminal, Cpu, ExternalLink, Package, RefreshCw, Puzzle, Link, Zap, Info } from '@lucide/svelte';
-	import ModuleCreateDialog from './ModuleCreateDialog.svelte';
-	import ModuleEditDialog from './ModuleEditDialog.svelte';
+	import ModuleDialog from './ModuleDialog.svelte';
 	import ModuleLogsDialog from './ModuleLogsDialog.svelte';
 	import ModuleTemplateCreateDialog from './ModuleTemplateCreateDialog.svelte';
 
@@ -501,18 +500,20 @@
 	</CardContent>
 </Card>
 
-<ModuleCreateDialog
+<ModuleDialog
 	bind:open={createDialogOpen}
+	mode="create"
 	{server}
 	{templates}
-	onCreated={handleModuleCreated}
+	onSuccess={handleModuleCreated}
 />
 
 {#if selectedModule}
-	<ModuleEditDialog
+	<ModuleDialog
 		bind:open={editDialogOpen}
+		mode="edit"
 		module={selectedModule}
-		onUpdated={handleModuleUpdated}
+		onSuccess={handleModuleUpdated}
 	/>
 
 	<ModuleLogsDialog

@@ -93,6 +93,16 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		AdditionalPorts: server.AdditionalPorts,
 		CreatedAt:       timestamppb.New(server.CreatedAt),
 		UpdatedAt:       timestamppb.New(server.UpdatedAt),
+
+		// SLP fields
+		SlpAvailable:    server.SLPAvailable,
+		SlpLatencyMs:    server.SLPLatencyMs,
+		Motd:            server.MOTD,
+		ServerVersion:   server.ServerVersion,
+		ProtocolVersion: int32(server.ProtocolVersion),
+		PlayerSample:    server.PlayerSample,
+		MaxPlayersSlp:   int32(server.MaxPlayersSLP),
+		Favicon:         server.Favicon,
 	}
 
 	// Apply overrides
@@ -254,6 +264,15 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 					server.DiskTotal = m.DiskTotal
 					server.PlayersOnline = m.PlayersOnline
 					server.TPS = m.TPS
+
+					// SLP fields
+					server.SLPAvailable = m.SLPAvailable
+					server.SLPLatencyMs = m.SLPLatencyMs
+					server.MOTD = m.MOTD
+					server.ServerVersion = m.ServerVersion
+					server.ProtocolVersion = m.ProtocolVersion
+					server.PlayerSample = m.PlayerSample
+					server.MaxPlayersSLP = m.MaxPlayers
 				}
 			}
 		}
@@ -302,6 +321,16 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 			server.DiskTotal = m.DiskTotal
 			server.PlayersOnline = m.PlayersOnline
 			server.TPS = m.TPS
+
+			// SLP fields
+			server.SLPAvailable = m.SLPAvailable
+			server.SLPLatencyMs = m.SLPLatencyMs
+			server.MOTD = m.MOTD
+			server.ServerVersion = m.ServerVersion
+			server.ProtocolVersion = m.ProtocolVersion
+			server.PlayerSample = m.PlayerSample
+			server.MaxPlayersSLP = m.MaxPlayers
+			server.Favicon = m.Favicon
 		}
 	}
 

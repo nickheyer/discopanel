@@ -99,6 +99,16 @@ type Server struct {
 	DiskTotal     int64   `json:"disk_total" gorm:"-"`     // Total disk space available in bytes
 	PlayersOnline int     `json:"players_online" gorm:"-"` // Current players online
 	TPS           float64 `json:"tps" gorm:"-"`            // Current TPS (20 is optimal)
+
+	// SLP runtime stats (not persisted to DB)
+	SLPAvailable    bool     `json:"slp_available" gorm:"-"`
+	SLPLatencyMs    int64    `json:"slp_latency_ms" gorm:"-"`
+	MOTD            string   `json:"motd" gorm:"-"`
+	ServerVersion   string   `json:"server_version" gorm:"-"`
+	ProtocolVersion int      `json:"protocol_version" gorm:"-"`
+	PlayerSample    []string `json:"player_sample" gorm:"-"`
+	MaxPlayersSLP   int      `json:"max_players_slp" gorm:"-"` // Actual from SLP (MaxPlayers field is config)
+	Favicon         string   `json:"favicon" gorm:"-"`         // Base64 PNG from SLP
 }
 
 type ServerConfig struct {
@@ -136,7 +146,7 @@ type ServerConfig struct {
 	Difficulty                     *string `json:"difficulty" env:"DIFFICULTY" default:"easy" desc:"Difficulty level (peaceful,easy,normal,hard)" input:"select" label:"Difficulty"`
 	Icon                           *string `json:"icon" env:"ICON" default:"" desc:"URL or file path for server icon" input:"text" label:"Server Icon"`
 	OverrideIcon                   *bool   `json:"overrideIcon" env:"OVERRIDE_ICON" default:"false" desc:"Override existing server icon" input:"checkbox" label:"Override Icon"`
-	MaxPlayers                     *int    `json:"maxPlayers" env:"MAX_PLAYERS" default:"20" desc:"Maximum number of players" input:"number" label:"Max Players"`
+	MaxPlayers                     *int    `json:"maxPlayers" env:"MAX_PLAYERS" default:"20" desc:"Maximum number of players" input:"number" label:"Max Players" system:"true"`
 	MaxWorldSize                   *int    `json:"maxWorldSize" env:"MAX_WORLD_SIZE" default:"0" desc:"Maximum world size in blocks (radius)" input:"number" label:"Max World Size"`
 	AllowNether                    *bool   `json:"allowNether" env:"ALLOW_NETHER" default:"true" desc:"Allow players to travel to the Nether" input:"checkbox" label:"Allow Nether"`
 	AnnouncePlayerAchievements     *bool   `json:"announcePlayerAchievements" env:"ANNOUNCE_PLAYER_ACHIEVEMENTS" default:"true" desc:"Announce player achievements" input:"checkbox" label:"Announce Player Achievements"`
@@ -144,7 +154,7 @@ type ServerConfig struct {
 	ForceGamemode                  *bool   `json:"forceGamemode" env:"FORCE_GAMEMODE" default:"false" desc:"Force players to join in default game mode" input:"checkbox" label:"Force Gamemode"`
 	GenerateStructures             *bool   `json:"generateStructures" env:"GENERATE_STRUCTURES" default:"true" desc:"Generate structures like villages" input:"checkbox" label:"Generate Structures"`
 	Hardcore                       *bool   `json:"hardcore" env:"HARDCORE" default:"false" desc:"Players set to spectator mode on death" input:"checkbox" label:"Hardcore Mode"`
-	SnooperEnabled                 *bool   `json:"snooperEnabled" env:"SNOOPER_ENABLED" default:"true" desc:"Send data to snoop.minecraft.net" input:"checkbox" label:"Enable Snooper"`
+	SnooperEnabled                 *bool   `json:"snooperEnabled" env:"SNOOPER_ENABLED" default:"false" desc:"Send data to snoop.minecraft.net" input:"checkbox" label:"Enable Snooper"`
 	MaxBuildHeight                 *int    `json:"maxBuildHeight" env:"MAX_BUILD_HEIGHT" default:"256" desc:"Maximum building height" input:"number" label:"Max Build Height"`
 	SpawnAnimals                   *bool   `json:"spawnAnimals" env:"SPAWN_ANIMALS" default:"true" desc:"Allow animals to spawn" input:"checkbox" label:"Spawn Animals"`
 	SpawnMonsters                  *bool   `json:"spawnMonsters" env:"SPAWN_MONSTERS" default:"true" desc:"Allow monsters to spawn" input:"checkbox" label:"Spawn Monsters"`
@@ -162,18 +172,18 @@ type ServerConfig struct {
 	ServerName                     *string `json:"serverName" env:"SERVER_NAME" default:"" desc:"The server name" input:"text" label:"Server Name"`
 	ServerPort                     *int    `json:"serverPort" env:"SERVER_PORT" default:"25565" desc:"Server port (only change if using host networking)" input:"number" label:"Server Port" system:"true"`
 	PlayerIdleTimeout              *int    `json:"playerIdleTimeout" env:"PLAYER_IDLE_TIMEOUT" default:"0" desc:"Player idle timeout" input:"number" label:"Player Idle Timeout"`
-	SyncChunkWrites                *bool   `json:"syncChunkWrites" env:"SYNC_CHUNK_WRITES" default:"false" desc:"Sync chunk writes" input:"checkbox" label:"Sync Chunk Writes"`
-	EnableStatus                   *bool   `json:"enableStatus" env:"ENABLE_STATUS" default:"false" desc:"Enable server status" input:"checkbox" label:"Enable Status"`
+	SyncChunkWrites                *bool   `json:"syncChunkWrites" env:"SYNC_CHUNK_WRITES" default:"true" desc:"Sync chunk writes" input:"checkbox" label:"Sync Chunk Writes"`
+	EnableStatus                   *bool   `json:"enableStatus" env:"ENABLE_STATUS" default:"true" desc:"Enable server status" input:"checkbox" label:"Enable Status"`
 	EntityBroadcastRangePercentage *int    `json:"entityBroadcastRangePercentage" env:"ENTITY_BROADCAST_RANGE_PERCENTAGE" default:"0" desc:"Entity broadcast range percentage" input:"number" label:"Entity Broadcast Range Percentage"`
 	FunctionPermissionLevel        *int    `json:"functionPermissionLevel" env:"FUNCTION_PERMISSION_LEVEL" default:"0" desc:"Function permission level" input:"number" label:"Function Permission Level"`
 	NetworkCompressionThreshold    *int    `json:"networkCompressionThreshold" env:"NETWORK_COMPRESSION_THRESHOLD" default:"0" desc:"Network compression threshold" input:"number" label:"Network Compression Threshold"`
 	OpPermissionLevel              *int    `json:"opPermissionLevel" env:"OP_PERMISSION_LEVEL" default:"0" desc:"OP permission level" input:"number" label:"OP Permission Level"`
 	PreventProxyConnections        *bool   `json:"preventProxyConnections" env:"PREVENT_PROXY_CONNECTIONS" default:"false" desc:"Prevent proxy connections" input:"checkbox" label:"Prevent Proxy Connections"`
-	UseNativeTransport             *bool   `json:"useNativeTransport" env:"USE_NATIVE_TRANSPORT" default:"false" desc:"Use native transport" input:"checkbox" label:"Use Native Transport"`
+	UseNativeTransport             *bool   `json:"useNativeTransport" env:"USE_NATIVE_TRANSPORT" default:"true" desc:"Use native transport" input:"checkbox" label:"Use Native Transport"`
 	SimulationDistance             *int    `json:"simulationDistance" env:"SIMULATION_DISTANCE" default:"0" desc:"Simulation distance" input:"number" label:"Simulation Distance"`
-	EnableQuery                    *bool   `json:"enableQuery" env:"ENABLE_QUERY" default:"false" desc:"Enable GameSpy query protocol" input:"checkbox" label:"Enable Query"`
+	EnableQuery                    *bool   `json:"enableQuery" env:"ENABLE_QUERY" default:"true" desc:"Enable GameSpy query protocol" input:"checkbox" label:"Enable Query"`
 	QueryPort                      *int    `json:"queryPort" env:"QUERY_PORT" default:"25565" desc:"UDP port for GameSpy query" input:"number" label:"Query Port"`
-	ServerPropertiesEscapeUnicode  *bool   `json:"serverPropertiesEscapeUnicode" env:"SERVER_PROPERTIES_ESCAPE_UNICODE" default:"false" desc:"Escape unicode in server.properties (<1.20 compatibility)" input:"checkbox" label:"Escape Unicode in Server Properties"`
+	ServerPropertiesEscapeUnicode  *bool   `json:"serverPropertiesEscapeUnicode" env:"SERVER_PROPERTIES_ESCAPE_UNICODE" default:"false" desc:"Escape unicode in server.properties (-1.20 compatibility)" input:"checkbox" label:"Escape Unicode in Server Properties"`
 	AcceptsTransfers               *bool   `json:"acceptsTransfers" env:"ACCEPTS_TRANSFERS" default:"false" desc:"Allow player transfers between servers" input:"checkbox" label:"Accepts Transfers"`
 	BroadcastConsoleToOps          *bool   `json:"broadcastConsoleToOps" env:"BROADCAST_CONSOLE_TO_OPS" default:"true" desc:"Broadcast console messages to ops" input:"checkbox" label:"Broadcast Console to OPs"`
 	BugReportLink                  *string `json:"bugReportLink" env:"BUG_REPORT_LINK" default:"" desc:"Custom bug report URL" input:"text" label:"Bug Report Link"`
@@ -546,8 +556,7 @@ type ModuleTemplate struct {
 	Description     string             `json:"description"`
 	Type            ModuleTemplateType `json:"type" gorm:"not null;default:custom"`
 	DockerImage     string             `json:"docker_image" gorm:"not null;column:docker_image"`
-	ConfigSchema    string             `json:"config_schema" gorm:"type:text;column:config_schema"` // JSON Schema for UI generation
-	DefaultEnv      string             `json:"default_env" gorm:"type:text;column:default_env"`     // JSON map of default env vars
+	DefaultEnv      string             `json:"default_env" gorm:"type:text;column:default_env"` // JSON map of default env vars
 	DefaultVolumes  string             `json:"default_volumes" gorm:"type:text;column:default_volumes"`
 	HealthCheckPath string             `json:"health_check_path" gorm:"column:health_check_path"`
 	HealthCheckPort int                `json:"health_check_port" gorm:"column:health_check_port"`
@@ -576,6 +585,9 @@ type ModuleTemplate struct {
 
 	// Default access URL templates
 	DefaultAccessUrls []string `json:"default_access_urls" gorm:"column:default_access_urls;serializer:json"`
+
+	// Default resource limits
+	DefaultMemory int `json:"default_memory" gorm:"column:default_memory;default:512"` // Default memory in MB
 }
 
 // Module represents a running instance of a module template attached to a server

@@ -151,6 +151,91 @@ func (s *ModpackService) GetModpack(ctx context.Context, req *connect.Request[v1
 	}), nil
 }
 
+// GetModpackBySlug gets a modpack by its slug
+func (s *ModpackService) GetModpackBySlug(ctx context.Context, req *connect.Request[v1.GetModpackBySlugRequest]) (*connect.Response[v1.GetModpackBySlugResponse], error) {
+	modpack, err := s.store.GetModpackBySlug(ctx, req.Msg.Slug)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to lookup modpack"))
+	}
+
+	// Not found is okay - return empty response
+	if modpack == nil {
+		return connect.NewResponse(&v1.GetModpackBySlugResponse{}), nil
+	}
+
+	javaVersionInt, _ := strconv.Atoi(modpack.JavaVersion)
+
+	protoModpack := &v1.IndexedModpack{
+		Id:             modpack.ID,
+		IndexerId:      modpack.IndexerID,
+		Indexer:        modpack.Indexer,
+		Name:           modpack.Name,
+		Slug:           modpack.Slug,
+		Summary:        modpack.Summary,
+		Description:    modpack.Description,
+		LogoUrl:        modpack.LogoURL,
+		WebsiteUrl:     modpack.WebsiteURL,
+		DownloadCount:  int32(modpack.DownloadCount),
+		Categories:     modpack.Categories,
+		GameVersions:   modpack.GameVersions,
+		ModLoaders:     modpack.ModLoaders,
+		LatestFileId:   modpack.LatestFileID,
+		DateCreated:    timestamppb.New(modpack.DateCreated),
+		DateModified:   timestamppb.New(modpack.DateModified),
+		DateReleased:   timestamppb.New(modpack.DateReleased),
+		McVersion:      modpack.MCVersion,
+		JavaVersion:    int32(javaVersionInt),
+		DockerImage:    modpack.DockerImage,
+		RecommendedRam: int32(modpack.RecommendedRAM),
+	}
+
+	return connect.NewResponse(&v1.GetModpackBySlugResponse{
+		Modpack: protoModpack,
+	}), nil
+}
+
+// GetModpackByURL gets a modpack by its website URL
+func (s *ModpackService) GetModpackByURL(ctx context.Context, req *connect.Request[v1.GetModpackByURLRequest]) (*connect.Response[v1.GetModpackByURLResponse], error) {
+	modpack, err := s.store.GetModpackByWebsiteURL(ctx, req.Msg.Url)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to lookup modpack"))
+	}
+
+	if modpack == nil {
+		return connect.NewResponse(&v1.GetModpackByURLResponse{}), nil
+	}
+
+	javaVersionInt, _ := strconv.Atoi(modpack.JavaVersion)
+
+	protoModpack := &v1.IndexedModpack{
+		Id:             modpack.ID,
+		IndexerId:      modpack.IndexerID,
+		Indexer:        modpack.Indexer,
+		Name:           modpack.Name,
+		Slug:           modpack.Slug,
+		Summary:        modpack.Summary,
+		Description:    modpack.Description,
+		LogoUrl:        modpack.LogoURL,
+		WebsiteUrl:     modpack.WebsiteURL,
+		DownloadCount:  int32(modpack.DownloadCount),
+		Categories:     modpack.Categories,
+		GameVersions:   modpack.GameVersions,
+		ModLoaders:     modpack.ModLoaders,
+		LatestFileId:   modpack.LatestFileID,
+		DateCreated:    timestamppb.New(modpack.DateCreated),
+		DateModified:   timestamppb.New(modpack.DateModified),
+		DateReleased:   timestamppb.New(modpack.DateReleased),
+		McVersion:      modpack.MCVersion,
+		JavaVersion:    int32(javaVersionInt),
+		DockerImage:    modpack.DockerImage,
+		RecommendedRam: int32(modpack.RecommendedRAM),
+	}
+
+	return connect.NewResponse(&v1.GetModpackByURLResponse{
+		Modpack: protoModpack,
+	}), nil
+}
+
 // GetModpackConfig gets modpack configuration
 func (s *ModpackService) GetModpackConfig(ctx context.Context, req *connect.Request[v1.GetModpackConfigRequest]) (*connect.Response[v1.GetModpackConfigResponse], error) {
 	modpack, err := s.store.GetIndexedModpack(ctx, req.Msg.Id)

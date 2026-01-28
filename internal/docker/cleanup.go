@@ -2,7 +2,6 @@ package docker
 
 import (
 	"context"
-	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -11,9 +10,9 @@ import (
 
 // CleanupOrphanedContainers removes containers that are no longer tracked in the database
 func (c *Client) CleanupOrphanedContainers(ctx context.Context, trackedContainerIDs map[string]bool, log *logger.Logger) error {
-	// List all containers with the discopanel prefix
+	// List all containers managed by discopanel
 	filterArgs := filters.NewArgs()
-	filterArgs.Add("name", "discopanel-")
+	filterArgs.Add("label", "discopanel.managed=true")
 
 	containers, err := c.docker.ContainerList(ctx, container.ListOptions{
 		All:     true,
@@ -50,55 +49,4 @@ func (c *Client) CleanupOrphanedContainers(ctx context.Context, trackedContainer
 	}
 
 	return nil
-}
-
-// GetDiscopanelContainers returns all containers managed by DiscoPanel
-func (c *Client) GetDiscopanelContainers(ctx context.Context) ([]string, error) {
-	filterArgs := filters.NewArgs()
-	filterArgs.Add("name", "discopanel-server-")
-
-	containers, err := c.docker.ContainerList(ctx, container.ListOptions{
-		All:     true,
-		Filters: filterArgs,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	containerIDs := make([]string, 0, len(containers))
-	for _, cont := range containers {
-		containerIDs = append(containerIDs, cont.ID)
-	}
-
-	return containerIDs, nil
-}
-
-// GetContainerInfo returns basic information about a container
-func (c *Client) GetContainerInfo(ctx context.Context, containerID string) (*ContainerInfo, error) {
-	inspect, err := c.docker.ContainerInspect(ctx, containerID)
-	if err != nil {
-		return nil, err
-	}
-
-	info := &ContainerInfo{
-		ID:      containerID,
-		Name:    strings.TrimPrefix(inspect.Name, "/"),
-		State:   inspect.State.Status,
-		Created: inspect.Created,
-	}
-
-	// Extract server ID from container name (format: discopanel-server-{uuid})
-	if after, ok := strings.CutPrefix(info.Name, "discopanel-server-"); ok {
-		info.ServerID = after
-	}
-
-	return info, nil
-}
-
-type ContainerInfo struct {
-	ID       string
-	Name     string
-	ServerID string
-	State    string
-	Created  string
 }

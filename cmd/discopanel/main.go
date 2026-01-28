@@ -108,19 +108,28 @@ func main() {
 	servers, err := store.ListServers(ctx)
 	if err != nil {
 		log.Error("Failed to list servers for cleanup: %v", err)
-	} else {
-		// Build map of tracked container IDs
-		trackedIDs := make(map[string]bool)
-		for _, server := range servers {
-			if server.ContainerID != "" {
-				trackedIDs[server.ContainerID] = true
-			}
-		}
+	}
+	modules, err := store.ListModules(ctx)
+	if err != nil {
+		log.Error("Failed to list modules for cleanup: %v", err)
+	}
 
-		// Clean up orphaned containers
-		if err := dockerClient.CleanupOrphanedContainers(ctx, trackedIDs, log); err != nil {
-			log.Error("Failed to cleanup orphaned containers: %v", err)
+	// Build map of tracked container IDs
+	trackedIDs := make(map[string]bool)
+	for _, server := range servers {
+		if server.ContainerID != "" {
+			trackedIDs[server.ContainerID] = true
 		}
+	}
+	for _, module := range modules {
+		if module.ContainerID != "" {
+			trackedIDs[module.ContainerID] = true
+		}
+	}
+
+	// Clean up orphaned containers
+	if err := dockerClient.CleanupOrphanedContainers(ctx, trackedIDs, log); err != nil {
+		log.Error("Failed to cleanup orphaned containers: %v", err)
 	}
 
 	// Load proxy configuration from database

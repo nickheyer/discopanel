@@ -9,7 +9,7 @@
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
-  import type { Server, AdditionalPort } from '$lib/proto/discopanel/v1/common_pb';
+  import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import * as _ from 'lodash-es';
 	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
@@ -18,6 +18,7 @@
 	import { GetMinecraftVersionsRequestSchema, GetModLoadersRequestSchema, GetDockerImagesRequestSchema } from '$lib/proto/discopanel/v1/minecraft_pb';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
+	import { getUniqueDockerImages } from '$lib/utils';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { enumToString } from '$lib/utils';
 
@@ -324,7 +325,7 @@
 					<span>{formData.dockerImage || 'Select Docker image'}</span>
 				</SelectTrigger>
 				<SelectContent>
-					{#each dockerImages?.images || [] as image (image.tag)}
+					{#each getUniqueDockerImages(dockerImages?.images || []) as image (image.tag)}
 						<SelectItem value={image.tag}>
 							{image.displayName || image.tag}
 						</SelectItem>

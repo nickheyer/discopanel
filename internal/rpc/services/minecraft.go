@@ -99,10 +99,11 @@ func (s *MinecraftService) GetDockerImages(ctx context.Context, req *connect.Req
 		// Create display name
 		displayName := img.Tag
 		if img.Java != "" {
-			displayName = "Java " + img.Java
+			displayName = "Java " + img.Java + ": " + img.JVM
 			if img.Distribution != "" {
 				displayName += " (" + img.Distribution + ")"
 			}
+
 		}
 
 		// Create description

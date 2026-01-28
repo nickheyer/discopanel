@@ -747,10 +747,12 @@ func (c *Client) GetDockerImages() []DockerImageTag {
 		return []DockerImageTag{}
 	}
 
-	// Filter out deprecated images
+	// Filter out deprecated and dedup
+	seen := make(map[string]bool)
 	var activeImages []DockerImageTag
 	for _, img := range images {
-		if !img.Deprecated {
+		if !img.Deprecated && !seen[img.Tag] {
+			seen[img.Tag] = true
 			activeImages = append(activeImages, img)
 		}
 	}

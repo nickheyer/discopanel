@@ -435,11 +435,15 @@ func (c *Collector) collectSLPData() {
 
 		// SLP ping w/ server version for protocol
 		slpCtx, slpCancel := context.WithTimeout(ctx, c.collectorConfig.SLPTimeout)
-		result, err := slpClient.Ping(slpCtx, containerIP, 25565, server.MCVersion)
+		port := server.Port
+		if port == 0 {
+			port = 25565
+		}
+		result, err := slpClient.Ping(slpCtx, containerIP, port, server.MCVersion)
 		slpCancel()
 
 		if err != nil {
-			c.log.Debug("Metrics collector SLP: failed to ping %s (%s:25565): %v", server.ID, containerIP, err)
+			c.log.Debug("Metrics collector SLP: failed to ping %s (%s:%d): %v", server.ID, containerIP, port, err)
 			c.updateMetrics(server.ID, func(m *ServerMetrics) {
 				m.SLPAvailable = false
 			})

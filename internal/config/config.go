@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/nickheyer/discopanel/internal/db"
 	"github.com/spf13/viper"
@@ -100,6 +101,7 @@ func Load(configPath string) (*Config, error) {
 
 	// Enable environment variables
 	v.SetEnvPrefix("DISCOPANEL")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
 	// Read config file

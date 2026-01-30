@@ -1,11 +1,14 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
-	import { Badge } from '$lib/components/ui/badge';
+	import { Input } from '$lib/components/ui/input';
+	import { Textarea } from '$lib/components/ui/textarea';
+	import { Label } from '$lib/components/ui/label';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import {
 		Download,
-		HelpCircle,
 		AlertCircle,
 		CheckCircle2,
 		Loader2,
@@ -14,15 +17,63 @@
 		ScrollText,
 		Send,
 		Copy,
-		ExternalLink
+		ExternalLink,
+		User,
+		Mail,
+		MessageSquare,
+		Github,
+		Server,
+		ChevronDown,
+		ChevronUp
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { serversStore } from '$lib/stores/servers';
+	import type { Server as ServerType } from '$lib/proto/discopanel/v1/common_pb';
 
 	let generating = $state(false);
 	let uploading = $state(false);
 	let bundlePath = $state<string | null>(null);
 	let referenceId = $state<string | null>(null);
+	let discordUsername = $state('');
+	let email = $state('');
+	let githubUsername = $state('');
+	let issueDescription = $state('');
+	let stepsToReproduce = $state('');
+
+	// Server selection
+	let servers = $state<ServerType[]>([]);
+	let selectedServerIds = $state<Set<string>>(new Set());
+	let serverSectionExpanded = $state(false);
+	let loadingServers = $state(true);
+
+	onMount(async () => {
+		try {
+			servers = await serversStore.fetchServers(true);
+		} catch (error) {
+			console.error('Failed to load servers:', error);
+		} finally {
+			loadingServers = false;
+		}
+	});
+
+	function toggleServer(serverId: string) {
+		const newSet = new Set(selectedServerIds);
+		if (newSet.has(serverId)) {
+			newSet.delete(serverId);
+		} else {
+			newSet.add(serverId);
+		}
+		selectedServerIds = newSet;
+	}
+
+	function selectAllServers() {
+		selectedServerIds = new Set(servers.map(s => s.id));
+	}
+
+	function clearServerSelection() {
+		selectedServerIds = new Set();
+	}
 
 	async function generateBundle(upload: boolean = false) {
 		if (upload) {
@@ -34,17 +85,29 @@
 		bundlePath = null;
 		referenceId = null;
 
+		const serverIds = Array.from(selectedServerIds);
+
 		try {
 			if (upload) {
 				const response = await rpcClient.support.uploadSupportBundle({
 					includeLogs: true,
 					includeConfigs: true,
 					includeSystemInfo: true,
-					serverIds: []
+					serverIds,
+					discordUsername: discordUsername.trim(),
+					email: email.trim(),
+					githubUsername: githubUsername.trim(),
+					issueDescription: issueDescription.trim(),
+					stepsToReproduce: stepsToReproduce.trim()
 				});
 
 				if (response.success && response.referenceId) {
 					referenceId = response.referenceId;
+					discordUsername = '';
+					email = '';
+					githubUsername = '';
+					issueDescription = '';
+					stepsToReproduce = '';
 					toast.success('Support bundle uploaded successfully!', {
 						description: 'Save your reference ID for support requests.',
 					});
@@ -54,12 +117,11 @@
 					});
 				}
 			} else {
-				// Gen bundle for download
 				const response = await rpcClient.support.generateSupportBundle({
 					includeLogs: true,
 					includeConfigs: true,
 					includeSystemInfo: true,
-					serverIds: []
+					serverIds
 				});
 
 				if (response.bundleId) {
@@ -122,6 +184,8 @@
 		} catch (error) { // Fallback for jank browsers
 			const textArea = document.createElement('textarea');
 			textArea.value = referenceId;
+			textArea.style.position = 'fixed';
+        	textArea.style.opacity = '0';
 			document.body.appendChild(textArea);
 			textArea.select();
 			document.execCommand('copy');
@@ -132,7 +196,6 @@
 </script>
 
 <Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-	<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
 	<CardHeader class="relative pb-6">
 		<div class="flex items-center justify-between">
 			<div>
@@ -205,6 +268,188 @@
 							Version and environment details for compatibility checks
 						</p>
 					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Server Selection -->
+		<div class="w-full rounded-xl border border-border/50 bg-muted/20 p-6">
+			<button
+				type="button"
+				class="w-full flex items-center justify-between cursor-pointer"
+				onclick={() => serverSectionExpanded = !serverSectionExpanded}
+			>
+				<div class="flex items-start gap-3">
+					<div class="rounded-lg bg-primary/10 p-2.5">
+						<Server class="h-5 w-5 text-primary" />
+					</div>
+					<div class="text-left">
+						<h3 class="font-semibold text-base">Server Selection</h3>
+						<p class="text-sm text-muted-foreground mt-1">
+							{#if selectedServerIds.size === 0}
+								Include all servers (default)
+							{:else}
+								{selectedServerIds.size} server{selectedServerIds.size === 1 ? '' : 's'} selected
+							{/if}
+						</p>
+					</div>
+				</div>
+				<div class="rounded-md bg-muted p-1.5">
+					{#if serverSectionExpanded}
+						<ChevronUp class="h-4 w-4 text-muted-foreground" />
+					{:else}
+						<ChevronDown class="h-4 w-4 text-muted-foreground" />
+					{/if}
+				</div>
+			</button>
+
+			{#if serverSectionExpanded}
+				<div class="mt-4 pt-4 border-t border-border/50">
+					{#if loadingServers}
+						<div class="flex items-center justify-center py-4">
+							<Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
+							<span class="ml-2 text-sm text-muted-foreground">Loading servers...</span>
+						</div>
+					{:else if servers.length === 0}
+						<p class="text-sm text-muted-foreground text-center py-4">
+							No servers found. All available data will be included.
+						</p>
+					{:else}
+						<div class="space-y-3">
+							<div class="flex items-center justify-between">
+								<p class="text-xs text-muted-foreground">
+									Select specific servers to include their logs and configurations
+								</p>
+								<div class="flex gap-2">
+									<Button
+										variant="ghost"
+										size="sm"
+										class="h-7 text-xs"
+										onclick={selectAllServers}
+									>
+										Select All
+									</Button>
+									<Button
+										variant="ghost"
+										size="sm"
+										class="h-7 text-xs"
+										onclick={clearServerSelection}
+										disabled={selectedServerIds.size === 0}
+									>
+										Clear
+									</Button>
+								</div>
+							</div>
+							<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+								{#each servers as server (server.id)}
+									<button
+										type="button"
+										class="flex items-center gap-3 p-3 rounded-lg border border-border/50 bg-card/50 hover:bg-card/80 transition-colors cursor-pointer text-left {selectedServerIds.has(server.id) ? 'border-primary/50 bg-primary/5' : ''}"
+										onclick={() => toggleServer(server.id)}
+									>
+										<Checkbox
+											checked={selectedServerIds.has(server.id)}
+											class="pointer-events-none"
+										/>
+										<div class="min-w-0 flex-1">
+											<p class="text-sm font-medium truncate">{server.name}</p>
+											<p class="text-xs text-muted-foreground truncate">
+												{server.mcVersion || 'Unknown version'}
+											</p>
+										</div>
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
+		<!-- User Contact & Issue Information -->
+		<div class="w-full rounded-xl border border-border/50 bg-muted/20 p-6">
+			<div class="flex items-start gap-3 mb-4">
+				<div class="rounded-lg bg-primary/10 p-2.5">
+					<MessageSquare class="h-5 w-5 text-primary" />
+				</div>
+				<div>
+					<h3 class="font-semibold text-base">Contact & Issue Details</h3>
+					<p class="text-sm text-muted-foreground mt-1">
+						Optional information to help us respond to your support request
+					</p>
+				</div>
+			</div>
+
+			<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+				<!-- Discord Username -->
+				<div class="space-y-2">
+					<Label for="discord" class="text-sm font-medium flex items-center gap-2">
+						<User class="h-3.5 w-3.5" />
+						Discord Username
+					</Label>
+					<Input
+						id="discord"
+						type="text"
+						placeholder="username#1234"
+						bind:value={discordUsername}
+						class="h-9"
+					/>
+				</div>
+
+				<!-- Email -->
+				<div class="space-y-2">
+					<Label for="email" class="text-sm font-medium flex items-center gap-2">
+						<Mail class="h-3.5 w-3.5" />
+						Email
+					</Label>
+					<Input
+						id="email"
+						type="email"
+						placeholder="you@example.com"
+						bind:value={email}
+						class="h-9"
+					/>
+				</div>
+
+				<!-- GitHub Username -->
+				<div class="space-y-2">
+					<Label for="github" class="text-sm font-medium flex items-center gap-2">
+						<Github class="h-3.5 w-3.5" />
+						GitHub Username
+					</Label>
+					<Input
+						id="github"
+						type="text"
+						placeholder="username"
+						bind:value={githubUsername}
+						class="h-9"
+					/>
+				</div>
+			</div>
+
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+				<!-- Issue Description -->
+				<div class="space-y-2">
+					<Label for="description" class="text-sm font-medium">Issue Description</Label>
+					<Textarea
+						id="description"
+						placeholder="Describe the issue you're experiencing..."
+						bind:value={issueDescription}
+						rows={3}
+						class="resize-none"
+					/>
+				</div>
+
+				<!-- Steps to Reproduce -->
+				<div class="space-y-2">
+					<Label for="steps" class="text-sm font-medium">Steps to Reproduce</Label>
+					<Textarea
+						id="steps"
+						placeholder="1. Go to...&#10;2. Click on...&#10;3. See error..."
+						bind:value={stepsToReproduce}
+						rows={3}
+						class="resize-none"
+					/>
 				</div>
 			</div>
 		</div>

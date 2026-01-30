@@ -49,6 +49,15 @@ type BundleInfo struct {
 	CreatedAt time.Time
 }
 
+// UploadUserInfo contains user-provided contact and issue information
+type UploadUserInfo struct {
+	DiscordUsername  string
+	Email            string
+	GithubUsername   string
+	IssueDescription string
+	StepsToReproduce string
+}
+
 // NewSupportService creates a new support service
 func NewSupportService(store *storage.Store, docker *docker.Client, config *config.Config, log *logger.Logger) *SupportService {
 	return &SupportService{
@@ -271,8 +280,17 @@ func (s *SupportService) UploadSupportBundle(ctx context.Context, req *connect.R
 	gzipWriter.Close()
 	bundleFile.Close()
 
+	// Build user info for upload
+	userInfo := &UploadUserInfo{
+		DiscordUsername:  msg.DiscordUsername,
+		Email:            msg.Email,
+		GithubUsername:   msg.GithubUsername,
+		IssueDescription: msg.IssueDescription,
+		StepsToReproduce: msg.StepsToReproduce,
+	}
+
 	// Upload the bundle to support server
-	referenceID, err := s.uploadBundleToServer(bundlePath, bundleFileName)
+	referenceID, err := s.uploadBundleToServer(bundlePath, bundleFileName, userInfo)
 	if err != nil {
 		s.log.Error("Failed to upload support bundle: %v", err)
 		// Clean up the bundle file
@@ -291,7 +309,7 @@ func (s *SupportService) UploadSupportBundle(ctx context.Context, req *connect.R
 }
 
 // uploadBundleToServer uploads a bundle file to the support server
-func (s *SupportService) uploadBundleToServer(bundlePath, fileName string) (string, error) {
+func (s *SupportService) uploadBundleToServer(bundlePath, fileName string, userInfo *UploadUserInfo) (string, error) {
 	supportURL := s.getUploadSupportUrl()
 
 	// Open the bundle file
@@ -325,6 +343,25 @@ func (s *SupportService) uploadBundleToServer(bundlePath, fileName string) (stri
 	// Add metadata fields
 	writer.WriteField("timestamp", time.Now().Format(time.RFC3339))
 	writer.WriteField("size", fmt.Sprintf("%d", fileInfo.Size()))
+
+	// Add user-provided contact and issue information
+	if userInfo != nil {
+		if userInfo.DiscordUsername != "" {
+			writer.WriteField("discord_username", userInfo.DiscordUsername)
+		}
+		if userInfo.Email != "" {
+			writer.WriteField("email", userInfo.Email)
+		}
+		if userInfo.GithubUsername != "" {
+			writer.WriteField("github_username", userInfo.GithubUsername)
+		}
+		if userInfo.IssueDescription != "" {
+			writer.WriteField("issue_description", userInfo.IssueDescription)
+		}
+		if userInfo.StepsToReproduce != "" {
+			writer.WriteField("steps_to_reproduce", userInfo.StepsToReproduce)
+		}
+	}
 
 	// Close multipart writer
 	if err := writer.Close(); err != nil {

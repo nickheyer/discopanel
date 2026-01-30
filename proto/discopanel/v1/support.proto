@@ -65,6 +65,11 @@ message UploadSupportBundleRequest {
   bool include_configs = 2;
   bool include_system_info = 3;
   repeated string server_ids = 4; // Specific servers to include, empty for all
+  string discord_username = 5; // Discord username for follow-up
+  string email = 6; // Email address for follow-up
+  string github_username = 7; // GitHub username for follow-up
+  string issue_description = 8; // Description of the issue encountered
+  string steps_to_reproduce = 9; // Steps to reproduce the issue
 }
 
 // Upload support bundle response

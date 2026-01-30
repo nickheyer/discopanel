@@ -1,11 +1,9 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +16,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/upload"
 )
 
 // Compile-time check that FileService implements the interface
@@ -25,17 +24,19 @@ var _ discopanelv1connect.FileServiceHandler = (*FileService)(nil)
 
 // FileService implements the File service
 type FileService struct {
-	store  *storage.Store
-	docker *docker.Client
-	log    *logger.Logger
+	store         *storage.Store
+	docker        *docker.Client
+	log           *logger.Logger
+	uploadManager *upload.Manager
 }
 
 // NewFileService creates a new file service
-func NewFileService(store *storage.Store, docker *docker.Client, log *logger.Logger) *FileService {
+func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, log *logger.Logger) *FileService {
 	return &FileService{
-		store:  store,
-		docker: docker,
-		log:    log,
+		store:         store,
+		docker:        docker,
+		log:           log,
+		uploadManager: uploadManager,
 	}
 }
 
@@ -125,9 +126,14 @@ func (s *FileService) GetFile(ctx context.Context, req *connect.Request[v1.GetFi
 	}), nil
 }
 
-// UploadFile uploads a new file
-func (s *FileService) UploadFile(ctx context.Context, req *connect.Request[v1.UploadFileRequest]) (*connect.Response[v1.UploadFileResponse], error) {
+// SaveUploadedFile saves a file from a completed chunked upload session
+func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request[v1.SaveUploadedFileRequest]) (*connect.Response[v1.SaveUploadedFileResponse], error) {
 	msg := req.Msg
+
+	// Validate upload session
+	if msg.UploadSessionId == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("upload_session_id is required"))
+	}
 
 	// Get server
 	server, err := s.store.GetServer(ctx, msg.ServerId)
@@ -135,8 +141,26 @@ func (s *FileService) UploadFile(ctx context.Context, req *connect.Request[v1.Up
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
+	// Get temp file path and original filename from upload manager
+	tempPath, originalFilename, err := s.uploadManager.GetTempPath(msg.UploadSessionId)
+	if err != nil {
+		s.log.Error("Failed to get upload session: %v", err)
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found or not completed"))
+	}
+
+	// Determine target filename
+	targetFilename := msg.Filename
+	if targetFilename == "" {
+		targetFilename = originalFilename
+	}
+
+	// Validate filename doesn't contain path separators
+	if strings.Contains(targetFilename, "/") || strings.Contains(targetFilename, "\\") {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("filename cannot contain path separators"))
+	}
+
 	// Get target path
-	targetPath := msg.Path
+	targetPath := msg.DestinationPath
 	if targetPath == "" {
 		targetPath = "."
 	}
@@ -147,32 +171,28 @@ func (s *FileService) UploadFile(ctx context.Context, req *connect.Request[v1.Up
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
 	}
 
-	// Validate filename
-	if msg.Filename == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("filename cannot be empty"))
-	}
-
-	// Ensure filename doesn't contain path separators
-	if strings.Contains(msg.Filename, "/") || strings.Contains(msg.Filename, "\\") {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("filename cannot contain path separators"))
-	}
-
 	// Create directories if needed
 	if err := os.MkdirAll(fullPath, 0755); err != nil {
 		s.log.Error("Failed to create directory: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create directory"))
 	}
 
-	// Save file
-	filePath := filepath.Join(fullPath, msg.Filename)
-	if err := os.WriteFile(filePath, msg.Content, 0644); err != nil {
-		s.log.Error("Failed to write file: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save file"))
+	// Move file from temp location to destination
+	destFilePath := filepath.Join(fullPath, targetFilename)
+	if err := os.Rename(tempPath, destFilePath); err != nil {
+		if err := files.CopyFile(tempPath, destFilePath); err != nil {
+			s.log.Error("Failed to move file: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save file"))
+		}
+		os.Remove(tempPath)
 	}
 
-	return connect.NewResponse(&v1.UploadFileResponse{
+	// Cleanup the upload session
+	s.uploadManager.CleanupSession(msg.UploadSessionId)
+
+	return connect.NewResponse(&v1.SaveUploadedFileResponse{
 		Message: "File uploaded successfully",
-		Path:    filepath.Join(targetPath, msg.Filename),
+		Path:    filepath.Join(targetPath, targetFilename),
 	}), nil
 }
 
@@ -385,14 +405,13 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 }
 
 // Helper functions
-
 func (s *FileService) listDirectory(path, basePath string) ([]*v1.FileInfo, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}
 
-	files := make([]*v1.FileInfo, 0, len(entries))
+	lsFiles := make([]*v1.FileInfo, 0, len(entries))
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
@@ -408,13 +427,13 @@ func (s *FileService) listDirectory(path, basePath string) ([]*v1.FileInfo, erro
 			IsDir:      entry.IsDir(),
 			Size:       info.Size(),
 			Modified:   info.ModTime().Unix(),
-			IsEditable: !entry.IsDir() && isTextFile(fullPath),
+			IsEditable: !entry.IsDir() && files.IsTextFile(fullPath),
 		}
 
-		files = append(files, fileInfo)
+		lsFiles = append(lsFiles, fileInfo)
 	}
 
-	return files, nil
+	return lsFiles, nil
 }
 
 func (s *FileService) listDirectoryTree(path, basePath string, depth, maxDepth int) ([]*v1.FileInfo, error) {
@@ -427,7 +446,7 @@ func (s *FileService) listDirectoryTree(path, basePath string, depth, maxDepth i
 		return nil, err
 	}
 
-	files := make([]*v1.FileInfo, 0, len(entries))
+	lsFiles := make([]*v1.FileInfo, 0, len(entries))
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
@@ -443,7 +462,7 @@ func (s *FileService) listDirectoryTree(path, basePath string, depth, maxDepth i
 			IsDir:      entry.IsDir(),
 			Size:       info.Size(),
 			Modified:   info.ModTime().Unix(),
-			IsEditable: !entry.IsDir() && isTextFile(fullPath),
+			IsEditable: !entry.IsDir() && files.IsTextFile(fullPath),
 		}
 
 		// If it's a directory and we haven't reached max depth, get children
@@ -455,49 +474,8 @@ func (s *FileService) listDirectoryTree(path, basePath string, depth, maxDepth i
 			}
 		}
 
-		files = append(files, fileInfo)
+		lsFiles = append(lsFiles, fileInfo)
 	}
 
-	return files, nil
-}
-
-func isTextFile(path string) bool {
-	// Read first 512 bytes to detect content type
-	file, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-
-	// Read up to 512 bytes
-	buffer := make([]byte, 512)
-	n, err := file.Read(buffer)
-	if err != nil && err != io.EOF {
-		return false
-	}
-
-	if n == 0 {
-		// Empty files are considered text
-		return true
-	}
-
-	// Check for null bytes (binary indicator)
-	if bytes.Contains(buffer[:n], []byte{0}) {
-		return false
-	}
-
-	// Check if it's valid UTF-8 with printable characters
-	for i := 0; i < n; i++ {
-		b := buffer[i]
-		// Allow printable ASCII, tabs, newlines, carriage returns
-		if b < 32 && b != 9 && b != 10 && b != 13 {
-			return false
-		}
-		// Reject high control characters
-		if b == 127 {
-			return false
-		}
-	}
-
-	return true
+	return lsFiles, nil
 }

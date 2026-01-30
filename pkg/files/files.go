@@ -1,6 +1,7 @@
 package files
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -175,4 +176,66 @@ func ExtractArchive(ctx context.Context, archivePath string, destPath string) er
 	}
 
 	return nil
+}
+
+func IsTextFile(path string) bool {
+	// Read first 512 bytes to detect content type
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	// Read up to 512 bytes
+	buffer := make([]byte, 512)
+	n, err := file.Read(buffer)
+	if err != nil && err != io.EOF {
+		return false
+	}
+
+	if n == 0 {
+		// Empty files are considered text
+		return true
+	}
+
+	// Check for null bytes (binary indicator)
+	if bytes.Contains(buffer[:n], []byte{0}) {
+		return false
+	}
+
+	// Check if it's valid UTF-8 with printable characters
+	for i := range n {
+		b := buffer[i]
+		// Allow printable ASCII, tabs, newlines, carriage returns
+		if b < 32 && b != 9 && b != 10 && b != 13 {
+			return false
+		}
+		// Reject high control characters
+		if b == 127 {
+			return false
+		}
+	}
+
+	return true
+}
+
+func CopyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return err
+	}
+
+	return dstFile.Sync()
 }

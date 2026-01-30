@@ -19,6 +19,7 @@ type Config struct {
 	Module    ModuleConfig    `mapstructure:"module" json:"module"`
 	Minecraft MinecraftConfig `mapstructure:"minecraft" json:"minecraft"`
 	Logging   LoggingConfig   `mapstructure:"logging" json:"logging"`
+	Upload    UploadConfig    `mapstructure:"upload" json:"upload"`
 }
 
 type ServerConfig struct {
@@ -79,6 +80,12 @@ type LoggingConfig struct {
 	MaxBackups int    `mapstructure:"max_backups" json:"max_backups"`
 	MaxAge     int    `mapstructure:"max_age" json:"max_age"`
 	Compress   bool   `mapstructure:"compress" json:"compress"`
+}
+
+type UploadConfig struct {
+	SessionTTL    int   `mapstructure:"session_ttl" json:"session_ttl"`         // Minutes, default 240 (4 hours)
+	ChunkSize     int   `mapstructure:"chunk_size" json:"chunk_size"`           // Bytes, default 2MB
+	MaxUploadSize int64 `mapstructure:"max_upload_size" json:"max_upload_size"` // Bytes, default 0 (unlimited)
 }
 
 func Load(configPath string) (*Config, error) {
@@ -156,7 +163,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("storage.data_dir", dataDir)
 	v.SetDefault("storage.backup_dir", "./backups")
 	v.SetDefault("storage.temp_dir", "./tmp")
-	v.SetDefault("storage.max_upload_size", 524288000) // 500MB
+	v.SetDefault("storage.max_upload_size", 500*1024*1024) // 500MB
 
 	// Proxy defaults
 	v.SetDefault("proxy.enabled", false)
@@ -180,6 +187,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.max_backups", 5) // keep 5
 	v.SetDefault("logging.max_age", 30)    // 30 days
 	v.SetDefault("logging.compress", true) // compress rotated
+
+	// Upload defaults
+	v.SetDefault("upload.session_ttl", 240) // 4 hours (in minutes)
+	v.SetDefault("upload.chunk_size", 5*1024*1024)  // 5MB
+	v.SetDefault("upload.max_upload_size", 0)       // unlimited
 }
 
 func validateConfig(cfg *Config) error {

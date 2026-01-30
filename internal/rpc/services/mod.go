@@ -11,9 +11,11 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/upload"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -22,17 +24,19 @@ var _ discopanelv1connect.ModServiceHandler = (*ModService)(nil)
 
 // ModService implements the Mod service
 type ModService struct {
-	store  *storage.Store
-	docker *docker.Client
-	log    *logger.Logger
+	store         *storage.Store
+	docker        *docker.Client
+	log           *logger.Logger
+	uploadManager *upload.Manager
 }
 
 // NewModService creates a new mod service
-func NewModService(store *storage.Store, docker *docker.Client, log *logger.Logger) *ModService {
+func NewModService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, log *logger.Logger) *ModService {
 	return &ModService{
-		store:  store,
-		docker: docker,
-		log:    log,
+		store:         store,
+		docker:        docker,
+		log:           log,
+		uploadManager: uploadManager,
 	}
 }
 
@@ -214,13 +218,13 @@ func (s *ModService) GetMod(ctx context.Context, req *connect.Request[v1.GetModR
 	return nil, connect.NewError(connect.CodeNotFound, errors.New("mod not found"))
 }
 
-// UploadMod uploads a new mod
-func (s *ModService) UploadMod(ctx context.Context, req *connect.Request[v1.UploadModRequest]) (*connect.Response[v1.UploadModResponse], error) {
+// ImportUploadedMod imports a mod
+func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request[v1.ImportUploadedModRequest]) (*connect.Response[v1.ImportUploadedModResponse], error) {
 	msg := req.Msg
 
-	// Validate filename
-	if msg.Filename == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("filename is required"))
+	// Validate upload session
+	if msg.UploadSessionId == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("upload_session_id is required"))
 	}
 
 	// Get server to find data path and mod loader
@@ -229,8 +233,15 @@ func (s *ModService) UploadMod(ctx context.Context, req *connect.Request[v1.Uplo
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
+	// Get temp file path and original filename from upload manager
+	tempPath, originalFilename, err := s.uploadManager.GetTempPath(msg.UploadSessionId)
+	if err != nil {
+		s.log.Error("Failed to get upload session: %v", err)
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found or not completed"))
+	}
+
 	// Validate file is appropriate for this mod loader
-	if !minecraft.IsValidModFile(msg.Filename, server.ModLoader) {
+	if !minecraft.IsValidModFile(originalFilename, server.ModLoader) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid file type for this mod loader"))
 	}
 
@@ -246,12 +257,18 @@ func (s *ModService) UploadMod(ctx context.Context, req *connect.Request[v1.Uplo
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create mods directory"))
 	}
 
-	// Save file
-	modPath := filepath.Join(modsDir, msg.Filename)
-	if err := os.WriteFile(modPath, msg.Content, 0644); err != nil {
-		s.log.Error("Failed to write mod file: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save mod"))
+	// Move file from temp location to mods dir
+	modPath := filepath.Join(modsDir, originalFilename)
+	if err := os.Rename(tempPath, modPath); err != nil {
+		if err := files.CopyFile(tempPath, modPath); err != nil {
+			s.log.Error("Failed to move mod file: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save mod"))
+		}
+		os.Remove(tempPath)
 	}
+
+	// Cleanup the upload session
+	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
 	// Get file info for the response
 	info, err := os.Stat(modPath)
@@ -263,7 +280,7 @@ func (s *ModService) UploadMod(ctx context.Context, req *connect.Request[v1.Uplo
 	// Use provided display name or derive from filename
 	displayName := msg.DisplayName
 	if displayName == "" {
-		displayName = msg.Filename
+		displayName = originalFilename
 		if ext := filepath.Ext(displayName); ext != "" {
 			displayName = displayName[:len(displayName)-len(ext)]
 		}
@@ -271,9 +288,9 @@ func (s *ModService) UploadMod(ctx context.Context, req *connect.Request[v1.Uplo
 
 	// Create mod record
 	mod := &v1.Mod{
-		Id:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+msg.Filename)).String(),
+		Id:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+originalFilename)).String(),
 		ServerId:    msg.ServerId,
-		FileName:    msg.Filename,
+		FileName:    originalFilename,
 		DisplayName: displayName,
 		Description: msg.Description,
 		Enabled:     true,
@@ -281,7 +298,7 @@ func (s *ModService) UploadMod(ctx context.Context, req *connect.Request[v1.Uplo
 		UploadedAt:  timestamppb.New(info.ModTime()),
 	}
 
-	return connect.NewResponse(&v1.UploadModResponse{
+	return connect.NewResponse(&v1.ImportUploadedModResponse{
 		Mod:     mod,
 		Message: "Mod uploaded successfully",
 	}), nil

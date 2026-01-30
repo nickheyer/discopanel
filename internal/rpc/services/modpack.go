@@ -21,9 +21,11 @@ import (
 	"github.com/nickheyer/discopanel/internal/indexers/fuego"
 	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/upload"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -32,17 +34,19 @@ var _ discopanelv1connect.ModpackServiceHandler = (*ModpackService)(nil)
 
 // ModpackService implements the Modpack service
 type ModpackService struct {
-	store  *storage.Store
-	config *config.Config
-	log    *logger.Logger
+	store         *storage.Store
+	config        *config.Config
+	log           *logger.Logger
+	uploadManager *upload.Manager
 }
 
 // NewModpackService creates a new modpack service
-func NewModpackService(store *storage.Store, cfg *config.Config, log *logger.Logger) *ModpackService {
+func NewModpackService(store *storage.Store, cfg *config.Config, uploadManager *upload.Manager, log *logger.Logger) *ModpackService {
 	return &ModpackService{
-		store:  store,
-		config: cfg,
-		log:    log,
+		store:         store,
+		config:        cfg,
+		log:           log,
+		uploadManager: uploadManager,
 	}
 }
 
@@ -475,33 +479,51 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 	}), nil
 }
 
-// UploadModpack uploads a modpack
-func (s *ModpackService) UploadModpack(ctx context.Context, req *connect.Request[v1.UploadModpackRequest]) (*connect.Response[v1.UploadModpackResponse], error) {
+// ImportUploadedModpack imports a modpack from a completed chunked upload session
+func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect.Request[v1.ImportUploadedModpackRequest]) (*connect.Response[v1.ImportUploadedModpackResponse], error) {
 	msg := req.Msg
 
+	s.log.Info("Starting modpack upload import with sessionId: %s", msg.UploadSessionId)
+
+	// Validate upload session
+	if msg.UploadSessionId == "" {
+		s.log.Error("Error during modpack upload import: upload_session_id is empty")
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("upload_session_id is required"))
+	}
+
+	// Get temp file path and original filename from upload manager
+	tempPath, originalFilename, err := s.uploadManager.GetTempPath(msg.UploadSessionId)
+	if err != nil {
+		s.log.Error("Failed to get upload session %s: %v", msg.UploadSessionId, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("upload session not found or not completed"))
+	}
+
+	var modpackID string
+
+	cleanupOnError := func() {
+		if tempPath != "" { // Remove tmp file just in case session wiped by goroutine
+			if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
+				s.log.Error("Failed to remove temp file %s: %v", tempPath, err)
+			}
+		}
+		s.uploadManager.Cancel(msg.UploadSessionId)
+		if modpackID != "" {
+			if err := s.store.DeleteIndexedModpack(ctx, modpackID); err != nil {
+				s.log.Error("Failed to cleanup modpack %s from database: %v", modpackID, err)
+			}
+		}
+	}
+
 	// Validate file extension
-	if !strings.HasSuffix(strings.ToLower(msg.Filename), ".zip") {
+	if !strings.HasSuffix(strings.ToLower(originalFilename), ".zip") {
+		cleanupOnError()
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("modpack must be a ZIP file"))
 	}
 
-	// Create temporary file
-	tempFile, err := os.CreateTemp("", "modpack-*.zip")
-	if err != nil {
-		s.log.Error("Failed to create temp file: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to process upload"))
-	}
-	defer os.Remove(tempFile.Name())
-	defer tempFile.Close()
-
-	// Write content to temp file
-	if _, err := tempFile.Write(msg.Content); err != nil {
-		s.log.Error("Failed to write temp file: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to process upload"))
-	}
-
 	// Open zip file for reading
-	zipReader, err := zip.OpenReader(tempFile.Name())
+	zipReader, err := zip.OpenReader(tempPath)
 	if err != nil {
+		cleanupOnError()
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid ZIP file"))
 	}
 	defer zipReader.Close()
@@ -516,6 +538,7 @@ func (s *ModpackService) UploadModpack(ctx context.Context, req *connect.Request
 	}
 
 	if manifestFile == nil {
+		cleanupOnError()
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("no manifest.json found in modpack"))
 	}
 
@@ -523,6 +546,7 @@ func (s *ModpackService) UploadModpack(ctx context.Context, req *connect.Request
 	manifestReader, err := manifestFile.Open()
 	if err != nil {
 		s.log.Error("Failed to open manifest: %v", err)
+		cleanupOnError()
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read manifest"))
 	}
 	defer manifestReader.Close()
@@ -543,11 +567,12 @@ func (s *ModpackService) UploadModpack(ctx context.Context, req *connect.Request
 
 	if err := json.NewDecoder(manifestReader).Decode(&manifest); err != nil {
 		s.log.Error("Failed to parse manifest: %v", err)
+		cleanupOnError()
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid manifest.json"))
 	}
 
 	// Generate ID for the uploaded modpack
-	modpackID := uuid.New().String()
+	modpackID = uuid.New().String()
 
 	// Determine mod loader from manifest
 	allLoaders := minecraft.GetAllModLoaders()
@@ -599,39 +624,50 @@ func (s *ModpackService) UploadModpack(ctx context.Context, req *connect.Request
 
 	if err := s.store.UpsertIndexedModpack(ctx, dbModpack); err != nil {
 		s.log.Error("Failed to store modpack: %v", err)
+		cleanupOnError()
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to store modpack"))
 	}
 
-	// Store the ZIP file
-	// Create directory for manual modpacks if it doesn't exist
+	// Store zip and create directory for manual modpacks if it doesn't exist
 	manualDir := filepath.Join(s.config.Storage.DataDir, "modpacks", "manual")
 	if err := os.MkdirAll(manualDir, 0755); err != nil {
 		s.log.Error("Failed to create manual modpacks directory: %v", err)
+		cleanupOnError()
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to store modpack file"))
 	}
 
-	// Copy ZIP to storage
-	destPath := filepath.Join(manualDir, modpackID+".zip")
-	destFile, err := os.Create(destPath)
+	// Get file size before moving
+	fileInfo, err := os.Stat(tempPath)
 	if err != nil {
-		s.log.Error("Failed to create destination file: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to store modpack file"))
+		s.log.Error("Failed to stat temp file: %v", err)
+		cleanupOnError()
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to process upload"))
 	}
-	defer destFile.Close()
+	fileSize := fileInfo.Size()
 
-	if _, err := destFile.Write(msg.Content); err != nil {
-		s.log.Error("Failed to copy modpack to storage: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to store modpack file"))
+	// Move file from temp location to storage
+	destPath := filepath.Join(manualDir, modpackID+".zip")
+	if err := os.Rename(tempPath, destPath); err != nil {
+		// If rename fails (cross-device), fall back to copy
+		if err := files.CopyFile(tempPath, destPath); err != nil {
+			s.log.Error("Failed to move modpack file: %v", err)
+			cleanupOnError()
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to store modpack file"))
+		}
+		os.Remove(tempPath)
 	}
+
+	// Cleanup the upload session
+	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
 	// Create a file entry for the uploaded modpack
 	dbFile := &storage.IndexedModpackFile{
 		ID:               modpackID,
 		ModpackID:        modpackID,
-		DisplayName:      msg.Filename,
-		FileName:         msg.Filename,
+		DisplayName:      originalFilename,
+		FileName:         originalFilename,
 		FileDate:         time.Now(),
-		FileLength:       int64(len(msg.Content)),
+		FileLength:       fileSize,
 		ReleaseType:      "1",      // Release
 		DownloadURL:      destPath, // Store local path
 		GameVersions:     string(gameVersionsJSON),
@@ -643,6 +679,8 @@ func (s *ModpackService) UploadModpack(ctx context.Context, req *connect.Request
 		s.log.Error("Failed to store modpack file entry: %v", err)
 		// Don't fail the upload, just log the error
 	}
+
+	s.log.Info("Successfully imported uploaded modpack '%s' (id: %s) from session %s", manifest.Name, modpackID, msg.UploadSessionId)
 
 	// Convert to proto format for response
 	javaVersionInt, _ := strconv.Atoi(dbModpack.JavaVersion)
@@ -672,7 +710,7 @@ func (s *ModpackService) UploadModpack(ctx context.Context, req *connect.Request
 		IsFavorited:    false,
 	}
 
-	return connect.NewResponse(&v1.UploadModpackResponse{
+	return connect.NewResponse(&v1.ImportUploadedModpackResponse{
 		Modpack: protoModpack,
 		Message: fmt.Sprintf("Modpack '%s' v%s by %s uploaded successfully", manifest.Name, manifest.Version, manifest.Author),
 	}), nil
@@ -824,8 +862,7 @@ func (s *ModpackService) GetIndexerStatus(ctx context.Context, req *connect.Requ
 		apiKeyConfigured = true
 	}
 
-	// Get modpack counts by indexer
-	// Since CountModpacksByIndexer doesn't exist, we'll get all modpacks and count them
+	// Get all modpacks and count
 	modpacksByIndexer := make(map[string]int32)
 	totalModpacks := int32(0)
 

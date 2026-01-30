@@ -4,12 +4,14 @@
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, Upload, Download, Trash2, ToggleLeft, ToggleRight, Package, FileText } from '@lucide/svelte';
+	import { Progress } from '$lib/components/ui/progress';
+	import { Loader2, Upload, Download, Trash2, ToggleLeft, ToggleRight, Package, FileText, X } from '@lucide/svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { ModLoader, type Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { Mod } from '$lib/proto/discopanel/v1/mod_pb';
 	import { formatBytes } from '$lib/utils';
+	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 
 	interface Props {
 		server: Server;
@@ -21,6 +23,9 @@
 	let mods = $state<Mod[]>([]);
 	let loading = $state(true);
 	let uploading = $state(false);
+	let uploadProgress = $state<UploadProgress | null>(null);
+	let currentUploadFilename = $state('');
+	let uploadAbortController = $state<AbortController | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
 
 	let hasLoaded = false;
@@ -61,28 +66,56 @@
 
 	async function handleFileSelect(event: Event) {
 		const input = event.target as HTMLInputElement;
-		const files = input.files;
-		if (!files || files.length === 0) return;
+		const fileList = input.files;
+		if (!fileList || fileList.length === 0) return;
 
 		uploading = true;
+		uploadAbortController = new AbortController();
+
 		try {
-			for (const file of Array.from(files)) {
-				const content = await file.arrayBuffer();
-				await rpcClient.mod.uploadMod({
+			for (const file of Array.from(fileList)) {
+				currentUploadFilename = file.name;
+				uploadProgress = null;
+
+				// Use chunked upload
+				const result = await uploadFile(file, {
+					onProgress: (progress) => {
+						uploadProgress = progress;
+					},
+					signal: uploadAbortController.signal
+				});
+
+				// Import the uploaded mod
+				await rpcClient.mod.importUploadedMod({
 					serverId: server.id,
-					filename: file.name,
-					content: new Uint8Array(content),
+					uploadSessionId: result.sessionId,
 					displayName: file.name,
 					description: ''
 				});
 			}
-			toast.success(`Uploaded ${files.length} mod(s)`);
+			toast.success(`Uploaded ${fileList.length} mod(s)`);
 			await loadMods();
-		} catch (error) {
-			toast.error('Failed to upload mod');
+		} catch (error: any) {
+			if (error.message === 'Upload cancelled') {
+				toast.info('Upload cancelled');
+			} else {
+				toast.error('Failed to upload mod');
+			}
 		} finally {
 			uploading = false;
+			uploadProgress = null;
+			currentUploadFilename = '';
+			uploadAbortController = null;
 			input.value = '';
+		}
+	}
+
+	function cancelCurrentUpload() {
+		if (uploadAbortController) {
+			uploadAbortController.abort();
+		}
+		if (uploadProgress?.sessionId) {
+			cancelUpload(uploadProgress.sessionId).catch(() => {});
 		}
 	}
 
@@ -202,6 +235,27 @@
 			{/if}
 		</div>
 	</CardHeader>
+	{#if uploading && uploadProgress}
+		<div class="px-6 pb-4">
+			<div class="flex items-center justify-between mb-2">
+				<span class="text-sm text-muted-foreground">
+					Uploading: {currentUploadFilename}
+				</span>
+				<div class="flex items-center gap-2">
+					<span class="text-sm text-muted-foreground">
+						{uploadProgress.percentComplete.toFixed(0)}%
+					</span>
+					<Button size="icon" variant="ghost" class="h-6 w-6" onclick={cancelCurrentUpload} title="Cancel upload">
+						<X class="h-4 w-4" />
+					</Button>
+				</div>
+			</div>
+			<Progress value={uploadProgress.percentComplete} class="h-2" />
+			<p class="text-xs text-muted-foreground mt-1">
+				{formatBytes(uploadProgress.bytesUploaded)} / {formatBytes(uploadProgress.totalBytes)}
+			</p>
+		</div>
+	{/if}
 	<CardContent class="flex-1 overflow-auto">
 		{#if !canHaveMods()}
 			<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">

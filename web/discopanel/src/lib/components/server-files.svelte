@@ -2,12 +2,14 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
-	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw, Plus, FolderPlus, FilePlus, Pencil, Package } from '@lucide/svelte';
+	import { Progress } from '$lib/components/ui/progress';
+	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw, Plus, FolderPlus, FilePlus, Pencil, Package, X } from '@lucide/svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { FileInfo } from '$lib/proto/discopanel/v1/file_pb';
 	import { formatBytes } from '$lib/utils';
+	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 	import FileEditorDialog from './file-editor-dialog.svelte';
 	import { DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { Dialog as DialogPrimitive } from "bits-ui";
@@ -24,6 +26,9 @@
 	let files = $state<FileInfo[]>([]);
 	let loading = $state(true);
 	let uploading = $state(false);
+	let uploadProgress = $state<UploadProgress | null>(null);
+	let currentUploadFilename = $state('');
+	let uploadAbortController = $state<AbortController | null>(null);
 	let selectedPath = $state('');
 	let expandedDirs = $state<Set<string>>(new Set());
 	let editingFile = $state<FileInfo | null>(null);
@@ -112,28 +117,57 @@
 
 	async function handleFileSelect(event: Event, path?: string) {
 		const input = event.target as HTMLInputElement;
-		const files = input.files;
-		if (!files || files.length === 0) return;
+		const fileList = input.files;
+		if (!fileList || fileList.length === 0) return;
 
 		const uploadPath = path || selectedPath || '';
 		uploading = true;
+		uploadAbortController = new AbortController();
+
 		try {
-			for (const file of Array.from(files)) {
-				const arrayBuffer = await file.arrayBuffer();
-				await rpcClient.file.uploadFile({
+			for (const file of Array.from(fileList)) {
+				currentUploadFilename = file.name;
+				uploadProgress = null;
+
+				// Use chunked upload
+				const result = await uploadFile(file, {
+					onProgress: (progress) => {
+						uploadProgress = progress;
+					},
+					signal: uploadAbortController.signal
+				});
+
+				// Save the uploaded file to the destination
+				await rpcClient.file.saveUploadedFile({
 					serverId: server.id,
-					path: uploadPath,
-					filename: file.name,
-					content: new Uint8Array(arrayBuffer)
+					uploadSessionId: result.sessionId,
+					destinationPath: uploadPath,
+					filename: file.name
 				});
 			}
-			toast.success(`Uploaded ${files.length} file(s) to ${uploadPath || 'root'}`);
+			toast.success(`Uploaded ${fileList.length} file(s) to ${uploadPath || 'root'}`);
 			await loadFiles();
-		} catch (error) {
-			toast.error('Failed to upload files');
+		} catch (error: any) {
+			if (error.message === 'Upload cancelled') {
+				toast.info('Upload cancelled');
+			} else {
+				toast.error('Failed to upload files');
+			}
 		} finally {
 			uploading = false;
+			uploadProgress = null;
+			currentUploadFilename = '';
+			uploadAbortController = null;
 			input.value = '';
+		}
+	}
+
+	function cancelCurrentUpload() {
+		if (uploadAbortController) {
+			uploadAbortController.abort();
+		}
+		if (uploadProgress?.sessionId) {
+			cancelUpload(uploadProgress.sessionId).catch(() => {});
 		}
 	}
 
@@ -325,6 +359,27 @@
 			</div>
 		</div>
 	</CardHeader>
+	{#if uploading && uploadProgress}
+		<div class="px-6 pb-4">
+			<div class="flex items-center justify-between mb-2">
+				<span class="text-sm text-muted-foreground">
+					Uploading: {currentUploadFilename}
+				</span>
+				<div class="flex items-center gap-2">
+					<span class="text-sm text-muted-foreground">
+						{uploadProgress.percentComplete.toFixed(0)}%
+					</span>
+					<Button size="icon" variant="ghost" class="h-6 w-6" onclick={cancelCurrentUpload} title="Cancel upload">
+						<X class="h-4 w-4" />
+					</Button>
+				</div>
+			</div>
+			<Progress value={uploadProgress.percentComplete} class="h-2" />
+			<p class="text-xs text-muted-foreground mt-1">
+				{formatBytes(uploadProgress.bytesUploaded)} / {formatBytes(uploadProgress.totalBytes)}
+			</p>
+		</div>
+	{/if}
 	<CardContent class="flex-1 overflow-auto">
 		{#if loading}
 			<div class="flex items-center justify-center py-12">

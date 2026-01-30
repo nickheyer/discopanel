@@ -10,8 +10,8 @@ service FileService {
   rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
   // Download file content
   rpc GetFile(GetFileRequest) returns (GetFileResponse);
-  // Upload new file
-  rpc UploadFile(UploadFileRequest) returns (UploadFileResponse);
+  // Save an uploaded file
+  rpc SaveUploadedFile(SaveUploadedFileRequest) returns (SaveUploadedFileResponse);
   // Modify file content
   rpc UpdateFile(UpdateFileRequest) returns (UpdateFileResponse);
   // Remove file or directory
@@ -58,15 +58,15 @@ message GetFileResponse {
 }
 
 // File upload data
-message UploadFileRequest {
+message SaveUploadedFileRequest {
   string server_id = 1;
-  string path = 2;
-  string filename = 3;
-  bytes content = 4;
+  string upload_session_id = 2;
+  string destination_path = 3; // Target dir
+  string filename = 4; // Target filename
 }
 
-// Upload confirmation
-message UploadFileResponse {
+// Save uploaded file result
+message SaveUploadedFileResponse {
   string message = 1;
   string path = 2;
 }

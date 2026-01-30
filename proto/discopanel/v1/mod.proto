@@ -12,8 +12,8 @@ service ModService {
   rpc ListMods(ListModsRequest) returns (ListModsResponse);
   // Get mod details
   rpc GetMod(GetModRequest) returns (GetModResponse);
-  // Upload mod file
-  rpc UploadMod(UploadModRequest) returns (UploadModResponse);
+  // Import mod from chunked upload session
+  rpc ImportUploadedMod(ImportUploadedModRequest) returns (ImportUploadedModResponse);
   // Update mod metadata
   rpc UpdateMod(UpdateModRequest) returns (UpdateModResponse);
   // Delete mod file
@@ -58,17 +58,16 @@ message GetModResponse {
   Mod mod = 1;
 }
 
-// Mod file upload
-message UploadModRequest {
+// Import mod from chunked upload session
+message ImportUploadedModRequest {
   string server_id = 1;
-  string filename = 2;
-  bytes content = 3;
-  string display_name = 4;
-  string description = 5;
+  string upload_session_id = 2;
+  string display_name = 3;
+  string description = 4;
 }
 
-// Upload result
-message UploadModResponse {
+// Import result
+message ImportUploadedModResponse {
   Mod mod = 1;
   string message = 2;
 }

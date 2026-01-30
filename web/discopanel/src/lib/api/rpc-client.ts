@@ -15,6 +15,7 @@ import { ProxyService } from '$lib/proto/discopanel/v1/proxy_pb';
 import { ServerService } from '$lib/proto/discopanel/v1/server_pb';
 import { SupportService } from '$lib/proto/discopanel/v1/support_pb';
 import { TaskService } from '$lib/proto/discopanel/v1/task_pb';
+import { UploadService } from '$lib/proto/discopanel/v1/upload_pb';
 import { UserService } from '$lib/proto/discopanel/v1/user_pb';
 import { ModuleService } from '$lib/proto/discopanel/v1/module_pb';
 
@@ -48,8 +49,10 @@ const authInterceptor: Interceptor = (next) => async (req) => {
     return res;
   } catch (error: any) {
     // Show error toast
-    const message = error.message || 'An error occurred';
-    toast.error(message);
+    if (!isSilent) {
+      const message = error.rawMessage || error.message || 'An error occurred';
+      toast.error(message);
+    }
     throw error;
   } finally {
     if (showLoading) {
@@ -76,6 +79,7 @@ export class RpcClient {
   public readonly server: Client<typeof ServerService>;
   public readonly support: Client<typeof SupportService>;
   public readonly task: Client<typeof TaskService>;
+  public readonly upload: Client<typeof UploadService>;
   public readonly user: Client<typeof UserService>;
   public readonly module: Client<typeof ModuleService>;
 
@@ -90,6 +94,7 @@ export class RpcClient {
     this.server = createClient(ServerService, transport);
     this.support = createClient(SupportService, transport);
     this.task = createClient(TaskService, transport);
+    this.upload = createClient(UploadService, transport);
     this.user = createClient(UserService, transport);
     this.module = createClient(ModuleService, transport);
   }

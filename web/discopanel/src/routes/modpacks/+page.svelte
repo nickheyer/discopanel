@@ -7,13 +7,16 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
+	import { Progress } from '$lib/components/ui/progress';
 	import { toast } from 'svelte-sonner';
-	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload, Package, ArrowLeft, Trash2 } from '@lucide/svelte';
+	import { Heart, Download, Search, RefreshCw, ExternalLink, AlertCircle, Settings, Upload, Package, ArrowLeft, Trash2, X } from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import type { IndexedModpack, SearchModpacksRequest, SearchModpacksResponse, GetIndexerStatusResponse } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { SearchModpacksRequestSchema } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { debounce } from 'lodash-es';
+	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
+	import { formatBytes } from '$lib/utils';
 	
 	let searchParams = $state<SearchModpacksRequest>(create(SearchModpacksRequestSchema, {
 		query: '',
@@ -34,6 +37,8 @@
 	let indexerStatus = $state<GetIndexerStatusResponse | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let uploading = $state(false);
+	let uploadProgress = $state<UploadProgress | null>(null);
+	let uploadAbortController = $state<AbortController | null>(null);
 	let selectedIndexer = $state('modrinth'); // Default Modrinth since no API key initially
 	let indexerName = $derived(selectedIndexer === 'fuego' ? 'CurseForge' : 'Modrinth');
 
@@ -49,8 +54,13 @@
 			loadFavorites(),
 			loadUploadedPacks(),
 			loadMinecraftVersions(),
-			loadModLoaders()
+			loadModLoaders(),
+			searchModpacks()
 		]);
+
+		if (searchResults && searchResults.total === 0 && !searchParams.query) {
+			syncModpacks();
+		}
 	});
 	
 	async function loadMinecraftVersions() {
@@ -226,13 +236,24 @@
 		}
 
 		uploading = true;
-		try {
-			const arrayBuffer = await file.arrayBuffer();
-			const content = new Uint8Array(arrayBuffer);
+		uploadAbortController = new AbortController();
+		uploadProgress = null;
 
-			const result = await rpcClient.modpack.uploadModpack({
-				filename: file.name,
-				content: content,
+		try {
+			// Use chunked upload
+			const uploadResult = await uploadFile(file, {
+				onProgress: (progress) => {
+					uploadProgress = progress;
+				},
+				signal: uploadAbortController.signal
+			});
+			if (!uploadResult.sessionId) {
+				throw new Error('Upload completed but no session ID returned');
+			}
+
+			// Import the uploaded modpack
+			const result = await rpcClient.modpack.importUploadedModpack({
+				uploadSessionId: uploadResult.sessionId,
 				name: file.name.replace('.zip', ''),
 				description: ''
 			});
@@ -244,11 +265,24 @@
 				searchModpacks(),
 				loadUploadedPacks()
 			]);
-		} catch (error) {
-			toast.error(error instanceof Error ? error.message : 'Failed to upload modpack');
+		} catch (error: any) {
+			if (error.message === 'Upload cancelled') {
+				toast.info('Upload cancelled');
+			}
 		} finally {
 			uploading = false;
+			uploadProgress = null;
+			uploadAbortController = null;
 			input.value = '';
+		}
+	}
+
+	function cancelCurrentUpload() {
+		if (uploadAbortController) {
+			uploadAbortController.abort();
+		}
+		if (uploadProgress?.sessionId) {
+			cancelUpload(uploadProgress.sessionId).catch(() => {});
 		}
 	}
 
@@ -275,17 +309,6 @@
 		}
 	}
 	
-	onMount(async () => {
-		await Promise.all([
-			searchModpacks(),
-			loadFavorites(),
-			loadUploadedPacks()
-		]);
-
-		if (searchResults && searchResults.total === 0 && !searchParams.query) {
-			syncModpacks();
-		}
-	});
 
 	// Computed display list with uploaded packs first
 	let displayModpacks = $derived(
@@ -432,6 +455,27 @@
 				<p class="text-sm text-muted-foreground">
 					No modpacks found locally. Click "Sync" to fetch modpacks from Indexers.
 				</p>
+			{/if}
+			{#if uploading && uploadProgress}
+				<div class="mt-4 p-4 rounded-lg border bg-card">
+					<div class="flex items-center justify-between mb-2">
+						<span class="text-sm font-medium">
+							Uploading modpack...
+						</span>
+						<div class="flex items-center gap-2">
+							<span class="text-sm text-muted-foreground">
+								{uploadProgress.percentComplete.toFixed(0)}%
+							</span>
+							<Button size="icon" variant="ghost" class="h-6 w-6" onclick={cancelCurrentUpload} title="Cancel upload">
+								<X class="h-4 w-4" />
+							</Button>
+						</div>
+					</div>
+					<Progress value={uploadProgress.percentComplete} class="h-2" />
+					<p class="text-xs text-muted-foreground mt-1">
+						{formatBytes(uploadProgress.bytesUploaded)} / {formatBytes(uploadProgress.totalBytes)}
+					</p>
+				</div>
 			{/if}
 		</div>
 	{/if}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
@@ -19,6 +20,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/scheduler"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/upload"
 	web "github.com/nickheyer/discopanel/web/discopanel"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -38,6 +40,7 @@ type Server struct {
 	scheduler        *scheduler.Scheduler
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
+	uploadManager    *upload.Manager
 }
 
 // Creates new Connect RPC server
@@ -55,6 +58,10 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	logStreamer := logger.NewLogStreamer(docker.GetDockerClient(), log, 10000)
 	docker.SetLogStreamer(logStreamer)
 
+	// Initialize upload manager
+	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
+	uploadManager := upload.NewManager(cfg.Storage.TempDir, uploadTTL, cfg.Upload.MaxUploadSize, log)
+
 	s := &Server{
 		store:            store,
 		docker:           docker,
@@ -67,6 +74,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		scheduler:        sched,
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
+		uploadManager:    uploadManager,
 	}
 
 	s.setupHandler()
@@ -107,6 +115,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.ServerServiceName,
 		discopanelv1connect.SupportServiceName,
 		discopanelv1connect.TaskServiceName,
+		discopanelv1connect.UploadServiceName,
 		discopanelv1connect.UserServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
@@ -125,16 +134,17 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.log)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.log)
-	fileService := services.NewFileService(s.store, s.docker, s.log)
+	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.log)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
-	modService := services.NewModService(s.store, s.docker, s.log)
-	modpackService := services.NewModpackService(s.store, s.config, s.log)
+	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
+	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
 	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.config, s.logStreamer, s.log)
+	uploadService := services.NewUploadService(s.uploadManager, s.log)
 
 	// Register service handlers
 	authPath, authHandler := discopanelv1connect.NewAuthServiceHandler(authService, opts...)
@@ -172,6 +182,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	modulePath, moduleHandler := discopanelv1connect.NewModuleServiceHandler(moduleService, opts...)
 	mux.Handle(modulePath, moduleHandler)
+
+	uploadPath, uploadHandler := discopanelv1connect.NewUploadServiceHandler(uploadService, opts...)
+	mux.Handle(uploadPath, uploadHandler)
 }
 
 // The HTTP handler for the server
@@ -216,7 +229,7 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// Checks if a procedure is a polling endpoint
+// Checks if a procedure is a polling endpoint or high-frequency endpoint
 func (s *Server) isPollingProcedure(procedure string) bool {
 	pollingProcedures := []string{
 		"/discopanel.v1.AuthService/GetAuthStatus",
@@ -225,6 +238,8 @@ func (s *Server) isPollingProcedure(procedure string) bool {
 		"/discopanel.v1.ServerService/GetServerLogs",
 		"/discopanel.v1.ProxyService/GetProxyStatus",
 		"/discopanel.v1.SupportService/GetApplicationLogs",
+		"/discopanel.v1.UploadService/UploadChunk",
+		"/discopanel.v1.UploadService/GetUploadStatus",
 	}
 
 	return slices.Contains(pollingProcedures, procedure)

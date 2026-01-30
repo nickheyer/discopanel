@@ -18,8 +18,8 @@ service ModpackService {
   rpc GetModpackByURL(GetModpackByURLRequest) returns (GetModpackByURLResponse);
   // Fetch modpacks from external sources
   rpc SyncModpacks(SyncModpacksRequest) returns (SyncModpacksResponse);
-  // Import local modpack file
-  rpc UploadModpack(UploadModpackRequest) returns (UploadModpackResponse);
+  // Import modpack from chunked upload session
+  rpc ImportUploadedModpack(ImportUploadedModpackRequest) returns (ImportUploadedModpackResponse);
   // Remove indexed modpack
   rpc DeleteModpack(DeleteModpackRequest) returns (DeleteModpackResponse);
   // Mark modpack as favorite
@@ -140,16 +140,15 @@ message SyncModpacksResponse {
   string message = 2;
 }
 
-// Local modpack import
-message UploadModpackRequest {
-  string filename = 1;
-  bytes content = 2;
-  string name = 3;
-  string description = 4;
+// Import modpack from chunked upload session
+message ImportUploadedModpackRequest {
+  string upload_session_id = 1;
+  string name = 2;
+  string description = 3;
 }
 
 // Import result
-message UploadModpackResponse {
+message ImportUploadedModpackResponse {
   IndexedModpack modpack = 1;
   string message = 2;
 }

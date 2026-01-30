@@ -27,7 +27,8 @@ export interface UploadStatus extends UploadProgress {
   tempPath?: string;
 }
 
-const DEFAULT_CHUNK_SIZE = 2 * 1024 * 1024; // 2MB
+// NOTE: Optional to init session, client can override server default up to max set by server
+const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
 const SESSION_STORAGE_KEY = 'chunked_upload_sessions';
 
 // Store session info in localStorage for resume capability
@@ -77,7 +78,6 @@ export async function uploadFile(
   const signal = options?.signal;
 
   let sessionId = options?.sessionId;
-  let startChunk = 0;
   let missingChunks: number[] = [];
 
   // Check for existing session if not explicitly provided
@@ -94,7 +94,7 @@ export async function uploadFile(
         return { sessionId, tempPath: status.tempPath || '' };
       }
       missingChunks = status.missingChunks;
-    } catch (err) {
+    } catch {
       // Session expired or invalid, start fresh
       sessionId = undefined;
     }

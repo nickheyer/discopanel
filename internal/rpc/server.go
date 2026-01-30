@@ -144,7 +144,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.config, s.logStreamer, s.log)
-	uploadService := services.NewUploadService(s.uploadManager, s.log)
+	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
 
 	// Register service handlers
 	authPath, authHandler := discopanelv1connect.NewAuthServiceHandler(authService, opts...)

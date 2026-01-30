@@ -11,7 +11,7 @@ function getVersion() {
 
 	try {
 		return execSync('git describe --tags --always').toString().trim();
-	} catch (error) {
+	} catch {
 		console.warn('Failed to get git version, using default');
 		return 'dev';
 	}

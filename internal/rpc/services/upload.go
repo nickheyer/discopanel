@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"connectrpc.com/connect"
+	"github.com/nickheyer/discopanel/internal/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -17,13 +18,15 @@ var _ discopanelv1connect.UploadServiceHandler = (*UploadService)(nil)
 // UploadService implements the Upload service
 type UploadService struct {
 	manager *upload.Manager
+	cfg     *config.Config
 	log     *logger.Logger
 }
 
 // NewUploadService creates a new upload service
-func NewUploadService(manager *upload.Manager, log *logger.Logger) *UploadService {
+func NewUploadService(manager *upload.Manager, cfg *config.Config, log *logger.Logger) *UploadService {
 	return &UploadService{
 		manager: manager,
+		cfg:     cfg,
 		log:     log,
 	}
 }
@@ -40,9 +43,13 @@ func (s *UploadService) InitUpload(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("total_size must be positive"))
 	}
 
-	chunkSize := msg.ChunkSize
+	chunkSize := msg.ChunkSize // Client override of chunk size
+	if chunkSize > int32(s.cfg.Upload.MaxChunkSize) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("max chunk size exceeded by client override during init session"))
+	}
+
 	if chunkSize <= 0 {
-		chunkSize = 2 * 1024 * 1024 // Default 2MB
+		chunkSize = int32(s.cfg.Upload.DefaultChunkSize) // Set to server default
 	}
 
 	session, err := s.manager.InitSession(msg.Filename, msg.TotalSize, chunkSize)

@@ -27,11 +27,13 @@ type ContainerLogStream struct {
 
 // LogStreamer manages log streaming for all containers
 type LogStreamer struct {
-	docker     *client.Client
-	streams    map[string]*ContainerLogStream // containerID -> stream
-	mu         sync.RWMutex
-	log        *Logger
-	maxEntries int
+	docker      *client.Client
+	streams     map[string]*ContainerLogStream // containerID -> stream
+	mu          sync.RWMutex
+	log         *Logger
+	maxEntries  int
+	subscribers map[string]map[chan *v1.LogEntry]bool // containerID -> set of subscriber channels
+	subMu       sync.RWMutex                          // mutex for subscribers
 }
 
 // NewLogStreamer creates a new log streamer
@@ -40,10 +42,11 @@ func NewLogStreamer(dockerClient *client.Client, log *Logger, maxEntriesPerConta
 		maxEntriesPerContainer = 10000 // Default to 10k entries per container
 	}
 	return &LogStreamer{
-		docker:     dockerClient,
-		streams:    make(map[string]*ContainerLogStream),
-		log:        log,
-		maxEntries: maxEntriesPerContainer,
+		docker:      dockerClient,
+		streams:     make(map[string]*ContainerLogStream),
+		log:         log,
+		maxEntries:  maxEntriesPerContainer,
+		subscribers: make(map[string]map[chan *v1.LogEntry]bool),
 	}
 }
 
@@ -173,6 +176,9 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 					stream.logs = stream.logs[len(stream.logs)-stream.maxEntries:]
 				}
 				stream.mu.Unlock()
+
+				// Broadcast to subscribers
+				ls.broadcast(stream.containerID, entry)
 			}
 		}
 	}
@@ -220,7 +226,6 @@ func (ls *LogStreamer) AddCommandEntry(containerID, command string, timestamp ti
 	}
 
 	stream.mu.Lock()
-	defer stream.mu.Unlock()
 
 	// Add command entry with the provided timestamp + ANSI to prevent color bleed
 	entry := &v1.LogEntry{
@@ -238,6 +243,10 @@ func (ls *LogStreamer) AddCommandEntry(containerID, command string, timestamp ti
 	if len(stream.logs) > stream.maxEntries {
 		stream.logs = stream.logs[len(stream.logs)-stream.maxEntries:]
 	}
+	stream.mu.Unlock()
+
+	// Broadcast to subscribers
+	ls.broadcast(containerID, entry)
 }
 
 // AddCommandOutput adds command output to the log stream (after execution)
@@ -250,8 +259,9 @@ func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool
 		return // No stream to add to
 	}
 
+	var entries []*v1.LogEntry
+
 	stream.mu.Lock()
-	defer stream.mu.Unlock()
 
 	// Add output entry if present + ANSI to prevent color bleed
 	if output != "" {
@@ -268,6 +278,7 @@ func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool
 					IsError:   !success,
 				}
 				stream.logs = append(stream.logs, entry)
+				entries = append(entries, entry)
 			}
 		}
 	} else if !success {
@@ -281,11 +292,18 @@ func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool
 			IsError:   true,
 		}
 		stream.logs = append(stream.logs, entry)
+		entries = append(entries, entry)
 	}
 
 	// Trim if exceeding max entries
 	if len(stream.logs) > stream.maxEntries {
 		stream.logs = stream.logs[len(stream.logs)-stream.maxEntries:]
+	}
+	stream.mu.Unlock()
+
+	// Broadcast all entries to subscribers
+	for _, entry := range entries {
+		ls.broadcast(containerID, entry)
 	}
 }
 
@@ -327,5 +345,60 @@ func (ls *LogStreamer) ClearLogs(containerID string) {
 		stream.mu.Lock()
 		stream.logs = make([]*v1.LogEntry, 0, stream.maxEntries)
 		stream.mu.Unlock()
+	}
+}
+
+// Subscribe creates a channel that receives new log entries for a container
+func (ls *LogStreamer) Subscribe(containerID string) chan *v1.LogEntry {
+	ls.subMu.Lock()
+	defer ls.subMu.Unlock()
+
+	ch := make(chan *v1.LogEntry, 100) // Buffered channel
+
+	if ls.subscribers[containerID] == nil {
+		ls.subscribers[containerID] = make(map[chan *v1.LogEntry]bool)
+	}
+	ls.subscribers[containerID][ch] = true
+
+	return ch
+}
+
+// Unsubscribe removes a subscriber channel for a container
+func (ls *LogStreamer) Unsubscribe(containerID string, ch chan *v1.LogEntry) {
+	ls.subMu.Lock()
+	defer ls.subMu.Unlock()
+
+	if subs, ok := ls.subscribers[containerID]; ok {
+		delete(subs, ch)
+		close(ch)
+		if len(subs) == 0 {
+			delete(ls.subscribers, containerID)
+		}
+	}
+}
+
+// broadcast sends a log entry to all subscribers for a container
+func (ls *LogStreamer) broadcast(containerID string, entry *v1.LogEntry) {
+	ls.subMu.RLock()
+	subs, ok := ls.subscribers[containerID]
+	if !ok || len(subs) == 0 {
+		ls.subMu.RUnlock()
+		return
+	}
+
+	// Copy subscriber list to avoid holding lock during sends
+	channels := make([]chan *v1.LogEntry, 0, len(subs))
+	for ch := range subs {
+		channels = append(channels, ch)
+	}
+	ls.subMu.RUnlock()
+
+	// Non-blocking send to all subscribers
+	for _, ch := range channels {
+		select {
+		case ch <- entry:
+		default:
+			// Channel full, skip this entry for this subscriber
+		}
 	}
 }

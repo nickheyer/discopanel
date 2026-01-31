@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+import "discopanel/v1/server.proto";
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// WebSocket message types
+enum WSMessageType {
+  WS_MESSAGE_TYPE_UNSPECIFIED = 0;
+  // Client -> Server
+  WS_MESSAGE_TYPE_AUTH = 1;
+  WS_MESSAGE_TYPE_SUBSCRIBE = 2;
+  WS_MESSAGE_TYPE_UNSUBSCRIBE = 3;
+  WS_MESSAGE_TYPE_COMMAND = 4;
+  WS_MESSAGE_TYPE_PING = 5;
+  // Server -> Client
+  WS_MESSAGE_TYPE_AUTH_OK = 10;
+  WS_MESSAGE_TYPE_AUTH_FAIL = 11;
+  WS_MESSAGE_TYPE_SUBSCRIBED = 12;
+  WS_MESSAGE_TYPE_UNSUBSCRIBED = 13;
+  WS_MESSAGE_TYPE_LOGS = 14;
+  WS_MESSAGE_TYPE_LOG = 15;
+  WS_MESSAGE_TYPE_COMMAND_RESULT = 16;
+  WS_MESSAGE_TYPE_ERROR = 17;
+  WS_MESSAGE_TYPE_PONG = 18;
+}
+
+// Client -> Server messages
+message WebSocketClientMessage {
+  WSMessageType type = 1;
+  // Client payload for the server
+  oneof payload {
+    AuthMessage auth = 2;
+    SubscribeMessage subscribe = 3;
+    UnsubscribeMessage unsubscribe = 4;
+    CommandMessage command = 5;
+  }
+}
+
+// Server -> Client messages
+message WebSocketServerMessage {
+  WSMessageType type = 1;
+  // Server payload for the client
+  oneof payload {
+    AuthOkMessage auth_ok = 2;
+    AuthFailMessage auth_fail = 3;
+    SubscribedMessage subscribed = 4;
+    UnsubscribedMessage unsubscribed = 5;
+    LogsMessage logs = 6;
+    LogMessage log = 7;
+    CommandResultMessage command_result = 8;
+    ErrorMessage error = 9;
+  }
+}
+
+// Auth request
+message AuthMessage {
+  string token = 1;
+}
+
+// Subscribe to server logs
+message SubscribeMessage {
+  string server_id = 1;
+  int32 tail = 2;
+}
+
+// Unsubscribe from server logs
+message UnsubscribeMessage {
+  string server_id = 1;
+}
+
+// Send command to server
+message CommandMessage {
+  string server_id = 1;
+  string command = 2;
+}
+
+// Auth success
+message AuthOkMessage {
+  string user_id = 1;
+  string username = 2;
+}
+
+// Auth failure
+message AuthFailMessage {
+  string error = 1;
+}
+
+// Subscription confirmed
+message SubscribedMessage {
+  string server_id = 1;
+}
+
+// Unsubscription confirmed
+message UnsubscribedMessage {
+  string server_id = 1;
+}
+
+// Initial batch of logs
+message LogsMessage {
+  string server_id = 1;
+  repeated LogEntry logs = 2;
+}
+
+// Single new log entry
+message LogMessage {
+  string server_id = 1;
+  LogEntry log = 2;
+}
+
+// Command execution result
+message CommandResultMessage {
+  string server_id = 1;
+  bool success = 2;
+  string output = 3;
+  string error = 4;
+}
+
+// Error message
+message ErrorMessage {
+  string error = 1;
+}

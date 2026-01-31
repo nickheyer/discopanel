@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
+	import { get } from 'svelte/store';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { create } from '@bufbuild/protobuf';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
@@ -10,9 +11,11 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
-	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw } from '@lucide/svelte';
+	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw, Wifi, WifiOff } from '@lucide/svelte';
 	import AnsiToHtml from 'ansi-to-html';
 	import { getStringForEnum } from '$lib/utils';
+	import { wsClient } from '$lib/stores/websocket.svelte';
+	import { authStore } from '$lib/stores/auth';
 
 	// Create ansi-to-html converter with proper options
 	const ansiConverter = new AnsiToHtml({
@@ -30,53 +33,105 @@
 	let loading = $state(false);
 	let autoScroll = $state(true);
 	let scrollAreaRef = $state<HTMLDivElement | null>(null);
-	let pollingInterval: ReturnType<typeof setInterval> | null = null;
 	let tailLines = $state(500);
 
-	onMount(() => {
-		if (active) {
-			fetchLogs();
-			startPolling();
-		}
-	});
+	// Ws state
+	let wsConnectionState = $derived(wsClient.state.connectionState);
+
+	// Cleanup functions for handlers
+	let cleanupHandlers: (() => void)[] = [];
+
+	// Track previous server ID
+	let previousServerId = server.id;
 
 	onDestroy(() => {
-		stopPolling();
+		untrack(() => cleanupWebSocket());
 	});
 
 	// Start/stop polling based on active prop
 	$effect(() => {
 		if (active) {
-			fetchLogs();
+			untrack(() => setupWebSocket());
 		} else {
-			stopPolling();
+			untrack(() => cleanupWebSocket());
 		}
 	});
 
-	// Clear logs and fetch new ones when server changes
-	let previousServerId = $state(server.id);
+	// Handle server changes
 	$effect(() => {
-		if (server.id !== previousServerId) {
-			previousServerId = server.id;
-			logEntries = [];
-			command = '';
-			if (active) {
-				fetchLogs();
-			}
+		const currentServerId = server.id;
+		if (currentServerId !== previousServerId) {
+			const oldServerId = previousServerId;
+			previousServerId = currentServerId;
+
+			untrack(() => {
+				// Unsubscribe from old server
+				wsClient.unsubscribe(oldServerId);
+				logEntries = [];
+				command = '';
+
+				// Subscribe to new server
+				if (active) {
+					wsClient.subscribe(currentServerId, tailLines);
+				}
+			});
 		}
 	});
 
-	function startPolling() {
-		if (!pollingInterval) {
-			pollingInterval = setInterval(fetchLogs, 3000);
+	function setupWebSocket() {
+		// Clean up any existing handlers
+		cleanupWebSocket();
+
+		// Connect WebSocket if not already connected
+		wsClient.connect();
+
+		// Authenticate with stored token
+		const authState = get(authStore);
+		if (authState.token) {
+			wsClient.authenticate(authState.token);
 		}
+
+		// Register handlers
+		const unsubLogs = wsClient.onLogs((serverId, logs) => {
+			if (serverId === server.id) {
+				logEntries = logs;
+			}
+		});
+
+		const unsubLogEntry = wsClient.onLogEntry((serverId, log) => {
+			if (serverId === server.id) {
+				logEntries = [...logEntries, log];
+				// Trim to tailLines limit
+				if (logEntries.length > tailLines) {
+					logEntries = logEntries.slice(-tailLines);
+				}
+			}
+		});
+
+		const unsubCommandResult = wsClient.onCommandResult((result) => {
+			if (result.serverId === server.id) {
+				loading = false;
+				if (result.success) {
+					toast.success('Command sent successfully');
+				} else {
+					toast.error(result.error || 'Failed to execute command');
+				}
+			}
+		});
+
+		cleanupHandlers = [unsubLogs, unsubLogEntry, unsubCommandResult];
+
+		// Subscribe to server logs
+		wsClient.subscribe(server.id, tailLines);
 	}
 
-	function stopPolling() {
-		if (pollingInterval) {
-			clearInterval(pollingInterval);
-			pollingInterval = null;
-		}
+	function cleanupWebSocket() {
+		// Unsubscribe from current server
+		wsClient.unsubscribe(server.id);
+
+		// Clean up handlers
+		cleanupHandlers.forEach(cleanup => cleanup());
+		cleanupHandlers = [];
 	}
 
 	// Handle auto-scrolling
@@ -95,7 +150,7 @@
 		if (!scrollAreaRef) return;
 
 		const { scrollTop, scrollHeight, clientHeight } = scrollAreaRef;
-		const isAtBottom = scrollHeight - scrollTop - clientHeight < 5; // Relock happens in last 5 px of scroll container
+		const isAtBottom = scrollHeight - scrollTop - clientHeight < 5;
 
 		if (isAtBottom && !autoScroll) {
 			autoScroll = true;
@@ -128,27 +183,29 @@
 		if (!command.trim()) return;
 
 		loading = true;
-		try {
-			const request = create(SendCommandRequestSchema, {
-				id: server.id,
-				command: command
-			});
-			const response = await rpcClient.server.sendCommand(request);
-			if (response.success) {
-				toast.success('Command sent successfully');
-			} else {
-				toast.error(response.error || 'Failed to execute command');
-			}
-			command = '';
+		const cmdToSend = command;
+		command = '';
 
-			// Refresh logs after delay to see cmd output
-			setTimeout(fetchLogs, 1000);
-		} catch (error) {
-			toast.error(
-				'Failed to send command: ' + (error instanceof Error ? error.message : 'Unknown error')
-			);
-		} finally {
-			loading = false;
+		// Use WebSocket if connected, otherwise fallback to RPC
+		if (wsClient.isReady) {
+			wsClient.sendCommand(server.id, cmdToSend);
+		} else {
+			try {
+				const request = create(SendCommandRequestSchema, {
+					id: server.id,
+					command: cmdToSend
+				});
+				const response = await rpcClient.server.sendCommand(request);
+				if (!response.success) {
+					toast.error(response.error || 'Failed to execute command');
+				}
+			} catch (error) {
+				console.error(
+					'Failed to send command: ' + (error instanceof Error ? error.message : 'Unknown error')
+				);
+			} finally {
+				loading = false;
+			}
 		}
 	}
 
@@ -174,6 +231,25 @@
 		URL.revokeObjectURL(url);
 		toast.success('Logs downloaded');
 	}
+
+	function handleTailChange() {
+		// Re-subscribe with new tail count
+		if (wsClient.isReady) {
+			wsClient.unsubscribe(server.id);
+			wsClient.subscribe(server.id, tailLines);
+		} else {
+			fetchLogs();
+		}
+	}
+
+	function getConnectionColor() {
+		switch (wsConnectionState) {
+			case 'authenticated': return 'text-green-500';
+			case 'connected': return 'text-yellow-500';
+			case 'connecting': return 'text-yellow-500';
+			default: return 'text-zinc-500';
+		}
+	}
 </script>
 
 <ResizablePaneGroup
@@ -189,6 +265,11 @@
 					<Badge variant={(server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY) ? 'default' : 'secondary'} class="text-xs">
 						{getStringForEnum(ServerStatus, server.status)?.toLowerCase()}
 					</Badge>
+					{#if wsConnectionState === 'authenticated'}
+					<Wifi class="h-3 w-3 {getConnectionColor()}" />
+				{:else}
+					<WifiOff class="h-3 w-3 {getConnectionColor()}" />
+				{/if}
 				</div>
 				<div class="flex items-center gap-1">
 					<Button
@@ -281,7 +362,7 @@
 					<span>Tail:</span>
 					<select
 						bind:value={tailLines}
-						onchange={fetchLogs}
+						onchange={handleTailChange}
 						class="rounded border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-xs"
 					>
 						<option value={100}>100</option>

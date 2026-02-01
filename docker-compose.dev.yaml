@@ -1,0 +1,18 @@
+services:
+  discopanel:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.discopanel
+    container_name: discopanel-dev
+    restart: "no"
+    network_mode: host
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/discopanel:/app/data
+    environment:
+      - DISCOPANEL_DATA_DIR=/app/data
+      - DISCOPANEL_HOST_DATA_PATH=/tmp/discopanel
+      - TZ=UTC
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

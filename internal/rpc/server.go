@@ -129,13 +129,12 @@ func (s *Server) setupHandler() {
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
 
 	// Register WebSocket handler
-	mux.Handle("/ws/console", s.wsHub)
+	mux.Handle("/ws", s.wsHub)
 
 	// Serve frontend for non-RPC routes
 	s.setupFrontend(mux)
 
-	// Use h2c for HTTP/2 cleartext (for development)
-	// In production, use TLS
+	// h2c HTTP/2 cleartext
 	s.handler = h2c.NewHandler(mux, &http2.Server{})
 }
 

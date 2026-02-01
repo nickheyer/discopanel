@@ -7,11 +7,16 @@ build/
 backups/
 discopanel
 !cmd/discopanel
-!web/discopanel
-!web/discopanel/**/*
+web/discopanel/build/
+web/discopanel/node_modules/
+web/discopanel/.svelte-kit/
 data/
+tmp/
+sandbox/
+backups/
 *.db
 config.yaml
+
 
 # User-specific files
 *.rsuser

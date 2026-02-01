@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image modules proto proto-clean proto-lint proto-format proto-breaking gen
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker modules proto proto-clean proto-lint proto-format proto-breaking gen
 
 DATA_DIR := ./data
 DB_FILE := $(DATA_DIR)/discopanel.db
@@ -27,6 +27,12 @@ run:
 	wait $$BACKEND_PID $$FRONTEND_PID
 
 dev: clean run
+
+# Build and run docker container for local dev
+dev-docker:
+	@echo "Building and running Docker container for development..."
+	docker compose -f docker-compose.dev.yaml build --no-cache
+	docker compose -f docker-compose.dev.yaml up
 
 # Production build and run
 prod: build-frontend
@@ -172,6 +178,7 @@ help:
 	@echo "  make build          - Build standalone binary with embedded frontend"
 	@echo "  make prod           - Build and run in production mode"
 	@echo "  make image          - Build and push Docker image to :dev tag"
+	@echo "  make dev-docker     - Build and run Docker container locally (no cache)"
 	@echo "  make modules        - Build and push all module Docker images"
 	@echo "  make clean          - Remove data directory and build artifacts"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"

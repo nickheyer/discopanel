@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
-	import { get } from 'svelte/store';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { create } from '@bufbuild/protobuf';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
@@ -15,7 +14,6 @@
 	import AnsiToHtml from 'ansi-to-html';
 	import { getStringForEnum } from '$lib/utils';
 	import { wsClient } from '$lib/stores/websocket.svelte';
-	import { authStore } from '$lib/stores/auth';
 
 	// Create ansi-to-html converter with proper options
 	const ansiConverter = new AnsiToHtml({
@@ -82,14 +80,8 @@
 		// Clean up any existing handlers
 		cleanupWebSocket();
 
-		// Connect WebSocket if not already connected
+		// Connect WebSocket
 		wsClient.connect();
-
-		// Authenticate with stored token
-		const authState = get(authStore);
-		if (authState.token) {
-			wsClient.authenticate(authState.token);
-		}
 
 		// Register handlers
 		const unsubLogs = wsClient.onLogs((serverId, logs) => {

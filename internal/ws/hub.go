@@ -72,8 +72,6 @@ func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, store *s
 		docker:      docker,
 		log:         log,
 		upgrader: websocket.Upgrader{
-			ReadBufferSize:  1024,
-			WriteBufferSize: 1024,
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins (CORS handled elsewhere)
 			},

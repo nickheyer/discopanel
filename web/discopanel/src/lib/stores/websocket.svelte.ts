@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { get } from 'svelte/store';
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
 import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
 import {
@@ -14,6 +15,7 @@ import {
 	type LogMessage,
 	type CommandResultMessage
 } from '$lib/proto/discopanel/v1/websocket_pb';
+import { authStore } from '$lib/stores/auth';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'authenticated';
 
@@ -34,7 +36,6 @@ class WebSocketClient {
 	private reconnectDelay = 1000;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private pingTimer: ReturnType<typeof setInterval> | null = null;
-	private pendingAuth: string | null = null;
 
 	// Svelte 5 runes for reactive state
 	state = $state<WebSocketState>({
@@ -60,7 +61,7 @@ class WebSocketClient {
 		this.state.error = null;
 
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-		const wsUrl = `${protocol}//${window.location.host}/ws/console`;
+		const wsUrl = `${protocol}//${window.location.host}/ws`;
 
 		try {
 			this.socket = new WebSocket(wsUrl);
@@ -71,10 +72,9 @@ class WebSocketClient {
 				this.state.connectionState = 'connected';
 				this.reconnectAttempts = 0;
 
-				// Authenticate if we have a pending token
-				if (this.pendingAuth) {
-					this.authenticate(this.pendingAuth);
-				}
+				// Authenticate with token or empty string for non auth to get anon token
+				const authState = get(authStore);
+				this.authenticate(authState.token || '');
 
 				// Start ping timer
 				this.startPingTimer();
@@ -235,14 +235,7 @@ class WebSocketClient {
 		return true;
 	}
 
-	authenticate(token: string): void {
-		this.pendingAuth = token;
-
-		if (this.state.connectionState !== 'connected' && this.state.connectionState !== 'authenticated') {
-			// Will authenticate after connection
-			return;
-		}
-
+	private authenticate(token: string): void {
 		const msg = create(WebSocketClientMessageSchema, {
 			type: WSMessageType.WS_MESSAGE_TYPE_AUTH,
 			payload: {
@@ -257,7 +250,6 @@ class WebSocketClient {
 		this.subscriptions.set(serverId, true);
 
 		if (this.state.connectionState !== 'authenticated') {
-			// Will subscribe after authentication
 			return;
 		}
 
@@ -290,7 +282,6 @@ class WebSocketClient {
 
 	sendCommand(serverId: string, command: string): void {
 		if (this.state.connectionState !== 'authenticated') {
-			console.warn('[WS] Cannot send command, not authenticated');
 			return;
 		}
 

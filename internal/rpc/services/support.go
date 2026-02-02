@@ -735,9 +735,19 @@ func toInt32Slice(intSlice []int) []int32 {
 
 // getVersionInfo gets version information for the application
 func getVersionInfo() string {
-	appV := os.Getenv("APP_VERSION")
-	if appV != "" {
+	// Check env var first
+	if appV := os.Getenv("APP_VERSION"); appV != "" {
 		return appV
+	}
+
+	// Check version file stored in home
+	if home, err := os.UserHomeDir(); err == nil {
+		versionFile := filepath.Join(home, ".discopanel")
+		if data, err := os.ReadFile(versionFile); err == nil {
+			if v := strings.TrimSpace(string(data)); v != "" {
+				return v
+			}
+		}
 	}
 
 	info, err := buildinfo.ReadFile(os.Args[0])

@@ -9,6 +9,7 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, Globe, Save, Copy, AlertCircle, CheckCircle2, XCircle } from '@lucide/svelte';
+	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import type { GetServerRoutingResponse, ProxyRoute } from '$lib/proto/discopanel/v1/proxy_pb';
@@ -133,9 +134,13 @@
 		}
 	}
 
-	function copyToClipboard(text: string) {
-		navigator.clipboard.writeText(text);
-		toast.success('Copied to clipboard');
+	async function copyToClipboard(text: string) {
+		const success = await copyText(text);
+		if (success) {
+			toast.success('Copied to clipboard');
+		} else {
+			toast.error('Failed to copy to clipboard');
+		}
 	}
 
 	function getFullHostname() {

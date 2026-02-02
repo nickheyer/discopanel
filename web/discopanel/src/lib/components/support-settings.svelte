@@ -28,6 +28,7 @@
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { serversStore } from '$lib/stores/servers';
 	import type { Server as ServerType } from '$lib/proto/discopanel/v1/common_pb';
 
@@ -177,20 +178,11 @@
 
 	async function copyReferenceId() {
 		if (!referenceId) return;
-
-		try {
-			await navigator.clipboard.writeText(referenceId);
+		const success = await copyToClipboard(referenceId);
+		if (success) {
 			toast.success('Reference ID copied to clipboard!');
-		} catch (error) { // Fallback for jank browsers
-			const textArea = document.createElement('textarea');
-			textArea.value = referenceId;
-			textArea.style.position = 'fixed';
-        	textArea.style.opacity = '0';
-			document.body.appendChild(textArea);
-			textArea.select();
-			document.execCommand('copy');
-			document.body.removeChild(textArea);
-			toast.success('Reference ID copied to clipboard!');
+		} else {
+			toast.error('Failed to copy to clipboard');
 		}
 	}
 </script>

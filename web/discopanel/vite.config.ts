@@ -2,19 +2,32 @@ import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { execSync } from 'child_process';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
-// Get version from env for CI builds || git tag for local
+// Get version from env for CI builds || version file || git tag for local
 function getVersion() {
 	if (process.env.APP_VERSION) {
 		return process.env.APP_VERSION;
 	}
 
+	// Check version file stored in home
 	try {
-		return execSync('git describe --tags --always').toString().trim();
-	} catch {
-		console.warn('Failed to get git version, using default');
-		return 'dev';
-	}
+		const versionFile = join(homedir(), '.discopanel');
+		if (existsSync(versionFile)) {
+			const version = readFileSync(versionFile, 'utf8').trim();
+			if (version) return version;
+		}
+	} catch {}
+
+	// Derive version from git tags
+	try {
+		const version = execSync('git describe --tags --always').toString().trim();
+		if (version) return version;
+	} catch {}
+
+	return 'dev'; // default
 }
 
 export default defineConfig({

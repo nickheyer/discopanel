@@ -5,6 +5,7 @@
 	import { AliasCategory, type AliasInfo } from '$lib/proto/discopanel/v1/module_pb';
 	import { Braces, Server, Box, Sparkles, Loader2, Check, Copy } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface Props {
 		serverId?: string;
@@ -44,14 +45,14 @@
 	let copiedAlias = $state<string | null>(null);
 
 	async function handleCopy(alias: string) {
-		try {
-			await navigator.clipboard.writeText(alias);
+		const success = await copyToClipboard(alias);
+		if (success) {
 			copiedAlias = alias;
 			toast.success('Copied to clipboard', { description: alias });
 			setTimeout(() => {
 				copiedAlias = null;
 			}, 2000);
-		} catch (error) {
+		} else {
 			toast.error('Failed to copy to clipboard');
 		}
 	}

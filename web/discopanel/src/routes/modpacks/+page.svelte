@@ -377,9 +377,9 @@
 			<AlertTitle>CurseForge API Key Required</AlertTitle>
 			<AlertDescription>
 				<div class="space-y-2">
-					<p>To sync modpacks from CurseForge, you need to configure a CurseForge API key in the settings.</p>
+					<p>To sync modpacks from CurseForge, you need to <a href="https://console.curseforge.com/#/api-keys" target="_blank" rel="noopener noreferrer">generate a CurseForge API key</a> and add it to your server defaults.</p>
 					<div class="flex items-center gap-2 mt-2">
-						<Button size="sm" href="/settings">
+						<Button size="sm" href="/settings#cfApiKey">
 							<Settings class="h-4 w-4 mr-2" />
 							Configure in Settings
 						</Button>

@@ -10,6 +10,7 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { toast } from 'svelte-sonner';
 	import { Save, RefreshCw, Loader2, Link, CircleDot, Circle } from '@lucide/svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ConfigCategory, ConfigProperty } from '$lib/proto/discopanel/v1/config_pb';
@@ -293,11 +294,15 @@
 		replaceState(url.toString(), {});
 	}
 
-	function copyLinkToClipboard(anchor: string) {
+	async function copyLinkToClipboard(anchor: string) {
 		const url = new URL(window.location.href);
 		url.hash = anchor;
-		navigator.clipboard.writeText(url.toString());
-		toast.success('Link copied to clipboard');
+		const success = await copyToClipboard(url.toString());
+		if (success) {
+			toast.success('Link copied to clipboard');
+		} else {
+			toast.error('Failed to copy to clipboard');
+		}
 	}
 
 	function checkUrlHash() {

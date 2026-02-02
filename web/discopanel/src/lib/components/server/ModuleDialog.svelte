@@ -17,6 +17,7 @@
 		Loader2, ArrowLeft, Package, Check, Plus, Trash2, Copy, Save, X,
 		Settings, Network, Variable, HardDrive, Wrench, Info, Play, Heart
 	} from '@lucide/svelte';
+	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
 
 	interface Props {
 		open: boolean;
@@ -436,10 +437,10 @@
 	}
 
 	async function copyToClipboard(text: string) {
-		try {
-			await navigator.clipboard.writeText(text);
+		const success = await copyText(text);
+		if (success) {
 			toast.success('Copied to clipboard');
-		} catch {
+		} else {
 			toast.error('Failed to copy');
 		}
 	}

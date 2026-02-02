@@ -19,6 +19,7 @@
 	import type { GetServerRoutingResponse } from '$lib/proto/discopanel/v1/proxy_pb';
 	import { GetServerRequestSchema, DeleteServerRequestSchema, StartServerRequestSchema, StopServerRequestSchema, RestartServerRequestSchema, RecreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import { formatBytes } from '$lib/utils';
+	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
 	import ServerConsole from '$lib/components/server-console.svelte';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
 	import ServerSettings from '$lib/components/server-settings.svelte';
@@ -129,10 +130,10 @@
 
 	async function copyToClipboard(text?: string) {
 		if (!text) return;
-		try {
-			await navigator.clipboard.writeText(text);
+		const success = await copyText(text);
+		if (success) {
 			toast.success('Copied to clipboard!');
-		} catch {
+		} else {
 			toast.error('Failed to copy to clipboard');
 		}
 	}

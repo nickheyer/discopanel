@@ -270,8 +270,8 @@ type ServerConfig struct {
 	ForgeInstallerURL *string `json:"forgeInstallerUrl" env:"FORGE_INSTALLER_URL" default:"" desc:"URL to download Forge installer" input:"text" label:"Forge Installer URL"`
 
 	// CurseForge
-	CFAPIKey                  *string `json:"cfApiKey" env:"CF_API_KEY" default:"" desc:"CurseForge (Eternal) API Key" input:"password" label:"CurseForge API Key"`
-	CFAPIKeyFile              *string `json:"cfApiKeyFile" env:"CF_API_KEY_FILE" default:"" desc:"Path to file containing CurseForge API Key" input:"text" label:"CurseForge API Key File"`
+	CFAPIKey                  *string `json:"cfApiKey" env:"CF_API_KEY" default:"" desc:"CurseForge API Key (https://console.curseforge.com/#/api-keys)" input:"password" label:"CurseForge API Key"`
+	CFAPIKeyFile              *string `json:"cfApiKeyFile" env:"CF_API_KEY_FILE" default:"" desc:"Path to file containing CurseForge API Key (https://console.curseforge.com/#/api-keys)" input:"text" label:"CurseForge API Key File"`
 	CFPageURL                 *string `json:"cfPageUrl" env:"CF_PAGE_URL" default:"" desc:"URL to modpack or specific file" input:"text" label:"CurseForge Page URL"`
 	CFSlug                    *string `json:"cfSlug" env:"CF_SLUG" default:"" desc:"Modpack slug identifier" input:"text" label:"CurseForge Slug"`
 	CFFileID                  *string `json:"cfFileId" env:"CF_FILE_ID" default:"" desc:"Mod CurseForge numerical ID" input:"text" label:"CurseForge File ID"`

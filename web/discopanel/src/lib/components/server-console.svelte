@@ -32,6 +32,7 @@
 	let autoScroll = $state(true);
 	let scrollAreaRef = $state<HTMLDivElement | null>(null);
 	let tailLines = $state(500);
+	const MAX_LOG_ENTRIES = 5000;
 
 	// Ws state
 	let wsConnectionState = $derived(wsClient.state.connectionState);
@@ -86,17 +87,19 @@
 		// Register handlers
 		const unsubLogs = wsClient.onLogs((serverId, logs) => {
 			if (serverId === server.id) {
-				logEntries = logs;
+				logEntries = logs.length > MAX_LOG_ENTRIES
+					? logs.slice(-MAX_LOG_ENTRIES)
+					: logs;
 			}
 		});
 
-		const unsubLogEntry = wsClient.onLogEntry((serverId, log) => {
-			if (serverId === server.id) {
-				logEntries = [...logEntries, log];
-				// Trim to tailLines limit
-				if (logEntries.length > tailLines) {
-					logEntries = logEntries.slice(-tailLines);
-				}
+		const unsubLogEntry = wsClient.onLogEntry((serverId, logs) => {
+			if (serverId === server.id && logs.length > 0) {
+				// Just append logs - browser preserves scrollTop naturally
+				const combined = [...logEntries, ...logs];
+				logEntries = combined.length > MAX_LOG_ENTRIES
+					? combined.slice(-MAX_LOG_ENTRIES)
+					: combined;
 			}
 		});
 
@@ -165,7 +168,10 @@
 				tail: tailLines
 			});
 			const response = await rpcClient.server.getServerLogs(request);
-			logEntries = response.logs || [];
+			const logs = response.logs || [];
+			logEntries = logs.length > MAX_LOG_ENTRIES
+				? logs.slice(-MAX_LOG_ENTRIES)
+				: logs;
 		} catch (error) {
 			console.error('Failed to fetch logs:', error);
 		}

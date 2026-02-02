@@ -26,7 +26,7 @@ export interface WebSocketState {
 
 type MessageHandler = (message: WebSocketServerMessage) => void;
 type LogHandler = (serverId: string, logs: LogEntry[]) => void;
-type LogEntryHandler = (serverId: string, log: LogEntry) => void;
+type LogEntryHandler = (serverId: string, logs: LogEntry[]) => void;
 type CommandResultHandler = (result: CommandResultMessage) => void;
 
 class WebSocketClient {
@@ -36,6 +36,11 @@ class WebSocketClient {
 	private reconnectDelay = 1000;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private pingTimer: ReturnType<typeof setInterval> | null = null;
+
+	// Log batching
+	private static readonly LOG_FLUSH_INTERVAL_MS = 100;
+	private logBuffer = new Map<string, LogEntry[]>();
+	private logFlushTimer: ReturnType<typeof setInterval> | null = null;
 
 	// Svelte 5 runes for reactive state
 	state = $state<WebSocketState>({
@@ -76,8 +81,9 @@ class WebSocketClient {
 				const authState = get(authStore);
 				this.authenticate(authState.token || '');
 
-				// Start ping timer
+				// Start ping timer and log flush timer
 				this.startPingTimer();
+				this.startLogFlushTimer();
 			};
 
 			this.socket.onclose = (event) => {
@@ -126,6 +132,29 @@ class WebSocketClient {
 			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
+		if (this.logFlushTimer) {
+			clearInterval(this.logFlushTimer);
+			this.logFlushTimer = null;
+		}
+		this.flushLogBuffer();
+	}
+
+	private startLogFlushTimer(): void {
+		if (this.logFlushTimer) return;
+		this.logFlushTimer = setInterval(() => {
+			this.flushLogBuffer();
+		}, WebSocketClient.LOG_FLUSH_INTERVAL_MS);
+	}
+
+	private flushLogBuffer(): void {
+		if (this.logBuffer.size === 0) return;
+
+		for (const [serverId, logs] of this.logBuffer) {
+			if (logs.length > 0) {
+				this.logEntryHandlers.forEach((handler) => handler(serverId, logs));
+			}
+		}
+		this.logBuffer.clear();
 	}
 
 	private scheduleReconnect(): void {
@@ -195,10 +224,10 @@ class WebSocketClient {
 				case WSMessageType.WS_MESSAGE_TYPE_LOG:
 					if (msg.payload.case === 'log') {
 						const logMsg = msg.payload.value as LogMessage;
-						if (logMsg.log) {
-							this.logEntryHandlers.forEach((handler) =>
-								handler(logMsg.serverId, logMsg.log!)
-							);
+						if (logMsg.log) { // Buffer log entries for batched dispatch
+							const buffer = this.logBuffer.get(logMsg.serverId) || [];
+							buffer.push(logMsg.log);
+							this.logBuffer.set(logMsg.serverId, buffer);
 						}
 					}
 					break;

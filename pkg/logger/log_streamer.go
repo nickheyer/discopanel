@@ -377,6 +377,26 @@ func (ls *LogStreamer) Unsubscribe(containerID string, ch chan *v1.LogEntry) {
 	}
 }
 
+// Move all subscribers from old container to new container
+func (ls *LogStreamer) MigrateSubscribers(oldContainerID, newContainerID string) {
+	ls.subMu.Lock()
+	defer ls.subMu.Unlock()
+
+	oldSubs, ok := ls.subscribers[oldContainerID]
+	if !ok || len(oldSubs) == 0 {
+		return
+	}
+
+	// Move subscribers to new container
+	if ls.subscribers[newContainerID] == nil {
+		ls.subscribers[newContainerID] = make(map[chan *v1.LogEntry]bool)
+	}
+	for ch := range oldSubs {
+		ls.subscribers[newContainerID][ch] = true
+	}
+	delete(ls.subscribers, oldContainerID)
+}
+
 // broadcast sends a log entry to all subscribers for a container
 func (ls *LogStreamer) broadcast(containerID string, entry *v1.LogEntry) {
 	ls.subMu.RLock()

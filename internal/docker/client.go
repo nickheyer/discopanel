@@ -165,6 +165,7 @@ type ClientConfig struct {
 type ContainerLogStreamer interface {
 	StartStreaming(containerID string) error
 	StopStreaming(containerID string)
+	MigrateSubscribers(oldContainerID, newContainerID string)
 }
 
 type Client struct {
@@ -587,6 +588,11 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 	result.NewContainerID = newContainerID
+
+	// Migrate log subscribers from old to new container
+	if c.logStreamer != nil && oldContainerID != "" {
+		c.logStreamer.MigrateSubscribers(oldContainerID, newContainerID)
+	}
 
 	// Start if it was running before
 	if result.WasRunning {

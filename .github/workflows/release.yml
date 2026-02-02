@@ -100,28 +100,26 @@ jobs:
           - goos: linux
             goarch: amd64
             suffix: linux-amd64
-            cgo: 0
             runner: ubuntu-latest
           - goos: linux
             goarch: arm64
             suffix: linux-arm64
-            cgo: 0
             runner: ubuntu-latest
+            cc: aarch64-linux-gnu-gcc
           - goos: darwin
             goarch: amd64
             suffix: darwin-amd64
-            cgo: 0
-            runner: ubuntu-latest
+            runner: macos-13
           - goos: darwin
             goarch: arm64
             suffix: darwin-arm64
-            cgo: 1
             runner: macos-latest
           - goos: windows
             goarch: amd64
             suffix: windows-amd64.exe
-            cgo: 1
             runner: ubuntu-latest
+            cc: x86_64-w64-mingw32-gcc
+            cxx: x86_64-w64-mingw32-g++
 
     steps:
       - name: Checkout code
@@ -138,8 +136,14 @@ jobs:
         with:
           go-version: '1.24.5'
 
-      - name: Install cross-compiler for Windows
-        if: matrix.goos == 'windows' && matrix.cgo == 1
+      - name: Install cross-compiler (Linux ARM64)
+        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install cross-compiler (Windows)
+        if: matrix.goos == 'windows'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
@@ -150,32 +154,12 @@ jobs:
           name: frontend-build
           path: web/discopanel/build
 
-      - name: Build binary (Darwin ARM64 with CGO)
-        if: matrix.goos == 'darwin' && matrix.goarch == 'arm64' && matrix.cgo == 1
+      - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 1
-        run: |
-          go build -tags embed -o discopanel-${{ matrix.suffix }} ./cmd/discopanel
-
-      - name: Build binary (Windows with CGO)
-        if: matrix.goos == 'windows' && matrix.cgo == 1
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 1
-          CC: x86_64-w64-mingw32-gcc
-          CXX: x86_64-w64-mingw32-g++
-        run: |
-          go build -tags embed -o discopanel-${{ matrix.suffix }} ./cmd/discopanel
-
-      - name: Build binary (Standard)
-        if: (matrix.goos != 'darwin' || matrix.goarch != 'arm64' || matrix.cgo != 1) && (matrix.goos != 'windows' || matrix.cgo != 1)
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
+          CC: ${{ matrix.cc || '' }}
+          CXX: ${{ matrix.cxx || '' }}
         run: |
           go build -tags embed -o discopanel-${{ matrix.suffix }} ./cmd/discopanel
 

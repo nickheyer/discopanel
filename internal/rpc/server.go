@@ -18,7 +18,6 @@ import (
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc/services"
 	"github.com/nickheyer/discopanel/internal/scheduler"
-	"github.com/nickheyer/discopanel/internal/ws"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	"github.com/nickheyer/discopanel/pkg/upload"
@@ -42,7 +41,6 @@ type Server struct {
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	uploadManager    *upload.Manager
-	wsHub            *ws.Hub
 }
 
 // Creates new Connect RPC server
@@ -64,10 +62,6 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
 	uploadManager := upload.NewManager(cfg.Storage.TempDir, uploadTTL, cfg.Upload.MaxUploadSize, log)
 
-	// Initialize WebSocket hub
-	wsHub := ws.NewHub(logStreamer, authManager, store, docker, log)
-	go wsHub.Run()
-
 	s := &Server{
 		store:            store,
 		docker:           docker,
@@ -81,7 +75,6 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
 		uploadManager:    uploadManager,
-		wsHub:            wsHub,
 	}
 
 	s.setupHandler()
@@ -127,9 +120,6 @@ func (s *Server) setupHandler() {
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
-
-	// Register WebSocket handler
-	mux.Handle("/ws", s.wsHub)
 
 	// Serve frontend for non-RPC routes
 	s.setupFrontend(mux)

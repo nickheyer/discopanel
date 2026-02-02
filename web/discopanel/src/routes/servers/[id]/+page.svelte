@@ -55,12 +55,11 @@
 	$effect(() => {
 		if (serverId) {
 			if (interval) clearInterval(interval);
-			// Reset state when switching servers to show loading
+			// Reset state when switching servers
 			const prev = untrack(() => prevServerId);
 			if (prev !== serverId) {
 				untrack(() => {
 					loading = true;
-					server = null;
 					prevServerId = serverId;
 				});
 			}

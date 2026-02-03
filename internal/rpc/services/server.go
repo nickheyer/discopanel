@@ -1268,43 +1268,18 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
 	}
 
-	// Stop and remove existing container if it exists
-	if server.ContainerID != "" {
-		// Stopping non existent containers...
-		if _, err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
-			s.log.Debug("Failed to stop container during recreate (may not exist): %v", err)
-		}
-
-		// Removing non existent containers...
-		if err := s.docker.RemoveContainer(ctx, server.ContainerID); err != nil {
-			s.log.Debug("Failed to remove container during recreate (may not exist): %v", err)
-		}
-
-		server.ContainerID = ""
-	}
-
-	// Create new container
-	containerID, err := s.docker.CreateContainer(ctx, server, serverConfig)
+	// Recreate container
+	result, err := s.docker.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
 	if err != nil {
-		s.log.Error("Failed to create container: %v", err)
+		s.log.Error("Failed to recreate container: %v", err)
 		server.Status = storage.StatusError
 		if updateErr := s.store.UpdateServer(ctx, server); updateErr != nil {
 			s.log.Error("Failed to update server status: %v", updateErr)
 		}
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server container"))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server container"))
 	}
 
-	server.ContainerID = containerID
-
-	// Start the container
-	if err := s.docker.StartContainer(ctx, containerID); err != nil {
-		s.log.Error("Failed to start container: %v", err)
-		server.Status = storage.StatusError
-		if updateErr := s.store.UpdateServer(ctx, server); updateErr != nil {
-			s.log.Error("Failed to update server status: %v", updateErr)
-		}
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server container"))
-	}
+	server.ContainerID = result.NewContainerID
 
 	// Update server status
 	now := time.Now()
@@ -1328,7 +1303,7 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 		s.log.Error("Failed to clear ephemeral config fields: %v", err)
 	}
 
-	s.log.Info("Server %s recreated successfully with new container %s", server.Name, containerID)
+	s.log.Info("Server %s recreated successfully with new container %s", server.Name, result.NewContainerID)
 
 	return connect.NewResponse(&v1.RecreateServerResponse{
 		Status: "recreated",

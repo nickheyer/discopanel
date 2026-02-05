@@ -12,8 +12,12 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"google.golang.org/protobuf/proto"
 )
 
 type ServerMetrics struct {
@@ -75,7 +79,10 @@ type Collector struct {
 	wg       sync.WaitGroup
 
 	collectorConfig CollectorConfig
+	emitter         emit.Emitter
 }
+
+func (c *Collector) SetEmitter(e emit.Emitter) { c.emitter = e }
 
 // Creates a new metrics collector
 func NewCollector(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger, collectorCfg ...CollectorConfig) *Collector {
@@ -293,7 +300,7 @@ func (c *Collector) collectRCONData() {
 
 		// Get TPS if configured
 		if server.TPSCommand != "" {
-			for _, cmd := range strings.Split(server.TPSCommand, " ?? ") {
+			for cmd := range strings.SplitSeq(server.TPSCommand, " ?? ") {
 				cmd = strings.TrimSpace(cmd)
 				if cmd == "" {
 					continue
@@ -359,14 +366,51 @@ func (c *Collector) collectDiskUsage() {
 // Updates metrics for a server
 func (c *Collector) updateMetrics(serverID string, update func(*ServerMetrics)) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	metrics, exists := c.metrics[serverID]
 	if !exists {
 		metrics = &ServerMetrics{ServerID: serverID}
 		c.metrics[serverID] = metrics
 	}
 	update(metrics)
+	c.mu.Unlock()
+
+	if c.emitter == nil {
+		return
+	}
+
+	topic := discopanelv1connect.ServerServiceGetServerProcedure + ":" + serverID
+	if !c.emitter.HasSubscribers(topic) {
+		return
+	}
+
+	server, err := c.store.GetServer(context.Background(), serverID)
+	if err != nil {
+		return
+	}
+
+	c.mu.RLock()
+	m := c.metrics[serverID]
+	if m != nil {
+		server.MemoryUsage = m.MemoryUsage
+		server.CPUPercent = m.CPUPercent
+		server.DiskUsage = m.DiskUsage
+		server.DiskTotal = m.DiskTotal
+		server.PlayersOnline = m.PlayersOnline
+		server.TPS = m.TPS
+		server.SLPAvailable = m.SLPAvailable
+		server.SLPLatencyMs = m.SLPLatencyMs
+		server.MOTD = m.MOTD
+		server.ServerVersion = m.ServerVersion
+		server.ProtocolVersion = m.ProtocolVersion
+		server.PlayerSample = m.PlayerSample
+		server.MaxPlayersSLP = m.MaxPlayers
+		server.Favicon = m.Favicon
+	}
+	c.mu.RUnlock()
+
+	if payload, err := proto.Marshal(&v1.GetServerResponse{Server: server.ToProto()}); err == nil {
+		c.emitter.Publish(topic, payload)
+	}
 }
 
 // Removes metrics for a server on delete

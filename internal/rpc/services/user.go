@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/nickheyer/discopanel/internal/auth"
 	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -20,7 +21,10 @@ type UserService struct {
 	store       *storage.Store
 	authManager *auth.Manager
 	log         *logger.Logger
+	emitter     emit.Emitter
 }
+
+func (s *UserService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // NewUserService creates a new user service
 func NewUserService(store *storage.Store, authManager *auth.Manager, log *logger.Logger) *UserService {
@@ -48,7 +52,7 @@ func (s *UserService) ListUsers(ctx context.Context, req *connect.Request[v1.Lis
 	// Convert DB users to proto users
 	protoUsers := make([]*v1.User, len(users))
 	for i, u := range users {
-		protoUsers[i] = dbUserToProto(u)
+		protoUsers[i] = storage.DBUserToProto(u)
 	}
 
 	return connect.NewResponse(&v1.ListUsersResponse{
@@ -67,7 +71,7 @@ func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.Cr
 	msg := req.Msg
 
 	// Validate role
-	role := protoRoleToDBRole(msg.Role)
+	role := storage.ProtoRoleToDBRole(msg.Role)
 	if role != storage.RoleAdmin && role != storage.RoleEditor && role != storage.RoleViewer {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid role"))
 	}
@@ -80,7 +84,7 @@ func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.Cr
 	}
 
 	return connect.NewResponse(&v1.CreateUserResponse{
-		User: dbUserToProto(newUser),
+		User: storage.DBUserToProto(newUser),
 	}), nil
 }
 
@@ -110,7 +114,7 @@ func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.Up
 		}
 	}
 	if msg.Role != nil {
-		user.Role = protoRoleToDBRole(*msg.Role)
+		user.Role = storage.ProtoRoleToDBRole(*msg.Role)
 	}
 	if msg.IsActive != nil {
 		user.IsActive = *msg.IsActive
@@ -122,7 +126,7 @@ func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.Up
 	}
 
 	return connect.NewResponse(&v1.UpdateUserResponse{
-		User: dbUserToProto(user),
+		User: storage.DBUserToProto(user),
 	}), nil
 }
 

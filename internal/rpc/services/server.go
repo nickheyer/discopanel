@@ -8,24 +8,25 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/nickheyer/discopanel/internal/config"
+	"github.com/nickheyer/discopanel/internal/db"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/proto"
 )
 
 // Compile-time check that ServerService implements the interface
@@ -41,6 +42,21 @@ type ServerService struct {
 	logStreamer      *logger.LogStreamer
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
+	emitter          emit.Emitter
+}
+
+func (s *ServerService) SetEmitter(e emit.Emitter) { s.emitter = e }
+
+func (s *ServerService) emitServerUpdate(server *storage.Server) {
+	if s.emitter == nil {
+		return
+	}
+	topic := discopanelv1connect.ServerServiceGetServerProcedure + ":" + server.ID
+	if s.emitter.HasSubscribers(topic) {
+		if payload, err := proto.Marshal(&v1.GetServerResponse{Server: db.DBServerToProto(server)}); err == nil {
+			s.emitter.Publish(topic, payload)
+		}
+	}
 }
 
 // NewServerService creates a new server service
@@ -54,169 +70,6 @@ func NewServerService(store *storage.Store, docker *docker.Client, config *confi
 		logStreamer:      logStreamer,
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
-	}
-}
-
-// dbServerToProto converts a database server model to proto server
-func dbServerToProto(server *storage.Server) *v1.Server {
-	if server == nil {
-		return nil
-	}
-
-	// Convert JavaVersion string to int32
-	javaVersion, _ := strconv.ParseInt(server.JavaVersion, 10, 32)
-
-	protoServer := &v1.Server{
-		Id:              server.ID,
-		Name:            server.Name,
-		Description:     server.Description,
-		McVersion:       server.MCVersion,
-		Port:            int32(server.Port),
-		ProxyHostname:   server.ProxyHostname,
-		ProxyListenerId: server.ProxyListenerID,
-		ProxyPort:       int32(server.ProxyPort),
-		MaxPlayers:      int32(server.MaxPlayers),
-		Memory:          int32(server.Memory),
-		DataPath:        server.DataPath,
-		ContainerId:     server.ContainerID,
-		JavaVersion:     int32(javaVersion),
-		DockerImage:     server.DockerImage,
-		AutoStart:       server.AutoStart,
-		Detached:        server.Detached,
-		TpsCommand:      server.TPSCommand,
-		MemoryUsage:     int64(server.MemoryUsage),
-		CpuPercent:      server.CPUPercent,
-		DiskUsage:       server.DiskUsage,
-		DiskTotal:       server.DiskTotal,
-		PlayersOnline:   int32(server.PlayersOnline),
-		Tps:             server.TPS,
-		AdditionalPorts: server.AdditionalPorts,
-		CreatedAt:       timestamppb.New(server.CreatedAt),
-		UpdatedAt:       timestamppb.New(server.UpdatedAt),
-
-		// SLP fields
-		SlpAvailable:    server.SLPAvailable,
-		SlpLatencyMs:    server.SLPLatencyMs,
-		Motd:            server.MOTD,
-		ServerVersion:   server.ServerVersion,
-		ProtocolVersion: int32(server.ProtocolVersion),
-		PlayerSample:    server.PlayerSample,
-		MaxPlayersSlp:   int32(server.MaxPlayersSLP),
-		Favicon:         server.Favicon,
-	}
-
-	// Apply overrides
-	protoServer.DockerOverrides = server.DockerOverrides
-
-	// Map mod loader
-	protoServer.ModLoader = dbModLoaderToProto(server.ModLoader)
-
-	// Map status
-	protoServer.Status = dbStatusToProto(server.Status)
-
-	// Map optional last started
-	if server.LastStarted != nil {
-		protoServer.LastStarted = timestamppb.New(*server.LastStarted)
-	}
-
-	return protoServer
-}
-
-// dbModLoaderToProto converts database mod loader to proto
-func dbModLoaderToProto(loader storage.ModLoader) v1.ModLoader {
-	switch loader {
-	case storage.ModLoaderVanilla:
-		return v1.ModLoader_MOD_LOADER_VANILLA
-	case storage.ModLoaderForge:
-		return v1.ModLoader_MOD_LOADER_FORGE
-	case storage.ModLoaderFabric:
-		return v1.ModLoader_MOD_LOADER_FABRIC
-	case storage.ModLoaderQuilt:
-		return v1.ModLoader_MOD_LOADER_QUILT
-	case storage.ModLoaderPaper:
-		return v1.ModLoader_MOD_LOADER_PAPER
-	case storage.ModLoaderSpigot:
-		return v1.ModLoader_MOD_LOADER_SPIGOT
-	case storage.ModLoaderBukkit:
-		return v1.ModLoader_MOD_LOADER_BUKKIT
-	case storage.ModLoaderPurpur:
-		return v1.ModLoader_MOD_LOADER_PURPUR
-	case storage.ModLoaderSpongeVanilla:
-		return v1.ModLoader_MOD_LOADER_SPONGE_VANILLA
-	case storage.ModLoaderMohist:
-		return v1.ModLoader_MOD_LOADER_MOHIST
-	case storage.ModLoaderCatserver:
-		return v1.ModLoader_MOD_LOADER_CATSERVER
-	case storage.ModLoaderArclight:
-		return v1.ModLoader_MOD_LOADER_ARCLIGHT
-	case storage.ModLoaderAutoCurseForge:
-		return v1.ModLoader_MOD_LOADER_AUTO_CURSEFORGE
-	case storage.ModLoaderModrinth:
-		return v1.ModLoader_MOD_LOADER_MODRINTH
-	case storage.ModLoaderNeoForge:
-		return v1.ModLoader_MOD_LOADER_NEOFORGE
-	default:
-		return v1.ModLoader_MOD_LOADER_VANILLA
-	}
-}
-
-// protoModLoaderToDB converts proto mod loader to database
-func protoModLoaderToDB(loader v1.ModLoader) storage.ModLoader {
-	switch loader {
-	case v1.ModLoader_MOD_LOADER_VANILLA:
-		return storage.ModLoaderVanilla
-	case v1.ModLoader_MOD_LOADER_FORGE:
-		return storage.ModLoaderForge
-	case v1.ModLoader_MOD_LOADER_FABRIC:
-		return storage.ModLoaderFabric
-	case v1.ModLoader_MOD_LOADER_QUILT:
-		return storage.ModLoaderQuilt
-	case v1.ModLoader_MOD_LOADER_PAPER:
-		return storage.ModLoaderPaper
-	case v1.ModLoader_MOD_LOADER_SPIGOT:
-		return storage.ModLoaderSpigot
-	case v1.ModLoader_MOD_LOADER_BUKKIT:
-		return storage.ModLoaderBukkit
-	case v1.ModLoader_MOD_LOADER_PURPUR:
-		return storage.ModLoaderPurpur
-	case v1.ModLoader_MOD_LOADER_SPONGE_VANILLA:
-		return storage.ModLoaderSpongeVanilla
-	case v1.ModLoader_MOD_LOADER_MOHIST:
-		return storage.ModLoaderMohist
-	case v1.ModLoader_MOD_LOADER_CATSERVER:
-		return storage.ModLoaderCatserver
-	case v1.ModLoader_MOD_LOADER_ARCLIGHT:
-		return storage.ModLoaderArclight
-	case v1.ModLoader_MOD_LOADER_AUTO_CURSEFORGE:
-		return storage.ModLoaderAutoCurseForge
-	case v1.ModLoader_MOD_LOADER_MODRINTH:
-		return storage.ModLoaderModrinth
-	case v1.ModLoader_MOD_LOADER_NEOFORGE:
-		return storage.ModLoaderNeoForge
-	default:
-		return storage.ModLoaderVanilla
-	}
-}
-
-// dbStatusToProto converts database status to proto
-func dbStatusToProto(status storage.ServerStatus) v1.ServerStatus {
-	switch status {
-	case storage.StatusCreating:
-		return v1.ServerStatus_SERVER_STATUS_CREATING
-	case storage.StatusStarting:
-		return v1.ServerStatus_SERVER_STATUS_STARTING
-	case storage.StatusRunning:
-		return v1.ServerStatus_SERVER_STATUS_RUNNING
-	case storage.StatusStopping:
-		return v1.ServerStatus_SERVER_STATUS_STOPPING
-	case storage.StatusStopped:
-		return v1.ServerStatus_SERVER_STATUS_STOPPED
-	case storage.StatusError:
-		return v1.ServerStatus_SERVER_STATUS_ERROR
-	case storage.StatusUnhealthy:
-		return v1.ServerStatus_SERVER_STATUS_UNHEALTHY
-	default:
-		return v1.ServerStatus_SERVER_STATUS_UNSPECIFIED
 	}
 }
 
@@ -281,7 +134,7 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 	// Convert to proto
 	protoServers := make([]*v1.Server, len(servers))
 	for i, server := range servers {
-		protoServers[i] = dbServerToProto(server)
+		protoServers[i] = db.DBServerToProto(server)
 	}
 
 	return connect.NewResponse(&v1.ListServersResponse{
@@ -335,7 +188,7 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 	}
 
 	return connect.NewResponse(&v1.GetServerResponse{
-		Server: dbServerToProto(server),
+		Server: db.DBServerToProto(server),
 	}), nil
 }
 
@@ -344,7 +197,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	msg := req.Msg
 
 	// Convert mod loader from proto
-	modLoader := protoModLoaderToDB(msg.ModLoader)
+	modLoader := db.ProtoModLoaderToDB(msg.ModLoader)
 
 	// If modpack is selected, load it and derive settings
 	var modpackURL string
@@ -716,7 +569,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 
 	// Return immediately with the server in "creating" state
 	return connect.NewResponse(&v1.CreateServerResponse{
-		Server: dbServerToProto(server),
+		Server: db.DBServerToProto(server),
 	}), nil
 }
 
@@ -953,8 +806,10 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		}
 	}
 
+	s.emitServerUpdate(server)
+
 	return connect.NewResponse(&v1.UpdateServerResponse{
-		Server: dbServerToProto(server),
+		Server: db.DBServerToProto(server),
 	}), nil
 }
 
@@ -1110,6 +965,8 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		}
 	}
 
+	s.emitServerUpdate(server)
+
 	return connect.NewResponse(&v1.StartServerResponse{
 		Status: "starting",
 	}), nil
@@ -1166,6 +1023,8 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 			s.log.Error("Failed to stop modules for server %s: %v", server.ID, err)
 		}
 	}
+
+	s.emitServerUpdate(server)
 
 	status := "stopping"
 	if !found {
@@ -1249,6 +1108,8 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		s.log.Error("Failed to clear ephemeral config fields: %v", err)
 	}
 
+	s.emitServerUpdate(server)
+
 	return connect.NewResponse(&v1.RestartServerResponse{
 		Status: "restarting",
 	}), nil
@@ -1304,6 +1165,8 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 	}
 
 	s.log.Info("Server %s recreated successfully with new container %s", server.Name, result.NewContainerID)
+
+	s.emitServerUpdate(server)
 
 	return connect.NewResponse(&v1.RecreateServerResponse{
 		Status: "recreated",

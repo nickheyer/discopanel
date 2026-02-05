@@ -14,10 +14,11 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/proto"
 )
 
 // Compile-time check that ModuleService implements the interface
@@ -32,6 +33,41 @@ type ModuleService struct {
 	config        *config.Config
 	log           *logger.Logger
 	logStreamer   *logger.LogStreamer
+	emitter       emit.Emitter
+}
+
+func (s *ModuleService) SetEmitter(e emit.Emitter) { s.emitter = e }
+
+func (s *ModuleService) emitModulesUpdate(serverID string) {
+	if s.emitter == nil || serverID == "" {
+		return
+	}
+	topic := discopanelv1connect.ModuleServiceListModulesProcedure + ":" + serverID
+	if !s.emitter.HasSubscribers(topic) {
+		return
+	}
+	ctx := context.Background()
+	modules, err := s.store.ListServerModules(ctx, serverID)
+	if err != nil {
+		return
+	}
+	var protoModules []*v1.Module
+	for _, m := range modules {
+		serverName := ""
+		serverProxyHostname := ""
+		if server, err := s.store.GetServer(ctx, m.ServerID); err == nil {
+			serverName = server.Name
+			serverProxyHostname = server.ProxyHostname
+		}
+		templateName := ""
+		if template, err := s.store.GetModuleTemplate(ctx, m.TemplateID); err == nil {
+			templateName = template.Name
+		}
+		protoModules = append(protoModules, storage.DBModuleToProto(m, serverName, templateName, serverProxyHostname))
+	}
+	if payload, err := proto.Marshal(&v1.ListModulesResponse{Modules: protoModules}); err == nil {
+		s.emitter.Publish(topic, payload)
+	}
 }
 
 // NewModuleService creates a new module service
@@ -55,148 +91,6 @@ func NewModuleService(
 	}
 }
 
-// Conversion functions
-
-func dbModuleTemplateTypeToProto(t storage.ModuleTemplateType) v1.ModuleTemplateType {
-	switch t {
-	case storage.ModuleTemplateTypeBuiltin:
-		return v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN
-	case storage.ModuleTemplateTypeCustom:
-		return v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_CUSTOM
-	default:
-		return v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_UNSPECIFIED
-	}
-}
-
-// func protoModuleTemplateTypeToDB(t v1.ModuleTemplateType) storage.ModuleTemplateType {
-// 	switch t {
-// 	case v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN:
-// 		return storage.ModuleTemplateTypeBuiltin
-// 	case v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_CUSTOM:
-// 		return storage.ModuleTemplateTypeCustom
-// 	default:
-// 		return storage.ModuleTemplateTypeCustom
-// 	}
-// }
-
-// func dbModuleProtocolToProto(p storage.ModuleProtocol) v1.ModuleProtocol {
-// 	switch p {
-// 	case storage.ModuleProtocolTCP:
-// 		return v1.ModuleProtocol_MODULE_PROTOCOL_TCP
-// 	case storage.ModuleProtocolUDP:
-// 		return v1.ModuleProtocol_MODULE_PROTOCOL_UDP
-// 	default:
-// 		return v1.ModuleProtocol_MODULE_PROTOCOL_UNSPECIFIED
-// 	}
-// }
-
-// func protoModuleProtocolToDB(p v1.ModuleProtocol) storage.ModuleProtocol {
-// 	switch p {
-// 	case v1.ModuleProtocol_MODULE_PROTOCOL_TCP:
-// 		return storage.ModuleProtocolTCP
-// 	case v1.ModuleProtocol_MODULE_PROTOCOL_UDP:
-// 		return storage.ModuleProtocolUDP
-// 	default:
-// 		return storage.ModuleProtocolTCP
-// 	}
-// }
-
-func dbModuleStatusToProto(s storage.ModuleStatus) v1.ModuleStatus {
-	switch s {
-	case storage.ModuleStatusStopped:
-		return v1.ModuleStatus_MODULE_STATUS_STOPPED
-	case storage.ModuleStatusStarting:
-		return v1.ModuleStatus_MODULE_STATUS_STARTING
-	case storage.ModuleStatusRunning:
-		return v1.ModuleStatus_MODULE_STATUS_RUNNING
-	case storage.ModuleStatusStopping:
-		return v1.ModuleStatus_MODULE_STATUS_STOPPING
-	case storage.ModuleStatusError:
-		return v1.ModuleStatus_MODULE_STATUS_ERROR
-	case storage.ModuleStatusCreating:
-		return v1.ModuleStatus_MODULE_STATUS_CREATING
-	default:
-		return v1.ModuleStatus_MODULE_STATUS_UNSPECIFIED
-	}
-}
-
-func dbModuleTemplateToProto(t *storage.ModuleTemplate) *v1.ModuleTemplate {
-	if t == nil {
-		return nil
-	}
-	return &v1.ModuleTemplate{
-		Id:                    t.ID,
-		Name:                  t.Name,
-		Description:           t.Description,
-		Type:                  dbModuleTemplateTypeToProto(t.Type),
-		DockerImage:           t.DockerImage,
-		DefaultEnv:            t.DefaultEnv,
-		DefaultVolumes:        t.DefaultVolumes,
-		HealthCheckPath:       t.HealthCheckPath,
-		HealthCheckPort:       int32(t.HealthCheckPort),
-		RequiresServer:        t.RequiresServer,
-		SupportsProxy:         t.SupportsProxy,
-		Icon:                  t.Icon,
-		Category:              t.Category,
-		Documentation:         t.Documentation,
-		CreatedAt:             timestamppb.New(t.CreatedAt),
-		UpdatedAt:             timestamppb.New(t.UpdatedAt),
-		Ports:                 t.Ports,
-		SuggestedDependencies: t.SuggestedDependencies,
-		DefaultHooks:          t.DefaultHooks,
-		Metadata:              t.Metadata,
-		DefaultCmd:            t.DefaultCmd,
-		DefaultAccessUrls:     t.DefaultAccessUrls,
-		DefaultMemory:         int32(t.DefaultMemory),
-	}
-}
-
-func dbModuleToProto(m *storage.Module, serverName, templateName, serverProxyHostname string) *v1.Module {
-	if m == nil {
-		return nil
-	}
-
-	protoModule := &v1.Module{
-		Id:                    m.ID,
-		Name:                  m.Name,
-		ServerId:              m.ServerID,
-		TemplateId:            m.TemplateID,
-		ContainerId:           m.ContainerID,
-		Status:                dbModuleStatusToProto(m.Status),
-		Config:                m.Config,
-		EnvOverrides:          m.EnvOverrides,
-		VolumeOverrides:       m.VolumeOverrides,
-		Memory:                int32(m.Memory),
-		CpuLimit:              m.CPULimit,
-		AutoStart:             m.AutoStart,
-		FollowServerLifecycle: m.FollowServerLifecycle,
-		Detached:              m.Detached,
-		DataPath:              m.DataPath,
-		CreatedAt:             timestamppb.New(m.CreatedAt),
-		UpdatedAt:             timestamppb.New(m.UpdatedAt),
-		MemoryUsage:           m.MemoryUsage,
-		CpuPercent:            m.CPUPercent,
-		ServerName:            serverName,
-		TemplateName:          templateName,
-		ServerProxyHostname:   serverProxyHostname,
-		Ports:                 m.Ports,
-		Dependencies:          m.Dependencies,
-		HealthCheckInterval:   int32(m.HealthCheckInterval),
-		HealthCheckTimeout:    int32(m.HealthCheckTimeout),
-		HealthCheckRetries:    int32(m.HealthCheckRetries),
-		EventHooks:            m.EventHooks,
-		Metadata:              m.Metadata,
-		CmdOverride:           m.CmdOverride,
-		AccessUrls:            m.AccessUrls,
-	}
-
-	if m.LastStarted != nil {
-		protoModule.LastStarted = timestamppb.New(*m.LastStarted)
-	}
-
-	return protoModule
-}
-
 // Template operations
 
 func (s *ModuleService) ListModuleTemplates(ctx context.Context, req *connect.Request[v1.ListModuleTemplatesRequest]) (*connect.Response[v1.ListModuleTemplatesResponse], error) {
@@ -210,7 +104,7 @@ func (s *ModuleService) ListModuleTemplates(ctx context.Context, req *connect.Re
 	for _, t := range templates {
 		// Filter by type if specified
 		if msg.Type != nil && *msg.Type != v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_UNSPECIFIED {
-			if dbModuleTemplateTypeToProto(t.Type) != *msg.Type {
+			if storage.DBModuleTemplateTypeToProto(t.Type) != *msg.Type {
 				continue
 			}
 		}
@@ -218,7 +112,7 @@ func (s *ModuleService) ListModuleTemplates(ctx context.Context, req *connect.Re
 		if msg.Category != nil && *msg.Category != "" && t.Category != *msg.Category {
 			continue
 		}
-		protoTemplates = append(protoTemplates, dbModuleTemplateToProto(t))
+		protoTemplates = append(protoTemplates, storage.DBModuleTemplateToProto(t))
 	}
 
 	return connect.NewResponse(&v1.ListModuleTemplatesResponse{
@@ -238,7 +132,7 @@ func (s *ModuleService) GetModuleTemplate(ctx context.Context, req *connect.Requ
 	}
 
 	return connect.NewResponse(&v1.GetModuleTemplateResponse{
-		Template: dbModuleTemplateToProto(template),
+		Template: storage.DBModuleTemplateToProto(template),
 	}), nil
 }
 
@@ -284,7 +178,7 @@ func (s *ModuleService) CreateModuleTemplate(ctx context.Context, req *connect.R
 	}
 
 	return connect.NewResponse(&v1.CreateModuleTemplateResponse{
-		Template: dbModuleTemplateToProto(template),
+		Template: storage.DBModuleTemplateToProto(template),
 	}), nil
 }
 
@@ -365,7 +259,7 @@ func (s *ModuleService) UpdateModuleTemplate(ctx context.Context, req *connect.R
 	}
 
 	return connect.NewResponse(&v1.UpdateModuleTemplateResponse{
-		Template: dbModuleTemplateToProto(template),
+		Template: storage.DBModuleTemplateToProto(template),
 	}), nil
 }
 
@@ -444,7 +338,7 @@ func (s *ModuleService) ListModules(ctx context.Context, req *connect.Request[v1
 			templateName = template.Name
 		}
 
-		protoModules = append(protoModules, dbModuleToProto(m, serverName, templateName, serverProxyHostname))
+		protoModules = append(protoModules, storage.DBModuleToProto(m, serverName, templateName, serverProxyHostname))
 	}
 
 	return connect.NewResponse(&v1.ListModulesResponse{
@@ -486,7 +380,7 @@ func (s *ModuleService) GetModule(ctx context.Context, req *connect.Request[v1.G
 	}
 
 	return connect.NewResponse(&v1.GetModuleResponse{
-		Module: dbModuleToProto(module, serverName, templateName, serverProxyHostname),
+		Module: storage.DBModuleToProto(module, serverName, templateName, serverProxyHostname),
 	}), nil
 }
 
@@ -605,8 +499,10 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		}
 	}()
 
+	s.emitModulesUpdate(module.ServerID)
+
 	return connect.NewResponse(&v1.CreateModuleResponse{
-		Module: dbModuleToProto(module, server.Name, template.Name, server.ProxyHostname),
+		Module: storage.DBModuleToProto(module, server.Name, template.Name, server.ProxyHostname),
 	}), nil
 }
 
@@ -742,8 +638,10 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		templateName = template.Name
 	}
 
+	s.emitModulesUpdate(module.ServerID)
+
 	return connect.NewResponse(&v1.UpdateModuleResponse{
-		Module: dbModuleToProto(module, serverName, templateName, serverProxyHostname),
+		Module: storage.DBModuleToProto(module, serverName, templateName, serverProxyHostname),
 	}), nil
 }
 
@@ -753,8 +651,18 @@ func (s *ModuleService) DeleteModule(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
 	}
 
-	if err := s.moduleManager.DeleteModule(ctx, msg.Id); err != nil {
+	// Fetch serverID before deletion
+	mod, err := s.store.GetModule(ctx, msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("existing module ID is required"))
+	}
+
+	if err := s.moduleManager.DeleteModule(ctx, mod.ID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete module: %w", err))
+	}
+
+	if mod != nil {
+		s.emitModulesUpdate(mod.ServerID)
 	}
 
 	return connect.NewResponse(&v1.DeleteModuleResponse{}), nil

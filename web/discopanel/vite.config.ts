@@ -57,7 +57,7 @@ export default defineConfig({
 				changeOrigin: true
 			},
 			// Proxy WebSocket connections
-			'/ws': {
+			'/api/ws': {
 				target: 'ws://localhost:8080',
 				ws: true,
 				changeOrigin: true

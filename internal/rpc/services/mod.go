@@ -11,6 +11,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -28,7 +29,10 @@ type ModService struct {
 	docker        *docker.Client
 	log           *logger.Logger
 	uploadManager *upload.Manager
+	emitter       emit.Emitter
 }
+
+func (s *ModService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // NewModService creates a new mod service
 func NewModService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, log *logger.Logger) *ModService {

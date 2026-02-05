@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/nickheyer/discopanel/internal/auth"
 	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -23,7 +24,10 @@ type AuthService struct {
 	store       *storage.Store
 	authManager *auth.Manager
 	log         *logger.Logger
+	emitter     emit.Emitter
 }
+
+func (s *AuthService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // NewAuthService creates a new auth service
 func NewAuthService(store *storage.Store, authManager *auth.Manager, log *logger.Logger) *AuthService {
@@ -37,55 +41,6 @@ func NewAuthService(store *storage.Store, authManager *auth.Manager, log *logger
 // Helper functions for auth service
 
 // dbUserToProto converts a database User to a proto User
-func dbUserToProto(user *storage.User) *v1.User {
-	if user == nil {
-		return nil
-	}
-
-	protoUser := &v1.User{
-		Id:        user.ID,
-		Username:  user.Username,
-		IsActive:  user.IsActive,
-		CreatedAt: timestamppb.New(user.CreatedAt),
-		UpdatedAt: timestamppb.New(user.UpdatedAt),
-	}
-
-	// Map role
-	switch user.Role {
-	case storage.RoleAdmin:
-		protoUser.Role = v1.UserRole_USER_ROLE_ADMIN
-	case storage.RoleEditor:
-		protoUser.Role = v1.UserRole_USER_ROLE_EDITOR
-	case storage.RoleViewer:
-		protoUser.Role = v1.UserRole_USER_ROLE_VIEWER
-	default:
-		protoUser.Role = v1.UserRole_USER_ROLE_UNSPECIFIED
-	}
-
-	// Handle optional email
-	if user.Email != nil && *user.Email != "" {
-		protoUser.Email = user.Email
-	}
-
-	// Note: recovery_key is intentionally not included in the proto response for security reasons
-	// It should only be shown to the user when first created
-
-	return protoUser
-}
-
-// protoRoleToDBRole converts a proto UserRole to a DB UserRole
-func protoRoleToDBRole(role v1.UserRole) storage.UserRole {
-	switch role {
-	case v1.UserRole_USER_ROLE_ADMIN:
-		return storage.RoleAdmin
-	case v1.UserRole_USER_ROLE_EDITOR:
-		return storage.RoleEditor
-	case v1.UserRole_USER_ROLE_VIEWER:
-		return storage.RoleViewer
-	default:
-		return storage.RoleViewer
-	}
-}
 
 // extractTokenFromHeaders extracts the auth token from the request headers
 func extractTokenFromHeaders(headers http.Header) string {
@@ -175,7 +130,7 @@ func (s *AuthService) Login(ctx context.Context, req *connect.Request[v1.LoginRe
 	// Set cookie in response headers
 	resp := connect.NewResponse(&v1.LoginResponse{
 		Token:     token,
-		User:      dbUserToProto(user),
+		User:      storage.DBUserToProto(user),
 		ExpiresAt: timestamppb.New(expiresAt),
 	})
 
@@ -279,7 +234,7 @@ func (s *AuthService) Register(ctx context.Context, req *connect.Request[v1.Regi
 	}
 
 	return connect.NewResponse(&v1.RegisterResponse{
-		User: dbUserToProto(user),
+		User: storage.DBUserToProto(user),
 	}), nil
 }
 
@@ -395,7 +350,7 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, req *connect.Request[v
 	}
 
 	return connect.NewResponse(&v1.GetCurrentUserResponse{
-		User: dbUserToProto(user),
+		User: storage.DBUserToProto(user),
 	}), nil
 }
 

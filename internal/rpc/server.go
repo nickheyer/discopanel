@@ -18,6 +18,8 @@ import (
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc/services"
 	"github.com/nickheyer/discopanel/internal/scheduler"
+	"github.com/nickheyer/discopanel/internal/websocket"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	"github.com/nickheyer/discopanel/pkg/upload"
@@ -41,6 +43,7 @@ type Server struct {
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	uploadManager    *upload.Manager
+	hub              *websocket.Hub
 }
 
 // Creates new Connect RPC server
@@ -62,6 +65,10 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
 	uploadManager := upload.NewManager(cfg.Storage.TempDir, uploadTTL, cfg.Upload.MaxUploadSize, log)
 
+	// Initialize WebSocket hub
+	hub := websocket.NewHub(authManager, log)
+	go hub.Run()
+
 	s := &Server{
 		store:            store,
 		docker:           docker,
@@ -75,7 +82,11 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
 		uploadManager:    uploadManager,
+		hub:              hub,
 	}
+
+	// Set emitters on helpers
+	emit.SetEmitters(hub, docker, logStreamer, metricsCollector, sched)
 
 	s.setupHandler()
 	return s
@@ -89,6 +100,7 @@ func (s *Server) setupHandler() {
 	interceptors := []connect.Interceptor{
 		s.loggingInterceptor(),
 		s.authInterceptor(),
+		s.keepAliveInterceptor(),
 	}
 
 	opts := []connect.HandlerOption{
@@ -121,6 +133,10 @@ func (s *Server) setupHandler() {
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
 
+	// Register WebSocket endpoint
+	wsHandler := websocket.NewHandler(s.hub)
+	mux.Handle("/api/ws", wsHandler)
+
 	// Serve frontend for non-RPC routes
 	s.setupFrontend(mux)
 
@@ -144,6 +160,14 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.config, s.logStreamer, s.log)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
+
+	// Set emitters on all services
+	emit.SetEmitters(s.hub,
+		authService, configService, fileService, minecraftService,
+		modService, modpackService, proxyService, serverService,
+		supportService, taskService, userService, moduleService,
+		uploadService,
+	)
 
 	// Register service handlers
 	authPath, authHandler := discopanelv1connect.NewAuthServiceHandler(authService, opts...)
@@ -324,4 +348,35 @@ func isConnectPath(path string) bool {
 // Starts log streaming for a container
 func (s *Server) StartLogStreaming(containerID string) error {
 	return s.logStreamer.StartStreaming(containerID)
+}
+
+// Hub returns the WebSocket hub for external use (e.g., emitters).
+func (s *Server) Hub() *websocket.Hub {
+	return s.hub
+}
+
+// Deterministic topic interceptor that sets the X-Alive response header
+func (s *Server) keepAliveInterceptor() connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			keepAlive := req.Header().Get("X-Keep-Alive")
+			if keepAlive == "" {
+				return next(ctx, req)
+			}
+
+			// Build topic from procedure path + client-supplied key
+			topic := req.Spec().Procedure
+			if keepAlive != "true" && keepAlive != "1" {
+				topic = topic + ":" + keepAlive
+			}
+
+			resp, err := next(ctx, req)
+			if err != nil {
+				return resp, err
+			}
+
+			resp.Header().Set("X-Alive", topic)
+			return resp, nil
+		}
+	}
 }

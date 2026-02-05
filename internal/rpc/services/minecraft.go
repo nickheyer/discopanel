@@ -7,6 +7,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -17,10 +18,13 @@ var _ discopanelv1connect.MinecraftServiceHandler = (*MinecraftService)(nil)
 
 // MinecraftService implements the Minecraft service
 type MinecraftService struct {
-	store  *storage.Store
-	docker *docker.Client
-	log    *logger.Logger
+	store   *storage.Store
+	docker  *docker.Client
+	log     *logger.Logger
+	emitter emit.Emitter
 }
+
+func (s *MinecraftService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // NewMinecraftService creates a new minecraft service
 func NewMinecraftService(store *storage.Store, docker *docker.Client, log *logger.Logger) *MinecraftService {

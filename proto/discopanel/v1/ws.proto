@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// WebSocket message types for real-time transport.
+enum WsMessageType {
+  WS_MESSAGE_TYPE_UNSPECIFIED = 0;
+  WS_MESSAGE_TYPE_SUBSCRIBE = 1;
+  WS_MESSAGE_TYPE_UNSUBSCRIBE = 2;
+  WS_MESSAGE_TYPE_ACK = 3;
+  WS_MESSAGE_TYPE_UPDATE = 4;
+  WS_MESSAGE_TYPE_ERROR = 5;
+}
+
+// WebSocket envelope message for subscribe/unsubscribe/ack/update/error frames.
+message WsMessage {
+  WsMessageType type = 1;
+  string topic = 2;
+  bytes payload = 3;   // Serialized protobuf response (UPDATE only)
+  string token = 4;    // Bearer token (SUBSCRIBE only)
+  string error = 5;    // Error text (ERROR only)
+}

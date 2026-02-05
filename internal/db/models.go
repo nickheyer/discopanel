@@ -111,6 +111,9 @@ type Server struct {
 	Favicon         string   `json:"favicon" gorm:"-"`         // Base64 PNG from SLP
 }
 
+// ToProto converts a Server to its protobuf representation.
+func (s *Server) ToProto() *v1.Server { return DBServerToProto(s) }
+
 type ServerConfig struct {
 	ID        string    `json:"id" gorm:"primaryKey"`
 	ServerID  string    `json:"server_id" gorm:"not null;index;column:server_id"`

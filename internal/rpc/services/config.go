@@ -13,6 +13,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -22,11 +23,14 @@ import (
 var _ discopanelv1connect.ConfigServiceHandler = (*ConfigService)(nil)
 
 type ConfigService struct {
-	store  *storage.Store
-	config *config.Config
-	docker *docker.Client
-	log    *logger.Logger
+	store   *storage.Store
+	config  *config.Config
+	docker  *docker.Client
+	log     *logger.Logger
+	emitter emit.Emitter
 }
+
+func (s *ConfigService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // Creates new config service
 func NewConfigService(store *storage.Store, cfg *config.Config, docker *docker.Client, log *logger.Logger) *ConfigService {
@@ -390,15 +394,15 @@ func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 		}
 
 		prop := &v1.ConfigProperty{
-			Key:          jsonTag,
-			Label:        label,
-			Value:        strValue,
-			Type:         inputTag,
-			Description:  descTag,
-			Required:     requiredTag == "true",
-			System:       systemTag == "true",
-			Ephemeral:    ephemeralTag == "true",
-			EnvVar:       envTag,
+			Key:         jsonTag,
+			Label:       label,
+			Value:       strValue,
+			Type:        inputTag,
+			Description: descTag,
+			Required:    requiredTag == "true",
+			System:      systemTag == "true",
+			Ephemeral:   ephemeralTag == "true",
+			EnvVar:      envTag,
 		}
 
 		// Only set default_value if it's explicitly specified in the struct tag

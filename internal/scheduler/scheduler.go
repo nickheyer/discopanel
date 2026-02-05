@@ -12,6 +12,7 @@ import (
 
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -38,7 +39,11 @@ type Scheduler struct {
 	// Stats
 	lastCheck time.Time
 	nextCheck time.Time
+
+	emitter emit.Emitter
 }
+
+func (s *Scheduler) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // Config holds scheduler configuration
 type Config struct {

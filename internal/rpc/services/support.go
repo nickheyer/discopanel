@@ -21,6 +21,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -38,7 +39,10 @@ type SupportService struct {
 	log    *logger.Logger
 	// Store generated bundles temporarily
 	bundles map[string]*BundleInfo
+	emitter emit.Emitter
 }
+
+func (s *SupportService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // BundleInfo stores information about a generated bundle
 type BundleInfo struct {

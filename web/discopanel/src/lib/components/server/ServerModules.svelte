@@ -2,11 +2,11 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
-	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import { rpcClient, silentCallOptions, withLive } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { Module, ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
-	import { ModuleStatus, ModuleEventType } from '$lib/proto/discopanel/v1/module_pb';
+	import { ModuleStatus, ModuleEventType, ListModulesResponseSchema } from '$lib/proto/discopanel/v1/module_pb';
 	import { Loader2, Plus, Play, Square, RotateCw, Settings, Trash2, Terminal, Cpu, ExternalLink, Package, RefreshCw, Puzzle, Link, Zap, Info } from '@lucide/svelte';
 	import ModuleDialog from './ModuleDialog.svelte';
 	import ModuleLogsDialog from './ModuleLogsDialog.svelte';
@@ -34,7 +34,7 @@
 
 	let hasLoaded = false;
 	let previousServerId = $state(server.id);
-	let pollingInterval: ReturnType<typeof setInterval> | null = null;
+	let liveUnsub: (() => void) | null = null;
 
 	// Reset state when server changes
 	$effect(() => {
@@ -44,9 +44,9 @@
 			templates = [];
 			loading = true;
 			hasLoaded = false;
-			if (pollingInterval) {
-				clearInterval(pollingInterval);
-				pollingInterval = null;
+			if (liveUnsub) {
+				liveUnsub();
+				liveUnsub = null;
 			}
 		}
 	});
@@ -54,22 +54,43 @@
 	$effect(() => {
 		if (active && !hasLoaded) {
 			hasLoaded = true;
-			loadModules();
+			subscribeModules();
 			loadTemplates();
-			// Start polling
-			pollingInterval = setInterval(() => loadModules(true), 5000);
-		} else if (!active && pollingInterval) {
-			clearInterval(pollingInterval);
-			pollingInterval = null;
+		} else if (!active && liveUnsub) {
+			liveUnsub();
+			liveUnsub = null;
 		}
 
 		return () => {
-			if (pollingInterval) {
-				clearInterval(pollingInterval);
-				pollingInterval = null;
+			if (liveUnsub) {
+				liveUnsub();
+				liveUnsub = null;
 			}
 		};
 	});
+
+	async function subscribeModules() {
+		try {
+			loading = true;
+			const result = await withLive(
+				(opts) => rpcClient.module.listModules({ serverId: server.id }, opts),
+				ListModulesResponseSchema,
+				(response) => {
+					modules = response.modules;
+					modules.forEach(m => loadAliases(m.id));
+				},
+				server.id,
+			);
+			modules = result.data.modules;
+			modules.forEach(m => loadAliases(m.id));
+			liveUnsub = result.unsubscribe;
+		} catch {
+			// Fallback to one-shot load
+			await loadModules();
+		} finally {
+			loading = false;
+		}
+	}
 
 	async function loadModules(silent = false) {
 		try {

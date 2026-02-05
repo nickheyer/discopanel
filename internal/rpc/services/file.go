@@ -12,6 +12,7 @@ import (
 	"connectrpc.com/connect"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -28,7 +29,10 @@ type FileService struct {
 	docker        *docker.Client
 	log           *logger.Logger
 	uploadManager *upload.Manager
+	emitter       emit.Emitter
 }
+
+func (s *FileService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // NewFileService creates a new file service
 func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, log *logger.Logger) *FileService {

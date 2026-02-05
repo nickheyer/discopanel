@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { onMount, untrack } from 'svelte';
-	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import { onDestroy, untrack } from 'svelte';
+	import { rpcClient, silentCallOptions, withLive } from '$lib/api/rpc-client';
 	import { serversStore } from '$lib/stores/servers';
 	import { goto } from '$app/navigation';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -17,7 +17,7 @@
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
 	import type { GetServerRoutingResponse } from '$lib/proto/discopanel/v1/proxy_pb';
-	import { GetServerRequestSchema, DeleteServerRequestSchema, StartServerRequestSchema, StopServerRequestSchema, RestartServerRequestSchema, RecreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
+	import { GetServerRequestSchema, GetServerResponseSchema, DeleteServerRequestSchema, StartServerRequestSchema, StopServerRequestSchema, RestartServerRequestSchema, RecreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import { formatBytes } from '$lib/utils';
 	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
 	import ServerConsole from '$lib/components/server-console.svelte';
@@ -37,7 +37,7 @@
 	let activeTab = $state('overview');
 	let routingInfo = $state<GetServerRoutingResponse | null>(null);
 
-	let interval: ReturnType<typeof setInterval> | undefined;
+	let liveUnsub: (() => void) | undefined;
 
 	// Helper function to convert protobuf Timestamp to Date
 	function timestampToDate(timestamp: Timestamp | undefined): Date {
@@ -46,15 +46,17 @@
 		return new Date(Number(timestamp.seconds) * 1000 + timestamp.nanos / 1_000_000);
 	}
 
-	onMount(() => {
-		return () => {
-			if (interval) clearInterval(interval);
-		};
+	onDestroy(() => {
+		if (liveUnsub) liveUnsub();
 	});
 
 	$effect(() => {
 		if (serverId) {
-			if (interval) clearInterval(interval);
+			// Unsubscribe from previous server's live updates
+			if (liveUnsub) {
+				liveUnsub();
+				liveUnsub = undefined;
+			}
 			// Reset state when switching servers to show loading
 			const prev = untrack(() => prevServerId);
 			if (prev !== serverId) {
@@ -64,12 +66,37 @@
 					prevServerId = serverId;
 				});
 			}
-			// Initial load - full screen loader
-			// Initial tab data loading requests - corner loader
-			loadServer(true);
-			interval = setInterval(() => loadServer(true), 5000); // Poll every 5 seconds
+			loadServerLive(serverId);
 		}
 	});
+
+	async function loadServerLive(id: string) {
+		try {
+			const request = create(GetServerRequestSchema, { id });
+			const result = await withLive(
+				(opts) => rpcClient.server.getServer(request, opts),
+				GetServerResponseSchema,
+				(response) => {
+					// Only update if we're still on the same server
+					if (response.server && serverId === id) {
+						server = response.server;
+						serversStore.updateServer(server);
+					}
+				},
+				id,
+			);
+
+			if (result.data.server && serverId === id) {
+				server = result.data.server;
+				serversStore.updateServer(server);
+				loading = false;
+			}
+
+			liveUnsub = result.unsubscribe;
+		} catch (error) {
+			await loadServer(true);
+		}
+	}
 
 	async function loadServer(skipLoading = false) {
 		if (!serverId) return;

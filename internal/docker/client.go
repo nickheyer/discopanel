@@ -25,8 +25,11 @@ import (
 	"github.com/docker/go-connections/nat"
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -172,12 +175,15 @@ type Client struct {
 	config      ClientConfig
 	logStreamer ContainerLogStreamer
 	log         *logger.Logger
+	emitter     emit.Emitter
 }
 
 // Auto manage streams at the client level when set
 func (c *Client) SetLogStreamer(ls ContainerLogStreamer) {
 	c.logStreamer = ls
 }
+
+func (c *Client) SetEmitter(e emit.Emitter) { c.emitter = e }
 
 func NewClient(host string, log *logger.Logger, config ...ClientConfig) (*Client, error) {
 	opts := []client.Opt{
@@ -471,6 +477,15 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
 
+	if c.emitter != nil {
+		topic := discopanelv1connect.ServerServiceGetServerProcedure + ":" + server.ID
+		if c.emitter.HasSubscribers(topic) {
+			if payload, err := proto.Marshal(&v1.GetServerResponse{Server: server.ToProto()}); err == nil {
+				c.emitter.Publish(topic, payload)
+			}
+		}
+	}
+
 	return resp.ID, nil
 }
 
@@ -592,6 +607,15 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 	if result.WasRunning {
 		if err := c.StartContainer(ctx, newContainerID); err != nil {
 			return result, fmt.Errorf("failed to start new container: %w", err)
+		}
+	}
+
+	if c.emitter != nil {
+		topic := discopanelv1connect.ServerServiceGetServerProcedure + ":" + server.ID
+		if c.emitter.HasSubscribers(topic) {
+			if payload, err := proto.Marshal(&v1.GetServerResponse{Server: server.ToProto()}); err == nil {
+				c.emitter.Publish(topic, payload)
+			}
 		}
 	}
 

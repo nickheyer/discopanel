@@ -6,6 +6,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/nickheyer/discopanel/internal/config"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -20,7 +21,10 @@ type UploadService struct {
 	manager *upload.Manager
 	cfg     *config.Config
 	log     *logger.Logger
+	emitter emit.Emitter
 }
+
+func (s *UploadService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // NewUploadService creates a new upload service
 func NewUploadService(manager *upload.Manager, cfg *config.Config, log *logger.Logger) *UploadService {

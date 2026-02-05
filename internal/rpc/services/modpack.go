@@ -21,6 +21,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/indexers/fuego"
 	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -38,7 +39,10 @@ type ModpackService struct {
 	config        *config.Config
 	log           *logger.Logger
 	uploadManager *upload.Manager
+	emitter       emit.Emitter
 }
+
+func (s *ModpackService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // NewModpackService creates a new modpack service
 func NewModpackService(store *storage.Store, cfg *config.Config, uploadManager *upload.Manager, log *logger.Logger) *ModpackService {

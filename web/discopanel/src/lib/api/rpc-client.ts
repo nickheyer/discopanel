@@ -1,8 +1,11 @@
-import { createClient, type Client, type Interceptor } from "@connectrpc/connect";
+import { createClient, type Client, type Interceptor, type CallOptions } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { authStore } from '$lib/stores/auth';
 import { toast } from 'svelte-sonner';
 import { loadingStore } from '$lib/stores/loading.svelte';
+import { wsClient } from './ws-client';
+import type { DescMessage, MessageShape } from '@bufbuild/protobuf';
+import { nanoid } from 'nanoid';
 
 // SERVICES
 import { AuthService } from '$lib/proto/discopanel/v1/auth_pb';
@@ -24,7 +27,10 @@ const SILENT_HEADER = 'X-Silent-Request';
 
 export const silentCallOptions = { headers: new Headers({ [SILENT_HEADER]: 'true' }) };
 
-// Login auth interception
+// Pending topic captures: captureId → resolve function
+const pendingTopicCaptures = new Map<string, (topic: string) => void>();
+
+// Login auth interception + X-Alive topic capture
 const authInterceptor: Interceptor = (next) => async (req) => {
   // Auth headers
   const authHeaders = authStore.getHeaders();
@@ -46,8 +52,26 @@ const authInterceptor: Interceptor = (next) => async (req) => {
 
   try {
     const res = await next(req);
+
+    // Capture X-Alive topic for keep-alive requests
+    const captureId = req.header.get('X-Live-Id');
+    const aliveTopic = res.header?.get('X-Alive');
+    if (captureId && aliveTopic) {
+      const resolve = pendingTopicCaptures.get(captureId);
+      if (resolve) {
+        resolve(aliveTopic);
+        pendingTopicCaptures.delete(captureId);
+      }
+    }
+
     return res;
   } catch (error: any) {
+    // Clean up pending capture on error
+    const captureId = req.header.get('X-Live-Id');
+    if (captureId) {
+      pendingTopicCaptures.delete(captureId);
+    }
+
     // Show error toast
     if (!isSilent) {
       const message = error.rawMessage || error.message || 'An error occurred';
@@ -102,3 +126,61 @@ export class RpcClient {
 
 // singleton
 export const rpcClient = new RpcClient();
+
+/**
+ * Makes an RPC call with X-Keep-Alive, captures the X-Alive topic from the response,
+ * and subscribes to that topic via WebSocket for real-time updates.
+ *
+ * @param rpcCall  - function that makes the RPC call, receives CallOptions
+ * @param schema   - protobuf response schema for deserializing WS updates
+ * @param onUpdate - callback invoked with each pushed update
+ * @param key      - primary key value sent as X-Keep-Alive (e.g. server ID).
+ *                   Omit or pass "true" for list/no-id endpoints.
+ *
+ * Returns the initial data and an unsubscribe function.
+ */
+export async function withLive<T extends DescMessage>(
+  rpcCall: (opts?: CallOptions) => Promise<MessageShape<T>>,
+  schema: T,
+  onUpdate: (data: MessageShape<T>) => void,
+  key?: string,
+): Promise<{ data: MessageShape<T>; unsubscribe: () => void }> {
+  const captureId = nanoid();
+
+  // Register topic capture before making the call
+  const topicPromise = new Promise<string>((resolve, reject) => {
+    pendingTopicCaptures.set(captureId, resolve);
+    // Timeout after 5s in case the header is never received
+    setTimeout(() => {
+      if (pendingTopicCaptures.has(captureId)) {
+        pendingTopicCaptures.delete(captureId);
+        reject(new Error('withLive: topic capture timed out'));
+      }
+    }, 10000);
+  });
+
+  // Make the RPC call with keep-alive headers
+  // X-Keep-Alive carries the pk value so the server can build the topic
+  const headers = new Headers({
+    'X-Keep-Alive': key || 'true',
+    'X-Silent-Request': 'true',
+    'X-Live-Id': captureId,
+  });
+
+  const data = await rpcCall({ headers });
+
+  // Wait for interceptor to capture the topic
+  const topic = await topicPromise;
+  const token = authStore.getToken()
+
+  // Ensure WebSocket is connected
+  wsClient.connect();
+
+  // Subscribe via WebSocket
+  wsClient.subscribe(topic, token, schema, onUpdate);
+
+  return {
+    data,
+    unsubscribe: () => wsClient.unsubscribe(topic),
+  };
+}

@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { onDestroy } from 'svelte';
+	import { rpcClient, withLive } from '$lib/api/rpc-client';
 	import { create } from '@bufbuild/protobuf';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
-	import { GetServerLogsRequestSchema, ClearServerLogsRequestSchema, SendCommandRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
+	import { GetServerLogsRequestSchema, GetServerLogsResponseSchema, ClearServerLogsRequestSchema, SendCommandRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import { ResizablePaneGroup, ResizablePane, ResizableHandle } from '$lib/components/ui/resizable';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -30,52 +30,69 @@
 	let loading = $state(false);
 	let autoScroll = $state(true);
 	let scrollAreaRef = $state<HTMLDivElement | null>(null);
-	let pollingInterval: ReturnType<typeof setInterval> | null = null;
 	let tailLines = $state(500);
-
-	onMount(() => {
-		if (active) {
-			fetchLogs();
-			startPolling();
-		}
-	});
+	let liveUnsub: (() => void) | null = null;
 
 	onDestroy(() => {
-		stopPolling();
-	});
-
-	// Start/stop polling based on active prop
-	$effect(() => {
-		if (active) {
-			fetchLogs();
-		} else {
-			stopPolling();
+		if (liveUnsub) {
+			liveUnsub();
+			liveUnsub = null;
 		}
 	});
 
-	// Clear logs and fetch new ones when server changes
+	// Start/stop live subscription based on active prop
+	$effect(() => {
+		if (active) {
+			subscribeLogs();
+		} else {
+			if (liveUnsub) {
+				liveUnsub();
+				liveUnsub = null;
+			}
+		}
+	});
+
+	// Clear logs and resubscribe when server changes
 	let previousServerId = $state(server.id);
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
 			logEntries = [];
 			command = '';
+			if (liveUnsub) {
+				liveUnsub();
+				liveUnsub = null;
+			}
 			if (active) {
-				fetchLogs();
+				subscribeLogs();
 			}
 		}
 	});
 
-	function startPolling() {
-		if (!pollingInterval) {
-			pollingInterval = setInterval(fetchLogs, 3000);
+	async function subscribeLogs() {
+		if (server.status === ServerStatus.STOPPED) {
+			fetchLogs();
+			return;
 		}
-	}
 
-	function stopPolling() {
-		if (pollingInterval) {
-			clearInterval(pollingInterval);
-			pollingInterval = null;
+		try {
+			const request = create(GetServerLogsRequestSchema, {
+				id: server.id,
+				tail: tailLines
+			});
+			const result = await withLive(
+				(opts) => rpcClient.server.getServerLogs(request, opts),
+				GetServerLogsResponseSchema,
+				(response) => {
+					logEntries = response.logs || [];
+				},
+				server.id,
+			);
+			logEntries = result.data.logs || [];
+			liveUnsub = result.unsubscribe;
+		} catch {
+			// Fallback to one-shot fetch
+			fetchLogs();
 		}
 	}
 

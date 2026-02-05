@@ -10,6 +10,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -27,7 +28,10 @@ type ProxyService struct {
 	config       *config.Config
 	log          *logger.Logger
 	logStreamer  *logger.LogStreamer
+	emitter      emit.Emitter
 }
+
+func (s *ProxyService) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // NewProxyService creates a new proxy service
 func NewProxyService(store *storage.Store, dockerClient *docker.Client, proxyManager *proxy.Manager, cfg *config.Config, logStreamer *logger.LogStreamer, log *logger.Logger) *ProxyService {

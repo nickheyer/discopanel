@@ -11,18 +11,23 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/nickheyer/discopanel/pkg/emit"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ContainerLogStream manages log streaming for a single container
 type ContainerLogStream struct {
 	containerID string
+	serverID    string
 	logs        []*v1.LogEntry
 	mu          sync.RWMutex
 	maxEntries  int
 	cancelFunc  context.CancelFunc
 	active      bool
+	lastEmit    time.Time
 }
 
 // LogStreamer manages log streaming for all containers
@@ -32,7 +37,10 @@ type LogStreamer struct {
 	mu         sync.RWMutex
 	log        *Logger
 	maxEntries int
+	emitter    emit.Emitter
 }
+
+func (ls *LogStreamer) SetEmitter(e emit.Emitter) { ls.emitter = e }
 
 // NewLogStreamer creates a new log streamer
 func NewLogStreamer(dockerClient *client.Client, log *Logger, maxEntriesPerContainer int) *LogStreamer {
@@ -173,6 +181,8 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 					stream.logs = stream.logs[len(stream.logs)-stream.maxEntries:]
 				}
 				stream.mu.Unlock()
+
+				ls.emitLogs(stream)
 			}
 		}
 	}
@@ -327,5 +337,38 @@ func (ls *LogStreamer) ClearLogs(containerID string) {
 		stream.mu.Lock()
 		stream.logs = make([]*v1.LogEntry, 0, stream.maxEntries)
 		stream.mu.Unlock()
+	}
+}
+
+// emitLogs publishes log updates to WebSocket subscribers, throttled to 500ms.
+func (ls *LogStreamer) emitLogs(stream *ContainerLogStream) {
+	if ls.emitter == nil || stream.serverID == "" {
+		return
+	}
+
+	now := time.Now()
+	if now.Sub(stream.lastEmit) < 500*time.Millisecond {
+		return
+	}
+
+	topic := discopanelv1connect.ServerServiceGetServerLogsProcedure + ":" + stream.serverID
+	if !ls.emitter.HasSubscribers(topic) {
+		return
+	}
+
+	stream.mu.RLock()
+	tail := 500
+	logs := stream.logs
+	if len(logs) > tail {
+		logs = logs[len(logs)-tail:]
+	}
+	entries := make([]*v1.LogEntry, len(logs))
+	copy(entries, logs)
+	stream.mu.RUnlock()
+
+	resp := &v1.GetServerLogsResponse{Logs: entries, Total: int32(len(entries))}
+	if payload, err := proto.Marshal(resp); err == nil {
+		ls.emitter.Publish(topic, payload)
+		stream.lastEmit = now
 	}
 }

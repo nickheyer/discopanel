@@ -255,6 +255,19 @@ function createAuthStore() {
 			}
 			return headers;
 		},
+
+		getToken() {
+			let currentToken: string | null = null;
+			update(state => {
+				currentToken = state.token;
+				return state;
+			});
+			
+			if (currentToken) {
+				return currentToken;
+			}
+			return '';
+		},
 	};
 }
 

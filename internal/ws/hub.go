@@ -253,20 +253,22 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 		return
 	}
 
-	// Check if already subscribed
-	c.subscriptionsMu.Lock()
-	if _, exists := c.subscriptions[msg.ServerId]; exists {
-		c.subscriptionsMu.Unlock()
-		c.sendSubscribed(msg.ServerId)
-		return
+	// Ensure log streaming is active for this container
+	if err := c.hub.logStreamer.StartStreaming(server.ContainerID); err != nil {
+		c.hub.log.Warn("Failed to start log streaming for container %s: %v", server.ContainerID, err)
 	}
 
-	// Subscribe to log streamer
-	ch := c.hub.logStreamer.Subscribe(server.ContainerID)
-	c.subscriptions[msg.ServerId] = ch
+	// Check if already subscribed
+	c.subscriptionsMu.Lock()
+	if _, exists := c.subscriptions[msg.ServerId]; !exists {
+		// Subscribe to log streamer
+		ch := c.hub.logStreamer.Subscribe(server.ContainerID)
+		c.subscriptions[msg.ServerId] = ch
+		go c.forwardLogs(msg.ServerId, ch)
+	}
 	c.subscriptionsMu.Unlock()
 
-	// Send initial logs
+	// Always send initial logs
 	tail := int(msg.Tail)
 	if tail <= 0 {
 		tail = 500
@@ -276,9 +278,6 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 
 	// Confirm subscription
 	c.sendSubscribed(msg.ServerId)
-
-	// Start forwarding logs for this subscription
-	go c.forwardLogs(msg.ServerId, ch)
 }
 
 // forwardLogs forwards log entries from the log streamer to the client
@@ -298,15 +297,16 @@ func (c *Client) handleUnsubscribe(msg *v1.UnsubscribeMessage) {
 	// Get server to find container ID
 	ctx := context.Background()
 	server, err := c.hub.store.GetServer(ctx, msg.ServerId)
-	if err != nil {
-		c.sendError("server not found")
-		return
-	}
 
+	// Always clean up the subscription
 	c.subscriptionsMu.Lock()
 	if ch, exists := c.subscriptions[msg.ServerId]; exists {
 		delete(c.subscriptions, msg.ServerId)
-		c.hub.logStreamer.Unsubscribe(server.ContainerID, ch)
+		if err == nil && server.ContainerID != "" {
+			c.hub.logStreamer.Unsubscribe(server.ContainerID, ch)
+		} else {
+			close(ch) // Close the channel to stop the forwardLogs goroutine
+		}
 	}
 	c.subscriptionsMu.Unlock()
 

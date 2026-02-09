@@ -19,7 +19,7 @@ database:
 # Docker configuration
 docker:
   host: "unix:///var/run/docker.sock"
-  version: "1.41"
+  version: ""
   network_name: "discopanel-network"
   registry_url: ""
   sync_interval: 5  # Seconds between docker state sync

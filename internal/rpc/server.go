@@ -13,6 +13,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
@@ -41,6 +42,7 @@ type Server struct {
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	uploadManager    *upload.Manager
+	eventBus         *events.Bus
 }
 
 // Creates new Connect RPC server
@@ -62,6 +64,12 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
 	uploadManager := upload.NewManager(cfg.Storage.TempDir, uploadTTL, cfg.Upload.MaxUploadSize, log)
 
+	// Initialize event bus
+	eventBus := events.NewBus()
+
+	// Wire event bus into metrics collector
+	metricsCollector.SetEventBus(eventBus)
+
 	s := &Server{
 		store:            store,
 		docker:           docker,
@@ -75,6 +83,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
 		uploadManager:    uploadManager,
+		eventBus:         eventBus,
 	}
 
 	s.setupHandler()
@@ -85,10 +94,10 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 func (s *Server) setupHandler() {
 	mux := http.NewServeMux()
 
-	// Configure Connect options
+	// Configure Connect options with full interceptors (unary + streaming)
 	interceptors := []connect.Interceptor{
-		s.loggingInterceptor(),
-		s.authInterceptor(),
+		&loggingInterceptorImpl{server: s},
+		&authInterceptorImpl{server: s},
 	}
 
 	opts := []connect.HandlerOption{
@@ -138,11 +147,11 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.eventBus, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
-	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.config, s.logStreamer, s.log)
+	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.config, s.logStreamer, s.eventBus, s.log)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
 
 	// Register service handlers
@@ -191,41 +200,71 @@ func (s *Server) Handler() http.Handler {
 	return s.handler
 }
 
-// Creates a Connect interceptor for logging
-func (s *Server) loggingInterceptor() connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			// Skip logging for polling endpoints
-			if !s.isPollingProcedure(req.Spec().Procedure) {
-				s.log.Info("RPC %s %s", req.Peer().Addr, req.Spec().Procedure)
-			}
-			return next(ctx, req)
+// loggingInterceptorImpl implements connect.Interceptor for both unary and streaming
+type loggingInterceptorImpl struct {
+	server *Server
+}
+
+func (i *loggingInterceptorImpl) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		if !i.server.isPollingProcedure(req.Spec().Procedure) {
+			i.server.log.Info("RPC %s %s", req.Peer().Addr, req.Spec().Procedure)
 		}
+		return next(ctx, req)
 	}
 }
 
-// Creates a Connect interceptor for authentication
-func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			// Extract token from auth header
-			token := ""
-			if authHeader := req.Header().Get("Authorization"); authHeader != "" {
-				token, _ = strings.CutPrefix(authHeader, "Bearer ")
-				token, _ = strings.CutPrefix(token, "bearer ")
-			}
+func (i *loggingInterceptorImpl) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return next // no-op for server-only application
+}
 
-			// Validate user session or return valid anon user/session if auth disabled
-			user, err := s.authManager.ValidateSession(ctx, token)
-			if err == nil && user != nil {
-				ctx = context.WithValue(ctx, auth.UserContextKey, user)
-			} else if err != nil {
-				s.log.Debug("Auth: Token validation failed for %s: %v", req.Spec().Procedure, err)
-			}
-
-			return next(ctx, req)
-		}
+func (i *loggingInterceptorImpl) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		i.server.log.Info("RPC Stream open %s %s", conn.Peer().Addr, conn.Spec().Procedure)
+		err := next(ctx, conn)
+		i.server.log.Info("RPC Stream closed %s %s", conn.Peer().Addr, conn.Spec().Procedure)
+		return err
 	}
+}
+
+// authInterceptorImpl implements connect.Interceptor for both unary and streaming
+type authInterceptorImpl struct {
+	server *Server
+}
+
+func (i *authInterceptorImpl) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		ctx = i.extractAndValidateAuth(ctx, req.Header(), req.Spec().Procedure)
+		return next(ctx, req)
+	}
+}
+
+func (i *authInterceptorImpl) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return next // no-op for server-only application
+}
+
+func (i *authInterceptorImpl) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		ctx = i.extractAndValidateAuth(ctx, conn.RequestHeader(), conn.Spec().Procedure)
+		return next(ctx, conn)
+	}
+}
+
+func (i *authInterceptorImpl) extractAndValidateAuth(ctx context.Context, headers http.Header, procedure string) context.Context {
+	token := ""
+	if authHeader := headers.Get("Authorization"); authHeader != "" {
+		token, _ = strings.CutPrefix(authHeader, "Bearer ")
+		token, _ = strings.CutPrefix(token, "bearer ")
+	}
+
+	user, err := i.server.authManager.ValidateSession(ctx, token)
+	if err == nil && user != nil {
+		ctx = context.WithValue(ctx, auth.UserContextKey, user)
+	} else if err != nil {
+		i.server.log.Debug("Auth: Token validation failed for %s: %v", procedure, err)
+	}
+
+	return ctx
 }
 
 // Checks if a procedure is a polling endpoint or high-frequency endpoint

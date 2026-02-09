@@ -16,6 +16,8 @@ service SupportService {
   rpc UploadSupportBundle(UploadSupportBundleRequest) returns (UploadSupportBundleResponse);
   // Get application logs
   rpc GetApplicationLogs(GetApplicationLogsRequest) returns (GetApplicationLogsResponse);
+  // Stream application logs in real-time
+  rpc StreamApplicationLogs(StreamApplicationLogsRequest) returns (stream StreamApplicationLogsResponse);
 }
 
 // Application logs request
@@ -28,6 +30,18 @@ message GetApplicationLogsResponse {
   string content = 1; // Log file content
   string filename = 2; // Log file name
   int64 size = 3; // Total file size in bytes
+}
+
+// Stream application logs request
+message StreamApplicationLogsRequest {
+  int32 tail = 1; // Initial backfill line count
+}
+
+// Stream application logs response - new content chunk
+message StreamApplicationLogsResponse {
+  string content = 1; // New log content
+  string filename = 2; // Log file name
+  int64 size = 3; // Current total file size
 }
 
 // Bundle generation options

@@ -35,6 +35,8 @@
 	import { onMount } from 'svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
+	import { consumeStream } from '$lib/api/stream-manager';
+	import { rpcClient } from '$lib/api/rpc-client';
 
 	import { Server, Home, Settings, Package, User, Users, LogOut, FileText, Sun, Moon } from '@lucide/svelte';
 	import { toggleMode, mode } from 'mode-watcher';
@@ -59,7 +61,7 @@
 		await authStore.logout();
 	}
 
-	let statusPollingInterval: ReturnType<typeof setInterval> | null = null;
+	let cleanupStream: (() => void) | null = null;
 
 	onMount(() => {
 		return new Promise((resolve, reject) => {
@@ -77,32 +79,29 @@
 					}
 				}
 			}).then(() => {
-				// Fetch servers immediately after auth check
 				if (page.url.pathname !== '/login') {
-					// Start fetching without awaiting - reduces perceived load time
-					serversStore.fetchServers(false).catch(err => {
-						console.error('Failed to fetch initial servers:', err);
-					});
-
-					// Start polling immediately, don't wait for first fetch to complete
-					if (!statusPollingInterval) {
-						statusPollingInterval = setInterval(() => {
-							if (page.url.pathname !== '/login') {
-								serversStore.fetchServers(true);
-							}
-						}, 10000);
-					}
+					// Start streaming server updates (replaces 10s polling)
+					cleanupStream = consumeStream(
+						(opts) => rpcClient.server.watchServers({ fullStats: false }, opts),
+						(response) => {
+							serversStore.set(response.servers);
+						},
+						{
+							onError: (err) => console.debug('Server watch reconnecting:', err),
+							reconnectDelay: 3000,
+						}
+					);
 				}
 
 				// Clean up on unmount
 				resolve(() => {
-					if (statusPollingInterval) {
-						clearInterval(statusPollingInterval);
-						statusPollingInterval = null;
+					if (cleanupStream) {
+						cleanupStream();
+						cleanupStream = null;
 					}
 				});
 			}).catch((err) => {
-				console.debug(`Discopanel caught a polling error: ${err}`);
+				console.debug(`Discopanel caught a stream error: ${err}`);
 				reject(err);
 			});
 		});

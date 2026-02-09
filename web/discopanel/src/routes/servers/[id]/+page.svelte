@@ -3,6 +3,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { serversStore } from '$lib/stores/servers';
+	import { consumeStream } from '$lib/api/stream-manager';
 	import { goto } from '$app/navigation';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -37,7 +38,7 @@
 	let activeTab = $state('overview');
 	let routingInfo = $state<GetServerRoutingResponse | null>(null);
 
-	let interval: ReturnType<typeof setInterval> | undefined;
+	let cleanupStream: (() => void) | undefined;
 
 	// Helper function to convert protobuf Timestamp to Date
 	function timestampToDate(timestamp: Timestamp | undefined): Date {
@@ -48,13 +49,13 @@
 
 	onMount(() => {
 		return () => {
-			if (interval) clearInterval(interval);
+			if (cleanupStream) cleanupStream();
 		};
 	});
 
 	$effect(() => {
 		if (serverId) {
-			if (interval) clearInterval(interval);
+			if (cleanupStream) cleanupStream();
 			// Reset state when switching servers to show loading
 			const prev = untrack(() => prevServerId);
 			if (prev !== serverId) {
@@ -64,10 +65,25 @@
 					prevServerId = serverId;
 				});
 			}
-			// Initial load - full screen loader
-			// Initial tab data loading requests - corner loader
-			loadServer(true);
-			interval = setInterval(() => loadServer(true), 5000); // Poll every 5 seconds
+
+			// Start streaming server updates (replaces 5s polling)
+			const currentId = serverId;
+			cleanupStream = consumeStream(
+				(opts) => rpcClient.server.watchServer({ id: currentId }, opts),
+				(response) => {
+					if (response.server && serverId === currentId) {
+						server = response.server;
+						serversStore.updateServer(server);
+						loading = false;
+					}
+				},
+				{
+					onError: () => {
+						// Fallback: try a unary fetch on stream error
+						if (!server) loadServer(true);
+					}
+				}
+			);
 		}
 	});
 

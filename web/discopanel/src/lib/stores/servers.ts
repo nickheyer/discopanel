@@ -10,6 +10,7 @@ function createServersStore() {
 
   return {
     subscribe,
+    set,
     fetchServers: async (skipLoading = false) => {
       try {
         const request = create(ListServersRequestSchema, { fullStats: false });

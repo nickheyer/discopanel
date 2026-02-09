@@ -12,6 +12,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -32,6 +33,7 @@ type ModuleService struct {
 	config        *config.Config
 	log           *logger.Logger
 	logStreamer   *logger.LogStreamer
+	eventBus      *events.Bus
 }
 
 // NewModuleService creates a new module service
@@ -42,6 +44,7 @@ func NewModuleService(
 	proxyManager *proxy.Manager,
 	cfg *config.Config,
 	logStreamer *logger.LogStreamer,
+	eventBus *events.Bus,
 	log *logger.Logger,
 ) *ModuleService {
 	return &ModuleService{
@@ -51,6 +54,7 @@ func NewModuleService(
 		proxyManager:  proxyManager,
 		config:        cfg,
 		logStreamer:   logStreamer,
+		eventBus:      eventBus,
 		log:           log,
 	}
 }
@@ -970,6 +974,59 @@ func (s *ModuleService) GetResolvedAliases(ctx context.Context, req *connect.Req
 
 	resolved := alias.GetResolvedAliases(aliasCtx)
 	return connect.NewResponse(&v1.GetResolvedAliasesResponse{Aliases: resolved}), nil
+}
+
+// StreamModuleLogs streams real-time log entries for a module container
+func (s *ModuleService) StreamModuleLogs(ctx context.Context, req *connect.Request[v1.StreamModuleLogsRequest], stream *connect.ServerStream[v1.StreamModuleLogsResponse]) error {
+	if req.Msg.Id == "" {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
+	}
+
+	mod, err := s.store.GetModule(ctx, req.Msg.Id)
+	if err != nil {
+		return connect.NewError(connect.CodeNotFound, errors.New("module not found"))
+	}
+
+	if mod.ContainerID == "" {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("module has no container"))
+	}
+
+	tail := int(req.Msg.Tail)
+	if tail <= 0 {
+		tail = 100
+	}
+
+	// Send initial backfill
+	backfill := s.logStreamer.GetLogs(mod.ContainerID, tail)
+	if len(backfill) > 0 {
+		if err := stream.Send(&v1.StreamModuleLogsResponse{
+			Logs:  backfill,
+			Total: int32(len(backfill)),
+		}); err != nil {
+			return err
+		}
+	}
+
+	// Subscribe for new entries
+	ch, unsub := s.logStreamer.Subscribe(mod.ContainerID)
+	defer unsub()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case entries, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			if err := stream.Send(&v1.StreamModuleLogsResponse{
+				Logs:  entries,
+				Total: int32(len(entries)),
+			}); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // aliasCategoryToProto converts internal alias category to proto enum

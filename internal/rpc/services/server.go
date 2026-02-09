@@ -17,6 +17,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/internal/module"
@@ -41,10 +42,11 @@ type ServerService struct {
 	logStreamer      *logger.LogStreamer
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
+	eventBus         *events.Bus
 }
 
 // NewServerService creates a new server service
-func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, moduleManager *module.Manager, log *logger.Logger) *ServerService {
+func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, moduleManager *module.Manager, eventBus *events.Bus, log *logger.Logger) *ServerService {
 	return &ServerService{
 		store:            store,
 		docker:           docker,
@@ -54,6 +56,7 @@ func NewServerService(store *storage.Store, docker *docker.Client, config *confi
 		logStreamer:      logStreamer,
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
+		eventBus:         eventBus,
 	}
 }
 
@@ -715,6 +718,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	}()
 
 	// Return immediately with the server in "creating" state
+	s.eventBus.Publish(events.Event{Type: events.EventServerUpdate, ServerID: server.ID})
 	return connect.NewResponse(&v1.CreateServerResponse{
 		Server: dbServerToProto(server),
 	}), nil
@@ -953,6 +957,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		}
 	}
 
+	s.eventBus.Publish(events.Event{Type: events.EventServerUpdate, ServerID: server.ID})
 	return connect.NewResponse(&v1.UpdateServerResponse{
 		Server: dbServerToProto(server),
 	}), nil
@@ -1011,6 +1016,7 @@ func (s *ServerService) DeleteServer(ctx context.Context, req *connect.Request[v
 		s.log.Error("Failed to delete server data: %v", err)
 	}
 
+	s.eventBus.Publish(events.Event{Type: events.EventServerDeleted, ServerID: req.Msg.Id})
 	return connect.NewResponse(&v1.DeleteServerResponse{}), nil
 }
 
@@ -1110,6 +1116,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		}
 	}
 
+	s.eventBus.Publish(events.Event{Type: events.EventServerUpdate, ServerID: req.Msg.Id})
 	return connect.NewResponse(&v1.StartServerResponse{
 		Status: "starting",
 	}), nil
@@ -1171,6 +1178,7 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 	if !found {
 		status = "stopped"
 	}
+	s.eventBus.Publish(events.Event{Type: events.EventServerUpdate, ServerID: req.Msg.Id})
 	return connect.NewResponse(&v1.StopServerResponse{
 		Status: status,
 	}), nil
@@ -1249,6 +1257,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		s.log.Error("Failed to clear ephemeral config fields: %v", err)
 	}
 
+	s.eventBus.Publish(events.Event{Type: events.EventServerUpdate, ServerID: req.Msg.Id})
 	return connect.NewResponse(&v1.RestartServerResponse{
 		Status: "restarting",
 	}), nil
@@ -1305,6 +1314,7 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 
 	s.log.Info("Server %s recreated successfully with new container %s", server.Name, result.NewContainerID)
 
+	s.eventBus.Publish(events.Event{Type: events.EventServerUpdate, ServerID: req.Msg.Id})
 	return connect.NewResponse(&v1.RecreateServerResponse{
 		Status: "recreated",
 	}), nil
@@ -1461,4 +1471,233 @@ func (s *ServerService) GetNextAvailablePort(ctx context.Context, req *connect.R
 		Port:      nextPort,
 		UsedPorts: usedPorts,
 	}), nil
+}
+
+// WatchServers streams real-time server list updates
+func (s *ServerService) WatchServers(ctx context.Context, req *connect.Request[v1.WatchServersRequest], stream *connect.ServerStream[v1.WatchServersResponse]) error {
+	// Send initial state
+	servers, err := s.buildServerList(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&v1.WatchServersResponse{Servers: servers}); err != nil {
+		return err
+	}
+
+	// Subscribe to events
+	ch, unsub := s.eventBus.Subscribe(32)
+	defer unsub()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case evt, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			if evt.Type == events.EventServerUpdate || evt.Type == events.EventServerMetrics || evt.Type == events.EventServerDeleted {
+				servers, err := s.buildServerList(ctx)
+				if err != nil {
+					s.log.Error("Failed to build server list for stream: %v", err)
+					continue
+				}
+				if err := stream.Send(&v1.WatchServersResponse{Servers: servers}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+}
+
+// WatchServer streams real-time updates for a single server
+func (s *ServerService) WatchServer(ctx context.Context, req *connect.Request[v1.WatchServerRequest], stream *connect.ServerStream[v1.WatchServerResponse]) error {
+	serverID := req.Msg.Id
+
+	// Send initial state
+	server, err := s.buildServer(ctx, serverID)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&v1.WatchServerResponse{Server: server}); err != nil {
+		return err
+	}
+
+	// Subscribe to events
+	ch, unsub := s.eventBus.Subscribe(32)
+	defer unsub()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case evt, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			// Only send updates for relevant events
+			if evt.Type == events.EventServerUpdate || evt.Type == events.EventServerMetrics {
+				if evt.ServerID == "" || evt.ServerID == serverID {
+					server, err := s.buildServer(ctx, serverID)
+					if err != nil {
+						s.log.Error("Failed to build server for stream: %v", err)
+						continue
+					}
+					if err := stream.Send(&v1.WatchServerResponse{Server: server}); err != nil {
+						return err
+					}
+				}
+			}
+			if evt.Type == events.EventServerDeleted && evt.ServerID == serverID {
+				return nil
+			}
+		}
+	}
+}
+
+// StreamServerLogs streams real-time log entries for a server container
+func (s *ServerService) StreamServerLogs(ctx context.Context, req *connect.Request[v1.StreamServerLogsRequest], stream *connect.ServerStream[v1.StreamServerLogsResponse]) error {
+	server, err := s.store.GetServer(ctx, req.Msg.Id)
+	if err != nil {
+		return connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+	if server.ContainerID == "" {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("server has no container"))
+	}
+
+	tail := int(req.Msg.Tail)
+	if tail <= 0 {
+		tail = 100
+	}
+
+	// Send initial backfill
+	backfill := s.logStreamer.GetLogs(server.ContainerID, tail)
+	if len(backfill) > 0 {
+		if err := stream.Send(&v1.StreamServerLogsResponse{
+			Logs:  backfill,
+			Total: int32(len(backfill)),
+		}); err != nil {
+			return err
+		}
+	}
+
+	// Subscribe for new entries
+	ch, unsub := s.logStreamer.Subscribe(server.ContainerID)
+	defer unsub()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case entries, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			if err := stream.Send(&v1.StreamServerLogsResponse{
+				Logs:  entries,
+				Total: int32(len(entries)),
+			}); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// buildServerList builds the full server list with metrics (reusable helper)
+func (s *ServerService) buildServerList(ctx context.Context) ([]*v1.Server, error) {
+	servers, err := s.store.ListServers(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list servers"))
+	}
+
+	var listeners map[string]*storage.ProxyListener
+	if s.config.Proxy.Enabled {
+		allListeners, err := s.store.GetProxyListeners(ctx)
+		if err == nil {
+			listeners = make(map[string]*storage.ProxyListener)
+			for _, l := range allListeners {
+				listeners[l.ID] = l
+			}
+		}
+	}
+
+	for _, server := range servers {
+		if server.ProxyHostname != "" && server.ProxyListenerID != "" && listeners != nil {
+			if listener, ok := listeners[server.ProxyListenerID]; ok {
+				server.ProxyPort = listener.Port
+			}
+		}
+		if server.ContainerID != "" {
+			status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+			if err == nil {
+				server.Status = status
+			}
+			if s.metricsCollector != nil {
+				if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
+					server.MemoryUsage = m.MemoryUsage
+					server.CPUPercent = m.CPUPercent
+					server.DiskUsage = m.DiskUsage
+					server.DiskTotal = m.DiskTotal
+					server.PlayersOnline = m.PlayersOnline
+					server.TPS = m.TPS
+					server.SLPAvailable = m.SLPAvailable
+					server.SLPLatencyMs = m.SLPLatencyMs
+					server.MOTD = m.MOTD
+					server.ServerVersion = m.ServerVersion
+					server.ProtocolVersion = m.ProtocolVersion
+					server.PlayerSample = m.PlayerSample
+					server.MaxPlayersSLP = m.MaxPlayers
+				}
+			}
+		}
+	}
+
+	protoServers := make([]*v1.Server, len(servers))
+	for i, server := range servers {
+		protoServers[i] = dbServerToProto(server)
+	}
+	return protoServers, nil
+}
+
+// buildServer builds a single server proto with metrics (reusable helper)
+func (s *ServerService) buildServer(ctx context.Context, serverID string) (*v1.Server, error) {
+	server, err := s.store.GetServer(ctx, serverID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+
+	if server.ProxyHostname != "" && server.ProxyListenerID != "" {
+		listener, err := s.store.GetProxyListener(ctx, server.ProxyListenerID)
+		if err == nil && listener != nil {
+			server.ProxyPort = listener.Port
+		}
+	}
+
+	if server.ContainerID != "" {
+		status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+		if err == nil {
+			server.Status = status
+		}
+	}
+
+	if s.metricsCollector != nil {
+		if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
+			server.MemoryUsage = m.MemoryUsage
+			server.CPUPercent = m.CPUPercent
+			server.DiskUsage = m.DiskUsage
+			server.DiskTotal = m.DiskTotal
+			server.PlayersOnline = m.PlayersOnline
+			server.TPS = m.TPS
+			server.SLPAvailable = m.SLPAvailable
+			server.SLPLatencyMs = m.SLPLatencyMs
+			server.MOTD = m.MOTD
+			server.ServerVersion = m.ServerVersion
+			server.ProtocolVersion = m.ProtocolVersion
+			server.PlayerSample = m.PlayerSample
+			server.MaxPlayersSLP = m.MaxPlayers
+			server.Favicon = m.Favicon
+		}
+	}
+
+	return dbServerToProto(server), nil
 }

@@ -23,6 +23,10 @@ type ContainerLogStream struct {
 	maxEntries  int
 	cancelFunc  context.CancelFunc
 	active      bool
+	// Subscriber channels for real-time streaming
+	subscribers map[uint64]chan []*v1.LogEntry
+	subMu       sync.Mutex
+	nextSubID   uint64
 }
 
 // LogStreamer manages log streaming for all containers
@@ -65,6 +69,7 @@ func (ls *LogStreamer) StartStreaming(containerID string) error {
 		maxEntries:  ls.maxEntries,
 		cancelFunc:  cancel,
 		active:      true,
+		subscribers: make(map[uint64]chan []*v1.LogEntry),
 	}
 
 	ls.streams[containerID] = stream
@@ -173,6 +178,8 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *ContainerLogStrea
 					stream.logs = stream.logs[len(stream.logs)-stream.maxEntries:]
 				}
 				stream.mu.Unlock()
+
+				stream.notifySubscribers([]*v1.LogEntry{entry})
 			}
 		}
 	}
@@ -214,13 +221,13 @@ func (ls *LogStreamer) AddCommandEntry(containerID, command string, timestamp ti
 			logs:        make([]*v1.LogEntry, 0, ls.maxEntries),
 			maxEntries:  ls.maxEntries,
 			active:      false,
+			subscribers: make(map[uint64]chan []*v1.LogEntry),
 		}
 		ls.streams[containerID] = stream
 		ls.mu.Unlock()
 	}
 
 	stream.mu.Lock()
-	defer stream.mu.Unlock()
 
 	// Add command entry with the provided timestamp + ANSI to prevent color bleed
 	entry := &v1.LogEntry{
@@ -238,6 +245,9 @@ func (ls *LogStreamer) AddCommandEntry(containerID, command string, timestamp ti
 	if len(stream.logs) > stream.maxEntries {
 		stream.logs = stream.logs[len(stream.logs)-stream.maxEntries:]
 	}
+	stream.mu.Unlock()
+
+	stream.notifySubscribers([]*v1.LogEntry{entry})
 }
 
 // AddCommandOutput adds command output to the log stream (after execution)
@@ -251,7 +261,9 @@ func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool
 	}
 
 	stream.mu.Lock()
-	defer stream.mu.Unlock()
+
+	// Collect new entries for subscriber notification
+	var newEntries []*v1.LogEntry
 
 	// Add output entry if present + ANSI to prevent color bleed
 	if output != "" {
@@ -268,6 +280,7 @@ func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool
 					IsError:   !success,
 				}
 				stream.logs = append(stream.logs, entry)
+				newEntries = append(newEntries, entry)
 			}
 		}
 	} else if !success {
@@ -281,11 +294,17 @@ func (ls *LogStreamer) AddCommandOutput(containerID, output string, success bool
 			IsError:   true,
 		}
 		stream.logs = append(stream.logs, entry)
+		newEntries = append(newEntries, entry)
 	}
 
 	// Trim if exceeding max entries
 	if len(stream.logs) > stream.maxEntries {
 		stream.logs = stream.logs[len(stream.logs)-stream.maxEntries:]
+	}
+	stream.mu.Unlock()
+
+	if len(newEntries) > 0 {
+		stream.notifySubscribers(newEntries)
 	}
 }
 
@@ -327,5 +346,56 @@ func (ls *LogStreamer) ClearLogs(containerID string) {
 		stream.mu.Lock()
 		stream.logs = make([]*v1.LogEntry, 0, stream.maxEntries)
 		stream.mu.Unlock()
+	}
+}
+
+// Subscribe returns a channel that receives new log entries for a container
+// and a function to unsubscribe. The channel is buffered to avoid blocking
+// the log pipeline.
+func (ls *LogStreamer) Subscribe(containerID string) (<-chan []*v1.LogEntry, func()) {
+	ls.mu.Lock()
+	stream, exists := ls.streams[containerID]
+	if !exists {
+		stream = &ContainerLogStream{
+			containerID: containerID,
+			logs:        make([]*v1.LogEntry, 0, ls.maxEntries),
+			maxEntries:  ls.maxEntries,
+			active:      false,
+			subscribers: make(map[uint64]chan []*v1.LogEntry),
+		}
+		ls.streams[containerID] = stream
+	}
+	ls.mu.Unlock()
+
+	stream.subMu.Lock()
+	if stream.subscribers == nil {
+		stream.subscribers = make(map[uint64]chan []*v1.LogEntry)
+	}
+	id := stream.nextSubID
+	stream.nextSubID++
+	ch := make(chan []*v1.LogEntry, 64)
+	stream.subscribers[id] = ch
+	stream.subMu.Unlock()
+
+	return ch, func() {
+		stream.subMu.Lock()
+		defer stream.subMu.Unlock()
+		if _, ok := stream.subscribers[id]; ok {
+			delete(stream.subscribers, id)
+			close(ch)
+		}
+	}
+}
+
+// notifySubscribers sends new entries to all subscribers (non-blocking)
+func (stream *ContainerLogStream) notifySubscribers(entries []*v1.LogEntry) {
+	stream.subMu.Lock()
+	defer stream.subMu.Unlock()
+	for _, ch := range stream.subscribers {
+		select {
+		case ch <- entries:
+		default:
+			// slow subscriber, drop to avoid blocking log pipeline
+		}
 	}
 }

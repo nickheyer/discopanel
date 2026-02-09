@@ -4,6 +4,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { consumeStream } from '$lib/api/stream-manager';
 	import type { Module } from '$lib/proto/discopanel/v1/module_pb';
 	import { ModuleStatus } from '$lib/proto/discopanel/v1/module_pb';
 	import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';

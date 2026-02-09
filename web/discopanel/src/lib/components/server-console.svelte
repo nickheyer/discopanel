@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { consumeStream } from '$lib/api/stream-manager';
 	import { create } from '@bufbuild/protobuf';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
@@ -30,52 +31,75 @@
 	let loading = $state(false);
 	let autoScroll = $state(true);
 	let scrollAreaRef = $state<HTMLDivElement | null>(null);
-	let pollingInterval: ReturnType<typeof setInterval> | null = null;
+	let cleanupStream: (() => void) | null = null;
 	let tailLines = $state(500);
+	let isFirstMessage = $state(true);
 
 	onMount(() => {
 		if (active) {
-			fetchLogs();
-			startPolling();
+			startStreaming();
 		}
 	});
 
 	onDestroy(() => {
-		stopPolling();
+		stopStreaming();
 	});
 
-	// Start/stop polling based on active prop
+	// Start/stop streaming based on active prop
 	$effect(() => {
 		if (active) {
-			fetchLogs();
+			startStreaming();
 		} else {
-			stopPolling();
+			stopStreaming();
 		}
 	});
 
-	// Clear logs and fetch new ones when server changes
+	// Clear logs and restart stream when server changes
 	let previousServerId = $state(server.id);
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
 			logEntries = [];
 			command = '';
+			isFirstMessage = true;
 			if (active) {
-				fetchLogs();
+				startStreaming();
 			}
 		}
 	});
 
-	function startPolling() {
-		if (!pollingInterval) {
-			pollingInterval = setInterval(fetchLogs, 3000);
-		}
+	function startStreaming() {
+		stopStreaming();
+		if (server.status === ServerStatus.STOPPED) return;
+
+		isFirstMessage = true;
+		cleanupStream = consumeStream(
+			(opts) => rpcClient.server.streamServerLogs({ id: server.id, tail: tailLines }, opts),
+			(response) => {
+				if (response.logs.length > 0) {
+					if (isFirstMessage) {
+						// First message is the backfill - replace all entries
+						logEntries = response.logs;
+						isFirstMessage = false;
+					} else {
+						// Subsequent messages are incremental - append
+						logEntries = [...logEntries, ...response.logs];
+						if (logEntries.length > tailLines) {
+							logEntries = logEntries.slice(-tailLines);
+						}
+					}
+				}
+			},
+			{
+				onError: (err) => console.error('Log stream error:', err),
+			}
+		);
 	}
 
-	function stopPolling() {
-		if (pollingInterval) {
-			clearInterval(pollingInterval);
-			pollingInterval = null;
+	function stopStreaming() {
+		if (cleanupStream) {
+			cleanupStream();
+			cleanupStream = null;
 		}
 	}
 

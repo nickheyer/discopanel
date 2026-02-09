@@ -35,6 +35,12 @@ service ServerService {
   rpc RecreateServer(RecreateServerRequest) returns (RecreateServerResponse);
   // Execute console command
   rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
+  // Stream real-time server list updates
+  rpc WatchServers(WatchServersRequest) returns (stream WatchServersResponse);
+  // Stream real-time updates for a single server
+  rpc WatchServer(WatchServerRequest) returns (stream WatchServerResponse);
+  // Stream real-time log entries for a server container
+  rpc StreamServerLogs(StreamServerLogsRequest) returns (stream StreamServerLogsResponse);
 }
 
 // Server list options
@@ -213,4 +219,36 @@ message SendCommandResponse {
   bool success = 1;
   string output = 2;
   string error = 3;
+}
+
+// Watch all servers request
+message WatchServersRequest {
+  bool full_stats = 1;
+}
+
+// Watch all servers response - full server list on each update
+message WatchServersResponse {
+  repeated Server servers = 1;
+}
+
+// Watch single server request
+message WatchServerRequest {
+  string id = 1;
+}
+
+// Watch single server response
+message WatchServerResponse {
+  Server server = 1;
+}
+
+// Stream server logs request
+message StreamServerLogsRequest {
+  string id = 1;
+  int32 tail = 2; // Initial backfill line count
+}
+
+// Stream server logs response - batch of log entries
+message StreamServerLogsResponse {
+  repeated LogEntry logs = 1;
+  int32 total = 2;
 }

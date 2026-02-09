@@ -10,6 +10,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/files"
@@ -75,6 +76,19 @@ type Collector struct {
 	wg       sync.WaitGroup
 
 	collectorConfig CollectorConfig
+
+	eventBus *events.Bus
+}
+
+// SetEventBus sets the event bus for publishing metrics events
+func (c *Collector) SetEventBus(bus *events.Bus) {
+	c.eventBus = bus
+}
+
+func (c *Collector) publishMetricsEvent() {
+	if c.eventBus != nil {
+		c.eventBus.Publish(events.Event{Type: events.EventServerMetrics})
+	}
 }
 
 // Creates a new metrics collector
@@ -164,11 +178,13 @@ func (c *Collector) collectDockerStatsLoop() {
 
 	// Collect immediately on start
 	c.collectDockerStats()
+	c.publishMetricsEvent()
 
 	for {
 		select {
 		case <-ticker.C:
 			c.collectDockerStats()
+			c.publishMetricsEvent()
 		case <-c.stopChan:
 			return
 		}

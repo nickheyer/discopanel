@@ -805,3 +805,77 @@ func (s *SupportService) GetApplicationLogs(ctx context.Context, req *connect.Re
 		Size:     fileInfo.Size(),
 	}), nil
 }
+
+// StreamApplicationLogs streams application log updates in real-time
+func (s *SupportService) StreamApplicationLogs(ctx context.Context, req *connect.Request[v1.StreamApplicationLogsRequest], stream *connect.ServerStream[v1.StreamApplicationLogsResponse]) error {
+	logFilePath := s.log.GetLogFilePath()
+	if logFilePath == "" {
+		return connect.NewError(connect.CodeNotFound, fmt.Errorf("logging to file is not enabled"))
+	}
+
+	// Send initial backfill
+	content, err := os.ReadFile(logFilePath)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read log file"))
+	}
+
+	tail := int(req.Msg.Tail)
+	if tail > 0 {
+		lines := strings.Split(string(content), "\n")
+		if len(lines) > tail {
+			lines = lines[len(lines)-tail:]
+		}
+		content = []byte(strings.Join(lines, "\n"))
+	}
+
+	fileInfo, _ := os.Stat(logFilePath)
+	if err := stream.Send(&v1.StreamApplicationLogsResponse{
+		Content:  string(content),
+		Filename: filepath.Base(logFilePath),
+		Size:     fileInfo.Size(),
+	}); err != nil {
+		return err
+	}
+
+	// Track file size for incremental reads
+	lastOffset := fileInfo.Size()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			fi, err := os.Stat(logFilePath)
+			if err != nil {
+				continue
+			}
+			if fi.Size() > lastOffset {
+				f, err := os.Open(logFilePath)
+				if err != nil {
+					continue
+				}
+				if _, err := f.Seek(lastOffset, io.SeekStart); err != nil {
+					f.Close()
+					continue
+				}
+				newContent, err := io.ReadAll(f)
+				f.Close()
+				if err != nil {
+					continue
+				}
+				lastOffset = fi.Size()
+				if len(newContent) > 0 {
+					if err := stream.Send(&v1.StreamApplicationLogsResponse{
+						Content:  string(newContent),
+						Filename: filepath.Base(logFilePath),
+						Size:     fi.Size(),
+					}); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+}

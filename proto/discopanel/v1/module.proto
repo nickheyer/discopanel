@@ -48,6 +48,8 @@ service ModuleService {
   rpc GetAvailableAliases(GetAvailableAliasesRequest) returns (GetAvailableAliasesResponse);
   // GetResolvedAliases returns all aliases with their resolved values for a given context.
   rpc GetResolvedAliases(GetResolvedAliasesRequest) returns (GetResolvedAliasesResponse);
+  // Stream real-time log entries for a module container
+  rpc StreamModuleLogs(StreamModuleLogsRequest) returns (stream StreamModuleLogsResponse);
 }
 
 // ModuleTemplateType distinguishes built-in templates from user-created ones.
@@ -626,4 +628,20 @@ message GetResolvedAliasesRequest {
 message GetResolvedAliasesResponse {
   // Map of alias (ie "{{server.id}}") to resolved value.
   map<string, string> aliases = 1;
+}
+
+// Stream module logs request
+message StreamModuleLogsRequest {
+  // Module ID to stream logs for
+  string id = 1;
+  // Initial backfill line count
+  int32 tail = 2;
+}
+
+// Stream module logs response - batch of log entries
+message StreamModuleLogsResponse {
+  // Log entries
+  repeated LogEntry logs = 1;
+  // Current total log count
+  int32 total = 2;
 }

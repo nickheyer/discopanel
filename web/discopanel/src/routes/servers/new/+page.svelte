@@ -291,6 +291,12 @@
 		// Determine which Docker image to use (custom takes precedence over preset)
 		let finalDockerImage = formData.dockerImage || selectedPresetDockerImage || '';
 
+		// If using a preset tag (simple tag without / or :), prepend itzg/minecraft-server
+		// Custom images have format: image:tag or registry/image:tag, so they have : or /
+		if (finalDockerImage && !finalDockerImage.includes('/') && !finalDockerImage.includes(':')) {
+			finalDockerImage = 'itzg/minecraft-server:' + finalDockerImage;
+		}
+
 		// Validate Docker image if provided
 		if (finalDockerImage) {
 			// If we haven't validated yet or the validation failed, validate now

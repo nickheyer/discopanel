@@ -12,7 +12,7 @@
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { isAdmin } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
-	import { ArrowLeft, Loader2, Package, Settings, HardDrive, AlertCircle } from '@lucide/svelte';
+	import { ArrowLeft, Loader2, Package, Settings, HardDrive, AlertCircle, Check } from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import type { CreateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
@@ -39,8 +39,14 @@
 	let dockerImageError = $state('');
 	let validatingDockerImage = $state(false);
 	let dockerImageValid = $state<boolean | null>(null); // null = not validated, true = valid, false = invalid
-	let selectedPresetDockerImage = $state('');
-	let presetDockerImageWarning = $state<string | null>(null);
+
+	// Docker image mode tracking (explicit, no string inference)
+	type DockerImageMode = 'preset' | 'custom';
+	let dockerImageMode = $state<DockerImageMode>('preset');
+	let selectedPresetTag = $state('');          // e.g., 'java21'
+	let customImageValue = $state('');           // e.g., 'my-registry/image:tag'
+	let userEditedCustomImage = $state(false); // Track if user has manually edited
+
 	let useProxyMode = $state(false); // Track connection mode separately
 	
 	// Modpack selection
@@ -180,7 +186,14 @@
 			formData.modLoader = 0; // Will be set based on modpack data
 			formData.mcVersion = modpack.mcVersion || '';
 			formData.memory = modpack.recommendedRam || 2048;
-			formData.dockerImage = modpack.dockerImage || '';
+
+			// Initialize docker image mode if modpack specifies one
+			if (modpack.dockerImage) {
+				initializeDockerImageMode(modpack.dockerImage);
+			} else {
+				initializeDockerImageMode('');
+			}
+
 			await loadModpackVersions(modpack.id);
 		} catch (error) {
 			toast.error('Failed to load modpack configuration');
@@ -197,6 +210,7 @@
 		formData.mcVersion = latestVersion || '';
 		formData.dockerImage = '';
 		formData.memory = 2048;
+		initializeDockerImageMode('');
 	}
 	
 	function parseJsonArray(jsonStr: string): string[] {
@@ -274,6 +288,36 @@
 	// Debounced validation
 	const debouncedValidateDockerImage = debounce(validateDockerImage, 700);
 
+	// Initialize docker image mode ONCE
+	function initializeDockerImageMode(dockerImage: string) {
+		if (!dockerImage) {
+			dockerImageMode = 'preset';
+			selectedPresetTag = '';
+			customImageValue = '';
+		} else if (dockerImage.startsWith('itzg/minecraft-server:')) {
+			dockerImageMode = 'preset';
+			selectedPresetTag = dockerImage.substring('itzg/minecraft-server:'.length);
+			customImageValue = '';
+		} else {
+			dockerImageMode = 'custom';
+			selectedPresetTag = '';
+			customImageValue = dockerImage;
+		}
+		dockerImageValid = true;
+		dockerImageError = '';
+	}
+
+	// Derive formData.dockerImage from explicit mode
+	$effect(() => {
+		if (dockerImageMode === 'custom') {
+			formData.dockerImage = customImageValue;
+		} else if (selectedPresetTag) {
+			formData.dockerImage = 'itzg/minecraft-server:' + selectedPresetTag;
+		} else {
+			formData.dockerImage = ''; // Auto-select
+		}
+	});
+
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 
@@ -288,17 +332,11 @@
 			return;
 		}
 
-		// Determine which Docker image to use (custom takes precedence over preset)
-		let finalDockerImage = formData.dockerImage || selectedPresetDockerImage || '';
+		// Docker image is already set in formData.dockerImage via derived state
+		const finalDockerImage = formData.dockerImage;
 
-		// If using a preset tag (simple tag without / or :), prepend itzg/minecraft-server
-		// Custom images have format: image:tag or registry/image:tag, so they have : or /
-		if (finalDockerImage && !finalDockerImage.includes('/') && !finalDockerImage.includes(':')) {
-			finalDockerImage = 'itzg/minecraft-server:' + finalDockerImage;
-		}
-
-		// Validate Docker image if provided
-		if (finalDockerImage) {
+		// Validate custom Docker image if provided
+		if (dockerImageMode === 'custom' && finalDockerImage) {
 			// If we haven't validated yet or the validation failed, validate now
 			if (dockerImageValid !== true) {
 				await validateDockerImage(finalDockerImage);
@@ -809,22 +847,103 @@
 
 				<div class="space-y-2">
 					<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
-					<Select type="single" value={selectedPresetDockerImage} onValueChange={(v: string | undefined) => selectedPresetDockerImage = v ?? ''} disabled={loading || loadingVersions}>
+					<Select type="single" value={dockerImageMode === 'custom' ? '__custom__' : selectedPresetTag} onValueChange={(value: string | undefined) => {
+					const newValue = value || '';
+					if (newValue === '__custom__') {
+						dockerImageMode = 'custom';
+						selectedPresetTag = '';
+						userEditedCustomImage = false;
+						dockerImageValid = null;
+						if (customImageValue) {
+							debouncedValidateDockerImage(customImageValue);
+						}
+					} else {
+						dockerImageMode = 'preset';
+						selectedPresetTag = newValue;
+						customImageValue = '';
+						userEditedCustomImage = false;
+						dockerImageValid = true;
+						dockerImageError = '';
+					}
+				}} disabled={loading || loadingVersions}>
 						<SelectTrigger id="docker_image">
-							<span>{selectedPresetDockerImage ? getDockerImageDisplayName(selectedPresetDockerImage) : 'Select Java version or auto-select'}</span>
+							<span>
+								{#if dockerImageMode === 'custom'}
+									Custom Image
+								{:else if selectedPresetTag}
+									{getDockerImageDisplayName(selectedPresetTag, dockerImages)}
+									<span class="text-xs text-muted-foreground ml-1">
+										(itzg/minecraft-server:{selectedPresetTag})
+									</span>
+								{:else}
+									Auto-select (Recommended)
+								{/if}
+							</span>
 						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="">Auto-select (Recommended)</SelectItem>
+							<SelectItem value="__custom__">Custom Image...</SelectItem>
+							{#if getUniqueDockerImages(dockerImages).length > 0}
+								<div class="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+									Preset Images
+								</div>
+							{/if}
 							{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
 								<SelectItem value={image.tag}>
 									{getDockerImageDisplayName(image)}
+									<span class="text-xs text-muted-foreground ml-1">
+										(itzg/minecraft-server:{image.tag})
+									</span>
 								</SelectItem>
 							{/each}
 						</SelectContent>
 					</Select>
-					<p class="text-xs text-muted-foreground">
-						Choose a preset Java version for quick selection
-					</p>
+
+					{#if dockerImageMode === 'custom'}
+						<div class="mt-2 space-y-2">
+							<Input
+								id="custom_docker_image"
+								type="text"
+								value={customImageValue}
+								placeholder="e.g., itzg/minecraft-server:java21 or my-registry/image:tag"
+								oninput={(e) => {
+									customImageValue = e.currentTarget.value;
+									userEditedCustomImage = true;
+									dockerImageValid = null;
+									dockerImageError = '';
+									if (customImageValue) {
+										debouncedValidateDockerImage(customImageValue);
+									}
+								}}
+								class={dockerImageValid === false ? 'border-destructive' : ''}
+								disabled={loading}
+							/>
+							{#if validatingDockerImage}
+								<div class="flex items-center gap-2 text-xs text-muted-foreground">
+									<Loader2 class="h-3 w-3 animate-spin" />
+									Validating image...
+								</div>
+							{:else if dockerImageError}
+								<div class="flex items-center gap-2 text-destructive text-xs">
+									<AlertCircle class="h-3 w-3" />
+									{dockerImageError}
+								</div>
+							{:else if dockerImageValid === true && userEditedCustomImage}
+								<div class="flex items-center gap-2 text-green-600 text-xs">
+									<Check class="h-3 w-3" />
+									Image validated
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<p class="text-xs text-muted-foreground">
+							{#if selectedPresetTag}
+								Full reference: itzg/minecraft-server:{selectedPresetTag}
+							{:else}
+								DiscoPanel will automatically select the best Java version for your Minecraft version
+							{/if}
+						</p>
+					{/if}
 				</div>
 
 				<Separator />
@@ -899,34 +1018,11 @@
 
 			<!-- Docker Overrides - Advanced Configuration -->
 			<div class="lg:col-span-2">
-				{#if presetDockerImageWarning}
-					<div class="mb-4 p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10">
-						<div class="flex items-start gap-2">
-							<AlertCircle class="h-4 w-4 text-yellow-600 mt-0.5 shrink-0" />
-							<p class="text-sm text-yellow-700">{presetDockerImageWarning}</p>
-						</div>
-					</div>
-				{/if}
 				<DockerOverridesEditor
 					bind:overrides={formData.dockerOverrides}
-					bind:presetDockerImage={selectedPresetDockerImage}
 					disabled={loading}
 					onchange={(overrides) => formData.dockerOverrides = overrides}
-					dockerImages={dockerImages}
-					customImageValue={formData.dockerImage}
-					onCustomImageWarning={(warning) => presetDockerImageWarning = warning}
-					dockerImageValid={dockerImageValid}
-					dockerImageError={dockerImageError}
-					validatingDockerImage={validatingDockerImage}
 					isAdmin={$isAdmin}
-					onCustomImageChange={(value) => {
-						formData.dockerImage = value;
-						dockerImageValid = null;
-						dockerImageError = '';
-						if (value) {
-							debouncedValidateDockerImage(value);
-						}
-					}}
 				/>
 			</div>
 		</div>

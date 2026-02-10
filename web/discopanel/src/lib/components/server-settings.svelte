@@ -414,6 +414,8 @@
 			bind:overrides={formData.dockerOverrides}
 			disabled={saving}
 			onchange={(overrides) => formData.dockerOverrides = overrides}
+			customImageValue={formData.dockerImage}
+			onCustomImageChange={(value) => formData.dockerImage = value}
 			isAdmin={$isAdmin}
 		/>
 	</div>

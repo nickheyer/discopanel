@@ -9,7 +9,7 @@
 	import type { DockerOverrides, VolumeMount } from '$lib/proto/discopanel/v1/common_pb';
 	import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/discopanel/v1/common_pb';
 	import type { DockerImage } from '$lib/proto/discopanel/v1/minecraft_pb';
-	import { create } from '@bufbuild/protobuf';
+	import { create, toJson } from '@bufbuild/protobuf';
 	import { Badge } from '$lib/components/ui/badge';
 
 	interface Props {
@@ -67,18 +67,18 @@
 	// Initialize JSON text when switching modes
 	$effect(() => {
 		if (jsonMode) {
-			// Combine customImage with overrides for JSON representation
+			// Combine dockerImage with overrides for JSON representation
 			const jsonData: Record<string, any> = {};
 
-			// Add custom image if present
+			// Add docker image if present
 			if (customImageValue) {
-				jsonData.customImage = customImageValue;
+				jsonData.dockerImage = customImageValue;
 			}
 
-			// Add all override properties
+			// Add all override properties using toJson for proper protobuf serialization
 			if (overrides) {
-				// Spread the protobuf object properties into jsonData
-				Object.assign(jsonData, overrides);
+				const overridesJson = toJson(DockerOverridesSchema, overrides) as Record<string, any>;
+				Object.assign(jsonData, overridesJson);
 			}
 
 			jsonText = JSON.stringify(jsonData, null, 2);
@@ -89,24 +89,36 @@
 		if (jsonMode) {
 			// Parse JSON and update overrides
 			try {
-				const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
-
-				// Extract customImage if present
-				if ('customImage' in parsed) {
-					const newCustomImage = parsed.customImage || '';
-					// Trigger validation and update via callback
-					onCustomImageChange?.(newCustomImage);
-					// Remove customImage from the parsed object so it's not in overrides
-					delete parsed.customImage;
+				const trimmed = jsonText.trim();
+				if (!trimmed) {
+					// If JSON is empty, keep existing overrides and just exit JSON mode
+					jsonError = '';
+					jsonMode = false;
+					return;
 				}
 
-				// Update overrides with remaining properties
-				overrides = Object.keys(parsed).length > 0 ? parsed : undefined;
+				const parsed = JSON.parse(trimmed);
+
+				// Extract dockerImage if present
+				if ('dockerImage' in parsed) {
+					const newCustomImage = parsed.dockerImage || '';
+					// Trigger validation and update via callback
+					onCustomImageChange?.(newCustomImage);
+					// Remove dockerImage from the parsed object so it's not in overrides
+					delete parsed.dockerImage;
+				}
+
+				// Update overrides with remaining properties - convert plain object back to protobuf Message
+				if (Object.keys(parsed).length > 0) {
+					overrides = create(DockerOverridesSchema, parsed);
+				} else {
+					overrides = undefined;
+				}
 				jsonError = '';
 				jsonMode = false;
 				onchange?.(overrides);
 
-				} catch (e) {
+			} catch (e) {
 				jsonError = `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`;
 			}
 		} else {

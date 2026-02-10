@@ -6,6 +6,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { isAdmin } from '$lib/stores/auth';
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
@@ -413,6 +414,7 @@
 			bind:overrides={formData.dockerOverrides}
 			disabled={saving}
 			onchange={(overrides) => formData.dockerOverrides = overrides}
+			isAdmin={$isAdmin}
 		/>
 	</div>
 

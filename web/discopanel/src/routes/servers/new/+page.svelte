@@ -10,6 +10,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { isAdmin } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import { ArrowLeft, Loader2, Package, Settings, HardDrive, AlertCircle } from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
@@ -911,6 +912,7 @@
 					dockerImageValid={dockerImageValid}
 					dockerImageError={dockerImageError}
 					validatingDockerImage={validatingDockerImage}
+					isAdmin={$isAdmin}
 					onCustomImageChange={(value) => {
 						formData.dockerImage = value;
 						dockerImageValid = null;

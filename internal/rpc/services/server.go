@@ -14,6 +14,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -382,6 +383,34 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Validate request
 	if msg.Name == "" || msg.McVersion == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name and MC version are required"))
+	}
+
+	// Validate init commands - admin only, requires auth enabled
+	if msg.DockerOverrides != nil && len(msg.DockerOverrides.InitCommands) > 0 {
+		authConfig, _, err := s.store.GetAuthConfig(ctx)
+		if err == nil && !authConfig.Enabled {
+			return nil, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("authentication must be enabled to use init commands"))
+		}
+
+		user := auth.GetUserFromContext(ctx)
+		if user == nil || user.Role != storage.RoleAdmin {
+			return nil, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("only administrators can configure init commands"))
+		}
+
+		// Audit log: Init commands configured during creation
+		s.log.Info("[AUDIT] User %s (%s) configured %d init commands for new server '%s'",
+			user.Username, user.ID, len(msg.DockerOverrides.InitCommands), msg.Name)
+
+		// Log each command (truncated for security)
+		for i, cmd := range msg.DockerOverrides.InitCommands {
+			cmdPreview := cmd
+			if len(cmdPreview) > 100 {
+				cmdPreview = cmdPreview[:100] + "..."
+			}
+			s.log.Info("[AUDIT]   Init command %d: %s", i+1, cmdPreview)
+		}
 	}
 
 	// Handle proxy configuration
@@ -854,10 +883,60 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		needsRecreation = true
 	}
 
-	// Handle docker overrides update
+	// Handle docker overrides update with init commands validation
 	if msg.DockerOverrides != nil {
+		// Check if init commands changed
+		oldInitCommands := []string{}
+		if server.DockerOverrides != nil {
+			oldInitCommands = server.DockerOverrides.InitCommands
+		}
+		newInitCommands := msg.DockerOverrides.InitCommands
+
+		// Compare init commands
+		commandsChanged := len(oldInitCommands) != len(newInitCommands)
+		if !commandsChanged {
+			for i := range oldInitCommands {
+				if oldInitCommands[i] != newInitCommands[i] {
+					commandsChanged = true
+					break
+				}
+			}
+		}
+
+		// Validate init commands if changed - admin only, requires auth enabled
+		if commandsChanged && len(newInitCommands) > 0 {
+			authConfig, _, err := s.store.GetAuthConfig(ctx)
+			if err == nil && !authConfig.Enabled {
+				return nil, connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("authentication must be enabled to use init commands"))
+			}
+
+			user := auth.GetUserFromContext(ctx)
+			if user == nil || user.Role != storage.RoleAdmin {
+				return nil, connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("only administrators can configure init commands"))
+			}
+
+			// Audit log: Init commands modified
+			s.log.Info("[AUDIT] User %s (%s) modified init commands for server '%s' (ID: %s)",
+				user.Username, user.ID, server.Name, server.ID)
+			s.log.Info("[AUDIT]   Previous: %d commands, New: %d commands",
+				len(oldInitCommands), len(newInitCommands))
+
+			// Log new commands
+			for i, cmd := range newInitCommands {
+				cmdPreview := cmd
+				if len(cmdPreview) > 100 {
+					cmdPreview = cmdPreview[:100] + "..."
+				}
+				s.log.Info("[AUDIT]   New init command %d: %s", i+1, cmdPreview)
+			}
+		}
+
 		server.DockerOverrides = msg.DockerOverrides
-		needsRecreation = true
+		if commandsChanged || len(msg.DockerOverrides.InitCommands) > 0 {
+			needsRecreation = true
+		}
 	}
 
 	// Handle modpack version update

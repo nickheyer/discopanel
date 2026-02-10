@@ -334,6 +334,48 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 	}
 }
 
+// generateInitWrapper creates a bash wrapper script that runs init commands before the original entrypoint
+func (c *Client) generateInitWrapper(ctx context.Context, initCommands []string, originalEntrypoint []string) (string, error) {
+	if len(initCommands) == 0 {
+		return "", nil
+	}
+
+	c.log.Info("Generating init wrapper script with %d commands", len(initCommands))
+
+	// Create wrapper script content
+	script := "#!/bin/bash\n"
+	script += "set -e  # Exit on first error\n"
+	script += "set -o pipefail  # Catch errors in pipes\n\n"
+	script += "echo '[DiscoPanel] Starting init commands...'\n\n"
+
+	// Add each init command with logging
+	for i, cmd := range initCommands {
+		script += fmt.Sprintf("echo '[DiscoPanel] Init command %d/%d: Running...'\n", i+1, len(initCommands))
+		script += fmt.Sprintf("%s\n", cmd)
+		script += fmt.Sprintf("echo '[DiscoPanel] Init command %d/%d: SUCCESS'\n\n", i+1, len(initCommands))
+	}
+
+	script += "echo '[DiscoPanel] All init commands completed successfully'\n"
+	script += "echo '[DiscoPanel] Starting original entrypoint...'\n\n"
+
+	// Exec original entrypoint (replaces shell process)
+	if len(originalEntrypoint) > 0 {
+		// Properly quote and escape arguments
+		entrypointCmd := "exec"
+		for _, part := range originalEntrypoint {
+			// Escape single quotes in the argument
+			escaped := strings.ReplaceAll(part, "'", "'\"'\"'")
+			entrypointCmd += fmt.Sprintf(" '%s'", escaped)
+		}
+		script += entrypointCmd + "\n"
+	} else {
+		script += "# No original entrypoint specified\n"
+		script += "exec /bin/bash\n"
+	}
+
+	return script, nil
+}
+
 func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerConfig) (string, error) {
 	// Use server's DockerImage if specified, otherwise determine based on version and loader
 	var imageName string
@@ -474,6 +516,55 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 
 	// Apply docker overrides
 	ApplyOverrides(server.DockerOverrides, config, hostConfig)
+
+	// Handle init commands wrapper - if init_commands are present
+	if server.DockerOverrides != nil && len(server.DockerOverrides.InitCommands) > 0 {
+		c.log.Info("Server %s has init commands, generating wrapper script", server.ID)
+
+		// Determine original entrypoint
+		originalEntrypoint := config.Entrypoint
+		if len(originalEntrypoint) == 0 {
+			// If no entrypoint specified, Docker will use image default
+			// Try to get it from the image inspection
+			imageInspect, err := c.docker.ImageInspect(ctx, imageName)
+			if err == nil && len(imageInspect.Config.Entrypoint) > 0 {
+				originalEntrypoint = imageInspect.Config.Entrypoint
+				c.log.Debug("Retrieved image entrypoint: %v", originalEntrypoint)
+			} else {
+				// Fallback for itzg/minecraft-server (known default)
+				originalEntrypoint = []string{"/start"}
+				c.log.Debug("Using fallback entrypoint for itzg/minecraft-server: /start")
+			}
+		}
+
+		// Generate wrapper script
+		scriptContent, err := c.generateInitWrapper(ctx, server.DockerOverrides.InitCommands, originalEntrypoint)
+		if err != nil {
+			return "", fmt.Errorf("failed to generate init wrapper: %w", err)
+		}
+
+		// Create script file in server's data directory
+		scriptPath := filepath.Join(server.DataPath, ".discopanel-init.sh")
+		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+			return "", fmt.Errorf("failed to write init wrapper script: %w", err)
+		}
+
+		c.log.Info("Wrote init wrapper script to %s", scriptPath)
+
+		// Mount the script into the container (read-only)
+		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   scriptPath,
+			Target:   "/discopanel-init.sh",
+			ReadOnly: true,
+		})
+
+		// Override entrypoint to use our wrapper
+		config.Entrypoint = []string{"/bin/bash", "/discopanel-init.sh"}
+
+		c.log.Info("[AUDIT] Generated init wrapper for server %s with %d commands",
+			server.ID, len(server.DockerOverrides.InitCommands))
+	}
 
 	// Network configuration
 	networkConfig := &network.NetworkingConfig{}

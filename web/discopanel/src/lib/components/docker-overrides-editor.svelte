@@ -5,9 +5,10 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Switch } from '$lib/components/ui/switch';
-	import { Plus, AlertCircle, Code, ChevronDown, ChevronRight, X } from '@lucide/svelte';
+	import { Plus, AlertCircle, Code, ChevronDown, ChevronRight, X, Loader2 } from '@lucide/svelte';
 	import type { DockerOverrides, VolumeMount } from '$lib/proto/discopanel/v1/common_pb';
 	import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/discopanel/v1/common_pb';
+	import type { DockerImage } from '$lib/proto/discopanel/v1/minecraft_pb';
 	import { create } from '@bufbuild/protobuf';
 	import { Badge } from '$lib/components/ui/badge';
 
@@ -15,9 +16,17 @@
 		overrides?: DockerOverrides;
 		disabled?: boolean;
 		onchange?: (overrides: DockerOverrides | undefined) => void;
+		dockerImages?: DockerImage[];
+		customImageValue?: string;
+		onCustomImageWarning?: (warning: string | null) => void;
+		presetDockerImage?: string;
+		dockerImageValid?: null | true | false;
+		dockerImageError?: string;
+		validatingDockerImage?: boolean;
+		onCustomImageChange?: (value: string) => void;
 	}
 
-	let { overrides = $bindable(), disabled = false, onchange }: Props = $props();
+	let { overrides = $bindable(), disabled = false, onchange, customImageValue = '', onCustomImageWarning, presetDockerImage = $bindable(), dockerImageValid = null, dockerImageError = '', validatingDockerImage = false, onCustomImageChange }: Props = $props();
 
 	let showAdvanced = $state(false);
 	let jsonMode = $state(false);
@@ -25,27 +34,52 @@
 	let jsonError = $state('');
 	let envVarCounter = $state(0); // Counter for unique env var keys
 
+	// Warn when both custom and preset images are specified
+	$effect(() => {
+		if (customImageValue && presetDockerImage) {
+			onCustomImageWarning?.('Both custom image and preset image are specified. The custom image will be used.');
+		} else {
+			onCustomImageWarning?.(null);
+		}
+	});
+
 	// Count active overrides for badge
 	let activeCount = $derived(() => {
 		if (!overrides) return 0;
 		let count = 0;
-		if (overrides.environment && Object.keys(overrides.environment).length > 0) count++;
-		if (overrides.volumes && overrides.volumes.length > 0) count++;
-		if (overrides.cpuLimit) count++;
-		if (overrides.memoryLimit) count++;
-		if (overrides.networkMode) count++;
-		if (overrides.privileged) count++;
-		if (overrides.user) count++;
-		if (overrides.capAdd && overrides.capAdd.length > 0) count++;
-		if (overrides.capDrop && overrides.capDrop.length > 0) count++;
-		if (overrides.devices && overrides.devices.length > 0) count++;
+		if (overrides) {
+			if (overrides.environment && Object.keys(overrides.environment).length > 0) count++;
+			if (overrides.volumes && overrides.volumes.length > 0) count++;
+			if (overrides.cpuLimit) count++;
+			if (overrides.memoryLimit) count++;
+			if (overrides.networkMode) count++;
+			if (overrides.privileged) count++;
+			if (overrides.user) count++;
+			if (overrides.capAdd && overrides.capAdd.length > 0) count++;
+			if (overrides.capDrop && overrides.capDrop.length > 0) count++;
+			if (overrides.devices && overrides.devices.length > 0) count++;
+		}
 		return count;
 	});
 
 	// Initialize JSON text when switching modes
 	$effect(() => {
 		if (jsonMode) {
-			jsonText = JSON.stringify(overrides || {}, null, 2);
+			// Combine customImage with overrides for JSON representation
+			const jsonData: Record<string, any> = {};
+
+			// Add custom image if present
+			if (customImageValue) {
+				jsonData.customImage = customImageValue;
+			}
+
+			// Add all override properties
+			if (overrides) {
+				// Spread the protobuf object properties into jsonData
+				Object.assign(jsonData, overrides);
+			}
+
+			jsonText = JSON.stringify(jsonData, null, 2);
 		}
 	});
 
@@ -54,11 +88,23 @@
 			// Parse JSON and update overrides
 			try {
 				const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
+
+				// Extract customImage if present
+				if ('customImage' in parsed) {
+					const newCustomImage = parsed.customImage || '';
+					// Trigger validation and update via callback
+					onCustomImageChange?.(newCustomImage);
+					// Remove customImage from the parsed object so it's not in overrides
+					delete parsed.customImage;
+				}
+
+				// Update overrides with remaining properties
 				overrides = Object.keys(parsed).length > 0 ? parsed : undefined;
 				jsonError = '';
 				jsonMode = false;
 				onchange?.(overrides);
-			} catch (e) {
+
+				} catch (e) {
 				jsonError = `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`;
 			}
 		} else {
@@ -251,19 +297,18 @@
 							placeholder={"{}"}
 							class="font-mono text-xs min-h-[200px] {jsonError ? 'border-destructive' : ''}"
 						/>
-						{#if jsonError}
-							<div class="flex items-center gap-2 text-destructive text-xs">
-								<AlertCircle class="h-3 w-3" />
-								{jsonError}
-							</div>
-						{/if}
-						<div class="flex justify-end">
-							<Button
-								type="button"
-								variant="default"
-								size="sm"
-								onclick={toggleJsonMode}
-								disabled={disabled || !!jsonError}
+					{#if jsonError}
+						<div class="flex items-center gap-2 text-destructive text-xs">
+							<AlertCircle class="h-3 w-3" />
+							{jsonError}
+						</div>
+					{/if}
+					<div class="flex justify-end">
+						<Button
+							type="button"
+							variant="default"
+							size="sm"
+							onclick={toggleJsonMode}
 							>
 								Apply JSON
 							</Button>
@@ -272,6 +317,55 @@
 				</CardContent>
 			{:else}
 				<CardContent class="pt-6 space-y-6">
+					<!-- Custom Docker Image Input -->
+					<div class="space-y-2">
+						<Label for="custom_docker_image" class="text-sm font-medium">Custom Docker Image</Label>
+						<div class="relative">
+							<Input
+								id="custom_docker_image"
+								type="text"
+								value={customImageValue}
+								placeholder="e.g., itzg/minecraft-server:java21"
+								oninput={(e) => {
+									onCustomImageChange?.(e.currentTarget.value);
+								}}
+								class={dockerImageValid === false ? 'border-destructive' : dockerImageValid === true ? 'border-green-600' : ''}
+								{disabled}
+							/>
+							{#if validatingDockerImage}
+								<div class="absolute right-3 top-1/2 transform -translate-y-1/2">
+									<Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
+								</div>
+							{:else if dockerImageValid === true}
+								<div class="absolute right-3 top-1/2 transform -translate-y-1/2">
+									<span class="text-green-600 text-lg">✓</span>
+								</div>
+							{/if}
+						</div>
+						{#if dockerImageError}
+							<div class="flex items-center gap-2 text-destructive pl-1">
+								<AlertCircle class="h-3 w-3" />
+								<span class="text-xs">{dockerImageError}</span>
+							</div>
+						{:else if customImageValue === ''}
+							<p class="text-xs text-muted-foreground">
+								Leave empty to use a preset image or auto-select
+							</p>
+						{:else if dockerImageValid === true}
+							<p class="text-xs text-green-600">
+								Image is available and ready to use
+							</p>
+						{:else if dockerImageValid === false}
+							<p class="text-xs text-destructive">
+								Please check the image name and try again
+							</p>
+						{:else}
+							<p class="text-xs text-muted-foreground">
+								Checking image availability...
+							</p>
+						{/if}
+					</div>
+
 					<!-- Environment Variables -->
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">

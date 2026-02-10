@@ -11,7 +11,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import { ArrowLeft, Loader2, Package, Settings, HardDrive } from '@lucide/svelte';
+	import { ArrowLeft, Loader2, Package, Settings, HardDrive, AlertCircle } from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import type { CreateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
@@ -22,7 +22,7 @@
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
-	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
+	import { getUniqueDockerImages, getDockerImageDisplayName, isValidImageReferenceFormat, debounce } from '$lib/utils';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
@@ -35,6 +35,11 @@
 	let proxyListeners = $state<ProxyListener[]>([]);
 	let usedPorts = $state<Record<number, boolean>>({});
 	let portError = $state('');
+	let dockerImageError = $state('');
+	let validatingDockerImage = $state(false);
+	let dockerImageValid = $state<boolean | null>(null); // null = not validated, true = valid, false = invalid
+	let selectedPresetDockerImage = $state('');
+	let presetDockerImageWarning = $state<string | null>(null);
 	let useProxyMode = $state(false); // Track connection mode separately
 	
 	// Modpack selection
@@ -230,9 +235,47 @@
 		}
 	}
 
+	async function validateDockerImage(image: string) {
+		dockerImageError = '';
+
+		// Allow empty for auto-select
+		if (!image || image.trim() === '') {
+			dockerImageValid = true;
+			return;
+		}
+
+		// Basic format check
+		if (!isValidImageReferenceFormat(image)) {
+			dockerImageError = 'Invalid image format. Example: itzg/minecraft-server:java21';
+			dockerImageValid = false;
+			return;
+		}
+
+		// Async validation with backend
+		validatingDockerImage = true;
+		try {
+			const result = await rpcClient.minecraft.validateDockerImage({ image });
+			if (!result.valid) {
+				dockerImageError = result.error || 'Image not found';
+				dockerImageValid = false;
+			} else {
+				dockerImageValid = true;
+				dockerImageError = '';
+			}
+		} catch (error) {
+			dockerImageError = `Failed to validate image: ${error instanceof Error ? error.message : 'Unknown error'}`;
+			dockerImageValid = false;
+		} finally {
+			validatingDockerImage = false;
+		}
+	}
+
+	// Debounced validation
+	const debouncedValidateDockerImage = debounce(validateDockerImage, 700);
+
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
-		
+
 		if (!formData.name.trim()) {
 			toast.error('Server name is required');
 			return;
@@ -242,6 +285,21 @@
 		if (!useProxyMode && !validatePort(formData.port)) {
 			toast.error('Please select a valid port');
 			return;
+		}
+
+		// Determine which Docker image to use (custom takes precedence over preset)
+		let finalDockerImage = formData.dockerImage || selectedPresetDockerImage || '';
+
+		// Validate Docker image if provided
+		if (finalDockerImage) {
+			// If we haven't validated yet or the validation failed, validate now
+			if (dockerImageValid !== true) {
+				await validateDockerImage(finalDockerImage);
+				if (dockerImageValid === false) {
+					toast.error('Invalid Docker image');
+					return;
+				}
+			}
 		}
 
 		loading = true;
@@ -255,6 +313,7 @@
 
 			const createRequest = {
 				...formData,
+				dockerImage: finalDockerImage,
 				modpackId: selectedModpack?.id || '',
 				modpackVersionId: versionToSend || '',
 				// When using proxy with hostname, set port to 0 to indicate proxy usage
@@ -274,18 +333,18 @@
 
 </script>
 
-<div class="h-full overflow-y-auto bg-gradient-to-br from-background to-muted/10">
+<div class="h-full overflow-y-auto bg-linear-to-br from-background to-muted/10">
 	<div class="space-y-8 p-4 sm:p-6 lg:p-8 pt-4 sm:pt-6">
 	<div class="flex items-center gap-4 pb-6 border-b-2 border-border/50">
 		<Button variant="ghost" size="icon" href="/servers" class="shrink-0 h-12 w-12 rounded-xl hover:bg-muted">
 			<ArrowLeft class="h-5 w-5" />
 		</Button>
 		<div class="flex items-center gap-4">
-			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+			<div class="h-16 w-16 rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
 				<Package class="h-8 w-8 text-primary" />
 			</div>
 			<div class="space-y-1">
-				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Create New Server</h2>
+				<h2 class="text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Create New Server</h2>
 				<p class="text-base text-muted-foreground">Set up a new Minecraft server instance with your preferred configuration</p>
 			</div>
 		</div>
@@ -293,7 +352,7 @@
 
 	<form onsubmit={handleSubmit}>
 		<div class="grid gap-6 lg:grid-cols-2">
-			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
+			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-linear-to-br from-card to-card/90">
 				<CardHeader class="pb-6">
 					<div class="flex items-center gap-3">
 						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -336,7 +395,7 @@
 						</div>
 						
 						{#if selectedModpack}
-							<Card class="border-2 border-primary/30 bg-gradient-to-br from-primary/10 to-primary/5 shadow-lg">
+							<Card class="border-2 border-primary/30 bg-linear-to-br from-primary/10 to-primary/5 shadow-lg">
 								<CardContent class="p-5">
 									<div class="flex items-start gap-3">
 										{#if selectedModpack.logoUrl}
@@ -507,7 +566,7 @@
 				</CardContent>
 			</Card>
 
-			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
+			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-linear-to-br from-card to-card/90">
 				<CardHeader class="pb-6">
 					<div class="flex items-center gap-3">
 						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -740,27 +799,28 @@
 
 					<Separator />
 
-					<div class="space-y-2">
-						<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
-						<Select type="single" value={formData.dockerImage} onValueChange={(v: string | undefined) => formData.dockerImage = v ?? ''} disabled={loading || loadingVersions}>
-							<SelectTrigger id="docker_image">
-								<span>{formData.dockerImage ? getDockerImageDisplayName(formData.dockerImage) : 'Auto-select (Recommended)'}</span>
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="">Auto-select (Recommended)</SelectItem>
-								{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
-									<SelectItem value={image.tag}>
-										{getDockerImageDisplayName(image)}
-									</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
-						<p class="text-xs text-muted-foreground">
-							Leave as auto-select unless you have specific requirements
-						</p>
-					</div>
 
-					<Separator />
+				<div class="space-y-2">
+					<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
+					<Select type="single" value={selectedPresetDockerImage} onValueChange={(v: string | undefined) => selectedPresetDockerImage = v ?? ''} disabled={loading || loadingVersions}>
+						<SelectTrigger id="docker_image">
+							<span>{selectedPresetDockerImage ? getDockerImageDisplayName(selectedPresetDockerImage) : 'Select Java version or auto-select'}</span>
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="">Auto-select (Recommended)</SelectItem>
+							{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
+								<SelectItem value={image.tag}>
+									{getDockerImageDisplayName(image)}
+								</SelectItem>
+							{/each}
+						</SelectContent>
+					</Select>
+					<p class="text-xs text-muted-foreground">
+						Choose a preset Java version for quick selection
+					</p>
+				</div>
+
+				<Separator />
 
 					<div class="space-y-4">
 						<h4 class="text-sm font-semibold">Lifecycle Management</h4>
@@ -832,10 +892,33 @@
 
 			<!-- Docker Overrides - Advanced Configuration -->
 			<div class="lg:col-span-2">
+				{#if presetDockerImageWarning}
+					<div class="mb-4 p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10">
+						<div class="flex items-start gap-2">
+							<AlertCircle class="h-4 w-4 text-yellow-600 mt-0.5 shrink-0" />
+							<p class="text-sm text-yellow-700">{presetDockerImageWarning}</p>
+						</div>
+					</div>
+				{/if}
 				<DockerOverridesEditor
 					bind:overrides={formData.dockerOverrides}
+					bind:presetDockerImage={selectedPresetDockerImage}
 					disabled={loading}
 					onchange={(overrides) => formData.dockerOverrides = overrides}
+					dockerImages={dockerImages}
+					customImageValue={formData.dockerImage}
+					onCustomImageWarning={(warning) => presetDockerImageWarning = warning}
+					dockerImageValid={dockerImageValid}
+					dockerImageError={dockerImageError}
+					validatingDockerImage={validatingDockerImage}
+					onCustomImageChange={(value) => {
+						formData.dockerImage = value;
+						dockerImageValid = null;
+						dockerImageError = '';
+						if (value) {
+							debouncedValidateDockerImage(value);
+						}
+					}}
 				/>
 			</div>
 		</div>

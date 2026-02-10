@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -336,15 +337,33 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerConfig) (string, error) {
 	// Use server's DockerImage if specified, otherwise determine based on version and loader
 	var imageName string
+	var isLocalImage bool
 	if server.DockerImage != "" {
-		imageName = "itzg/minecraft-server:" + server.DockerImage
+		// Check if DockerImage is a full image reference (contains "/") or a local image
+		if strings.Contains(server.DockerImage, "/") {
+			// It's a full image reference (e.g., "my-registry.com/image:tag"), use as-is
+			imageName = server.DockerImage
+			c.log.Debug("Using full image reference: %s", imageName)
+		} else if c.imageExistsLocally(ctx, server.DockerImage) {
+			// It's a local image (e.g., "minecraft-with-git:latest"), use as-is
+			imageName = server.DockerImage
+			isLocalImage = true
+			c.log.Info("Using local image: %s", imageName)
+		} else {
+			// It's just a tag (e.g., "java21"), prepend the default itzg image
+			imageName = "itzg/minecraft-server:" + server.DockerImage
+			c.log.Debug("Using itzg image with tag: %s", imageName)
+		}
 	} else {
 		imageName = getDockerImage(server.ModLoader, server.MCVersion)
+		c.log.Debug("Using optimal docker tag: %s", imageName)
 	}
 
-	// Try pulling latest
-	if err := c.pullImage(ctx, imageName); err != nil {
-		return "", fmt.Errorf("failed to pull image: %w", err)
+	// Only pull if it's not a local image
+	if !isLocalImage {
+		if err := c.pullImage(ctx, imageName); err != nil {
+			return "", fmt.Errorf("failed to pull image: %w", err)
+		}
 	}
 
 	// Build environment variables
@@ -763,6 +782,83 @@ func (c *Client) GetDockerImages() []DockerImageTag {
 		}
 	}
 	return activeImages
+}
+
+// parseImageReference splits an image reference into repository and tag
+// Returns normalized image name with tag (defaults to "latest" if not specified)
+func parseImageReference(imageStr string) (string, error) {
+	imageStr = strings.TrimSpace(imageStr)
+	if imageStr == "" {
+		return "", fmt.Errorf("image name cannot be empty")
+	}
+
+	// Check for invalid characters
+	if strings.ContainsAny(imageStr, " \t\n") {
+		return "", fmt.Errorf("image name contains invalid whitespace")
+	}
+
+	// If no tag specified, add :latest
+	if !strings.Contains(imageStr, ":") {
+		return imageStr + ":latest", nil
+	}
+
+	return imageStr, nil
+}
+
+// imageExistsLocally checks if a Docker image exists in the local Docker daemon
+func (c *Client) imageExistsLocally(ctx context.Context, imageName string) bool {
+	// Use the Docker API client for more reliable local image detection
+	_, err := c.docker.ImageInspect(ctx, imageName)
+	exists := err == nil
+	c.log.Debug("imageExistsLocally check for '%s': exists=%v, err=%v", imageName, exists, err)
+	return exists
+}
+
+// ValidateImageExists checks if a Docker image exists locally or on accessible registries
+// First checks for local images using docker image inspect, then falls back to docker manifest inspect for remote images
+func (c *Client) ValidateImageExists(ctx context.Context, imageName string) error {
+	// Parse and normalize the image reference
+	normalizedImage, err := parseImageReference(imageName)
+	if err != nil {
+		return err
+	}
+
+	// First try to check if it's a local image using docker image inspect
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", normalizedImage)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err == nil {
+		// Image exists locally
+		return nil
+	}
+
+	// Not found locally, try remote registries using docker manifest inspect
+	cmd = exec.CommandContext(ctx, "docker", "manifest", "inspect", normalizedImage)
+	stdout.Reset()
+	stderr.Reset()
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err != nil {
+		// More descriptive error messages based on error output
+		errStr := stderr.String() + " " + stdout.String()
+		if strings.Contains(errStr, "no such manifest") || strings.Contains(errStr, "not found") {
+			return fmt.Errorf("image '%s' not found locally or on Docker Hub or accessible registries", normalizedImage)
+		}
+		if strings.Contains(errStr, "unauthorized") || strings.Contains(errStr, "forbidden") {
+			return fmt.Errorf("access denied to image '%s' - may require authentication", normalizedImage)
+		}
+		if strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "network") {
+			return fmt.Errorf("cannot reach Docker daemon or registry: %w", err)
+		}
+		return fmt.Errorf("failed to validate image '%s': %w", normalizedImage, err)
+	}
+
+	return nil
 }
 
 func getDockerImage(loader models.ModLoader, mcVersion string) string {

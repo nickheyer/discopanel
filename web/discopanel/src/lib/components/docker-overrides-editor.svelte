@@ -5,19 +5,21 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Switch } from '$lib/components/ui/switch';
-	import { Plus, AlertCircle, Code, ChevronDown, ChevronRight, X } from '@lucide/svelte';
+	import { Plus, AlertCircle, Code, ChevronDown, ChevronRight, X, Loader2 } from '@lucide/svelte';
 	import type { DockerOverrides, VolumeMount } from '$lib/proto/discopanel/v1/common_pb';
 	import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/discopanel/v1/common_pb';
-	import { create } from '@bufbuild/protobuf';
+	import type { DockerImage } from '$lib/proto/discopanel/v1/minecraft_pb';
+	import { create, toJson } from '@bufbuild/protobuf';
 	import { Badge } from '$lib/components/ui/badge';
 
 	interface Props {
 		overrides?: DockerOverrides;
 		disabled?: boolean;
 		onchange?: (overrides: DockerOverrides | undefined) => void;
+		isAdmin?: boolean;
 	}
 
-	let { overrides = $bindable(), disabled = false, onchange }: Props = $props();
+	let { overrides = $bindable(), disabled = false, onchange, isAdmin = false }: Props = $props();
 
 	let showAdvanced = $state(false);
 	let jsonMode = $state(false);
@@ -29,23 +31,31 @@
 	let activeCount = $derived(() => {
 		if (!overrides) return 0;
 		let count = 0;
-		if (overrides.environment && Object.keys(overrides.environment).length > 0) count++;
-		if (overrides.volumes && overrides.volumes.length > 0) count++;
-		if (overrides.cpuLimit) count++;
-		if (overrides.memoryLimit) count++;
-		if (overrides.networkMode) count++;
-		if (overrides.privileged) count++;
-		if (overrides.user) count++;
-		if (overrides.capAdd && overrides.capAdd.length > 0) count++;
-		if (overrides.capDrop && overrides.capDrop.length > 0) count++;
-		if (overrides.devices && overrides.devices.length > 0) count++;
+		if (overrides) {
+			if (overrides.environment && Object.keys(overrides.environment).length > 0) count++;
+			if (overrides.volumes && overrides.volumes.length > 0) count++;
+			if (overrides.initCommands && overrides.initCommands.length > 0) count++;
+			if (overrides.cpuLimit) count++;
+			if (overrides.memoryLimit) count++;
+			if (overrides.networkMode) count++;
+			if (overrides.privileged) count++;
+			if (overrides.user) count++;
+			if (overrides.capAdd && overrides.capAdd.length > 0) count++;
+			if (overrides.capDrop && overrides.capDrop.length > 0) count++;
+			if (overrides.devices && overrides.devices.length > 0) count++;
+		}
 		return count;
 	});
 
 	// Initialize JSON text when switching modes
 	$effect(() => {
 		if (jsonMode) {
-			jsonText = JSON.stringify(overrides || {}, null, 2);
+				if (overrides) {
+					const overridesJson = toJson(DockerOverridesSchema, overrides);
+					jsonText = JSON.stringify(overridesJson, null, 2);
+				} else {
+					jsonText = '{}';
+				}
 		}
 	});
 
@@ -53,11 +63,29 @@
 		if (jsonMode) {
 			// Parse JSON and update overrides
 			try {
-				const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
-				overrides = Object.keys(parsed).length > 0 ? parsed : undefined;
+				const trimmed = jsonText.trim();
+				if (!trimmed || trimmed === '{}') {
+					// If JSON is empty or just empty object, reset to empty message
+					overrides = create(DockerOverridesSchema, {});
+					jsonError = '';
+					jsonMode = false;
+					onchange?.(overrides);
+					return;
+				}
+
+				const parsed = JSON.parse(trimmed);
+
+				// Update overrides - convert plain object back to protobuf Message
+				if (typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+					overrides = create(DockerOverridesSchema, parsed);
+					onchange?.(overrides);
+				} else {
+					overrides = create(DockerOverridesSchema, {});
+					onchange?.(overrides);
+				}
 				jsonError = '';
 				jsonMode = false;
-				onchange?.(overrides);
+
 			} catch (e) {
 				jsonError = `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`;
 			}
@@ -92,6 +120,7 @@
 		// Copy existing values
 		if (overrides.environment && Object.keys(overrides.environment).length > 0) updates.environment = { ...overrides.environment };
 		if (overrides.volumes && overrides.volumes.length > 0) updates.volumes = [...overrides.volumes];
+		if (overrides.initCommands && overrides.initCommands.length > 0) updates.initCommands = [...overrides.initCommands];
 		if (overrides.capAdd && overrides.capAdd.length > 0) updates.capAdd = [...overrides.capAdd];
 		if (overrides.capDrop && overrides.capDrop.length > 0) updates.capDrop = [...overrides.capDrop];
 		if (overrides.devices && overrides.devices.length > 0) updates.devices = [...overrides.devices];
@@ -125,7 +154,7 @@
 		if (hasValues) {
 			overrides = create(DockerOverridesSchema, updates);
 		} else {
-			overrides = undefined;
+			overrides = create(DockerOverridesSchema, {});
 		}
 
 		onchange?.(overrides);
@@ -251,19 +280,18 @@
 							placeholder={"{}"}
 							class="font-mono text-xs min-h-[200px] {jsonError ? 'border-destructive' : ''}"
 						/>
-						{#if jsonError}
-							<div class="flex items-center gap-2 text-destructive text-xs">
-								<AlertCircle class="h-3 w-3" />
-								{jsonError}
-							</div>
-						{/if}
-						<div class="flex justify-end">
-							<Button
-								type="button"
-								variant="default"
-								size="sm"
-								onclick={toggleJsonMode}
-								disabled={disabled || !!jsonError}
+					{#if jsonError}
+						<div class="flex items-center gap-2 text-destructive text-xs">
+							<AlertCircle class="h-3 w-3" />
+							{jsonError}
+						</div>
+					{/if}
+					<div class="flex justify-end">
+						<Button
+							type="button"
+							variant="default"
+							size="sm"
+							onclick={toggleJsonMode}
 							>
 								Apply JSON
 							</Button>
@@ -405,6 +433,101 @@
 							<div class="text-xs text-muted-foreground italic">No volume mounts configured</div>
 						{/if}
 					</div>
+
+					<!-- Init Commands (Admin Only) -->
+					{#if isAdmin}
+					<div class="space-y-3">
+						<div class="flex items-center justify-between">
+							<Label class="text-sm font-medium">Init Commands (Admin Only)</Label>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onclick={() => {
+									const commands = [...(overrides?.initCommands || [])];
+									commands.push('');
+									const newOverrides = { ...overrides } as DockerOverrides;
+									newOverrides.initCommands = commands;
+									overrides = newOverrides;
+									onchange?.(overrides);
+								}}
+								disabled={disabled}
+								class="h-7 text-xs gap-1"
+							>
+								<Plus class="h-3 w-3" />
+								Add Command
+							</Button>
+						</div>
+
+						<!-- Security Warning -->
+						<div class="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
+							<AlertCircle class="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+							<div class="text-xs space-y-1">
+								<p class="font-medium text-destructive">Advanced Feature: Admin Only</p>
+								<p class="text-destructive/90">
+									Requires a shellful image with <code class="bg-destructive/5 px-1 rounded">/bin/sh</code>.
+									Distroless, scratch, and minimal images are <strong>not supported</strong>.
+									Commands run with container privileges before the server starts.
+								</p>
+								<p class="text-destructive/90 font-medium mt-2">
+									Examples: Install packages, clone git repos, modify configs
+								</p>
+							</div>
+						</div>
+
+						{#if overrides?.initCommands && overrides.initCommands.length > 0}
+							<div class="rounded-lg border bg-muted/20 p-3">
+								<div class="space-y-2">
+									{#each overrides.initCommands as command, i}
+										<div class="flex items-start gap-2">
+											<span class="text-xs text-muted-foreground mt-2 min-w-[20px]">{i + 1}.</span>
+											<Textarea
+												value={command}
+												oninput={(e) => {
+													const commands = [...(overrides?.initCommands || [])];
+													commands[i] = e.currentTarget.value;
+													const newOverrides = { ...overrides } as DockerOverrides;
+													newOverrides.initCommands = commands;
+													overrides = newOverrides;
+													onchange?.(overrides);
+												}}
+												placeholder="apt-get update && apt-get install -y git"
+												disabled={disabled}
+												class="font-mono text-xs flex-1 min-h-[60px]"
+											/>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												onclick={() => {
+													const commands = [...(overrides?.initCommands || [])];
+													commands.splice(i, 1);
+													const newOverrides = { ...overrides } as DockerOverrides;
+													newOverrides.initCommands = commands.length > 0 ? commands : [];
+													overrides = newOverrides;
+													onchange?.(overrides);
+												}}
+												disabled={disabled}
+												class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+											>
+												<X class="h-3 w-3" />
+											</Button>
+										</div>
+									{/each}
+								</div>
+							</div>
+							<div class="flex items-start gap-2 p-2 rounded bg-muted/30 border">
+								<AlertCircle class="h-3 w-3 text-muted-foreground mt-0.5" />
+								<p class="text-xs text-muted-foreground">
+									Commands execute in order. The container will fail to start if any command returns a non-zero exit code.
+									Check container logs for execution details.
+								</p>
+							</div>
+						{:else}
+							<div class="text-xs text-muted-foreground italic">No init commands configured</div>
+						{/if}
+					</div>
+					{/if}
 
 					<!-- Resource Limits -->
 					<div class="grid grid-cols-2 gap-4">

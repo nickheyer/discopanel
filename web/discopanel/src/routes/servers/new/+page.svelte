@@ -10,8 +10,9 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { isAdmin } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
-	import { ArrowLeft, Loader2, Package, Settings, HardDrive } from '@lucide/svelte';
+	import { ArrowLeft, Loader2, Package, Settings, HardDrive, AlertCircle } from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import type { CreateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
@@ -35,6 +36,13 @@
 	let proxyListeners = $state<ProxyListener[]>([]);
 	let usedPorts = $state<Record<number, boolean>>({});
 	let portError = $state('');
+
+	// Docker image mode tracking (explicit, no string inference)
+	type DockerImageMode = 'preset' | 'custom';
+	let dockerImageMode = $state<DockerImageMode>('preset');
+	let selectedPresetTag = $state('');          // e.g., 'java21'
+	let customImageValue = $state('');           // e.g., 'my-registry/image:tag'
+
 	let useProxyMode = $state(false); // Track connection mode separately
 	
 	// Modpack selection
@@ -174,7 +182,14 @@
 			formData.modLoader = 0; // Will be set based on modpack data
 			formData.mcVersion = modpack.mcVersion || '';
 			formData.memory = modpack.recommendedRam || 2048;
-			formData.dockerImage = modpack.dockerImage || '';
+
+			// Initialize docker image mode if modpack specifies one
+			if (modpack.dockerImage) {
+				initializeDockerImageMode(modpack.dockerImage);
+			} else {
+				initializeDockerImageMode('');
+			}
+
 			await loadModpackVersions(modpack.id);
 		} catch (error) {
 			toast.error('Failed to load modpack configuration');
@@ -191,6 +206,7 @@
 		formData.mcVersion = latestVersion || '';
 		formData.dockerImage = '';
 		formData.memory = 2048;
+		initializeDockerImageMode('');
 	}
 	
 	function parseJsonArray(jsonStr: string): string[] {
@@ -230,9 +246,62 @@
 		}
 	}
 
+
+	// Initialize docker image mode ONCE
+	function initializeDockerImageMode(dockerImage: string) {
+		if (!dockerImage) {
+			dockerImageMode = 'preset';
+			selectedPresetTag = '';
+			customImageValue = '';
+		} else if (dockerImage.startsWith('itzg/minecraft-server:')) {
+			dockerImageMode = 'preset';
+			selectedPresetTag = dockerImage.substring('itzg/minecraft-server:'.length);
+			customImageValue = '';
+		} else {
+			// Check if this is a known preset tag by comparing against available images
+			const availableImages = getUniqueDockerImages(dockerImages);
+			const isKnownPreset = availableImages.some(img => img.tag === dockerImage);
+
+			if (isKnownPreset) {
+				// It's a known preset tag (like "java21" from auto-select)
+				dockerImageMode = 'preset';
+				selectedPresetTag = dockerImage;
+				customImageValue = '';
+			} else {
+				// It's a custom image
+				dockerImageMode = 'custom';
+				selectedPresetTag = '';
+				customImageValue = dockerImage;
+			}
+		}
+		dockerImageValid = true;
+		dockerImageError = '';
+	}
+
+	// Derive formData.dockerImage from explicit mode
+	$effect(() => {
+		if (dockerImageMode === 'custom') {
+			formData.dockerImage = customImageValue;
+		} else if (selectedPresetTag) {
+			formData.dockerImage = 'itzg/minecraft-server:' + selectedPresetTag;
+		} else {
+			formData.dockerImage = ''; // Auto-select
+		}
+	});
+
+	// Re-initialize docker image mode when dockerImages loads (to properly identify presets vs custom)
+	$effect(() => {
+		if (dockerImages && dockerImages.length > 0 && !loadingVersions) {
+			// Re-check modpack docker image if available
+			if (selectedModpack?.dockerImage) {
+				initializeDockerImageMode(selectedModpack.dockerImage);
+			}
+		}
+	});
+
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
-		
+
 		if (!formData.name.trim()) {
 			toast.error('Server name is required');
 			return;
@@ -242,6 +311,32 @@
 		if (!useProxyMode && !validatePort(formData.port)) {
 			toast.error('Please select a valid port');
 			return;
+		}
+
+		// Docker image is already set in formData.dockerImage via derived state
+		const finalDockerImage = formData.dockerImage;
+
+		// Validate: if using auto-select (empty dockerImage), MC version is required
+		if (!finalDockerImage && !formData.mcVersion) {
+			toast.error('Minecraft version is required when using auto-select');
+			return;
+		}
+
+		// Validate custom Docker image if provided
+		if (dockerImageMode === 'custom' && finalDockerImage) {
+			loading = true;
+			try {
+				const validationResult = await rpcClient.minecraft.validateDockerImage({ image: finalDockerImage });
+				if (!validationResult.valid) {
+					toast.error(`Invalid Docker image: ${validationResult.error || 'Image format is invalid'}`);
+					loading = false;
+					return;
+				}
+			} catch (error) {
+				toast.error(`Failed to validate Docker image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+				loading = false;
+				return;
+			}
 		}
 
 		loading = true;
@@ -255,6 +350,7 @@
 
 			const createRequest = {
 				...formData,
+				dockerImage: finalDockerImage,
 				modpackId: selectedModpack?.id || '',
 				modpackVersionId: versionToSend || '',
 				// When using proxy with hostname, set port to 0 to indicate proxy usage
@@ -274,18 +370,18 @@
 
 </script>
 
-<div class="h-full overflow-y-auto bg-gradient-to-br from-background to-muted/10">
+<div class="h-full overflow-y-auto bg-linear-to-br from-background to-muted/10">
 	<div class="space-y-8 p-4 sm:p-6 lg:p-8 pt-4 sm:pt-6">
 	<div class="flex items-center gap-4 pb-6 border-b-2 border-border/50">
 		<Button variant="ghost" size="icon" href="/servers" class="shrink-0 h-12 w-12 rounded-xl hover:bg-muted">
 			<ArrowLeft class="h-5 w-5" />
 		</Button>
 		<div class="flex items-center gap-4">
-			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+			<div class="h-16 w-16 rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
 				<Package class="h-8 w-8 text-primary" />
 			</div>
 			<div class="space-y-1">
-				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Create New Server</h2>
+				<h2 class="text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Create New Server</h2>
 				<p class="text-base text-muted-foreground">Set up a new Minecraft server instance with your preferred configuration</p>
 			</div>
 		</div>
@@ -293,7 +389,7 @@
 
 	<form onsubmit={handleSubmit}>
 		<div class="grid gap-6 lg:grid-cols-2">
-			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
+			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-linear-to-br from-card to-card/90">
 				<CardHeader class="pb-6">
 					<div class="flex items-center gap-3">
 						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -336,7 +432,7 @@
 						</div>
 						
 						{#if selectedModpack}
-							<Card class="border-2 border-primary/30 bg-gradient-to-br from-primary/10 to-primary/5 shadow-lg">
+							<Card class="border-2 border-primary/30 bg-linear-to-br from-primary/10 to-primary/5 shadow-lg">
 								<CardContent class="p-5">
 									<div class="flex items-start gap-3">
 										{#if selectedModpack.logoUrl}
@@ -507,7 +603,7 @@
 				</CardContent>
 			</Card>
 
-			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
+			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-linear-to-br from-card to-card/90">
 				<CardHeader class="pb-6">
 					<div class="flex items-center gap-3">
 						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -740,27 +836,84 @@
 
 					<Separator />
 
-					<div class="space-y-2">
-						<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
-						<Select type="single" value={formData.dockerImage} onValueChange={(v: string | undefined) => formData.dockerImage = v ?? ''} disabled={loading || loadingVersions}>
-							<SelectTrigger id="docker_image">
-								<span>{formData.dockerImage ? getDockerImageDisplayName(formData.dockerImage) : 'Auto-select (Recommended)'}</span>
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="">Auto-select (Recommended)</SelectItem>
-								{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
-									<SelectItem value={image.tag}>
-										{getDockerImageDisplayName(image)}
-									</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
-						<p class="text-xs text-muted-foreground">
-							Leave as auto-select unless you have specific requirements
-						</p>
-					</div>
 
-					<Separator />
+				<div class="space-y-2">
+					<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
+					<Select type="single" value={dockerImageMode === 'custom' ? '__custom__' : selectedPresetTag} onValueChange={(value: string | undefined) => {
+					const newValue = value || '';
+					if (newValue === '__custom__') {
+						dockerImageMode = 'custom';
+						selectedPresetTag = '';
+					} else {
+						dockerImageMode = 'preset';
+						selectedPresetTag = newValue;
+						customImageValue = '';
+					}
+				}} disabled={loading || loadingVersions}>
+						<SelectTrigger id="docker_image">
+							<span>
+								{#if dockerImageMode === 'custom'}
+									Custom Image
+								{:else if selectedPresetTag}
+									{getDockerImageDisplayName(selectedPresetTag, dockerImages)}
+									<span class="text-xs text-muted-foreground ml-1">
+										(itzg/minecraft-server:{selectedPresetTag})
+									</span>
+								{:else}
+									Auto-select (Recommended)
+								{/if}
+							</span>
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="">Auto-select (Recommended)</SelectItem>
+							{#if $isAdmin}
+								<SelectItem value="__custom__">Custom Image...</SelectItem>
+							{/if}
+							{#if getUniqueDockerImages(dockerImages).length > 0}
+								<div class="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+									Preset Images
+								</div>
+							{/if}
+							{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
+								<SelectItem value={image.tag}>
+									{getDockerImageDisplayName(image)}
+									<span class="text-xs text-muted-foreground ml-1">
+										(itzg/minecraft-server:{image.tag})
+									</span>
+								</SelectItem>
+							{/each}
+						</SelectContent>
+					</Select>
+
+					{#if dockerImageMode === 'custom' && $isAdmin}
+						<div class="mt-2 space-y-2">
+							<Input
+								id="custom_docker_image"
+								type="text"
+								value={customImageValue}
+								placeholder="e.g., itzg/minecraft-server:java21 or my-registry/image:tag"
+								oninput={(e) => {
+									customImageValue = e.currentTarget.value;
+								}}
+								disabled={loading}
+							/>
+						</div>
+					{:else if dockerImageMode === 'custom' && !$isAdmin}
+						<div class="mt-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30">
+							<p class="text-sm text-destructive">Custom images require admin access for security reasons</p>
+						</div>
+					{:else}
+						<p class="text-xs text-muted-foreground">
+							{#if selectedPresetTag}
+								Full reference: itzg/minecraft-server:{selectedPresetTag}
+							{:else}
+								DiscoPanel will automatically select the best Java version for your Minecraft version
+							{/if}
+						</p>
+					{/if}
+				</div>
+
+				<Separator />
 
 					<div class="space-y-4">
 						<h4 class="text-sm font-semibold">Lifecycle Management</h4>
@@ -836,6 +989,7 @@
 					bind:overrides={formData.dockerOverrides}
 					disabled={loading}
 					onchange={(overrides) => formData.dockerOverrides = overrides}
+					isAdmin={$isAdmin}
 				/>
 			</div>
 		</div>

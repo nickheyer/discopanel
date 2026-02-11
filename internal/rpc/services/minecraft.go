@@ -139,3 +139,21 @@ func (s *MinecraftService) GetDockerImages(ctx context.Context, req *connect.Req
 		Images: protoImages,
 	}), nil
 }
+
+// ValidateDockerImage validates a custom Docker image
+func (s *MinecraftService) ValidateDockerImage(ctx context.Context, req *connect.Request[v1.ValidateDockerImageRequest]) (*connect.Response[v1.ValidateDockerImageResponse], error) {
+	imageName := req.Msg.GetImage()
+
+	normalizedImage, err := s.docker.ValidateImageExists(ctx, imageName)
+	if err != nil {
+		return connect.NewResponse(&v1.ValidateDockerImageResponse{
+			Valid: false,
+			Error: err.Error(),
+		}), nil
+	}
+
+	return connect.NewResponse(&v1.ValidateDockerImageResponse{
+		Valid:           true,
+		NormalizedImage: normalizedImage,
+	}), nil
+}

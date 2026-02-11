@@ -14,6 +14,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -384,6 +385,45 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name and MC version are required"))
 	}
 
+	// Validate init commands - admin only, requires auth enabled
+	if msg.DockerOverrides != nil && len(msg.DockerOverrides.InitCommands) > 0 {
+		authConfig, _, err := s.store.GetAuthConfig(ctx)
+		if err == nil && !authConfig.Enabled {
+			return nil, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("authentication must be enabled to use init commands"))
+		}
+
+		user := auth.GetUserFromContext(ctx)
+		if user == nil || user.Role != storage.RoleAdmin {
+			return nil, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("only administrators can configure init commands"))
+		}
+
+		// Log that init commands were configured
+		s.log.Info("User %s (%s) configured %d init commands for new server '%s'",
+			user.Username, user.ID, len(msg.DockerOverrides.InitCommands), msg.Name)
+	}
+
+	// Validate custom Docker image - admin only
+	if msg.DockerImage != "" && !strings.HasPrefix(msg.DockerImage, "itzg/minecraft-server:") {
+		// This is a custom image - admin only
+		authConfig, _, err := s.store.GetAuthConfig(ctx)
+		if err == nil && !authConfig.Enabled {
+			return nil, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("authentication must be enabled to use custom docker images"))
+		}
+
+		user := auth.GetUserFromContext(ctx)
+		if user == nil || user.Role != storage.RoleAdmin {
+			return nil, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("only administrators can use custom docker images"))
+		}
+
+		// Audit log: Custom image configured during creation
+		s.log.Info("User %s (%s) configured custom docker image '%s' for new server '%s'",
+			user.Username, user.ID, msg.DockerImage, msg.Name)
+	}
+
 	// Handle proxy configuration
 	proxyHostname := msg.ProxyHostname
 	proxyListenerID := msg.ProxyListenerId
@@ -464,7 +504,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Determine Docker image if not specified
 	dockerImage := msg.DockerImage
 	if dockerImage == "" {
-		dockerImage = docker.GetOptimalDockerTag(msg.McVersion, modLoader, false)
+		dockerImage = "itzg/minecraft-server:" + docker.GetOptimalDockerTag(msg.McVersion, modLoader, false)
 	}
 
 	// Validate additional ports
@@ -791,6 +831,27 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		needsRecreation = true
 	}
 	if msg.DockerImage != "" && msg.DockerImage != originalDockerImage {
+		// Validate custom Docker image - admin only
+		if !strings.HasPrefix(msg.DockerImage, "itzg/minecraft-server:") {
+			// This is a custom image - admin only
+			authConfig, _, err := s.store.GetAuthConfig(ctx)
+			if err == nil && !authConfig.Enabled {
+				return nil, connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("authentication must be enabled to use custom docker images"))
+			}
+
+			user := auth.GetUserFromContext(ctx)
+			if user == nil || user.Role != storage.RoleAdmin {
+				return nil, connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("only administrators can use custom docker images"))
+			}
+
+			// Audit log: Custom image modified
+			s.log.Info("User %s (%s) changed docker image for server '%s' (ID: %s)",
+				user.Username, user.ID, server.Name, server.ID)
+			s.log.Info("  Previous: %s, New: %s", originalDockerImage, msg.DockerImage)
+		}
+
 		server.DockerImage = msg.DockerImage
 		needsRecreation = true
 	}
@@ -854,10 +915,60 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		needsRecreation = true
 	}
 
-	// Handle docker overrides update
+	// Handle docker overrides update with init commands validation
 	if msg.DockerOverrides != nil {
+		// Check if init commands changed
+		oldInitCommands := []string{}
+		if server.DockerOverrides != nil {
+			oldInitCommands = server.DockerOverrides.InitCommands
+		}
+		newInitCommands := msg.DockerOverrides.InitCommands
+
+		// Compare init commands
+		commandsChanged := len(oldInitCommands) != len(newInitCommands)
+		if !commandsChanged {
+			for i := range oldInitCommands {
+				if oldInitCommands[i] != newInitCommands[i] {
+					commandsChanged = true
+					break
+				}
+			}
+		}
+
+		// Validate init commands if changed - admin only, requires auth enabled
+		if commandsChanged && len(newInitCommands) > 0 {
+			authConfig, _, err := s.store.GetAuthConfig(ctx)
+			if err == nil && !authConfig.Enabled {
+				return nil, connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("authentication must be enabled to use init commands"))
+			}
+
+			user := auth.GetUserFromContext(ctx)
+			if user == nil || user.Role != storage.RoleAdmin {
+				return nil, connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("only administrators can configure init commands"))
+			}
+
+			// Audit log: Init commands modified
+			s.log.Info("User %s (%s) modified init commands for server '%s' (ID: %s)",
+				user.Username, user.ID, server.Name, server.ID)
+			s.log.Info("  Previous: %d commands, New: %d commands",
+				len(oldInitCommands), len(newInitCommands))
+
+			// Log new commands
+			for i, cmd := range newInitCommands {
+				cmdPreview := cmd
+				if len(cmdPreview) > 100 {
+					cmdPreview = cmdPreview[:100] + "..."
+				}
+				s.log.Info("  New init command %d: %s", i+1, cmdPreview)
+			}
+		}
+
 		server.DockerOverrides = msg.DockerOverrides
-		needsRecreation = true
+		if commandsChanged || len(msg.DockerOverrides.InitCommands) > 0 {
+			needsRecreation = true
+		}
 	}
 
 	// Handle modpack version update

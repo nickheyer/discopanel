@@ -147,6 +147,7 @@ message DockerOverrides {
   string working_dir = 17; // Working directory inside container
   repeated string entrypoint = 18; // Override default entrypoint
   repeated string command = 19; // Override default command
+  repeated string init_commands = 20; // Bash commands to run before entrypoint (ADMIN ONLY)
 }
 
 // TCP proxy listener endpoint

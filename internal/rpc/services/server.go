@@ -420,7 +420,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		}
 
 		// Audit log: Custom image configured during creation
-		s.log.Info("[AUDIT] User %s (%s) configured custom docker image '%s' for new server '%s'",
+		s.log.Info("User %s (%s) configured custom docker image '%s' for new server '%s'",
 			user.Username, user.ID, msg.DockerImage, msg.Name)
 	}
 
@@ -847,9 +847,9 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			}
 
 			// Audit log: Custom image modified
-			s.log.Info("[AUDIT] User %s (%s) changed docker image for server '%s' (ID: %s)",
+			s.log.Info("User %s (%s) changed docker image for server '%s' (ID: %s)",
 				user.Username, user.ID, server.Name, server.ID)
-			s.log.Info("[AUDIT]   Previous: %s, New: %s", originalDockerImage, msg.DockerImage)
+			s.log.Info("  Previous: %s, New: %s", originalDockerImage, msg.DockerImage)
 		}
 
 		server.DockerImage = msg.DockerImage
@@ -950,9 +950,9 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			}
 
 			// Audit log: Init commands modified
-			s.log.Info("[AUDIT] User %s (%s) modified init commands for server '%s' (ID: %s)",
+			s.log.Info("User %s (%s) modified init commands for server '%s' (ID: %s)",
 				user.Username, user.ID, server.Name, server.ID)
-			s.log.Info("[AUDIT]   Previous: %d commands, New: %d commands",
+			s.log.Info("  Previous: %d commands, New: %d commands",
 				len(oldInitCommands), len(newInitCommands))
 
 			// Log new commands
@@ -961,7 +961,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 				if len(cmdPreview) > 100 {
 					cmdPreview = cmdPreview[:100] + "..."
 				}
-				s.log.Info("[AUDIT]   New init command %d: %s", i+1, cmdPreview)
+				s.log.Info("  New init command %d: %s", i+1, cmdPreview)
 			}
 		}
 

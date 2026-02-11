@@ -413,6 +413,26 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		}
 	}
 
+	// Validate custom Docker image - admin only
+	if msg.DockerImage != "" && !strings.HasPrefix(msg.DockerImage, "itzg/minecraft-server:") {
+		// This is a custom image - admin only
+		authConfig, _, err := s.store.GetAuthConfig(ctx)
+		if err == nil && !authConfig.Enabled {
+			return nil, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("authentication must be enabled to use custom docker images"))
+		}
+
+		user := auth.GetUserFromContext(ctx)
+		if user == nil || user.Role != storage.RoleAdmin {
+			return nil, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("only administrators can use custom docker images"))
+		}
+
+		// Audit log: Custom image configured during creation
+		s.log.Info("[AUDIT] User %s (%s) configured custom docker image '%s' for new server '%s'",
+			user.Username, user.ID, msg.DockerImage, msg.Name)
+	}
+
 	// Handle proxy configuration
 	proxyHostname := msg.ProxyHostname
 	proxyListenerID := msg.ProxyListenerId
@@ -820,6 +840,27 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		needsRecreation = true
 	}
 	if msg.DockerImage != "" && msg.DockerImage != originalDockerImage {
+		// Validate custom Docker image - admin only
+		if !strings.HasPrefix(msg.DockerImage, "itzg/minecraft-server:") {
+			// This is a custom image - admin only
+			authConfig, _, err := s.store.GetAuthConfig(ctx)
+			if err == nil && !authConfig.Enabled {
+				return nil, connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("authentication must be enabled to use custom docker images"))
+			}
+
+			user := auth.GetUserFromContext(ctx)
+			if user == nil || user.Role != storage.RoleAdmin {
+				return nil, connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("only administrators can use custom docker images"))
+			}
+
+			// Audit log: Custom image modified
+			s.log.Info("[AUDIT] User %s (%s) changed docker image for server '%s' (ID: %s)",
+				user.Username, user.ID, server.Name, server.ID)
+			s.log.Info("[AUDIT]   Previous: %s, New: %s", originalDockerImage, msg.DockerImage)
+		}
+
 		server.DockerImage = msg.DockerImage
 		needsRecreation = true
 	}

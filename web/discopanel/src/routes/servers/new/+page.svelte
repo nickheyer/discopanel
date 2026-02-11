@@ -299,9 +299,21 @@
 			selectedPresetTag = dockerImage.substring('itzg/minecraft-server:'.length);
 			customImageValue = '';
 		} else {
-			dockerImageMode = 'custom';
-			selectedPresetTag = '';
-			customImageValue = dockerImage;
+			// Check if this is a known preset tag by comparing against available images
+			const availableImages = getUniqueDockerImages(dockerImages);
+			const isKnownPreset = availableImages.some(img => img.tag === dockerImage);
+
+			if (isKnownPreset) {
+				// It's a known preset tag (like "java21" from auto-select)
+				dockerImageMode = 'preset';
+				selectedPresetTag = dockerImage;
+				customImageValue = '';
+			} else {
+				// It's a custom image
+				dockerImageMode = 'custom';
+				selectedPresetTag = '';
+				customImageValue = dockerImage;
+			}
 		}
 		dockerImageValid = true;
 		dockerImageError = '';
@@ -315,6 +327,16 @@
 			formData.dockerImage = 'itzg/minecraft-server:' + selectedPresetTag;
 		} else {
 			formData.dockerImage = ''; // Auto-select
+		}
+	});
+
+	// Re-initialize docker image mode when dockerImages loads (to properly identify presets vs custom)
+	$effect(() => {
+		if (dockerImages && dockerImages.length > 0 && !loadingVersions) {
+			// Re-check modpack docker image if available
+			if (selectedModpack?.dockerImage) {
+				initializeDockerImageMode(selectedModpack.dockerImage);
+			}
 		}
 	});
 
@@ -882,7 +904,9 @@
 						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="">Auto-select (Recommended)</SelectItem>
-							<SelectItem value="__custom__">Custom Image...</SelectItem>
+							{#if $isAdmin}
+								<SelectItem value="__custom__">Custom Image...</SelectItem>
+							{/if}
 							{#if getUniqueDockerImages(dockerImages).length > 0}
 								<div class="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
 									Preset Images
@@ -899,7 +923,7 @@
 						</SelectContent>
 					</Select>
 
-					{#if dockerImageMode === 'custom'}
+					{#if dockerImageMode === 'custom' && $isAdmin}
 						<div class="mt-2 space-y-2">
 							<Input
 								id="custom_docker_image"
@@ -934,6 +958,10 @@
 									Image validated
 								</div>
 							{/if}
+						</div>
+					{:else if dockerImageMode === 'custom' && !$isAdmin}
+						<div class="mt-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30">
+							<p class="text-sm text-destructive">Custom images require admin access for security reasons</p>
 						</div>
 					{:else}
 						<p class="text-xs text-muted-foreground">

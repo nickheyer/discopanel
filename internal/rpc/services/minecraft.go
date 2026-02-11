@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"strings"
 
 	"connectrpc.com/connect"
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -145,8 +144,7 @@ func (s *MinecraftService) GetDockerImages(ctx context.Context, req *connect.Req
 func (s *MinecraftService) ValidateDockerImage(ctx context.Context, req *connect.Request[v1.ValidateDockerImageRequest]) (*connect.Response[v1.ValidateDockerImageResponse], error) {
 	imageName := req.Msg.GetImage()
 
-	// Validate image exists
-	err := s.docker.ValidateImageExists(ctx, imageName)
+	normalizedImage, err := s.docker.ValidateImageExists(ctx, imageName)
 	if err != nil {
 		return connect.NewResponse(&v1.ValidateDockerImageResponse{
 			Valid: false,
@@ -154,14 +152,8 @@ func (s *MinecraftService) ValidateDockerImage(ctx context.Context, req *connect
 		}), nil
 	}
 
-	// Parse the image reference to get normalized name
-	normalizedImage := imageName
-	if !strings.Contains(imageName, ":") {
-		normalizedImage = imageName + ":latest"
-	}
-
 	return connect.NewResponse(&v1.ValidateDockerImageResponse{
-		Valid:             true,
-		NormalizedImage:   normalizedImage,
+		Valid:           true,
+		NormalizedImage: normalizedImage,
 	}), nil
 }

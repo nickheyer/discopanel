@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/containerd/errdefs"
+	"github.com/distribution/reference"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
@@ -334,29 +334,31 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 	}
 }
 
-// generateInitWrapper creates a bash wrapper script that runs init commands before the original entrypoint
+// generateInitWrapper creates a shell wrapper script that runs init commands before the original entrypoint.
+// IMPORTANT: This feature requires a shellful image with /bin/sh present or else startup will fail
 func (c *Client) generateInitWrapper(ctx context.Context, initCommands []string, originalEntrypoint []string) (string, error) {
 	if len(initCommands) == 0 {
 		return "", nil
 	}
 
-	c.log.Info("Generating init wrapper script with %d commands", len(initCommands))
-
-	// Create wrapper script content
-	script := "#!/bin/bash\n"
-	script += "set -e  # Exit on first error\n"
-	script += "set -o pipefail  # Catch errors in pipes\n\n"
-	script += "echo '[DiscoPanel] Starting init commands...'\n\n"
-
-	// Add each init command with logging
+	// Validate init commands - check for empty commands
 	for i, cmd := range initCommands {
-		script += fmt.Sprintf("echo '[DiscoPanel] Init command %d/%d: Running...'\n", i+1, len(initCommands))
-		script += fmt.Sprintf("%s\n", cmd)
-		script += fmt.Sprintf("echo '[DiscoPanel] Init command %d/%d: SUCCESS'\n\n", i+1, len(initCommands))
+		if strings.TrimSpace(cmd) == "" {
+			return "", fmt.Errorf("init command %d is empty", i+1)
+		}
 	}
 
-	script += "echo '[DiscoPanel] All init commands completed successfully'\n"
-	script += "echo '[DiscoPanel] Starting original entrypoint...'\n\n"
+	c.log.Info("Generating init wrapper script with %d commands", len(initCommands))
+
+	script := "set -e\n"
+	script += "set -x\n\n" // Echo commands as they execute for visibility
+
+	// Add each init command
+	for _, cmd := range initCommands {
+		script += fmt.Sprintf("%s\n", cmd)
+	}
+
+	script += "\n"
 
 	// Exec original entrypoint (replaces shell process)
 	if len(originalEntrypoint) > 0 {
@@ -369,8 +371,9 @@ func (c *Client) generateInitWrapper(ctx context.Context, initCommands []string,
 		}
 		script += entrypointCmd + "\n"
 	} else {
-		script += "# No original entrypoint specified\n"
-		script += "exec /bin/bash\n"
+		// No entrypoint - this is an error condition
+		// Cannot generate wrapper without knowing what to exec back to
+		return "", fmt.Errorf("cannot generate init wrapper: image has no entrypoint defined. init commands require an image with a defined entrypoint")
 	}
 
 	return script, nil
@@ -379,32 +382,36 @@ func (c *Client) generateInitWrapper(ctx context.Context, initCommands []string,
 func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerConfig) (string, error) {
 	// Use server's DockerImage if specified, otherwise determine based on version and loader
 	var imageName string
-	var isLocalImage bool
 	if server.DockerImage != "" {
-		// Check if DockerImage is a full image reference (contains "/") or a local image
-		if strings.Contains(server.DockerImage, "/") {
-			// It's a full image reference (e.g., "my-registry.com/image:tag"), use as-is
-			imageName = server.DockerImage
-			c.log.Debug("Using full image reference: %s", imageName)
-		} else if c.imageExistsLocally(ctx, server.DockerImage) {
-			// It's a local image (e.g., "minecraft-with-git:latest"), use as-is
-			imageName = server.DockerImage
-			isLocalImage = true
-			c.log.Info("Using local image: %s", imageName)
-		} else {
-			// It's just a tag (e.g., "java21"), prepend the default itzg image
-			imageName = "itzg/minecraft-server:" + server.DockerImage
-			c.log.Debug("Using itzg image with tag: %s", imageName)
-		}
+		// User provided a custom image - use it as-is
+		// Could be a full reference (registry.com/image:tag), a short name (my-image:latest),
+		// or any other valid image reference format
+		imageName = server.DockerImage
+		c.log.Debug("Using custom image: %s", imageName)
 	} else {
+		// No custom image specified, determine optimal one based on version and loader
 		imageName = getDockerImage(server.ModLoader, server.MCVersion)
 		c.log.Debug("Using optimal docker tag: %s", imageName)
 	}
 
-	// Only pull if it's not a local image
-	if !isLocalImage {
-		if err := c.pullImage(ctx, imageName); err != nil {
-			return "", fmt.Errorf("failed to pull image: %w", err)
+	// Attempt to pull the image from registry to get latest version
+	pullErr := c.pullImage(ctx, imageName)
+	if pullErr == nil {
+		c.log.Debug("Successfully pulled image: %s", imageName)
+	} else {
+		// Pull failed, check if image exists locally as fallback
+		c.log.Warn("Failed to pull image %s: %v, checking for local image", imageName, pullErr)
+		_, inspectErr := c.docker.ImageInspect(ctx, imageName)
+		if inspectErr == nil {
+			// Image exists locally
+			c.log.Info("Using existing local image as fallback: %s", imageName)
+		} else if !errdefs.IsNotFound(inspectErr) {
+			// Real error checking local image, but still return pull error
+			c.log.Debug("Error inspecting local image %s: %v", imageName, inspectErr)
+			return "", fmt.Errorf("failed to pull image: %w", pullErr)
+		} else {
+			// Image doesn't exist locally either
+			return "", fmt.Errorf("failed to pull image: %w", pullErr)
 		}
 	}
 
@@ -544,25 +551,27 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		}
 
 		// Create script file in server's data directory
-		scriptPath := filepath.Join(server.DataPath, ".discopanel-init.sh")
-		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+		scriptPath := filepath.Join(server.DataPath, "discopanel-init.sh")
+		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
 			return "", fmt.Errorf("failed to write init wrapper script: %w", err)
 		}
 
 		c.log.Info("Wrote init wrapper script to %s", scriptPath)
 
 		// Mount the script into the container (read-only)
+		// Use a specific directory to avoid conflicts at container root
+		containerScriptPath := "/opt/discopanel/init.sh"
 		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   scriptPath,
-			Target:   "/discopanel-init.sh",
+			Target:   containerScriptPath,
 			ReadOnly: true,
 		})
 
 		// Override entrypoint to use our wrapper
-		config.Entrypoint = []string{"/bin/bash", "/discopanel-init.sh"}
+		config.Entrypoint = []string{"/bin/sh", containerScriptPath}
 
-		c.log.Info("[AUDIT] Generated init wrapper for server %s with %d commands",
+		c.log.Info("Generated init wrapper for server %s with %d init commands",
 			server.ID, len(server.DockerOverrides.InitCommands))
 	}
 
@@ -875,81 +884,66 @@ func (c *Client) GetDockerImages() []DockerImageTag {
 	return activeImages
 }
 
-// parseImageReference splits an image reference into repository and tag
-// Returns normalized image name with tag (defaults to "latest" if not specified)
-func parseImageReference(imageStr string) (string, error) {
-	imageStr = strings.TrimSpace(imageStr)
-	if imageStr == "" {
+// ParseImageReference validates and normalizes a Docker image reference.
+// Returns the normalized reference string, adding a "latest" tag if none is present.
+func (c *Client) ParseImageReference(imageStr string) (string, error) {
+	s := strings.TrimSpace(imageStr)
+	if s == "" {
 		return "", fmt.Errorf("image name cannot be empty")
 	}
-
-	// Check for invalid characters
-	if strings.ContainsAny(imageStr, " \t\n") {
+	// Reject any whitespace anywhere (Docker refs cannot contain it)
+	if strings.IndexFunc(s, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	}) != -1 {
 		return "", fmt.Errorf("image name contains invalid whitespace")
 	}
 
-	// If no tag specified, add :latest
-	if !strings.Contains(imageStr, ":") {
-		return imageStr + ":latest", nil
+	ref, err := reference.ParseNormalizedNamed(s)
+	if err != nil {
+		return "", fmt.Errorf("invalid image reference %q: %w", s, err)
 	}
 
-	return imageStr, nil
+	// If it has a digest, don't add a tag. (image@sha256:... is already fully pinned.)
+	if _, ok := ref.(reference.Digested); ok {
+		return reference.FamiliarString(ref), nil
+	}
+
+	// Ensure a tag exists (default "latest") for non-digest refs.
+	ref = reference.TagNameOnly(ref)
+
+	return reference.FamiliarString(ref), nil
 }
 
-// imageExistsLocally checks if a Docker image exists in the local Docker daemon
-func (c *Client) imageExistsLocally(ctx context.Context, imageName string) bool {
-	// Use the Docker API client for more reliable local image detection
-	_, err := c.docker.ImageInspect(ctx, imageName)
-	exists := err == nil
-	c.log.Debug("imageExistsLocally check for '%s': exists=%v, err=%v", imageName, exists, err)
-	return exists
-}
 
-// ValidateImageExists checks if a Docker image exists locally or on accessible registries
-// First checks for local images using docker image inspect, then falls back to docker manifest inspect for remote images
-func (c *Client) ValidateImageExists(ctx context.Context, imageName string) error {
-	// Parse and normalize the image reference
-	normalizedImage, err := parseImageReference(imageName)
+// ValidateImageExists validates that a Docker image reference is valid and accessible.
+// Returns the normalized image name and any validation error.
+func (c *Client) ValidateImageExists(ctx context.Context, imageName string) (string, error) {
+	// Validate format first
+	normalizedName, err := c.ParseImageReference(imageName)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	// First try to check if it's a local image using docker image inspect
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", normalizedImage)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err = cmd.Run()
-	if err == nil {
-		// Image exists locally
-		return nil
+	// Try to pull the image from registry
+	pullErr := c.pullImage(ctx, normalizedName)
+	if pullErr == nil {
+		c.log.Debug("Image validated successfully: %s", normalizedName)
+		return normalizedName, nil
 	}
 
-	// Not found locally, try remote registries using docker manifest inspect
-	cmd = exec.CommandContext(ctx, "docker", "manifest", "inspect", normalizedImage)
-	stdout.Reset()
-	stderr.Reset()
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err = cmd.Run()
-	if err != nil {
-		// More descriptive error messages based on error output
-		errStr := stderr.String() + " " + stdout.String()
-		if strings.Contains(errStr, "no such manifest") || strings.Contains(errStr, "not found") {
-			return fmt.Errorf("image '%s' not found locally or on Docker Hub or accessible registries", normalizedImage)
-		}
-		if strings.Contains(errStr, "unauthorized") || strings.Contains(errStr, "forbidden") {
-			return fmt.Errorf("access denied to image '%s' - may require authentication", normalizedImage)
-		}
-		if strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "network") {
-			return fmt.Errorf("cannot reach Docker daemon or registry: %w", err)
-		}
-		return fmt.Errorf("failed to validate image '%s': %w", normalizedImage, err)
+	// Pull failed, check if image exists locally as fallback
+	c.log.Debug("Pull failed for %s: %v, checking for local image", normalizedName, pullErr)
+	_, inspectErr := c.docker.ImageInspect(ctx, normalizedName)
+	if inspectErr == nil {
+		c.log.Info("Image validated (local): %s", normalizedName)
+		return normalizedName, nil
+	}
+	if !errdefs.IsNotFound(inspectErr) {
+		c.log.Debug("Error inspecting local image %s: %v", normalizedName, inspectErr)
 	}
 
-	return nil
+	// Image doesn't exist in registry or locally
+	return "", fmt.Errorf("image not found in registry or local images: %s", normalizedName)
 }
 
 func getDockerImage(loader models.ModLoader, mcVersion string) string {

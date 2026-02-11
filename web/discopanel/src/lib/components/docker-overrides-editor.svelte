@@ -50,13 +50,12 @@
 	// Initialize JSON text when switching modes
 	$effect(() => {
 		if (jsonMode) {
-			// Only include overrides in JSON representation
-			if (overrides) {
-				const overridesJson = toJson(DockerOverridesSchema, overrides) as Record<string, any>;
-				jsonText = JSON.stringify(overridesJson, null, 2);
-			} else {
-				jsonText = '{}';
-			}
+				if (overrides) {
+					const overridesJson = toJson(DockerOverridesSchema, overrides);
+					jsonText = JSON.stringify(overridesJson, null, 2);
+				} else {
+					jsonText = '{}';
+				}
 		}
 	});
 
@@ -65,24 +64,27 @@
 			// Parse JSON and update overrides
 			try {
 				const trimmed = jsonText.trim();
-				if (!trimmed) {
-					// If JSON is empty, keep existing overrides and just exit JSON mode
+				if (!trimmed || trimmed === '{}') {
+					// If JSON is empty or just empty object, reset to empty message
+					overrides = create(DockerOverridesSchema, {});
 					jsonError = '';
 					jsonMode = false;
+					onchange?.(overrides);
 					return;
 				}
 
 				const parsed = JSON.parse(trimmed);
 
 				// Update overrides - convert plain object back to protobuf Message
-				if (Object.keys(parsed).length > 0) {
+				if (typeof parsed === 'object' && Object.keys(parsed).length > 0) {
 					overrides = create(DockerOverridesSchema, parsed);
+					onchange?.(overrides);
 				} else {
-					overrides = undefined;
+					overrides = create(DockerOverridesSchema, {});
+					onchange?.(overrides);
 				}
 				jsonError = '';
 				jsonMode = false;
-				onchange?.(overrides);
 
 			} catch (e) {
 				jsonError = `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`;
@@ -152,7 +154,7 @@
 		if (hasValues) {
 			overrides = create(DockerOverridesSchema, updates);
 		} else {
-			overrides = undefined;
+			overrides = create(DockerOverridesSchema, {});
 		}
 
 		onchange?.(overrides);
@@ -461,11 +463,11 @@
 						<div class="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
 							<AlertCircle class="h-4 w-4 text-destructive mt-0.5 shrink-0" />
 							<div class="text-xs space-y-1">
-								<p class="font-medium text-destructive">Security Warning: Admin Access Required</p>
+								<p class="font-medium text-destructive">Advanced Feature: Admin Only</p>
 								<p class="text-destructive/90">
-									Init commands run with container privileges before the Minecraft server starts.
-									Only administrators can configure these commands. Commands run as bash scripts
-									and can modify the container environment.
+									Requires a shellful image with <code class="bg-destructive/5 px-1 rounded">/bin/sh</code>.
+									Distroless, scratch, and minimal images are <strong>not supported</strong>.
+									Commands run with container privileges before the server starts.
 								</p>
 								<p class="text-destructive/90 font-medium mt-2">
 									Examples: Install packages, clone git repos, modify configs

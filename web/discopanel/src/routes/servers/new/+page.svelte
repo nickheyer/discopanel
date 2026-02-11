@@ -12,7 +12,7 @@
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { isAdmin } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
-	import { ArrowLeft, Loader2, Package, Settings, HardDrive, AlertCircle, Check } from '@lucide/svelte';
+	import { ArrowLeft, Loader2, Package, Settings, HardDrive, AlertCircle } from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import type { CreateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
@@ -23,7 +23,7 @@
 	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
-	import { getUniqueDockerImages, getDockerImageDisplayName, isValidImageReferenceFormat, debounce } from '$lib/utils';
+	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
@@ -36,16 +36,12 @@
 	let proxyListeners = $state<ProxyListener[]>([]);
 	let usedPorts = $state<Record<number, boolean>>({});
 	let portError = $state('');
-	let dockerImageError = $state('');
-	let validatingDockerImage = $state(false);
-	let dockerImageValid = $state<boolean | null>(null); // null = not validated, true = valid, false = invalid
 
 	// Docker image mode tracking (explicit, no string inference)
 	type DockerImageMode = 'preset' | 'custom';
 	let dockerImageMode = $state<DockerImageMode>('preset');
 	let selectedPresetTag = $state('');          // e.g., 'java21'
 	let customImageValue = $state('');           // e.g., 'my-registry/image:tag'
-	let userEditedCustomImage = $state(false); // Track if user has manually edited
 
 	let useProxyMode = $state(false); // Track connection mode separately
 	
@@ -250,43 +246,6 @@
 		}
 	}
 
-	async function validateDockerImage(image: string) {
-		dockerImageError = '';
-
-		// Allow empty for auto-select
-		if (!image || image.trim() === '') {
-			dockerImageValid = true;
-			return;
-		}
-
-		// Basic format check
-		if (!isValidImageReferenceFormat(image)) {
-			dockerImageError = 'Invalid image format. Example: itzg/minecraft-server:java21';
-			dockerImageValid = false;
-			return;
-		}
-
-		// Async validation with backend
-		validatingDockerImage = true;
-		try {
-			const result = await rpcClient.minecraft.validateDockerImage({ image });
-			if (!result.valid) {
-				dockerImageError = result.error || 'Image not found';
-				dockerImageValid = false;
-			} else {
-				dockerImageValid = true;
-				dockerImageError = '';
-			}
-		} catch (error) {
-			dockerImageError = `Failed to validate image: ${error instanceof Error ? error.message : 'Unknown error'}`;
-			dockerImageValid = false;
-		} finally {
-			validatingDockerImage = false;
-		}
-	}
-
-	// Debounced validation
-	const debouncedValidateDockerImage = debounce(validateDockerImage, 700);
 
 	// Initialize docker image mode ONCE
 	function initializeDockerImageMode(dockerImage: string) {
@@ -357,15 +316,26 @@
 		// Docker image is already set in formData.dockerImage via derived state
 		const finalDockerImage = formData.dockerImage;
 
+		// Validate: if using auto-select (empty dockerImage), MC version is required
+		if (!finalDockerImage && !formData.mcVersion) {
+			toast.error('Minecraft version is required when using auto-select');
+			return;
+		}
+
 		// Validate custom Docker image if provided
 		if (dockerImageMode === 'custom' && finalDockerImage) {
-			// If we haven't validated yet or the validation failed, validate now
-			if (dockerImageValid !== true) {
-				await validateDockerImage(finalDockerImage);
-				if (dockerImageValid === false) {
-					toast.error('Invalid Docker image');
+			loading = true;
+			try {
+				const validationResult = await rpcClient.minecraft.validateDockerImage({ image: finalDockerImage });
+				if (!validationResult.valid) {
+					toast.error(`Invalid Docker image: ${validationResult.error || 'Image format is invalid'}`);
+					loading = false;
 					return;
 				}
+			} catch (error) {
+				toast.error(`Failed to validate Docker image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+				loading = false;
+				return;
 			}
 		}
 
@@ -874,18 +844,10 @@
 					if (newValue === '__custom__') {
 						dockerImageMode = 'custom';
 						selectedPresetTag = '';
-						userEditedCustomImage = false;
-						dockerImageValid = null;
-						if (customImageValue) {
-							debouncedValidateDockerImage(customImageValue);
-						}
 					} else {
 						dockerImageMode = 'preset';
 						selectedPresetTag = newValue;
 						customImageValue = '';
-						userEditedCustomImage = false;
-						dockerImageValid = true;
-						dockerImageError = '';
 					}
 				}} disabled={loading || loadingVersions}>
 						<SelectTrigger id="docker_image">
@@ -932,32 +894,9 @@
 								placeholder="e.g., itzg/minecraft-server:java21 or my-registry/image:tag"
 								oninput={(e) => {
 									customImageValue = e.currentTarget.value;
-									userEditedCustomImage = true;
-									dockerImageValid = null;
-									dockerImageError = '';
-									if (customImageValue) {
-										debouncedValidateDockerImage(customImageValue);
-									}
 								}}
-								class={dockerImageValid === false ? 'border-destructive' : ''}
 								disabled={loading}
 							/>
-							{#if validatingDockerImage}
-								<div class="flex items-center gap-2 text-xs text-muted-foreground">
-									<Loader2 class="h-3 w-3 animate-spin" />
-									Validating image...
-								</div>
-							{:else if dockerImageError}
-								<div class="flex items-center gap-2 text-destructive text-xs">
-									<AlertCircle class="h-3 w-3" />
-									{dockerImageError}
-								</div>
-							{:else if dockerImageValid === true && userEditedCustomImage}
-								<div class="flex items-center gap-2 text-green-600 text-xs">
-									<Check class="h-3 w-3" />
-									Image validated
-								</div>
-							{/if}
 						</div>
 					{:else if dockerImageMode === 'custom' && !$isAdmin}
 						<div class="mt-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30">

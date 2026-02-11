@@ -399,18 +399,9 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 				fmt.Errorf("only administrators can configure init commands"))
 		}
 
-		// Audit log: Init commands configured during creation
-		s.log.Info("[AUDIT] User %s (%s) configured %d init commands for new server '%s'",
+		// Log that init commands were configured
+		s.log.Info("User %s (%s) configured %d init commands for new server '%s'",
 			user.Username, user.ID, len(msg.DockerOverrides.InitCommands), msg.Name)
-
-		// Log each command (truncated for security)
-		for i, cmd := range msg.DockerOverrides.InitCommands {
-			cmdPreview := cmd
-			if len(cmdPreview) > 100 {
-				cmdPreview = cmdPreview[:100] + "..."
-			}
-			s.log.Info("[AUDIT]   Init command %d: %s", i+1, cmdPreview)
-		}
 	}
 
 	// Validate custom Docker image - admin only
@@ -513,7 +504,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Determine Docker image if not specified
 	dockerImage := msg.DockerImage
 	if dockerImage == "" {
-		dockerImage = docker.GetOptimalDockerTag(msg.McVersion, modLoader, false)
+		dockerImage = "itzg/minecraft-server:" + docker.GetOptimalDockerTag(msg.McVersion, modLoader, false)
 	}
 
 	// Validate additional ports

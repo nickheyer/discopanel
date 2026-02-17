@@ -1,0 +1,72 @@
+# DiscoPanel + Authelia (OIDC)
+#
+# This is a complete docker-compose with OIDC authentication pre-configured using Authelia.
+#
+# NOTE #1: Default users should be changed (SEE oidc/authelia/config/users_database.yml).
+# Passwords are stored as hash, see instructions. Use same hash cmd for secret below (when setting in oidc/authelia/config/configuration.yaml) if needed.
+#
+# NOTE #2: Authelia is generally intended to be used with a proxy like traefik. Plenty of guides online for that.
+# Feel free to throw away the example configuration.yml and users_database.yml !!!! Just make sure groups are included in claims.
+
+services:
+  discopanel:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile.discopanel
+    image: nickheyer/discopanel:dev
+    container_name: discopanel
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/discopanel/data:/app/data
+      - /opt/discopanel/backups:/app/backups
+      - /tmp/discopanel:/app/tmp
+    environment:
+      - DISCOPANEL_DATA_DIR=/app/data
+      - DISCOPANEL_HOST_DATA_PATH=/opt/discopanel/data
+      - TZ=UTC
+
+      #  ------------------------------------ AUTH CONFIG STARTS HERE FOR DISCOPANEL + AUTHELIA ------------------------------------
+      - DISCOPANEL_AUTH_LOCAL_ENABLED=true
+      - DISCOPANEL_AUTH_OIDC_ENABLED=true
+
+      # MUST MATCH oidc/authelia/config/configuration.yaml
+      - DISCOPANEL_AUTH_OIDC_ISSUER_URI=https://authelia.traefik.me:9091
+
+      # ONLY CHANGE THIS IF YOUR CLIENT NAME IS DIFFERENT
+      - DISCOPANEL_AUTH_OIDC_CLIENT_ID=discopanel
+
+      # YOU SHOULD CHANGE THIS HERE AS WELL AS THE HASHED ONE IN oidc/authelia/config/configuration.yaml (inside the identity_providers.client)
+      - DISCOPANEL_AUTH_OIDC_CLIENT_SECRET=discopanel-dev-secret
+
+      # YOU SHOULD CHANGE "localhost:8080" TO WHATEVER YOUR PUBLIC DOMAIN IS FOR DISCOPANEL (ie: https://mypanel.com/api/v1/auth/oidc/callback)
+      - DISCOPANEL_AUTH_OIDC_REDIRECT_URL=http://localhost:8080/api/v1/auth/oidc/callback
+
+      - DISCOPANEL_AUTH_OIDC_ROLE_CLAIM=groups
+
+      # SKIPPING TLS VERIFY HERE BECAUSE TLS CERTS ARE SELF SIGNED. IF USING YOUR OWN CERTS (in authelia mounts), REMOVE THIS.
+      - DISCOPANEL_AUTH_OIDC_SKIP_TLS_VERIFY=true
+
+    depends_on:
+      authelia:
+        condition: service_healthy
+
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    volumes:
+      - ./config/configuration.yml:/config/configuration.yml:ro
+      - ./config/users_database.yml:/config/users_database.yml:ro
+      - ./config/tls.crt:/config/tls.crt:ro # THE INCLUDED CERT IS SELF SIGNED
+      - ./config/tls.key:/config/tls.key:ro
+    ports:
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "--spider", "https://localhost:9091/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    environment:
+      - TZ=UTC

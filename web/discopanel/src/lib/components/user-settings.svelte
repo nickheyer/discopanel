@@ -1,26 +1,27 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
-	import { authStore, isAdmin } from '$lib/stores/auth';
+	import { authStore, canCreateUsers, canUpdateUsers, canDeleteUsers } from '$lib/stores/auth';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { toast } from 'svelte-sonner';
-	import { Users, UserPlus, Trash2, Edit, Shield, Eye, AlertCircle, Loader2 } from '@lucide/svelte';
+	import { Users, UserPlus, Trash2, Edit, Loader2 } from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import { rpcClient } from '$lib/api/rpc-client';
-	import type { User } from '$lib/proto/discopanel/v1/common_pb';
-	import { UserRole } from '$lib/proto/discopanel/v1/common_pb';
+	import type { User, Role } from '$lib/proto/discopanel/v1/common_pb';
 	import { CreateUserRequestSchema, UpdateUserRequestSchema, DeleteUserRequestSchema } from '$lib/proto/discopanel/v1/user_pb';
+	import { getRoleBadgeVariant } from '$lib/utils/role-colors';
 
 	let users = $state<User[]>([]);
+	let availableRoles = $state<Role[]>([]);
 	let loading = $state(true);
-	let isUserAdmin = $derived($isAdmin);
+	let canCreate = $derived($canCreateUsers);
+	let canUpdate = $derived($canUpdateUsers);
+	let canDelete = $derived($canDeleteUsers);
 	let showCreateDialog = $state(false);
 	let showEditDialog = $state(false);
 	let editingUser = $state<User | null>(null);
@@ -29,33 +30,32 @@
 		username: '',
 		email: '',
 		password: '',
-		role: UserRole.VIEWER
+		roles: [] as string[]
 	});
 
 	let editUserForm = $state({
 		email: '',
-		role: UserRole.VIEWER,
+		roles: [] as string[],
 		isActive: true
 	});
-	
+
 	async function loadUsers() {
 		loading = true;
 		try {
-			const response = await rpcClient.user.listUsers({});
-			users = response.users;
+			const [usersResponse, rolesResponse] = await Promise.all([
+				rpcClient.user.listUsers({}),
+				rpcClient.role.listRoles({})
+			]);
+			users = usersResponse.users;
+			availableRoles = rolesResponse.roles;
 		} catch (error: any) {
-			if (error.code === 'PERMISSION_DENIED') {
-				toast.error('Admin access required');
-				goto('/');
-				return;
-			}
 			toast.error('Failed to load users');
 			console.error(error);
 		} finally {
 			loading = false;
 		}
 	}
-	
+
 	async function createUser() {
 		if (!newUserForm.username || !newUserForm.password) {
 			toast.error('Username and password are required');
@@ -68,7 +68,12 @@
 		}
 
 		try {
-			const request = create(CreateUserRequestSchema, newUserForm);
+			const request = create(CreateUserRequestSchema, {
+				username: newUserForm.username,
+				email: newUserForm.email,
+				password: newUserForm.password,
+				roles: newUserForm.roles
+			});
 			await rpcClient.user.createUser(request);
 
 			toast.success('User created successfully');
@@ -77,22 +82,22 @@
 				username: '',
 				email: '',
 				password: '',
-				role: UserRole.VIEWER
+				roles: []
 			};
 			await loadUsers();
 		} catch (error: any) {
 			toast.error(error.message || 'Failed to create user');
 		}
 	}
-	
+
 	async function updateUser() {
 		if (!editingUser) return;
 
 		try {
 			const request = create(UpdateUserRequestSchema, {
 				id: editingUser.id,
-				email: editUserForm.email,
-				role: editUserForm.role,
+				email: editUserForm.email || undefined,
+				roles: editUserForm.roles,
 				isActive: editUserForm.isActive
 			});
 			await rpcClient.user.updateUser(request);
@@ -105,7 +110,7 @@
 			toast.error(error.message || 'Failed to update user');
 		}
 	}
-	
+
 	async function deleteUser(user: User) {
 		if (!confirm(`Are you sure you want to delete user "${user.username}"?`)) {
 			return;
@@ -121,43 +126,26 @@
 			toast.error(error.message || 'Failed to delete user');
 		}
 	}
-	
+
 	function openEditDialog(user: User) {
 		editingUser = user;
 		editUserForm = {
 			email: user.email || '',
-			role: user.role,
+			roles: [...(user.roles || [])],
 			isActive: user.isActive
 		};
 		showEditDialog = true;
 	}
-	
-	function getRoleBadge(role: UserRole) {
-		switch (role) {
-			case UserRole.ADMIN:
-				return { variant: 'destructive' as const, icon: Shield };
-			case UserRole.EDITOR:
-				return { variant: 'secondary' as const, icon: Edit };
-			case UserRole.VIEWER:
-				return { variant: 'outline' as const, icon: Eye };
-			default:
-				return { variant: 'outline' as const, icon: Eye };
+
+	function toggleRole(form: { roles: string[] }, roleName: string) {
+		const idx = form.roles.indexOf(roleName);
+		if (idx >= 0) {
+			form.roles = form.roles.filter(r => r !== roleName);
+		} else {
+			form.roles = [...form.roles, roleName];
 		}
 	}
 
-	function getRoleDisplayName(role: UserRole): string {
-		switch (role) {
-			case UserRole.ADMIN:
-				return 'Admin';
-			case UserRole.EDITOR:
-				return 'Editor';
-			case UserRole.VIEWER:
-				return 'Viewer';
-			default:
-				return 'Unknown';
-		}
-	}
-	
 	function formatDate(dateString: string) {
 		return new Date(dateString).toLocaleDateString('en-US', {
 			year: 'numeric',
@@ -167,35 +155,23 @@
 			minute: '2-digit'
 		});
 	}
-	
+
 	onMount(() => {
-		if (!isUserAdmin) {
-			toast.error('Admin access required');
-			goto('/');
-			return;
-		}
 		loadUsers();
 	});
 </script>
 
-<div class="flex-1 space-y-8 p-8 pt-6">
+<div class="space-y-4">
 	<div class="flex items-center justify-between">
-		<div class="flex items-center gap-4">
-			<div class="h-12 w-12 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
-				<Users class="h-6 w-6 text-primary" />
-			</div>
-			<div>
-				<h2 class="text-3xl font-bold tracking-tight">User Management</h2>
-				<p class="text-muted-foreground">Manage user accounts and permissions</p>
-			</div>
-		</div>
-		
-		<Button onclick={() => showCreateDialog = true}>
-			<UserPlus class="mr-2 h-4 w-4" />
-			Add User
-		</Button>
+		<p class="text-sm text-muted-foreground">Manage user accounts and role assignments</p>
+		{#if canCreate}
+			<Button onclick={() => showCreateDialog = true}>
+				<UserPlus class="mr-2 h-4 w-4" />
+				Add User
+			</Button>
+		{/if}
 	</div>
-	
+
 	<Card>
 		<CardContent>
 			{#if loading}
@@ -218,11 +194,13 @@
 						<TableRow>
 							<TableHead>Username</TableHead>
 							<TableHead>Email</TableHead>
-							<TableHead>Role</TableHead>
+							<TableHead>Provider</TableHead>
+							<TableHead>Roles</TableHead>
 							<TableHead>Status</TableHead>
 							<TableHead>Created</TableHead>
-							<TableHead>Last Active</TableHead>
-							<TableHead class="text-right">Actions</TableHead>
+							{#if canUpdate || canDelete}
+								<TableHead class="text-right">Actions</TableHead>
+							{/if}
 						</TableRow>
 					</TableHeader>
 					<TableBody>
@@ -231,12 +209,19 @@
 								<TableCell class="font-medium">{user.username}</TableCell>
 								<TableCell>{user.email || '-'}</TableCell>
 								<TableCell>
-									{@const badge = getRoleBadge(user.role)}
-									{@const Icon = badge.icon}
-									<Badge variant={badge.variant}>
-										<Icon class="mr-1 h-3 w-3" />
-										{getRoleDisplayName(user.role)}
-									</Badge>
+									<Badge variant="outline" class="capitalize">{user.authProvider || 'local'}</Badge>
+								</TableCell>
+								<TableCell>
+									<div class="flex flex-wrap gap-1">
+										{#each user.roles || [] as role}
+											<Badge variant={getRoleBadgeVariant(role)}>
+												{role}
+											</Badge>
+										{/each}
+										{#if !user.roles?.length}
+											<span class="text-muted-foreground text-sm">None</span>
+										{/if}
+									</div>
 								</TableCell>
 								<TableCell>
 									{#if user.isActive}
@@ -248,28 +233,31 @@
 								<TableCell class="text-sm text-muted-foreground">
 									{user.createdAt ? formatDate(new Date(Number(user.createdAt.seconds) * 1000).toISOString()) : 'Unknown'}
 								</TableCell>
-								<TableCell class="text-sm text-muted-foreground">
-									{user.updatedAt ? formatDate(new Date(Number(user.updatedAt.seconds) * 1000).toISOString()) : 'Never'}
-								</TableCell>
-								<TableCell class="text-right">
-									<div class="flex justify-end gap-2">
-										<Button 
-											size="sm" 
-											variant="outline"
-											onclick={() => openEditDialog(user)}
-										>
-											<Edit class="h-4 w-4" />
-										</Button>
-										<Button 
-											size="sm" 
-											variant="outline"
-											onclick={() => deleteUser(user)}
-											disabled={user.id === $authStore.user?.id}
-										>
-											<Trash2 class="h-4 w-4" />
-										</Button>
-									</div>
-								</TableCell>
+								{#if canUpdate || canDelete}
+									<TableCell class="text-right">
+										<div class="flex justify-end gap-2">
+											{#if canUpdate}
+												<Button
+													size="sm"
+													variant="outline"
+													onclick={() => openEditDialog(user)}
+												>
+													<Edit class="h-4 w-4" />
+												</Button>
+											{/if}
+											{#if canDelete}
+												<Button
+													size="sm"
+													variant="outline"
+													onclick={() => deleteUser(user)}
+													disabled={user.id === $authStore.user?.id}
+												>
+													<Trash2 class="h-4 w-4" />
+												</Button>
+											{/if}
+										</div>
+									</TableCell>
+								{/if}
 							</TableRow>
 						{/each}
 					</TableBody>
@@ -285,10 +273,10 @@
 		<DialogHeader>
 			<DialogTitle>Create New User</DialogTitle>
 			<DialogDescription>
-				Add a new user to the system with specific permissions.
+				Add a new user to the system with specific roles.
 			</DialogDescription>
 		</DialogHeader>
-		
+
 		<div class="space-y-4">
 			<div class="space-y-2">
 				<Label for="new-username">Username</Label>
@@ -320,27 +308,21 @@
 				/>
 			</div>
 			<div class="space-y-2">
-				<Label for="new-role">Role</Label>
-				<Select
-					type="single"
-					value={newUserForm.role.toString()}
-					onValueChange={(value: string | undefined) => {
-						const roleValue = parseInt(value || '1');
-						newUserForm.role = roleValue as UserRole;
-					}}
-				>
-					<SelectTrigger id="new-role">
-						<span>{getRoleDisplayName(newUserForm.role)}</span>
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value={UserRole.VIEWER.toString()}>Viewer (Read-only)</SelectItem>
-						<SelectItem value={UserRole.EDITOR.toString()}>Editor (Manage servers)</SelectItem>
-						<SelectItem value={UserRole.ADMIN.toString()}>Admin (Full access)</SelectItem>
-					</SelectContent>
-				</Select>
+				<Label>Roles</Label>
+				<div class="flex flex-wrap gap-2">
+					{#each availableRoles as role}
+						<Button
+							size="sm"
+							variant={newUserForm.roles.includes(role.name) ? 'default' : 'outline'}
+							onclick={() => toggleRole(newUserForm, role.name)}
+						>
+							{role.name}
+						</Button>
+					{/each}
+				</div>
 			</div>
 		</div>
-		
+
 		<DialogFooter>
 			<Button variant="outline" onclick={() => showCreateDialog = false}>
 				Cancel
@@ -359,10 +341,10 @@
 		<DialogHeader>
 			<DialogTitle>Edit User</DialogTitle>
 			<DialogDescription>
-				Update user information and permissions.
+				Update user information and role assignments.
 			</DialogDescription>
 		</DialogHeader>
-		
+
 		{#if editingUser}
 			<div class="space-y-4">
 				<div class="space-y-2">
@@ -379,24 +361,18 @@
 					/>
 				</div>
 				<div class="space-y-2">
-					<Label for="edit-role">Role</Label>
-					<Select
-						type="single"
-						value={editUserForm.role.toString()}
-						onValueChange={(value: string | undefined) => {
-							const roleValue = parseInt(value || '1');
-							editUserForm.role = roleValue as UserRole;
-						}}
-					>
-						<SelectTrigger id="edit-role">
-							<span>{getRoleDisplayName(editUserForm.role)}</span>
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value={UserRole.VIEWER.toString()}>Viewer (Read-only)</SelectItem>
-							<SelectItem value={UserRole.EDITOR.toString()}>Editor (Manage servers)</SelectItem>
-							<SelectItem value={UserRole.ADMIN.toString()}>Admin (Full access)</SelectItem>
-						</SelectContent>
-					</Select>
+					<Label>Roles</Label>
+					<div class="flex flex-wrap gap-2">
+						{#each availableRoles as role}
+							<Button
+								size="sm"
+								variant={editUserForm.roles.includes(role.name) ? 'default' : 'outline'}
+								onclick={() => toggleRole(editUserForm, role.name)}
+							>
+								{role.name}
+							</Button>
+						{/each}
+					</div>
 				</div>
 				<div class="flex items-center space-x-2">
 					<input
@@ -409,7 +385,7 @@
 				</div>
 			</div>
 		{/if}
-		
+
 		<DialogFooter>
 			<Button variant="outline" onclick={() => showEditDialog = false}>
 				Cancel

@@ -10,6 +10,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/auth"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"google.golang.org/protobuf/proto"
@@ -31,8 +32,9 @@ const (
 
 // Hub manages WebSocket connections and log subscriptions
 type Hub struct {
-	logStreamer *logger.LogStreamer
+	logStreamer  *logger.LogStreamer
 	authManager *auth.Manager
+	enforcer    *rbac.Enforcer
 	store       *storage.Store
 	docker      *docker.Client
 	log         *logger.Logger
@@ -55,7 +57,7 @@ type Client struct {
 	send chan []byte
 
 	// Authentication
-	user          *storage.User
+	user          *auth.AuthenticatedUser
 	authenticated bool
 
 	// Subscriptions: serverId -> log channel
@@ -64,10 +66,11 @@ type Client struct {
 }
 
 // NewHub creates a new WebSocket hub
-func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, store *storage.Store, docker *docker.Client, log *logger.Logger) *Hub {
+func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer *rbac.Enforcer, store *storage.Store, docker *docker.Client, log *logger.Logger) *Hub {
 	return &Hub{
-		logStreamer: logStreamer,
+		logStreamer:  logStreamer,
 		authManager: authManager,
+		enforcer:    enforcer,
 		store:       store,
 		docker:      docker,
 		log:         log,
@@ -217,15 +220,30 @@ func (c *Client) handleAuth(msg *v1.AuthMessage) {
 	}
 
 	ctx := context.Background()
-	user, err := c.hub.authManager.ValidateSession(ctx, msg.Token)
-	if err != nil {
-		c.sendAuthFail("invalid token")
-		return
-	}
 
-	c.user = user
-	c.authenticated = true
-	c.sendAuthOk()
+	if msg.Token != "" {
+		user, err := c.hub.authManager.ValidateSession(ctx, msg.Token)
+		if err != nil {
+			// Try anonymous access
+			if c.hub.authManager.IsAnonymousAccessEnabled() {
+				c.user = c.hub.authManager.AnonymousUser()
+				c.authenticated = true
+				c.sendAuthOk()
+				return
+			}
+			c.sendAuthFail("invalid token")
+			return
+		}
+		c.user = user
+		c.authenticated = true
+		c.sendAuthOk()
+	} else if c.hub.authManager.IsAnonymousAccessEnabled() {
+		c.user = c.hub.authManager.AnonymousUser()
+		c.authenticated = true
+		c.sendAuthOk()
+	} else {
+		c.sendAuthFail("authentication required")
+	}
 }
 
 // handleSubscribe subscribes to server logs
@@ -240,6 +258,15 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 		return
 	}
 
+	// Check permission
+	if c.hub.enforcer != nil && c.user != nil {
+		allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionRead, msg.ServerId)
+		if err != nil || !allowed {
+			c.sendError("permission denied")
+			return
+		}
+	}
+
 	// Get server to find container ID
 	ctx := context.Background()
 	server, err := c.hub.store.GetServer(ctx, msg.ServerId)
@@ -248,8 +275,17 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 		return
 	}
 
+	tail := int(msg.Tail)
+	if tail <= 0 {
+		tail = 500
+	}
+
+	// If server has no container yet (just created, never started),
+	// send empty logs and confirm subscription without starting streaming.
+	// The client will re-subscribe when the server status changes.
 	if server.ContainerID == "" {
-		c.sendError("server has no container")
+		c.sendLogs(msg.ServerId, nil)
+		c.sendSubscribed(msg.ServerId)
 		return
 	}
 
@@ -268,11 +304,7 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 	}
 	c.subscriptionsMu.Unlock()
 
-	// Always send initial logs
-	tail := int(msg.Tail)
-	if tail <= 0 {
-		tail = 500
-	}
+	// Send initial logs
 	logs := c.hub.logStreamer.GetLogs(server.ContainerID, tail)
 	c.sendLogs(msg.ServerId, logs)
 
@@ -323,6 +355,15 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 	if msg == nil || msg.ServerId == "" || msg.Command == "" {
 		c.sendError("missing server_id or command")
 		return
+	}
+
+	// Check command permission
+	if c.hub.enforcer != nil && c.user != nil {
+		allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionCommand, msg.ServerId)
+		if err != nil || !allowed {
+			c.sendCommandResult(msg.ServerId, false, "", "permission denied")
+			return
+		}
 	}
 
 	ctx := context.Background()
@@ -396,12 +437,18 @@ func (c *Client) sendMessage(msg *v1.WebSocketServerMessage) {
 }
 
 func (c *Client) sendAuthOk() {
+	userId := ""
+	username := ""
+	if c.user != nil {
+		userId = c.user.ID
+		username = c.user.Username
+	}
 	c.sendMessage(&v1.WebSocketServerMessage{
 		Type: v1.WSMessageType_WS_MESSAGE_TYPE_AUTH_OK,
 		Payload: &v1.WebSocketServerMessage_AuthOk{
 			AuthOk: &v1.AuthOkMessage{
-				UserId:   c.user.ID,
-				Username: c.user.Username,
+				UserId:   userId,
+				Username: username,
 			},
 		},
 	})

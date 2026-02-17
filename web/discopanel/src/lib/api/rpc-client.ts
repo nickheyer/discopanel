@@ -17,6 +17,7 @@ import { SupportService } from '$lib/proto/discopanel/v1/support_pb';
 import { TaskService } from '$lib/proto/discopanel/v1/task_pb';
 import { UploadService } from '$lib/proto/discopanel/v1/upload_pb';
 import { UserService } from '$lib/proto/discopanel/v1/user_pb';
+import { RoleService } from '$lib/proto/discopanel/v1/role_pb';
 import { ModuleService } from '$lib/proto/discopanel/v1/module_pb';
 
 // Header to mark requests as silent / no loader
@@ -81,6 +82,7 @@ export class RpcClient {
   public readonly task: Client<typeof TaskService>;
   public readonly upload: Client<typeof UploadService>;
   public readonly user: Client<typeof UserService>;
+  public readonly role: Client<typeof RoleService>;
   public readonly module: Client<typeof ModuleService>;
 
   constructor() {
@@ -96,6 +98,7 @@ export class RpcClient {
     this.task = createClient(TaskService, transport);
     this.upload = createClient(UploadService, transport);
     this.user = createClient(UserService, transport);
+    this.role = createClient(RoleService, transport);
     this.module = createClient(ModuleService, transport);
   }
 }

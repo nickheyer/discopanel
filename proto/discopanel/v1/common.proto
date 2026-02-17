@@ -6,14 +6,6 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
-// User permission levels
-enum UserRole {
-  USER_ROLE_UNSPECIFIED = 0;
-  USER_ROLE_VIEWER = 1;
-  USER_ROLE_EDITOR = 2;
-  USER_ROLE_ADMIN = 3;
-}
-
 // Container runtime state
 enum ServerStatus {
   SERVER_STATUS_UNSPECIFIED = 0;
@@ -54,11 +46,12 @@ message User {
   string id = 1;
   string username = 2;
   optional string email = 3;
-  UserRole role = 4;
+  string auth_provider = 4;
   bool is_active = 5;
-  optional string recovery_key = 6;
+  repeated string roles = 6;
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
+  optional google.protobuf.Timestamp last_login = 9;
 }
 
 // Minecraft server instance
@@ -170,13 +163,21 @@ message ProxyConfig {
   google.protobuf.Timestamp updated_at = 5;
 }
 
-// Authentication system settings
-message AuthConfig {
+// Permission entry for RBAC
+message Permission {
+  string resource = 1;
+  string action = 2;
+  string object_id = 3;
+}
+
+// Role definition
+message Role {
   string id = 1;
-  bool enabled = 2;
-  int32 session_timeout = 3;
-  bool require_email_verify = 4;
-  bool allow_registration = 5;
-  google.protobuf.Timestamp created_at = 6;
-  google.protobuf.Timestamp updated_at = 7;
+  string name = 2;
+  string description = 3;
+  bool is_system = 4;
+  bool is_default = 5;
+  repeated Permission permissions = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
 }

@@ -20,6 +20,32 @@ type Config struct {
 	Minecraft MinecraftConfig `mapstructure:"minecraft" json:"minecraft"`
 	Logging   LoggingConfig   `mapstructure:"logging" json:"logging"`
 	Upload    UploadConfig    `mapstructure:"upload" json:"upload"`
+	Auth      AuthConfig      `mapstructure:"auth" json:"auth"`
+}
+
+type AuthConfig struct {
+	SessionTimeout  int         `mapstructure:"session_timeout" json:"session_timeout"`
+	AnonymousAccess bool        `mapstructure:"anonymous_access" json:"anonymous_access"`
+	JWTSecret       string      `mapstructure:"jwt_secret" json:"jwt_secret"`
+	OIDC            OIDCConfig  `mapstructure:"oidc" json:"oidc"`
+	Local           LocalConfig `mapstructure:"local" json:"local"`
+}
+
+type OIDCConfig struct {
+	Enabled           bool              `mapstructure:"enabled" json:"enabled"`
+	IssuerURI         string            `mapstructure:"issuer_uri" json:"issuer_uri"`
+	ClientID          string            `mapstructure:"client_id" json:"client_id"`
+	ClientSecret      string            `mapstructure:"client_secret" json:"client_secret"`
+	RedirectURL       string            `mapstructure:"redirect_url" json:"redirect_url"`
+	Scopes            []string          `mapstructure:"scopes" json:"scopes"`
+	RoleClaim         string            `mapstructure:"role_claim" json:"role_claim"`
+	RoleMapping       map[string]string `mapstructure:"role_mapping" json:"role_mapping"`
+	SkipTLSVerify     bool              `mapstructure:"skip_tls_verify" json:"skip_tls_verify"`
+}
+
+type LocalConfig struct {
+	Enabled           bool `mapstructure:"enabled" json:"enabled"`
+	AllowRegistration bool `mapstructure:"allow_registration" json:"allow_registration"`
 }
 
 type ServerConfig struct {
@@ -188,6 +214,21 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.max_backups", 5) // keep 5
 	v.SetDefault("logging.max_age", 30)    // 30 days
 	v.SetDefault("logging.compress", true) // compress rotated
+
+	// Auth defaults
+	v.SetDefault("auth.session_timeout", 86400)
+	v.SetDefault("auth.anonymous_access", false)
+	v.SetDefault("auth.jwt_secret", "")
+	v.SetDefault("auth.oidc.enabled", false)
+	v.SetDefault("auth.oidc.issuer_uri", "")
+	v.SetDefault("auth.oidc.client_id", "")
+	v.SetDefault("auth.oidc.client_secret", "")
+	v.SetDefault("auth.oidc.redirect_url", "")
+	v.SetDefault("auth.oidc.scopes", []string{"openid", "profile", "email", "groups"})
+	v.SetDefault("auth.oidc.role_claim", "groups")
+	v.SetDefault("auth.oidc.skip_tls_verify", false)
+	v.SetDefault("auth.local.enabled", true)
+	v.SetDefault("auth.local.allow_registration", false)
 
 	// Upload defaults
 	v.SetDefault("upload.session_ttl", 240)                // 4 hours (in minutes)

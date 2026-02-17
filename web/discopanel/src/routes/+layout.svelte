@@ -30,29 +30,34 @@
 		DropdownMenuSeparator,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
+	import { get } from 'svelte/store';
 	import { serversStore, runningServers } from '$lib/stores/servers';
-	import { authStore, currentUser, isAdmin } from '$lib/stores/auth';
+	import { authStore, currentUser, canAccessSettings, authEnabled } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
-	import { Server, Home, Settings, Package, User, Users, LogOut, FileText, Sun, Moon } from '@lucide/svelte';
+	import { Server, Home, Settings, Package, User, LogOut, LogIn, FileText, Sun, Moon } from '@lucide/svelte';
 	import { toggleMode, mode } from 'mode-watcher';
-	import { ServerStatus, UserRole } from '$lib/proto/discopanel/v1/common_pb';
-	import { getStringForEnum } from '$lib/utils';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 
 	let { children } = $props();
 
 	let servers = $derived($serversStore);
 	let runningCount = $derived($runningServers.length);
 	let user = $derived($currentUser);
-	let isUserAdmin = $derived($isAdmin);
+	let showSettingsNav = $derived($canAccessSettings);
 	let loading = $state(true);
-	let isAuthEnabled = $derived($authStore.authEnabled);
+	let isAuthEnabled = $derived($authEnabled);
 
 	function getUserInitials(user: any) {
 		if (!user) return '';
 		return user.username.slice(0, 2).toUpperCase();
+	}
+
+	function getDisplayRole(user: any): string {
+		if (!user?.roles?.length) return 'No roles';
+		return user.roles[0];
 	}
 
 	async function handleLogout() {
@@ -72,8 +77,12 @@
 					}
 					const isValid = await authStore.validateSession();
 					if (!isValid) {
-						goto('/login');
-						return;
+						// If anonymous access is enabled, allow browsing without login
+						const state = get(authStore);
+						if (!state.anonymousAccessEnabled) {
+							goto('/login');
+							return;
+						}
 					}
 				}
 			}).then(() => {
@@ -173,28 +182,18 @@
 										{/snippet}
 									</SidebarMenuButton>
 								</SidebarMenuItem>
-								{#if isUserAdmin}
+								{#if showSettingsNav}
 									<SidebarMenuItem>
-										<SidebarMenuButton isActive={page.url.pathname === '/users'}>
+										<SidebarMenuButton isActive={page.url.pathname === '/settings'}>
 											{#snippet child({ props })}
-												<a href="/users" {...props}>
-													<Users class="h-4 w-4" />
-													<span class="group-data-[collapsible=icon]:hidden">Users</span>
+												<a href="/settings" {...props}>
+													<Settings class="h-4 w-4" />
+													<span class="group-data-[collapsible=icon]:hidden">Settings</span>
 												</a>
 											{/snippet}
 										</SidebarMenuButton>
 									</SidebarMenuItem>
 								{/if}
-								<SidebarMenuItem>
-									<SidebarMenuButton isActive={page.url.pathname === '/settings'}>
-										{#snippet child({ props })}
-											<a href="/settings" {...props}>
-												<Settings class="h-4 w-4" />
-												<span class="group-data-[collapsible=icon]:hidden">Settings</span>
-											</a>
-										{/snippet}
-									</SidebarMenuButton>
-								</SidebarMenuItem>
 								<SidebarMenuItem>
 									<SidebarMenuButton isActive={page.url.pathname.startsWith('/docs/api')}>
 										{#snippet child({ props })}
@@ -259,7 +258,7 @@
 												</Avatar>
 												<div class="ml-2 flex-1 text-left group-data-[collapsible=icon]:hidden">
 													<p class="text-sm font-medium leading-none">{user.username}</p>
-													<p class="text-xs text-muted-foreground capitalize">{getStringForEnum(UserRole, user.role)}</p>
+													<p class="text-xs text-muted-foreground capitalize">{getDisplayRole(user)}</p>
 												</div>
 											</Button>
 										{/snippet}
@@ -272,7 +271,9 @@
 											{#if user.email}
 												<p class="text-xs leading-none text-muted-foreground">{user.email}</p>
 											{/if}
-											<p class="text-xs leading-none text-muted-foreground capitalize">Role: {user.role}</p>
+											<p class="text-xs leading-none text-muted-foreground capitalize">
+												{user.roles?.length ? user.roles.join(', ') : 'No roles'}
+											</p>
 										</div>
 									</DropdownMenuLabel>
 									<DropdownMenuSeparator />
@@ -280,20 +281,21 @@
 										<User class="mr-2 h-4 w-4" />
 										<span>Profile</span>
 									</DropdownMenuItem>
-									{#if isUserAdmin}
-										<DropdownMenuSeparator />
-										<DropdownMenuItem onclick={() => goto('/users')}>
-											<Users class="mr-2 h-4 w-4" />
-											<span>Manage Users</span>
-										</DropdownMenuItem>
-									{/if}
 									<DropdownMenuSeparator />
 									<DropdownMenuItem onclick={handleLogout}>
 										<LogOut class="mr-2 h-4 w-4" />
 										<span>Log out</span>
 									</DropdownMenuItem>
 								</DropdownMenuContent>
-							</DropdownMenu>					
+							</DropdownMenu>
+						</div>
+					{:else if isAuthEnabled && $authStore.anonymousAccessEnabled && !user}
+						<Separator orientation="horizontal" />
+						<div class="py-2 w-full">
+							<Button variant="ghost" class="w-full justify-start" onclick={() => goto('/login')}>
+								<LogIn class="h-4 w-4" />
+								<span class="group-data-[collapsible=icon]:hidden">Login</span>
+							</Button>
 						</div>
 					{/if}
 					<Separator orientation="horizontal" class="mb-2" />

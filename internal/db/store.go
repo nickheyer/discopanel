@@ -62,6 +62,10 @@ func NewSQLiteStore(dbPath string, config ...DBConfig) (*Store, error) {
 	return store, nil
 }
 
+func (s *Store) DB() *gorm.DB {
+	return s.db
+}
+
 func (s *Store) Close() error {
 	sqlDB, err := s.db.DB()
 	if err != nil {
@@ -82,12 +86,14 @@ func (s *Store) Migrate() error {
 		&ProxyConfig{},
 		&ProxyListener{},
 		&User{},
-		&AuthConfig{},
+		&Role{},
+		&UserRole{},
 		&Session{},
 		&ScheduledTask{},
 		&TaskExecution{},
 		&ModuleTemplate{},
 		&Module{},
+		&SystemSetting{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate: %w", err)
@@ -99,6 +105,24 @@ func (s *Store) Migrate() error {
 	}
 	if err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)").Error; err != nil {
 		return err
+	}
+
+	// Migrate User indexes: composite unique on (username, auth_provider), drop old single-column unique
+	s.db.Exec("DROP INDEX IF EXISTS idx_users_username")
+	s.db.Exec("DROP INDEX IF EXISTS idx_users_email")
+	if err := s.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_provider ON users(username, auth_provider)").Error; err != nil {
+		return err
+	}
+	if err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)").Error; err != nil {
+		return err
+	}
+	if err := s.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_oidc_identity ON users(oidc_subject, oidc_issuer) WHERE oidc_subject != ''").Error; err != nil {
+		return err
+	}
+
+	// Seed system roles
+	if err := s.SeedSystemRoles(); err != nil {
+		return fmt.Errorf("failed to seed system roles: %w", err)
 	}
 
 	return nil
@@ -727,9 +751,9 @@ func (s *Store) GetUser(ctx context.Context, id string) (*User, error) {
 	return &user, nil
 }
 
-func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+func (s *Store) GetUserByUsernameAndProvider(ctx context.Context, username, provider string) (*User, error) {
 	var user User
-	err := s.db.WithContext(ctx).First(&user, "username = ?", username).Error
+	err := s.db.WithContext(ctx).First(&user, "username = ? AND auth_provider = ?", username, provider).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("user not found")
@@ -739,9 +763,9 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, 
 	return &user, nil
 }
 
-func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+func (s *Store) GetUserByOIDCSubject(ctx context.Context, subject string) (*User, error) {
 	var user User
-	err := s.db.WithContext(ctx).First(&user, "email = ?", email).Error
+	err := s.db.WithContext(ctx).First(&user, "oidc_subject = ?", subject).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("user not found")
@@ -763,11 +787,12 @@ func (s *Store) UpdateUser(ctx context.Context, user *User) error {
 
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Delete sessions
 		if err := tx.Where("user_id = ?", id).Delete(&Session{}).Error; err != nil {
 			return err
 		}
-		// Delete user
+		if err := tx.Where("user_id = ?", id).Delete(&UserRole{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&User{}, "id = ?", id).Error
 	})
 }
@@ -778,31 +803,108 @@ func (s *Store) CountUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-// AuthConfig operations
-func (s *Store) GetAuthConfig(ctx context.Context) (*AuthConfig, bool, error) {
-	var config AuthConfig
-	err := s.db.WithContext(ctx).First(&config).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// Return default config if none exists
-			return &AuthConfig{
-				ID:                 "default",
-				Enabled:            false,
-				SessionTimeout:     86400, // 24 hours
-				RequireEmailVerify: false,
-				AllowRegistration:  false,
-			}, true, nil
-		}
-		return nil, false, err
+// Role operations
+func (s *Store) SeedSystemRoles() error {
+	roles := []Role{
+		{ID: "role-admin", Name: "admin", Description: "Full system access", IsSystem: true},
+		{ID: "role-user", Name: "user", Description: "Standard user access", IsSystem: true, IsDefault: true},
+		{ID: "role-anonymous", Name: "anonymous", Description: "Unauthenticated user access", IsSystem: true},
 	}
-	return &config, false, nil
+	for _, role := range roles {
+		var existing Role
+		if err := s.db.Where("name = ?", role.Name).First(&existing).Error; err == gorm.ErrRecordNotFound {
+			if err := s.db.Create(&role).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
-func (s *Store) SaveAuthConfig(ctx context.Context, config *AuthConfig) error {
-	if config.ID == "" {
-		config.ID = "default"
+func (s *Store) CreateRole(ctx context.Context, role *Role) error {
+	if role.ID == "" {
+		role.ID = uuid.New().String()
 	}
-	return s.db.WithContext(ctx).Save(config).Error
+	return s.db.WithContext(ctx).Create(role).Error
+}
+
+func (s *Store) GetRole(ctx context.Context, id string) (*Role, error) {
+	var role Role
+	err := s.db.WithContext(ctx).First(&role, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("role not found")
+		}
+		return nil, err
+	}
+	return &role, nil
+}
+
+func (s *Store) ListRoles(ctx context.Context) ([]*Role, error) {
+	var roles []*Role
+	err := s.db.WithContext(ctx).Order("is_system DESC, name ASC").Find(&roles).Error
+	return roles, err
+}
+
+func (s *Store) GetDefaultRoles(ctx context.Context) ([]*Role, error) {
+	var roles []*Role
+	err := s.db.WithContext(ctx).Where("is_default = ?", true).Find(&roles).Error
+	return roles, err
+}
+
+func (s *Store) UpdateRole(ctx context.Context, role *Role) error {
+	return s.db.WithContext(ctx).Save(role).Error
+}
+
+func (s *Store) DeleteRole(ctx context.Context, id string) error {
+	var role Role
+	if err := s.db.WithContext(ctx).First(&role, "id = ?", id).Error; err != nil {
+		return err
+	}
+	if role.IsSystem {
+		return fmt.Errorf("cannot delete system role")
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("role_name = ?", role.Name).Delete(&UserRole{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&Role{}, "id = ?", id).Error
+	})
+}
+
+// UserRole operations
+func (s *Store) AssignRole(ctx context.Context, userID, roleName, source string) error {
+	var existing UserRole
+	err := s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).First(&existing).Error
+	if err == nil {
+		return nil // Already assigned
+	}
+	ur := &UserRole{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		RoleName: roleName,
+		Source:   source,
+	}
+	return s.db.WithContext(ctx).Create(ur).Error
+}
+
+func (s *Store) UnassignRole(ctx context.Context, userID, roleName string) error {
+	return s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).Delete(&UserRole{}).Error
+}
+
+func (s *Store) GetUserRoleNames(ctx context.Context, userID string) ([]string, error) {
+	var names []string
+	err := s.db.WithContext(ctx).
+		Model(&UserRole{}).
+		Select("user_roles.role_name").
+		Joins("LEFT JOIN roles ON roles.name = user_roles.role_name").
+		Where("user_roles.user_id = ?", userID).
+		Order("roles.is_system DESC, roles.name ASC").
+		Pluck("user_roles.role_name", &names).Error
+	if err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 // Session operations
@@ -829,12 +931,29 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	return s.db.WithContext(ctx).Where("token = ?", token).Delete(&Session{}).Error
 }
 
-func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
-	return s.db.WithContext(ctx).Where("user_id = ?", userID).Delete(&Session{}).Error
-}
-
 func (s *Store) CleanExpiredSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
+}
+
+// CleanAllSessions deletes all sessions (used when JWT secret changes).
+func (s *Store) CleanAllSessions(ctx context.Context) error {
+	return s.db.WithContext(ctx).Where("1 = 1").Delete(&Session{}).Error
+}
+
+// SystemSetting operations
+
+func (s *Store) GetSystemSetting(ctx context.Context, key string) (string, error) {
+	var setting SystemSetting
+	err := s.db.WithContext(ctx).First(&setting, "key = ?", key).Error
+	if err != nil {
+		return "", err
+	}
+	return setting.Value, nil
+}
+
+func (s *Store) SetSystemSetting(ctx context.Context, key, value string) error {
+	setting := SystemSetting{Key: key, Value: value}
+	return s.db.WithContext(ctx).Save(&setting).Error
 }
 
 // ScheduledTask operations

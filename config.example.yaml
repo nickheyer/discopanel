@@ -1,5 +1,14 @@
 # DiscoPanel Configuration File
 # This file contains all configuration options for DiscoPanel
+# 
+# These can all be set via env, like we do in our docker compose example(s). For example:
+# 
+# server:
+#   port: "8080"
+#
+# - is the same as -
+#
+# DISCOPANEL_SERVER_PORT="8080"
 
 # Server configuration for the DiscoPanel application itself
 server:
@@ -30,6 +39,41 @@ storage:
   backup_dir: "./backups"
   temp_dir: "./tmp"
   max_upload_size: 524288000  # 500MB in bytes
+
+# Authentication configuration
+auth:
+  session_timeout: 86400  # default: 24 hours
+  anonymous_access: false  # Allow unauthenticated access
+  jwt_secret: ""  # Leave empty to auto-generate
+
+  # Local authentication (login via discopanel web ui)
+  local:
+    enabled: true  # Enable local
+    allow_registration: false  # Allow new users to register themselves via login
+
+  # OIDC authentication (login via OIDC-compliant provider, ie: keycloak, authelia, authentik, etc.)
+  oidc:
+    enabled: false
+    issuer_uri: ""  # OIDC Provider url (ie: http://authelia.local:9091, http://localhost:8180/realms/discopanel, etc.)
+    client_id: ""  # Client ID registered with your OIDC (like "discopanel")
+    client_secret: ""  # Client secret registered with your OIDC
+    redirect_url: ""  # Where OIDC sends users after login (ie: "http://localhost:8080/api/v1/auth/oidc/callback")
+    scopes: ["openid", "profile", "email", "groups"]
+    role_claim: "groups"  # The token claim that contains the user's groups (usually "groups")
+    role_mapping: {}  # Mapping to groups if they arent the same name as discopanels (ie: {"my-admins": "admin", "my-users": "user"})
+
+# Upload configuration
+upload:
+  session_ttl: 240  # Upload session time-to-live in minutes (default: 4 hours)
+  default_chunk_size: 5242880  # 5MB default chunk size (client can override)
+  max_chunk_size: 10485760  # 10MB max chunk size (server enforced)
+  max_upload_size: 0  # Max total upload size in bytes (0 = unlimited)
+
+# Module configuration
+module:
+  enabled: true
+  port_range_min: 8100
+  port_range_max: 8199
 
 # Proxy configuration - ENABLE THIS FOR MINECRAFT ROUTING
 proxy:

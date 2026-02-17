@@ -10,6 +10,7 @@ function createServersStore() {
 
   return {
     subscribe,
+    set,
     fetchServers: async (skipLoading = false) => {
       try {
         const request = create(ListServersRequestSchema, { fullStats: false });
@@ -26,9 +27,9 @@ function createServersStore() {
       update(servers => {
         const index = servers.findIndex(s => s.id === server.id);
         if (index !== -1) {
-          servers[index] = server;
+          return [...servers.slice(0, index), server, ...servers.slice(index + 1)];
         }
-        return servers;
+        return [...servers, server];
       });
     },
     removeServer: (id: string) => {

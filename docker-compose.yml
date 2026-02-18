@@ -30,7 +30,6 @@ services:
       # DISCOPANEL_HOST_DATA_PATH=/opt/discopanel/data
       # (See environment)
       - /opt/discopanel/data:/app/data
-
       - /opt/discopanel/backups:/app/backups
       - /tmp/discopanel:/app/tmp
       

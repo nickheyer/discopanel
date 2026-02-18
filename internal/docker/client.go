@@ -440,7 +440,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	hostConfig := &container.HostConfig{
 		PortBindings: portBindings,
 		Mounts: []mount.Mount{
-			{Type: mount.TypeBind, Source: dataPath, Target: "/data"},
+			{Type: mount.TypeBind, Source: dataPath, Target: "/data", BindOptions: &mount.BindOptions{CreateMountpoint: true}},
 		},
 		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
 		Resources: container.Resources{

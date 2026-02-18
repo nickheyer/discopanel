@@ -10,21 +10,16 @@
 
 services:
   discopanel:
-    build:
-      context: ../../
-      dockerfile: docker/Dockerfile.discopanel
     image: nickheyer/discopanel:dev
     container_name: discopanel
     restart: unless-stopped
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/discopanel/data:/app/data
-      - /opt/discopanel/backups:/app/backups
-      - /tmp/discopanel:/app/tmp
+      - /tmp/discopanel:/app/data
     environment:
       - DISCOPANEL_DATA_DIR=/app/data
-      - DISCOPANEL_HOST_DATA_PATH=/opt/discopanel/data
+      - DISCOPANEL_HOST_DATA_PATH=/tmp/discopanel
       - TZ=UTC
 
       #  ------------------------------------ AUTH CONFIG STARTS HERE FOR DISCOPANEL + AUTHELIA ------------------------------------

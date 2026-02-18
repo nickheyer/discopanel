@@ -1,7 +1,7 @@
 .PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen
 
 DATA_DIR := ./data
-DOCKER_DATA_DIR := /opt/discopanel
+DOCKER_DATA_DIR := /tmp/discopanel
 DB_FILE := $(DATA_DIR)/discopanel.db
 FRONTEND_DIR := web/discopanel
 DISCOPANEL_BIN := build/discopanel

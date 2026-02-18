@@ -32,15 +32,15 @@ type AuthConfig struct {
 }
 
 type OIDCConfig struct {
-	Enabled           bool              `mapstructure:"enabled" json:"enabled"`
-	IssuerURI         string            `mapstructure:"issuer_uri" json:"issuer_uri"`
-	ClientID          string            `mapstructure:"client_id" json:"client_id"`
-	ClientSecret      string            `mapstructure:"client_secret" json:"client_secret"`
-	RedirectURL       string            `mapstructure:"redirect_url" json:"redirect_url"`
-	Scopes            []string          `mapstructure:"scopes" json:"scopes"`
-	RoleClaim         string            `mapstructure:"role_claim" json:"role_claim"`
-	RoleMapping       map[string]string `mapstructure:"role_mapping" json:"role_mapping"`
-	SkipTLSVerify     bool              `mapstructure:"skip_tls_verify" json:"skip_tls_verify"`
+	Enabled       bool              `mapstructure:"enabled" json:"enabled"`
+	IssuerURI     string            `mapstructure:"issuer_uri" json:"issuer_uri"`
+	ClientID      string            `mapstructure:"client_id" json:"client_id"`
+	ClientSecret  string            `mapstructure:"client_secret" json:"client_secret"`
+	RedirectURL   string            `mapstructure:"redirect_url" json:"redirect_url"`
+	Scopes        []string          `mapstructure:"scopes" json:"scopes"`
+	RoleClaim     string            `mapstructure:"role_claim" json:"role_claim"`
+	RoleMapping   map[string]string `mapstructure:"role_mapping" json:"role_mapping"`
+	SkipTLSVerify bool              `mapstructure:"skip_tls_verify" json:"skip_tls_verify"`
 }
 
 type LocalConfig struct {
@@ -224,7 +224,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.oidc.client_id", "")
 	v.SetDefault("auth.oidc.client_secret", "")
 	v.SetDefault("auth.oidc.redirect_url", "")
-	v.SetDefault("auth.oidc.scopes", []string{"openid", "profile", "email", "groups"})
+	v.SetDefault("auth.oidc.scopes", []string{"openid", "profile", "email"})
 	v.SetDefault("auth.oidc.role_claim", "groups")
 	v.SetDefault("auth.oidc.skip_tls_verify", false)
 	v.SetDefault("auth.local.enabled", true)

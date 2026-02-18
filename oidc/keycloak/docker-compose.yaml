@@ -8,21 +8,16 @@
 
 services:
   discopanel:
-    build:
-      context: ../../
-      dockerfile: docker/Dockerfile.discopanel
     image: nickheyer/discopanel:dev
     container_name: discopanel
     restart: unless-stopped
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/discopanel/data:/app/data
-      - /opt/discopanel/backups:/app/backups
-      - /tmp/discopanel:/app/tmp
+      - /tmp/discopanel:/app/data
     environment:
       - DISCOPANEL_DATA_DIR=/app/data
-      - DISCOPANEL_HOST_DATA_PATH=/opt/discopanel/data
+      - DISCOPANEL_HOST_DATA_PATH=/tmp/discopanel
       - TZ=UTC
 
       #  ------------------------------------ AUTH CONFIG STARTS HERE FOR DISCOPANEL + KEYCLOAK ------------------------------------
@@ -53,7 +48,7 @@ services:
     command: start-dev --import-realm
     volumes:
       # THIS IS AN EXAMPLE REALM CONFIG, MODIFY AS NEEDED (WHICH MAY REQUIRE MODIFYING DISCOPANEL CONFIG TO MATCH, SEE ABOVE)
-      - ./config/*:/opt/keycloak/data/import/.:ro
+      - ./config/realm.json:/opt/keycloak/data/import/realm.json:ro
     environment:
       # KEYCLOAK ADMIN LOGIN CREDENTIALS - CHANGE THESE!!!!!
       - KC_BOOTSTRAP_ADMIN_USERNAME=admin

@@ -12,6 +12,8 @@ service MinecraftService {
   rpc GetModLoaders(GetModLoadersRequest) returns (GetModLoadersResponse);
   // List available Docker images
   rpc GetDockerImages(GetDockerImagesRequest) returns (GetDockerImagesResponse);
+  // Validate a custom Docker image
+  rpc ValidateDockerImage(ValidateDockerImageRequest) returns (ValidateDockerImageResponse);
 }
 
 // Minecraft version metadata
@@ -119,4 +121,16 @@ message SLPPlayers {
 message SLPPlayerSample {
   string name = 1;
   string id = 2; // UUID
+}
+
+// Request to validate a custom Docker image
+message ValidateDockerImageRequest {
+  string image = 1; // e.g., "itzg/minecraft-server:java21" or "myrepo/custom:latest"
+}
+
+// Response with validation result for a Docker image
+message ValidateDockerImageResponse {
+  bool valid = 1;                    // True if image exists and is accessible
+  string error = 2;                  // Error message if validation fails
+  string normalized_image = 3;       // Normalized image name (with tag added if needed)
 }

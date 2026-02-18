@@ -60,3 +60,40 @@ export function enumToString(map: any, val: unknown): string {
   }
   return enumKey.toLowerCase();
 }
+
+// Validate Docker image reference format
+export function isValidImageReferenceFormat(image: string): boolean {
+  if (!image || image.trim() === '') {
+    return true; // Empty is valid for auto-select
+  }
+
+  // Check for invalid whitespace
+  if (/\s/.test(image)) {
+    return false;
+  }
+
+  // Basic format check - should contain at least a namespace/repo
+  // Valid formats: repo:tag, registry.io/repo:tag, registry.io/repo, repo
+  const hasValidFormat = /^[a-zA-Z0-9\-._/]+(?::[a-zA-Z0-9\-._]+)?$/.test(image);
+  return hasValidFormat;
+}
+
+// Debounce helper for async validation
+export function debounce<TArgs extends unknown[], TReturn>(
+  func: (...args: TArgs) => Promise<TReturn>,
+  wait: number
+): (...args: TArgs) => Promise<TReturn> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  return (...args: TArgs) => {
+    return new Promise((resolve) => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+
+      timeout = setTimeout(() => {
+        resolve(func(...args));
+      }, wait);
+    });
+  };
+}

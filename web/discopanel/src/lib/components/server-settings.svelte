@@ -6,21 +6,21 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { isAdmin } from '$lib/stores/auth';
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
   import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import * as _ from 'lodash-es';
-	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus, ModLoader, DockerOverridesSchema } from '$lib/proto/discopanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { UpdateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import type { GetMinecraftVersionsResponse, GetModLoadersResponse, GetDockerImagesResponse } from '$lib/proto/discopanel/v1/minecraft_pb';
 	import { GetMinecraftVersionsRequestSchema, GetModLoadersRequestSchema, GetDockerImagesRequestSchema } from '$lib/proto/discopanel/v1/minecraft_pb';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
-	import { getUniqueDockerImages } from '$lib/utils';
+	import { getUniqueDockerImages, getDockerImageDisplayName, enumToString } from '$lib/utils';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
-	import { enumToString } from '$lib/utils';
 
 	interface Props {
 		server: Server;
@@ -31,7 +31,32 @@
 
 	let saving = $state(false);
 	let isDirty = $state(false);
-	
+
+	// Docker image mode tracking (explicit, no string inference)
+	type DockerImageMode = 'preset' | 'custom';
+	let dockerImageMode = $state<DockerImageMode>('preset');
+	let selectedPresetTag = $state('');          // e.g., 'java21'
+	let customImageValue = $state('');           // e.g., 'my-registry/image:tag'
+
+
+	// Initialize docker image mode ONCE when server changes
+	function initializeDockerImageMode(dockerImage: string) {
+		if (!dockerImage) {
+			dockerImageMode = 'preset';
+			selectedPresetTag = '';
+			customImageValue = '';
+		} else if (dockerImage.startsWith('itzg/minecraft-server:')) {
+			dockerImageMode = 'preset';
+			selectedPresetTag = dockerImage.substring('itzg/minecraft-server:'.length);
+			customImageValue = '';
+		} else {
+			// Custom image reference
+			dockerImageMode = 'custom';
+			selectedPresetTag = '';
+			customImageValue = dockerImage;
+		}
+	}
+
   function safeToString(data?: any): string | undefined {
     if (!data) return undefined;
     try {
@@ -40,6 +65,13 @@
       console.error('Failed to parse dockerOverrides:', e);
       return undefined;
     }
+  }
+
+  // Compare two DockerOverrides to see if they're meaningfully different
+  function dockerOverridesEqual(a: any, b: any): boolean {
+    const aStr = safeToString(a) || '{}';
+    const bStr = safeToString(b) || '{}';
+    return aStr === bStr;
   }
 
 	let formData = $state<UpdateServerRequest>(
@@ -59,7 +91,7 @@
 			modpackId: '', // Not used in this context
 			modpackVersionId: '', // Not used in this context
 			additionalPorts: server.additionalPorts || [],
-			dockerOverrides: server.dockerOverrides
+			dockerOverrides: server.dockerOverrides || create(DockerOverridesSchema, {})
 		})
 	);
 
@@ -70,12 +102,22 @@
 	let dockerImages = $state<GetDockerImagesResponse | null>(null);
 	let loadingOptions = $state(true);
 
+	// Derive formData.dockerImage from explicit mode
+	$effect(() => {
+		if (dockerImageMode === 'custom') {
+			formData.dockerImage = customImageValue;
+		} else if (selectedPresetTag) {
+			formData.dockerImage = 'itzg/minecraft-server:' + selectedPresetTag;
+		} else {
+			formData.dockerImage = ''; // Auto-select
+		}
+	});
+
 	// Reset state when server changes
-	let previousServerId = $state(server.id);
+	let previousServerId = $state<string | null>(null);
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
-
 
 			// Reset form data to match new server
 			formData = create(UpdateServerRequestSchema, {
@@ -94,12 +136,23 @@
 				modpackId: '', // Not used in this context
 				modpackVersionId: '', // Not used in this context
 				additionalPorts: server.additionalPorts || [],
-				dockerOverrides: server.dockerOverrides
+				dockerOverrides: server.dockerOverrides || create(DockerOverridesSchema, {})
 			});
+
+			// Initialize docker image mode for new server
+			initializeDockerImageMode(server.dockerImage);
+
 			saving = false;
 			isDirty = false;
 			// Reload options for new server
 			loadOptions();
+		}
+	});
+
+	// Re-initialize docker image mode when dockerImages loads (to properly identify presets vs custom)
+	$effect(() => {
+		if (dockerImages && !loadingOptions) {
+			initializeDockerImageMode(server.dockerImage);
 		}
 	});
 
@@ -123,7 +176,7 @@
 			formData.autoStart !== server.autoStart ||
 			formData.tpsCommand !== (server.tpsCommand || '') ||
 			safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
-			safeToString($state.snapshot(formData.dockerOverrides)) !== safeToString(server.dockerOverrides);
+			!dockerOverridesEqual($state.snapshot(formData.dockerOverrides), server.dockerOverrides);
 	});
 
 	async function loadOptions() {
@@ -169,6 +222,29 @@
 
 	async function handleSave() {
 		if (!isDirty) return;
+
+		// Validate: if using auto-select (empty dockerImage), MC version is required
+		if (!formData.dockerImage && !formData.mcVersion) {
+			toast.error('Minecraft version is required when using auto-select');
+			return;
+		}
+
+		// Validate custom Docker image if provided
+		if (dockerImageMode === 'custom' && formData.dockerImage) {
+			saving = true;
+			try {
+				const validationResult = await rpcClient.minecraft.validateDockerImage({ image: formData.dockerImage });
+				if (!validationResult.valid) {
+					toast.error(`Invalid Docker image: ${validationResult.error || 'Image format is invalid'}`);
+					saving = false;
+					return;
+				}
+			} catch (error) {
+				toast.error(`Failed to validate Docker image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+				saving = false;
+				return;
+			}
+		}
 
 		saving = true;
 		try {
@@ -294,7 +370,7 @@
 			<Label for="mod_loader" class="text-sm font-medium">Mod Loader</Label>
 			<Select
 				type="single"
-				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
+				disabled={loadingOptions}
 				value={formData.modLoader}
 				onValueChange={(value: string) => formData.modLoader = value}
 			>
@@ -317,21 +393,82 @@
 			<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
 			<Select
 				type="single"
-				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
-				value={formData.dockerImage}
-				onValueChange={(value: string | undefined) => formData.dockerImage = value || ''}
+				disabled={loadingOptions}
+				value={dockerImageMode === 'custom' ? '__custom__' : selectedPresetTag}
+				onValueChange={(value: string | undefined) => {
+					const newValue = value || '';
+					if (newValue === '__custom__') {
+						// Switch to custom mode
+						dockerImageMode = 'custom';
+						selectedPresetTag = '';
+					} else {
+						// Switch to preset mode
+						dockerImageMode = 'preset';
+						selectedPresetTag = newValue;
+						customImageValue = '';
+					}
+				}}
 			>
 				<SelectTrigger id="docker_image" class="h-10">
-					<span>{formData.dockerImage || 'Select Docker image'}</span>
+					<span>
+						{#if dockerImageMode === 'custom'}
+							Custom Image
+						{:else if selectedPresetTag}
+							{getDockerImageDisplayName(selectedPresetTag, dockerImages?.images)}
+							<span class="text-xs text-muted-foreground ml-1">
+								(itzg/minecraft-server:{selectedPresetTag})
+							</span>
+						{:else}
+							Auto-select (Recommended)
+						{/if}
+					</span>
 				</SelectTrigger>
 				<SelectContent>
+					<SelectItem value="">Auto-select (Recommended)</SelectItem>
+					{#if $isAdmin}
+						<SelectItem value="__custom__">Custom Image...</SelectItem>
+					{/if}
+					{#if getUniqueDockerImages(dockerImages?.images || []).length > 0}
+						<div class="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+							Preset Images
+						</div>
+					{/if}
 					{#each getUniqueDockerImages(dockerImages?.images || []) as image (image.tag)}
 						<SelectItem value={image.tag}>
 							{image.displayName || image.tag}
+							<span class="text-xs text-muted-foreground ml-1">
+								(itzg/minecraft-server:{image.tag})
+							</span>
 						</SelectItem>
 					{/each}
 				</SelectContent>
 			</Select>
+
+			{#if dockerImageMode === 'custom' && $isAdmin}
+				<div class="mt-2 space-y-2">
+					<Input
+						id="custom_docker_image"
+						type="text"
+						value={customImageValue}
+						placeholder="e.g., itzg/minecraft-server:java21 or my-registry/image:tag"
+						oninput={(e) => {
+							customImageValue = e.currentTarget.value;
+						}}
+					/>
+				</div>
+			{:else if dockerImageMode === 'custom' && !$isAdmin}
+				<div class="mt-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30">
+					<p class="text-sm text-destructive">Custom images require admin access for security reasons</p>
+				</div>
+			{:else}
+				<p class="text-xs text-muted-foreground">
+					{#if selectedPresetTag}
+						Full reference: itzg/minecraft-server:{selectedPresetTag}
+					{:else}
+						DiscoPanel will automatically select the best Java version for your Minecraft version
+					{/if}
+				</p>
+			{/if}
 		</div>
 
 		<div class="space-y-2">
@@ -413,6 +550,7 @@
 			bind:overrides={formData.dockerOverrides}
 			disabled={saving}
 			onchange={(overrides) => formData.dockerOverrides = overrides}
+			isAdmin={$isAdmin}
 		/>
 	</div>
 

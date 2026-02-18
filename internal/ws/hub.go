@@ -32,7 +32,7 @@ const (
 
 // Hub manages WebSocket connections and log subscriptions
 type Hub struct {
-	logStreamer  *logger.LogStreamer
+	logStreamer *logger.LogStreamer
 	authManager *auth.Manager
 	enforcer    *rbac.Enforcer
 	store       *storage.Store
@@ -68,7 +68,7 @@ type Client struct {
 // NewHub creates a new WebSocket hub
 func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer *rbac.Enforcer, store *storage.Store, docker *docker.Client, log *logger.Logger) *Hub {
 	return &Hub{
-		logStreamer:  logStreamer,
+		logStreamer: logStreamer,
 		authManager: authManager,
 		enforcer:    enforcer,
 		store:       store,
@@ -216,6 +216,19 @@ func (c *Client) handleMessage(data []byte) {
 func (c *Client) handleAuth(msg *v1.AuthMessage) {
 	if msg == nil {
 		c.sendAuthFail("missing auth message")
+		return
+	}
+
+	// If no auth providers are enabled, bypass auth entirely - grant full admin access
+	if !c.hub.authManager.IsAnyAuthEnabled() {
+		c.user = &auth.AuthenticatedUser{
+			ID:       "admin",
+			Username: "admin",
+			Roles:    []string{"admin"},
+			Provider: "none",
+		}
+		c.authenticated = true
+		c.sendAuthOk()
 		return
 	}
 

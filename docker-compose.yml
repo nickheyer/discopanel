@@ -29,10 +29,9 @@ services:
       # DISCOPANEL_DATA_DIR=/app/data
       # DISCOPANEL_HOST_DATA_PATH=/home/user/data
       # (See environment)
-      - /home/user/data:/app/data
-
-      - ./backups:/app/backups
-      - ./tmp:/app/tmp
+      - /opt/discopanel/data:/app/data
+      - /opt/discopanel/backups:/app/backups
+      - /tmp/discopanel:/app/tmp
       
       # Configuration file, uncomment if you are using a config file (optional, see config.example.yaml for all available options).
       #- ./config.yaml:/app/config.yaml:ro

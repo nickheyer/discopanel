@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	shellparse "github.com/arkady-emelyanov/go-shellparse"
 	"github.com/docker/docker/api/types/container"
@@ -225,31 +223,12 @@ func (c *Client) parseVolumeMounts(volumeJSON string, aliasCtx *alias.Context) [
 			continue
 		}
 
-		// Handle path translation when DiscoPanel runs in a container
-		if mountType == mount.TypeBind {
-			if envHostDataPath := os.Getenv("DISCOPANEL_HOST_DATA_PATH"); envHostDataPath != "" {
-				containerDataDir := os.Getenv("DISCOPANEL_DATA_DIR")
-				if containerDataDir == "" {
-					containerDataDir = "/app/data"
-				}
-				if relPath, err := filepath.Rel(containerDataDir, source); err == nil {
-					source = filepath.Join(envHostDataPath, relPath)
-				}
-			}
-		}
-
-		// Ensure source directory exists for bind mounts
-		if mountType == mount.TypeBind {
-			if err := os.MkdirAll(source, 0755); err != nil {
-				c.log.Warn("Failed to create volume source directory %s: %v", source, err)
-			}
-		}
-
 		mounts = append(mounts, mount.Mount{
-			Type:     mountType,
-			Source:   source,
-			Target:   target,
-			ReadOnly: vol.ReadOnly,
+			Type:        mountType,
+			Source:      source,
+			Target:      target,
+			ReadOnly:    vol.ReadOnly,
+			BindOptions: &mount.BindOptions{CreateMountpoint: true},
 		})
 	}
 

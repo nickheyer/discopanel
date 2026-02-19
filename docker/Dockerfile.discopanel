@@ -3,7 +3,7 @@ ARG APP_VERSION=dev
 # Generate protobuf code using buf
 FROM bufbuild/buf:latest AS proto-builder
 WORKDIR /app
-COPY buf.yaml buf.gen.yaml ./
+COPY buf.yaml buf.gen.yaml buf.lock ./
 COPY proto/ ./proto/
 RUN mkdir -p web/discopanel/static pkg/proto web/discopanel/src/lib/proto && buf generate
 

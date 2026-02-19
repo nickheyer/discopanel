@@ -27,6 +27,16 @@ service AuthService {
   rpc GetAuthConfig(GetAuthConfigRequest) returns (GetAuthConfigResponse);
   // Update mutable auth settings
   rpc UpdateAuthSettings(UpdateAuthSettingsRequest) returns (UpdateAuthSettingsResponse);
+  // Create a registration invite link
+  rpc CreateInvite(CreateInviteRequest) returns (CreateInviteResponse);
+  // List all registration invites
+  rpc ListInvites(ListInvitesRequest) returns (ListInvitesResponse);
+  // Get a specific invite by ID
+  rpc GetInvite(GetInviteRequest) returns (GetInviteResponse);
+  // Delete/revoke an invite
+  rpc DeleteInvite(DeleteInviteRequest) returns (DeleteInviteResponse);
+  // Validate an invite code (public, unauthenticated)
+  rpc ValidateInvite(ValidateInviteRequest) returns (ValidateInviteResponse);
 }
 
 // Empty auth status request
@@ -67,6 +77,8 @@ message RegisterRequest {
   string username = 1;
   string email = 2;
   string password = 3;
+  optional string invite_code = 4;
+  optional string invite_pin = 5;
 }
 
 // Created user
@@ -132,4 +144,60 @@ message UpdateAuthSettingsRequest {
 // Returns the updated auth configuration
 message UpdateAuthSettingsResponse {
   GetAuthConfigResponse config = 1;
+}
+
+// Registration invite link
+message RegistrationInvite {
+  string id = 1;
+  string code = 2;
+  string description = 3;
+  repeated string roles = 4;
+  bool has_pin = 5;
+  int32 max_uses = 6;
+  int32 use_count = 7;
+  google.protobuf.Timestamp expires_at = 8;
+  string created_by = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message CreateInviteRequest {
+  string description = 1;
+  repeated string roles = 2;
+  optional string pin = 3;
+  int32 max_uses = 4;
+  optional int32 expires_in_hours = 5;
+}
+
+message CreateInviteResponse {
+  RegistrationInvite invite = 1;
+}
+
+message ListInvitesRequest {}
+
+message ListInvitesResponse {
+  repeated RegistrationInvite invites = 1;
+}
+
+message GetInviteRequest {
+  string id = 1;
+}
+
+message GetInviteResponse {
+  RegistrationInvite invite = 1;
+}
+
+message DeleteInviteRequest {
+  string id = 1;
+}
+
+message DeleteInviteResponse {}
+
+message ValidateInviteRequest {
+  string code = 1;
+}
+
+message ValidateInviteResponse {
+  bool valid = 1;
+  bool requires_pin = 2;
+  string description = 3;
 }

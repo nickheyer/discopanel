@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { create } from '@bufbuild/protobuf';
 	import { authStore } from '$lib/stores/auth';
+	import { rpcClient } from '$lib/api/rpc-client';
+	import { silentCallOptions } from '$lib/api/rpc-client';
+	import { ValidateInviteRequestSchema } from '$lib/proto/discopanel/v1/auth_pb';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -9,7 +13,7 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
-	import { Loader2, AlertCircle } from '@lucide/svelte';
+	import { Loader2, AlertCircle, TicketCheck } from '@lucide/svelte';
 
 	let mode = $state<'login' | 'register'>('login');
 	let username = $state('');
@@ -25,6 +29,13 @@
 	});
 	let oidcEnabled = $state(false);
 	let localAuthEnabled = $state(true);
+
+	// Invite state
+	let inviteCode = $state('');
+	let inviteValid = $state(false);
+	let inviteRequiresPin = $state(false);
+	let inviteDescription = $state('');
+	let invitePin = $state('');
 
 	onMount(() => {
 		// Check for OIDC callback token
@@ -44,6 +55,9 @@
 			return;
 		}
 
+		// Check for invite code in URL
+		const invite = urlParams.get('invite');
+
 		// If already authenticated, redirect to home
 		if ($authStore.isAuthenticated) {
 			goto('/');
@@ -51,7 +65,7 @@
 		}
 
 		// Check auth status
-		authStore.checkAuthStatus().then(status => {
+		authStore.checkAuthStatus().then(async (status) => {
 			authStatus = status;
 			oidcEnabled = $authStore.oidcEnabled;
 			localAuthEnabled = $authStore.localAuthEnabled;
@@ -65,6 +79,28 @@
 			// If first user setup, show registration
 			if (status.firstUserSetup) {
 				mode = 'register';
+				return;
+			}
+
+			// Validate invite code if present
+			if (invite) {
+				try {
+					const resp = await rpcClient.auth.validateInvite(
+						create(ValidateInviteRequestSchema, { code: invite }),
+						silentCallOptions,
+					);
+					if (resp.valid) {
+						inviteCode = invite;
+						inviteValid = true;
+						inviteRequiresPin = resp.requiresPin;
+						inviteDescription = resp.description;
+						mode = 'register';
+					}
+				} catch {
+					// Invalid invite, just show normal login
+				}
+				// Clean up URL
+				window.history.replaceState({}, '', '/login');
 			}
 		});
 	});
@@ -101,7 +137,13 @@
 		loading = true;
 
 		try {
-			await authStore.register(username, email, password);
+			await authStore.register(
+				username,
+				email,
+				password,
+				inviteValid ? inviteCode : undefined,
+				inviteValid && inviteRequiresPin ? invitePin : undefined,
+			);
 			toast.success(authStatus.firstUserSetup ?
 				'Admin account created successfully' :
 				'Account created successfully');
@@ -193,6 +235,12 @@
 
 {#snippet registerForm()}
 	<form onsubmit={handleSubmit} class="space-y-4">
+		{#if inviteValid && inviteDescription}
+			<Alert>
+				<TicketCheck class="h-4 w-4" />
+				<AlertDescription>{inviteDescription}</AlertDescription>
+			</Alert>
+		{/if}
 		<div class="space-y-2">
 			<Label for="reg-username">Username</Label>
 			<Input
@@ -236,6 +284,19 @@
 				placeholder="Confirm your password"
 			/>
 		</div>
+		{#if inviteValid && inviteRequiresPin}
+			<div class="space-y-2">
+				<Label for="reg-pin">Invite PIN</Label>
+				<Input
+					id="reg-pin"
+					type="password"
+					bind:value={invitePin}
+					required
+					disabled={loading}
+					placeholder="Enter invite PIN"
+				/>
+			</div>
+		{/if}
 		<Button type="submit" class="w-full" disabled={loading}>
 			{#if loading}
 				<Loader2 class="mr-2 h-4 w-4 animate-spin" />
@@ -338,7 +399,7 @@
 						{/if}
 					</Button>
 				</form>
-			{:else if authStatus.allowRegistration && localAuthEnabled}
+			{:else if (authStatus.allowRegistration || inviteValid) && localAuthEnabled}
 				<!-- Login + Registration tabs -->
 				<Tabs bind:value={mode} class="w-full">
 					<TabsList class="grid w-full grid-cols-2">

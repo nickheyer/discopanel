@@ -89,6 +89,7 @@ func (s *Store) Migrate() error {
 		&Role{},
 		&UserRole{},
 		&Session{},
+		&RegistrationInvite{},
 		&ScheduledTask{},
 		&TaskExecution{},
 		&ModuleTemplate{},
@@ -938,6 +939,53 @@ func (s *Store) CleanExpiredSessions(ctx context.Context) error {
 // CleanAllSessions deletes all sessions (used when JWT secret changes).
 func (s *Store) CleanAllSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("1 = 1").Delete(&Session{}).Error
+}
+
+// RegistrationInvite operations
+func (s *Store) CreateRegistrationInvite(ctx context.Context, invite *RegistrationInvite) error {
+	if invite.ID == "" {
+		invite.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(invite).Error
+}
+
+func (s *Store) GetRegistrationInvite(ctx context.Context, id string) (*RegistrationInvite, error) {
+	var invite RegistrationInvite
+	err := s.db.WithContext(ctx).First(&invite, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("invite not found")
+		}
+		return nil, err
+	}
+	return &invite, nil
+}
+
+func (s *Store) GetRegistrationInviteByCode(ctx context.Context, code string) (*RegistrationInvite, error) {
+	var invite RegistrationInvite
+	err := s.db.WithContext(ctx).First(&invite, "code = ?", code).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("invite not found")
+		}
+		return nil, err
+	}
+	return &invite, nil
+}
+
+func (s *Store) ListRegistrationInvites(ctx context.Context) ([]*RegistrationInvite, error) {
+	var invites []*RegistrationInvite
+	err := s.db.WithContext(ctx).Order("created_at DESC").Find(&invites).Error
+	return invites, err
+}
+
+func (s *Store) IncrementInviteUseCount(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Model(&RegistrationInvite{}).Where("id = ?", id).
+		Update("use_count", gorm.Expr("use_count + 1")).Error
+}
+
+func (s *Store) DeleteRegistrationInvite(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Delete(&RegistrationInvite{}, "id = ?", id).Error
 }
 
 // SystemSetting operations

@@ -386,6 +386,20 @@ type ProxyListener struct {
 	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
+// RegistrationInvite represents a shareable invite link for controlled registration
+type RegistrationInvite struct {
+	ID          string     `json:"id" gorm:"primaryKey"`
+	Code        string     `json:"code" gorm:"not null;uniqueIndex"`
+	Description string     `json:"description"`
+	Roles       []string   `json:"roles" gorm:"column:roles;serializer:json"`
+	PinHash     string     `json:"-" gorm:"column:pin_hash"`
+	MaxUses     int        `json:"max_uses" gorm:"default:0;column:max_uses"`
+	UseCount    int        `json:"use_count" gorm:"default:0;column:use_count"`
+	ExpiresAt   *time.Time `json:"expires_at" gorm:"column:expires_at"`
+	CreatedBy   string     `json:"created_by" gorm:"not null;column:created_by"`
+	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`
+}
+
 // User represents a user account
 type User struct {
 	ID           string     `json:"id" gorm:"primaryKey"`

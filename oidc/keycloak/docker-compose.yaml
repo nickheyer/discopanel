@@ -8,7 +8,10 @@
 
 services:
   discopanel:
-    image: nickheyer/discopanel:dev
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile.discopanel
+    #image: nickheyer/discopanel:dev
     container_name: discopanel
     restart: unless-stopped
     network_mode: host

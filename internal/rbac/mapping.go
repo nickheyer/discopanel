@@ -12,7 +12,8 @@ var PublicProcedures = map[string]bool{
 	"/discopanel.v1.AuthService/GetAuthStatus":   true,
 	"/discopanel.v1.AuthService/Login":           true,
 	"/discopanel.v1.AuthService/Register":        true,
-	"/discopanel.v1.AuthService/GetOIDCLoginURL": true,
+	"/discopanel.v1.AuthService/GetOIDCLoginURL":   true,
+	"/discopanel.v1.AuthService/ValidateInvite":    true,
 }
 
 // AuthenticatedOnlyProcedures lists RPC procedures that require authentication
@@ -50,6 +51,10 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	// ── AuthService (admin) ───────────────────────────────────────────
 	"/discopanel.v1.AuthService/GetAuthConfig":      {Resource: ResourceSettings, Action: ActionRead},
 	"/discopanel.v1.AuthService/UpdateAuthSettings": {Resource: ResourceSettings, Action: ActionUpdate},
+	"/discopanel.v1.AuthService/CreateInvite":       {Resource: ResourceUsers, Action: ActionCreate},
+	"/discopanel.v1.AuthService/ListInvites":        {Resource: ResourceUsers, Action: ActionRead},
+	"/discopanel.v1.AuthService/GetInvite":          {Resource: ResourceUsers, Action: ActionRead},
+	"/discopanel.v1.AuthService/DeleteInvite":       {Resource: ResourceUsers, Action: ActionDelete},
 
 	// ── ConfigService ──────────────────────────────────────────────────
 	"/discopanel.v1.ConfigService/GetServerConfig":      {Resource: ResourceServerConfig, Action: ActionRead, ObjectIDField: "server_id"},

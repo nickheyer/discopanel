@@ -184,8 +184,14 @@ function createAuthStore() {
 			goto('/login');
 		},
 
-		async register(username: string, email: string, password: string) {
-			const request = create(RegisterRequestSchema, { username, email, password });
+		async register(username: string, email: string, password: string, inviteCode?: string, invitePin?: string) {
+			const request = create(RegisterRequestSchema, {
+				username,
+				email,
+				password,
+				inviteCode: inviteCode || undefined,
+				invitePin: invitePin || undefined,
+			});
 			await rpcClient.auth.register(request);
 
 			// After successful registration, log them in

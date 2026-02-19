@@ -2,10 +2,15 @@ package services
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/nickheyer/discopanel/internal/auth"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/rbac"
@@ -101,11 +106,33 @@ func (s *AuthService) Logout(ctx context.Context, req *connect.Request[v1.Logout
 func (s *AuthService) Register(ctx context.Context, req *connect.Request[v1.RegisterRequest]) (*connect.Response[v1.RegisterResponse], error) {
 	msg := req.Msg
 
-	// Check if registration is allowed
 	userCount, _ := s.store.CountUsers(ctx)
 	isFirstUser := userCount == 0
 
-	if !isFirstUser && !s.authManager.IsRegistrationAllowed() {
+	var invite *storage.RegistrationInvite
+
+	if msg.InviteCode != nil && *msg.InviteCode != "" {
+		// Validate invite
+		var err error
+		invite, err = s.store.GetRegistrationInviteByCode(ctx, *msg.InviteCode)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("invalid invite code"))
+		}
+		if invite.ExpiresAt != nil && invite.ExpiresAt.Before(time.Now()) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("invite has expired"))
+		}
+		if invite.MaxUses > 0 && invite.UseCount >= invite.MaxUses {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("invite has reached maximum uses"))
+		}
+		if invite.PinHash != "" {
+			if msg.InvitePin == nil || *msg.InvitePin == "" {
+				return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("PIN is required for this invite"))
+			}
+			if err := bcrypt.CompareHashAndPassword([]byte(invite.PinHash), []byte(*msg.InvitePin)); err != nil {
+				return nil, connect.NewError(connect.CodePermissionDenied, errors.New("incorrect PIN"))
+			}
+		}
+	} else if !isFirstUser && !s.authManager.IsRegistrationAllowed() {
 		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("registration is disabled"))
 	}
 
@@ -119,14 +146,23 @@ func (s *AuthService) Register(ctx context.Context, req *connect.Request[v1.Regi
 		return nil, connect.NewError(connect.CodeAlreadyExists, errors.New("registration failed"))
 	}
 
-	// First user gets admin role, others get default roles
+	// Role assignment: first user → admin; invite with roles → invite roles; else → default roles
 	if isFirstUser {
 		_ = s.store.AssignRole(ctx, user.ID, "admin", "local")
+	} else if invite != nil && len(invite.Roles) > 0 {
+		for _, roleName := range invite.Roles {
+			_ = s.store.AssignRole(ctx, user.ID, roleName, "invite")
+		}
 	} else {
 		defaultRoles, _ := s.store.GetDefaultRoles(ctx)
 		for _, role := range defaultRoles {
 			_ = s.store.AssignRole(ctx, user.ID, role.Name, "local")
 		}
+	}
+
+	// Increment invite use count after successful registration
+	if invite != nil {
+		_ = s.store.IncrementInviteUseCount(ctx, invite.ID)
 	}
 
 	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
@@ -291,4 +327,155 @@ func (s *AuthService) UpdateAuthSettings(ctx context.Context, req *connect.Reque
 	return connect.NewResponse(&v1.UpdateAuthSettingsResponse{
 		Config: configResp.Msg,
 	}), nil
+}
+
+func (s *AuthService) CreateInvite(ctx context.Context, req *connect.Request[v1.CreateInviteRequest]) (*connect.Response[v1.CreateInviteResponse], error) {
+	msg := req.Msg
+
+	// Validate roles exist
+	if len(msg.Roles) > 0 {
+		existingRoles, err := s.store.ListRoles(ctx)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list roles"))
+		}
+		roleSet := make(map[string]bool, len(existingRoles))
+		for _, r := range existingRoles {
+			roleSet[r.Name] = true
+		}
+		for _, roleName := range msg.Roles {
+			if !roleSet[roleName] {
+				return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("role not found: "+roleName))
+			}
+		}
+	}
+
+	// Generate crypto-random code
+	codeBytes := make([]byte, 32)
+	if _, err := rand.Read(codeBytes); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to generate invite code"))
+	}
+	code := base64.RawURLEncoding.EncodeToString(codeBytes)
+
+	// Hash PIN if provided
+	var pinHash string
+	if msg.Pin != nil && *msg.Pin != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(*msg.Pin), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to hash PIN"))
+		}
+		pinHash = string(hash)
+	}
+
+	// Calculate expiration
+	var expiresAt *time.Time
+	if msg.ExpiresInHours != nil && *msg.ExpiresInHours > 0 {
+		t := time.Now().Add(time.Duration(*msg.ExpiresInHours) * time.Hour)
+		expiresAt = &t
+	}
+
+	// Get creator from context
+	authUser := auth.GetUserFromContext(ctx)
+	createdBy := ""
+	if authUser != nil {
+		createdBy = authUser.Username
+	}
+
+	invite := &storage.RegistrationInvite{
+		Code:        code,
+		Description: msg.Description,
+		Roles:       msg.Roles,
+		PinHash:     pinHash,
+		MaxUses:     int(msg.MaxUses),
+		ExpiresAt:   expiresAt,
+		CreatedBy:   createdBy,
+	}
+
+	if err := s.store.CreateRegistrationInvite(ctx, invite); err != nil {
+		s.log.Error("Failed to create invite: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create invite"))
+	}
+
+	return connect.NewResponse(&v1.CreateInviteResponse{
+		Invite: dbInviteToProto(invite),
+	}), nil
+}
+
+func (s *AuthService) ListInvites(ctx context.Context, req *connect.Request[v1.ListInvitesRequest]) (*connect.Response[v1.ListInvitesResponse], error) {
+	invites, err := s.store.ListRegistrationInvites(ctx)
+	if err != nil {
+		s.log.Error("Failed to list invites: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list invites"))
+	}
+
+	protoInvites := make([]*v1.RegistrationInvite, 0, len(invites))
+	for _, inv := range invites {
+		protoInvites = append(protoInvites, dbInviteToProto(inv))
+	}
+
+	return connect.NewResponse(&v1.ListInvitesResponse{
+		Invites: protoInvites,
+	}), nil
+}
+
+func (s *AuthService) GetInvite(ctx context.Context, req *connect.Request[v1.GetInviteRequest]) (*connect.Response[v1.GetInviteResponse], error) {
+	invite, err := s.store.GetRegistrationInvite(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("invite not found"))
+	}
+
+	return connect.NewResponse(&v1.GetInviteResponse{
+		Invite: dbInviteToProto(invite),
+	}), nil
+}
+
+func (s *AuthService) DeleteInvite(ctx context.Context, req *connect.Request[v1.DeleteInviteRequest]) (*connect.Response[v1.DeleteInviteResponse], error) {
+	if err := s.store.DeleteRegistrationInvite(ctx, req.Msg.Id); err != nil {
+		s.log.Error("Failed to delete invite: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete invite"))
+	}
+
+	return connect.NewResponse(&v1.DeleteInviteResponse{}), nil
+}
+
+func (s *AuthService) ValidateInvite(ctx context.Context, req *connect.Request[v1.ValidateInviteRequest]) (*connect.Response[v1.ValidateInviteResponse], error) {
+	if req.Msg.Code == "" {
+		return connect.NewResponse(&v1.ValidateInviteResponse{Valid: false}), nil
+	}
+
+	invite, err := s.store.GetRegistrationInviteByCode(ctx, req.Msg.Code)
+	if err != nil {
+		return connect.NewResponse(&v1.ValidateInviteResponse{Valid: false}), nil
+	}
+
+	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(time.Now()) {
+		return connect.NewResponse(&v1.ValidateInviteResponse{Valid: false}), nil
+	}
+
+	if invite.MaxUses > 0 && invite.UseCount >= invite.MaxUses {
+		return connect.NewResponse(&v1.ValidateInviteResponse{Valid: false}), nil
+	}
+
+	return connect.NewResponse(&v1.ValidateInviteResponse{
+		Valid:       true,
+		RequiresPin: invite.PinHash != "",
+		Description: invite.Description,
+	}), nil
+}
+
+func dbInviteToProto(invite *storage.RegistrationInvite) *v1.RegistrationInvite {
+	pi := &v1.RegistrationInvite{
+		Id:          invite.ID,
+		Code:        invite.Code,
+		Description: invite.Description,
+		Roles:       invite.Roles,
+		HasPin:      invite.PinHash != "",
+		MaxUses:     int32(invite.MaxUses),
+		UseCount:    int32(invite.UseCount),
+		CreatedBy:   invite.CreatedBy,
+		CreatedAt:   timestamppb.New(invite.CreatedAt),
+	}
+	if invite.ExpiresAt != nil {
+		pi.ExpiresAt = timestamppb.New(*invite.ExpiresAt)
+	}
+	return pi
 }

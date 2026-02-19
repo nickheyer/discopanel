@@ -62,52 +62,54 @@ m = g(r.sub, p.sub) && (p.res == "*" || r.res == p.res) && (p.act == "*" || r.ac
 	return &Enforcer{enforcer: e}, nil
 }
 
-// SeedDefaultPolicies ensures default roles have their base permissions.
-// When anonymousEnabled is true, the anonymous role receives read-only
-// access to common resources. When false, all anonymous policies are removed.
+// Ensures default roles have their base permissions
 func (e *Enforcer) SeedDefaultPolicies(anonymousEnabled bool) error {
-	policies := [][]string{
-		{"admin", "*", "*", "*"},
-		{"user", ResourceServers, ActionRead, "*"},
-		{"user", ResourceServers, ActionStart, "*"},
-		{"user", ResourceServers, ActionStop, "*"},
-		{"user", ResourceServers, ActionRestart, "*"},
-		{"user", ResourceServers, ActionCommand, "*"},
-		{"user", ResourceServerConfig, ActionRead, "*"},
-		{"user", ResourceMods, ActionRead, "*"},
-		{"user", ResourceModpacks, ActionRead, "*"},
-		{"user", ResourceModules, ActionRead, "*"},
-		{"user", ResourceModuleTemplates, ActionRead, "*"},
-		{"user", ResourceFiles, ActionRead, "*"},
-		{"user", ResourceTasks, ActionRead, "*"},
-		{"user", ResourceProxy, ActionRead, "*"},
-		{"anonymous", ResourceServers, ActionRead, "*"},
-		{"anonymous", ResourceServerConfig, ActionRead, "*"},
-		{"anonymous", ResourceMods, ActionRead, "*"},
-		{"anonymous", ResourceModpacks, ActionRead, "*"},
-		{"anonymous", ResourceModules, ActionRead, "*"},
-		{"anonymous", ResourceModuleTemplates, ActionRead, "*"},
-		{"anonymous", ResourceFiles, ActionRead, "*"},
-		{"anonymous", ResourceTasks, ActionRead, "*"},
-		{"anonymous", ResourceProxy, ActionRead, "*"},
+	policies := map[string][][]string{
+		"admin": {
+			{"admin", "*", "*", "*"},
+		},
+		"user": {
+			{"user", ResourceServers, ActionRead, "*"},
+			{"user", ResourceServers, ActionStart, "*"},
+			{"user", ResourceServers, ActionStop, "*"},
+			{"user", ResourceServers, ActionRestart, "*"},
+			{"user", ResourceServers, ActionCommand, "*"},
+			{"user", ResourceServerConfig, ActionRead, "*"},
+			{"user", ResourceMods, ActionRead, "*"},
+			{"user", ResourceModpacks, ActionRead, "*"},
+			{"user", ResourceModules, ActionRead, "*"},
+			{"user", ResourceModuleTemplates, ActionRead, "*"},
+			{"user", ResourceFiles, ActionRead, "*"},
+			{"user", ResourceTasks, ActionRead, "*"},
+			{"user", ResourceProxy, ActionRead, "*"},
+		},
+		"anonymous": {
+			{"anonymous", ResourceServers, ActionRead, "*"},
+			{"anonymous", ResourceServerConfig, ActionRead, "*"},
+			{"anonymous", ResourceMods, ActionRead, "*"},
+			{"anonymous", ResourceModpacks, ActionRead, "*"},
+			{"anonymous", ResourceModules, ActionRead, "*"},
+			{"anonymous", ResourceModuleTemplates, ActionRead, "*"},
+			{"anonymous", ResourceFiles, ActionRead, "*"},
+			{"anonymous", ResourceTasks, ActionRead, "*"},
+			{"anonymous", ResourceProxy, ActionRead, "*"},
+		},
 	}
-	for _, p := range policies {
-		if p[0] == "anonymous" && !anonymousEnabled {
-			continue
-		}
-		has, err := e.enforcer.HasPolicy(p[0], p[1], p[2], p[3])
+
+	for role, rolePolicies := range policies {
+		existing, err := e.enforcer.GetFilteredPolicy(0, role)
 		if err != nil {
 			return err
 		}
-		if !has {
-			if _, err = e.enforcer.AddPolicy(p[0], p[1], p[2], p[3]); err != nil {
+		if len(existing) > 0 {
+			continue
+		}
+
+		for _, p := range rolePolicies {
+			if _, err := e.enforcer.AddPolicy(p[0], p[1], p[2], p[3]); err != nil {
 				return err
 			}
 		}
-	}
-
-	if !anonymousEnabled {
-		e.enforcer.RemoveFilteredPolicy(0, "anonymous")
 	}
 
 	return e.enforcer.SavePolicy()

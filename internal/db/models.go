@@ -441,6 +441,18 @@ type SystemSetting struct {
 	Value string `gorm:"not null"`
 }
 
+// APIToken represents a long-lived API token for programmatic access
+type APIToken struct {
+	ID         string     `json:"id" gorm:"primaryKey"`
+	UserID     string     `json:"user_id" gorm:"not null;index;column:user_id"`
+	Name       string     `json:"name" gorm:"not null"`
+	TokenHash  string     `json:"-" gorm:"not null;uniqueIndex;column:token_hash"`
+	ExpiresAt  *time.Time `json:"expires_at" gorm:"column:expires_at"`
+	LastUsedAt *time.Time `json:"last_used_at" gorm:"column:last_used_at"`
+	CreatedAt  time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	User       *User      `json:"-" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+}
+
 // Session represents an active user session
 type Session struct {
 	ID        string    `json:"id" gorm:"primaryKey"`

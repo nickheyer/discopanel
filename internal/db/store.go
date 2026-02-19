@@ -89,6 +89,7 @@ func (s *Store) Migrate() error {
 		&Role{},
 		&UserRole{},
 		&Session{},
+		&APIToken{},
 		&RegistrationInvite{},
 		&ScheduledTask{},
 		&TaskExecution{},
@@ -791,6 +792,9 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 		if err := tx.Where("user_id = ?", id).Delete(&Session{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("user_id = ?", id).Delete(&APIToken{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("user_id = ?", id).Delete(&UserRole{}).Error; err != nil {
 			return err
 		}
@@ -939,6 +943,47 @@ func (s *Store) CleanExpiredSessions(ctx context.Context) error {
 // CleanAllSessions deletes all sessions (used when JWT secret changes).
 func (s *Store) CleanAllSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("1 = 1").Delete(&Session{}).Error
+}
+
+// APIToken operations
+func (s *Store) CreateAPIToken(ctx context.Context, token *APIToken) error {
+	if token.ID == "" {
+		token.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(token).Error
+}
+
+func (s *Store) GetAPITokenByHash(ctx context.Context, hash string) (*APIToken, error) {
+	var token APIToken
+	err := s.db.WithContext(ctx).Where("token_hash = ?", hash).First(&token).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("api token not found")
+		}
+		return nil, err
+	}
+	return &token, nil
+}
+
+func (s *Store) ListAPITokensByUser(ctx context.Context, userID string) ([]APIToken, error) {
+	var tokens []APIToken
+	err := s.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Find(&tokens).Error
+	return tokens, err
+}
+
+func (s *Store) DeleteAPIToken(ctx context.Context, id, userID string) error {
+	result := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&APIToken{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("api token not found")
+	}
+	return nil
+}
+
+func (s *Store) UpdateAPITokenLastUsed(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Model(&APIToken{}).Where("id = ?", id).Update("last_used_at", time.Now()).Error
 }
 
 // RegistrationInvite operations

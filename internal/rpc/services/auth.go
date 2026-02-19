@@ -462,6 +462,84 @@ func (s *AuthService) ValidateInvite(ctx context.Context, req *connect.Request[v
 	}), nil
 }
 
+func (s *AuthService) CreateAPIToken(ctx context.Context, req *connect.Request[v1.CreateAPITokenRequest]) (*connect.Response[v1.CreateAPITokenResponse], error) {
+	user := auth.GetUserFromContext(ctx)
+	if user == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+
+	msg := req.Msg
+	if msg.Name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("token name is required"))
+	}
+
+	plaintext, apiToken, err := s.authManager.GenerateAPIToken(ctx, user.ID, msg.Name, msg.ExpiresInDays)
+	if err != nil {
+		s.log.Error("Failed to create API token: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create API token"))
+	}
+
+	return connect.NewResponse(&v1.CreateAPITokenResponse{
+		PlaintextToken: plaintext,
+		ApiToken:       dbAPITokenToProto(apiToken),
+	}), nil
+}
+
+func (s *AuthService) ListAPITokens(ctx context.Context, req *connect.Request[v1.ListAPITokensRequest]) (*connect.Response[v1.ListAPITokensResponse], error) {
+	user := auth.GetUserFromContext(ctx)
+	if user == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+
+	tokens, err := s.store.ListAPITokensByUser(ctx, user.ID)
+	if err != nil {
+		s.log.Error("Failed to list API tokens: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list API tokens"))
+	}
+
+	protoTokens := make([]*v1.ApiToken, 0, len(tokens))
+	for _, t := range tokens {
+		protoTokens = append(protoTokens, dbAPITokenToProto(&t))
+	}
+
+	return connect.NewResponse(&v1.ListAPITokensResponse{
+		ApiTokens: protoTokens,
+	}), nil
+}
+
+func (s *AuthService) DeleteAPIToken(ctx context.Context, req *connect.Request[v1.DeleteAPITokenRequest]) (*connect.Response[v1.DeleteAPITokenResponse], error) {
+	user := auth.GetUserFromContext(ctx)
+	if user == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("token ID is required"))
+	}
+
+	if err := s.store.DeleteAPIToken(ctx, req.Msg.Id, user.ID); err != nil {
+		s.log.Error("Failed to delete API token: %v", err)
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("API token not found"))
+	}
+
+	return connect.NewResponse(&v1.DeleteAPITokenResponse{}), nil
+}
+
+func dbAPITokenToProto(t *storage.APIToken) *v1.ApiToken {
+	pt := &v1.ApiToken{
+		Id:        t.ID,
+		Name:      t.Name,
+		CreatedAt: timestamppb.New(t.CreatedAt),
+	}
+	if t.ExpiresAt != nil {
+		pt.ExpiresAt = timestamppb.New(*t.ExpiresAt)
+	}
+	if t.LastUsedAt != nil {
+		pt.LastUsedAt = timestamppb.New(*t.LastUsedAt)
+	}
+	return pt
+}
+
 func dbInviteToProto(invite *storage.RegistrationInvite) *v1.RegistrationInvite {
 	pi := &v1.RegistrationInvite{
 		Id:          invite.ID,

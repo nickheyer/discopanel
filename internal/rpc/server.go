@@ -18,6 +18,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rbac"
+	"github.com/nickheyer/discopanel/internal/rpc/handlers"
 	"github.com/nickheyer/discopanel/internal/rpc/services"
 	"github.com/nickheyer/discopanel/internal/scheduler"
 	"github.com/nickheyer/discopanel/internal/ws"
@@ -159,6 +160,9 @@ func (s *Server) setupHandler() {
 		mux.HandleFunc("/api/v1/auth/oidc/callback", s.oidcHandler.HandleCallback)
 	}
 
+	// Serve dynamic OpenAPI spec
+	mux.HandleFunc("/api/v1/openapi.yaml", handlers.NewOpenAPIHandler(s.log, s.authManager.IsAnyAuthEnabled))
+
 	// Serve frontend for non-RPC routes
 	s.setupFrontend(mux)
 
@@ -272,16 +276,20 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 			// Extract token from Authorization header
 			token := ""
 			if authHeader := req.Header().Get("Authorization"); authHeader != "" {
-				token, _ = strings.CutPrefix(authHeader, "Bearer ")
-				token, _ = strings.CutPrefix(token, "bearer ")
+				token = strings.TrimPrefix(strings.TrimPrefix(authHeader, "Bearer "), "bearer ")
 			}
 
 			var user *auth.AuthenticatedUser
 
 			if token != "" {
-				// Validate session
 				var err error
-				user, err = s.authManager.ValidateSession(ctx, token)
+				if strings.HasPrefix(token, "dp_") {
+					// API token authentication
+					user, err = s.authManager.ValidateAPIToken(ctx, token)
+				} else {
+					// Session/JWT authentication
+					user, err = s.authManager.ValidateSession(ctx, token)
+				}
 				if err != nil {
 					s.log.Debug("Auth: Token validation failed for %s: %v", procedure, err)
 					return nil, connect.NewError(connect.CodeUnauthenticated, err)

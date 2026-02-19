@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -235,7 +236,13 @@ func (c *Client) handleAuth(msg *v1.AuthMessage) {
 	ctx := context.Background()
 
 	if msg.Token != "" {
-		user, err := c.hub.authManager.ValidateSession(ctx, msg.Token)
+		var user *auth.AuthenticatedUser
+		var err error
+		if strings.HasPrefix(msg.Token, "dp_") {
+			user, err = c.hub.authManager.ValidateAPIToken(ctx, msg.Token)
+		} else {
+			user, err = c.hub.authManager.ValidateSession(ctx, msg.Token)
+		}
 		if err != nil {
 			// Try anonymous access
 			if c.hub.authManager.IsAnonymousAccessEnabled() {

@@ -3,10 +3,13 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -25,6 +28,8 @@ var (
 	ErrLocalAuthDisabled    = errors.New("local authentication is disabled")
 	ErrRegistrationDisabled = errors.New("registration is disabled")
 	ErrSessionTimeoutMin    = errors.New("session timeout must be at least 300 seconds (5 minutes)")
+	ErrAPITokenExpired      = errors.New("api token has expired")
+	ErrAPITokenNotFound     = errors.New("api token not found")
 )
 
 // Auth override keys
@@ -330,6 +335,96 @@ func (m *Manager) UpdateSettings(ctx context.Context, localEnabled, allowReg, an
 	}
 
 	return nil
+}
+
+// Creates a new API token for a user. Plaintext is returned, SHA-256 hash is stored
+func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, expiresInDays *int32) (string, *db.APIToken, error) {
+	// Generate 32 random bytes
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", nil, fmt.Errorf("failed to generate token: %w", err)
+	}
+
+	plaintext := "dp_" + base64.RawURLEncoding.EncodeToString(raw)
+
+	// SHA-256 hash for storage
+	hash := sha256.Sum256([]byte(plaintext))
+	hashHex := hex.EncodeToString(hash[:])
+
+	var expiresAt *time.Time
+	if expiresInDays != nil && *expiresInDays > 0 {
+		t := time.Now().Add(time.Duration(*expiresInDays) * 24 * time.Hour)
+		expiresAt = &t
+	}
+
+	token := &db.APIToken{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		Name:      name,
+		TokenHash: hashHex,
+		ExpiresAt: expiresAt,
+	}
+
+	if err := m.store.CreateAPIToken(ctx, token); err != nil {
+		return "", nil, fmt.Errorf("failed to store api token: %w", err)
+	}
+
+	return plaintext, token, nil
+}
+
+// Validates a raw API token (dp_...) and returns the authenticated user.
+func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*AuthenticatedUser, error) {
+	if !strings.HasPrefix(rawToken, "dp_") {
+		return nil, ErrInvalidToken
+	}
+
+	// Hash the incoming token
+	hash := sha256.Sum256([]byte(rawToken))
+	hashHex := hex.EncodeToString(hash[:])
+
+	// Look up by hash
+	apiToken, err := m.store.GetAPITokenByHash(ctx, hashHex)
+	if err != nil {
+		return nil, ErrAPITokenNotFound
+	}
+
+	// Check expiry
+	if apiToken.ExpiresAt != nil && apiToken.ExpiresAt.Before(time.Now()) {
+		return nil, ErrAPITokenExpired
+	}
+
+	// Resolve user
+	user, err := m.store.GetUser(ctx, apiToken.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token user: %w", err)
+	}
+
+	if !user.IsActive {
+		return nil, ErrUserNotActive
+	}
+
+	// Get roles
+	roleNames, err := m.store.GetUserRoleNames(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user roles: %w", err)
+	}
+
+	// Background-update last_used_at
+	go func() {
+		_ = m.store.UpdateAPITokenLastUsed(context.Background(), apiToken.ID)
+	}()
+
+	authUser := &AuthenticatedUser{
+		ID:       user.ID,
+		Username: user.Username,
+		Roles:    roleNames,
+		Provider: user.AuthProvider,
+	}
+	if user.Email != nil {
+		authUser.Email = *user.Email
+	}
+
+	return authUser, nil
 }
 
 func (m *Manager) generateJWT(userID, username string, roles []string, expiresAt time.Time) (string, error) {

@@ -7,6 +7,7 @@ sandbox/
 build/
 discopanel
 !proto/discopanel
+web/discopanel/src/lib/proto/gnostic/
 !cmd/discopanel
 !web/discopanel
 data/

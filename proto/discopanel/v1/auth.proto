@@ -3,25 +3,62 @@ syntax = "proto3";
 package discopanel.v1;
 
 import "discopanel/v1/common.proto";
+import "gnostic/openapi/v3/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+// Global OpenAPI security: Bearer token auth via session JWT or API token (dp_...)
+option (gnostic.openapi.v3.document) = {
+  info: {
+    title: "DiscoPanel API"
+    version: "2.x"
+    description: "DiscoPanel server management API. Authenticate using a session token (from Login/OIDC) or an API token (dp_... prefix) in the Authorization header.\n\n## Connect Protocol\n\nThis API uses the [Connect protocol](https://connectrpc.com/docs/protocol) over HTTP. All endpoints accept `POST` with `application/json` bodies. Connect clients may send the following optional headers:\n\n- `Connect-Protocol-Version: 1` — declares the Connect protocol version.\n- `Connect-Timeout-Ms: <ms>` — request deadline in milliseconds.\n\nThese headers are handled automatically by Connect client libraries and are not required when calling the API directly with curl or other HTTP clients."
+  }
+  components: {
+    security_schemes: {
+      additional_properties: [
+        {
+          name: "BearerAuth"
+          value: {
+            security_scheme: {
+              type: "http"
+              scheme: "bearer"
+              description: "Session JWT from login, or API token with dp_ prefix"
+            }
+          }
+        }
+      ]
+    }
+  }
+  security: [
+    {
+      additional_properties: [
+        {
+          name: "BearerAuth"
+          value: {
+            value: []
+          }
+        }
+      ]
+    }
+  ]
+};
 
 // Authentication service
 service AuthService {
-  // Check auth system status
+  // Check auth system status (public)
   rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse);
-  // Authenticate with local credentials
+  // Authenticate with local credentials (public)
   rpc Login(LoginRequest) returns (LoginResponse);
   // Invalidate session
   rpc Logout(LogoutRequest) returns (LogoutResponse);
-  // Register new local account
+  // Register new local account (public)
   rpc Register(RegisterRequest) returns (RegisterResponse);
   // Get authenticated user info
   rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
   // Change own password (local auth only)
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
-  // Get OIDC login redirect URL
+  // Get OIDC login redirect URL (public)
   rpc GetOIDCLoginURL(GetOIDCLoginURLRequest) returns (GetOIDCLoginURLResponse);
   // Get full auth configuration
   rpc GetAuthConfig(GetAuthConfigRequest) returns (GetAuthConfigResponse);
@@ -35,8 +72,14 @@ service AuthService {
   rpc GetInvite(GetInviteRequest) returns (GetInviteResponse);
   // Delete/revoke an invite
   rpc DeleteInvite(DeleteInviteRequest) returns (DeleteInviteResponse);
-  // Validate an invite code (public, unauthenticated)
+  // Validate an invite code (public)
   rpc ValidateInvite(ValidateInviteRequest) returns (ValidateInviteResponse);
+  // Create a new API token for the authenticated user
+  rpc CreateAPIToken(CreateAPITokenRequest) returns (CreateAPITokenResponse);
+  // List all API tokens for the authenticated user
+  rpc ListAPITokens(ListAPITokensRequest) returns (ListAPITokensResponse);
+  // Delete/revoke an API token
+  rpc DeleteAPIToken(DeleteAPITokenRequest) returns (DeleteAPITokenResponse);
 }
 
 // Empty auth status request
@@ -160,6 +203,7 @@ message RegistrationInvite {
   google.protobuf.Timestamp created_at = 10;
 }
 
+// New invite with roles, optional PIN, and expiry
 message CreateInviteRequest {
   string description = 1;
   repeated string roles = 2;
@@ -168,36 +212,82 @@ message CreateInviteRequest {
   optional int32 expires_in_hours = 5;
 }
 
+// Created invite details
 message CreateInviteResponse {
   RegistrationInvite invite = 1;
 }
 
+// Empty list invites request
 message ListInvitesRequest {}
 
+// All registration invites
 message ListInvitesResponse {
   repeated RegistrationInvite invites = 1;
 }
 
+// Invite lookup by ID
 message GetInviteRequest {
   string id = 1;
 }
 
+// Single invite details
 message GetInviteResponse {
   RegistrationInvite invite = 1;
 }
 
+// Invite deletion by ID
 message DeleteInviteRequest {
   string id = 1;
 }
 
+// Empty delete invite confirmation
 message DeleteInviteResponse {}
 
+// Invite code to validate
 message ValidateInviteRequest {
   string code = 1;
 }
 
+// Invite validity and PIN requirement
 message ValidateInviteResponse {
   bool valid = 1;
   bool requires_pin = 2;
   string description = 3;
 }
+
+// API Token metadata (never includes the token value)
+message ApiToken {
+  string id = 1;
+  string name = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  google.protobuf.Timestamp last_used_at = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// New API token with name and optional expiry
+message CreateAPITokenRequest {
+  string name = 1;
+  optional int32 expires_in_days = 2;
+}
+
+// Plaintext token (shown once) and metadata
+message CreateAPITokenResponse {
+  string plaintext_token = 1;
+  ApiToken api_token = 2;
+}
+
+// Empty list API tokens request
+message ListAPITokensRequest {}
+
+// All API tokens for the authenticated user
+message ListAPITokensResponse {
+  repeated ApiToken api_tokens = 1;
+}
+
+// API token deletion by ID
+message DeleteAPITokenRequest {
+  string id = 1;
+}
+
+// Empty delete API token confirmation
+message DeleteAPITokenResponse {}

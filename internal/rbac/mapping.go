@@ -20,9 +20,12 @@ var PublicProcedures = map[string]bool{
 // but no specific resource permission.
 var AuthenticatedOnlyProcedures = map[string]bool{
 	// AuthService - authenticated user operations
-	"/discopanel.v1.AuthService/GetCurrentUser": true,
-	"/discopanel.v1.AuthService/Logout":         true,
-	"/discopanel.v1.AuthService/ChangePassword": true,
+	"/discopanel.v1.AuthService/GetCurrentUser":  true,
+	"/discopanel.v1.AuthService/Logout":          true,
+	"/discopanel.v1.AuthService/ChangePassword":  true,
+	"/discopanel.v1.AuthService/CreateAPIToken":  true,
+	"/discopanel.v1.AuthService/ListAPITokens":   true,
+	"/discopanel.v1.AuthService/DeleteAPIToken":  true,
 
 	// MinecraftService - reference data, no resource ownership
 	"/discopanel.v1.MinecraftService/GetMinecraftVersions": true,

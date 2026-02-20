@@ -42,5 +42,5 @@ On first launch, you'll be prompted to create an admin account. This account has
 
 ## Next Steps
 
-- [Deployment Guide](/discopanel/deployment/docker/) - Production deployment options and configuration
-- [Usage Guide](/discopanel/guides/usage/) - Learn how to manage containers and use the module system
+- [Deployment Guide](/deployment/docker/) - Production deployment options and configuration
+- [Usage Guide](/guides/usage/) - Learn how to manage containers and use the module system

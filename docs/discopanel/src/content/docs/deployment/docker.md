@@ -5,7 +5,7 @@ description: Production deployment with Docker Compose.
 
 ## Basic Setup
 
-The simplest way to deploy DiscoPanel is with Docker Compose. See the [Quick Start](/discopanel/getting-started/quick-start/) for the minimal configuration.
+The simplest way to deploy DiscoPanel is with Docker Compose. See the [Quick Start](/getting-started/quick-start/) for the minimal configuration.
 
 ## Configuration
 

@@ -4,8 +4,7 @@ import starlight from '@astrojs/starlight';
 
 // https://astro.build/config
 export default defineConfig({
-	site: 'https://nickheyer.github.io',
-	base: '/discopanel',
+	site: 'https://docs.discopanel.app',
 	integrations: [
 		starlight({
 			title: 'DiscoPanel',

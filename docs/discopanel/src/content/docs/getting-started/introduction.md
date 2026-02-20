@@ -24,4 +24,4 @@ The backend communicates directly with the Docker socket to manage containers, i
 
 ## Next Steps
 
-Head to the [Quick Start](/discopanel/getting-started/quick-start/) guide to get DiscoPanel running in minutes.
+Head to the [Quick Start](/getting-started/quick-start/) guide to get DiscoPanel running in minutes.

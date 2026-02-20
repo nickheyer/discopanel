@@ -1,0 +1,33 @@
+---
+title: DiscoPanel
+description: Docker container management, simplified.
+template: splash
+hero:
+  tagline: A self-hosted Docker container management panel with role-based access control, real-time monitoring, and a modern web interface.
+  actions:
+    - text: Get Started
+      link: /discopanel/getting-started/introduction/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/nickheyer/discopanel
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+	<Card title="Quick Deployment" icon="rocket">
+		Get up and running with a single `docker compose up` command. DiscoPanel is designed to be deployed in seconds.
+	</Card>
+	<Card title="Role-Based Access" icon="setting">
+		Fine-grained RBAC with customizable roles and permissions. Control exactly who can do what across your infrastructure.
+	</Card>
+	<Card title="Real-Time Monitoring" icon="information">
+		Live container logs, status updates, and resource monitoring streamed directly to your browser.
+	</Card>
+	<Card title="Module System" icon="puzzle">
+		Extensible module architecture for deploying pre-configured application stacks with a few clicks.
+	</Card>
+</CardGrid>

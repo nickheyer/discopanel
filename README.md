@@ -250,6 +250,22 @@ make gen
 docker run --rm -v "$(pwd):/workspace" -w /workspace bufbuild/buf:latest generate
 ```
 
+## Docs
+
+The doc site lives in `docs/discopanel/` and is built with [Astro](https://astro.build) + [Starlight](https://starlight.astro.build). Deployed to [docs.discopanel.app](https://docs.discopanel.app).
+
+### Contributing, building, & viewing locally
+
+```bash
+make dev-docs
+```
+
+Open `http://localhost:4321`.
+
+### Reporting doc issues
+
+If something is wrong or missing, open an issue on [GitHub](https://github.com/nickheyer/discopanel/issues) or mention it in [Discord](https://discord.gg/6Z9yKTbsrP).
+
 ## License
 
 MIT. Do whatever you want with it, just don't blame me when it breaks.

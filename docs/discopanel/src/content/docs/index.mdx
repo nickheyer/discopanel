@@ -1,12 +1,144 @@
 ---
 title: DiscoPanel
-description: Docker container management, simplified.
+description: Minecraft server management, simplified.
 template: splash
 hero:
-  tagline: A self-hosted Docker container management panel with role-based access control, real-time monitoring, and a modern web interface.
+  tagline: A self-hosted Minecraft server + proxy + modpack manager. Docker-powered, easy to deploy, and it actually works.
+  image:
+    html: |
+      <style>
+        .mc-scene {
+          width: 300px;
+          height: 460px;
+          perspective: 1000px;
+        }
+        .mc-cube {
+          width: 220px;
+          height: 220px;
+          position: relative;
+          transform-style: preserve-3d;
+          animation: mc-spin 14s linear infinite;
+          margin: 210px auto 0;
+        }
+        @keyframes mc-spin {
+          from { transform: rotateX(-20deg) rotateY(45deg); }
+          to { transform: rotateX(-20deg) rotateY(405deg); }
+        }
+
+        /* Floating logo above the cube */
+        .mc-emblem {
+          position: absolute;
+          width: 150px;
+          height: 150px;
+          left: 35px;
+          top: -210px;
+          transform-style: preserve-3d;
+          animation: emblem-bob 3s ease-in-out infinite alternate;
+        }
+        @keyframes emblem-bob {
+          from { transform: translateY(0); }
+          to { transform: translateY(-16px); }
+        }
+        .mc-emblem-face {
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          background-image: url('/discopanel_logo_transparent_512.png');
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center;
+          image-rendering: pixelated;
+          backface-visibility: hidden;
+        }
+        .mc-emblem-back {
+          transform: rotateY(180deg);
+        }
+        :root[data-theme="dark"] .mc-emblem-face {
+          filter:
+            drop-shadow(1px 0 0 rgba(50,50,50,0.9))
+            drop-shadow(-1px 0 0 rgba(50,50,50,0.9))
+            drop-shadow(0 1px 0 rgba(50,50,50,0.9))
+            drop-shadow(0 -1px 0 rgba(50,50,50,0.9));
+        }
+
+        /* Upward lava glow — sits in the scene's 2D space, not the cube's 3D space */
+        .mc-lava-glow {
+          position: absolute;
+          width: 360px;
+          height: 260px;
+          left: 50%;
+          top: 0px;
+          transform: translateX(-50%);
+          pointer-events: none;
+          background: radial-gradient(ellipse 75% 85% at 50% 100%,
+            rgba(255, 90, 0, 0.75) 0%,
+            rgba(255, 70, 0, 0.4) 20%,
+            rgba(255, 50, 0, 0.15) 50%,
+            rgba(255, 40, 0, 0.04) 70%,
+            transparent 85%);
+          filter: blur(20px);
+          mix-blend-mode: screen;
+          animation: lava-pulse 3s ease-in-out infinite alternate;
+        }
+        @keyframes lava-pulse {
+          from { opacity: 0.8; }
+          to { opacity: 1; }
+        }
+
+        /* Cube faces */
+        .mc-face {
+          position: absolute;
+          width: 220px;
+          height: 220px;
+          box-sizing: border-box;
+          background-size: cover;
+          background-position: center;
+          image-rendering: pixelated;
+          border: 1px solid rgba(0,0,0,0.1);
+        }
+        .mc-top {
+          background-image: url('/mc_lava_block_texture.png');
+          transform: rotateX(90deg) translateZ(110px);
+        }
+        .mc-bottom {
+          background-image: url('/mc_lava_block_texture.png');
+          transform: rotateX(-90deg) translateZ(110px);
+        }
+        .mc-front {
+          background-image: url('/mc_dirt_block_texture.png');
+          transform: translateZ(110px);
+        }
+        .mc-back {
+          background-image: url('/mc_netherrack_block_texture.png');
+          transform: rotateY(180deg) translateZ(110px);
+        }
+        .mc-left {
+          background-image: url('/mc_obsidian_block_texture.png');
+          transform: rotateY(-90deg) translateZ(110px);
+        }
+        .mc-right {
+          background-image: url('/mc_diamond_ore_block_texture.png');
+          transform: rotateY(90deg) translateZ(110px);
+        }
+      </style>
+      <div class="mc-scene">
+        <div class="mc-lava-glow"></div>
+        <div class="mc-cube">
+          <div class="mc-emblem">
+            <div class="mc-emblem-face"></div>
+            <div class="mc-emblem-face mc-emblem-back"></div>
+          </div>
+          <div class="mc-face mc-top"></div>
+          <div class="mc-face mc-bottom"></div>
+          <div class="mc-face mc-front"></div>
+          <div class="mc-face mc-back"></div>
+          <div class="mc-face mc-left"></div>
+          <div class="mc-face mc-right"></div>
+        </div>
+      </div>
   actions:
     - text: Get Started
-      link: /getting-started/introduction/
+      link: /introduction/
       icon: right-arrow
       variant: primary
     - text: View on GitHub
@@ -14,20 +146,3 @@ hero:
       icon: external
       variant: minimal
 ---
-
-import { Card, CardGrid } from '@astrojs/starlight/components';
-
-<CardGrid stagger>
-	<Card title="Quick Deployment" icon="rocket">
-		Get up and running with a single `docker compose up` command. DiscoPanel is designed to be deployed in seconds.
-	</Card>
-	<Card title="Role-Based Access" icon="setting">
-		Fine-grained RBAC with customizable roles and permissions. Control exactly who can do what across your infrastructure.
-	</Card>
-	<Card title="Real-Time Monitoring" icon="information">
-		Live container logs, status updates, and resource monitoring streamed directly to your browser.
-	</Card>
-	<Card title="Module System" icon="puzzle">
-		Extensible module architecture for deploying pre-configured application stacks with a few clicks.
-	</Card>
-</CardGrid>

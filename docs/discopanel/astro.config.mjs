@@ -12,25 +12,13 @@ export default defineConfig({
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/nickheyer/discopanel' },
 			],
 			sidebar: [
-				{
-					label: 'Getting Started',
-					items: [
-						{ label: 'Introduction', slug: 'getting-started/introduction' },
-						{ label: 'Quick Start', slug: 'getting-started/quick-start' },
-					],
-				},
-				{
-					label: 'Deployment',
-					autogenerate: { directory: 'deployment' },
-				},
-				{
-					label: 'Guides',
-					autogenerate: { directory: 'guides' },
-				},
-				{
-					label: 'Troubleshooting',
-					autogenerate: { directory: 'troubleshooting' },
-				},
+				{ label: 'Introduction', slug: 'introduction' },
+				{ label: 'Getting Started', slug: 'getting-started' },
+				{ label: 'Configuration', slug: 'configuration' },
+				{ label: 'FAQ', slug: 'faq' },
+				{ label: 'Troubleshooting', slug: 'troubleshooting' },
+				{ label: 'API Docs', slug: 'api' },
+				{ label: 'Contributing', slug: 'contributing' },
 			],
 		}),
 	],

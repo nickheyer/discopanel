@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
 
 DATA_DIR := ./data
 DOCKER_DATA_DIR := /tmp/discopanel
@@ -37,6 +37,9 @@ dev-auth-%: clean
 	docker compose -f oidc/$*/docker-compose.yaml build --no-cache
 	docker compose -f oidc/$*/docker-compose.yaml up
 
+dev-docs:
+	cd docs/discopanel && npm run dev
+	
 # Production build and run
 prod: build-frontend
 	@echo "Building for production..."

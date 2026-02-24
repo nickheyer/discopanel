@@ -17,6 +17,7 @@ server:
   read_timeout: 15
   write_timeout: 15
   idle_timeout: 60
+  user_agent: "DiscoPanel/1.0 (github.com/nickheyer/discopanel)"
 
 # Database configuration
 database:
@@ -58,9 +59,10 @@ auth:
     client_id: ""  # Client ID registered with your OIDC (like "discopanel")
     client_secret: ""  # Client secret registered with your OIDC
     redirect_url: ""  # Where OIDC sends users after login (ie: "http://localhost:8080/api/v1/auth/oidc/callback")
-    scopes: ["openid", "profile", "email", "groups"]
+    scopes: ["openid", "profile", "email"]
     role_claim: "groups"  # The token claim that contains the user's groups (usually "groups")
     role_mapping: {}  # Mapping to groups if they arent the same name as discopanels (ie: {"my-admins": "admin", "my-users": "user"})
+    skip_tls_verify: false  # Skip TLS certificate verification (for self-signed certs)
 
 # Upload configuration
 upload:

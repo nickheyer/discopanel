@@ -5,7 +5,6 @@ description: Deploy DiscoPanel via Docker Compose, Proxmox LXC, or build from so
 
 import { Code } from '@astrojs/starlight/components';
 import dockerCompose from '../../../../../docker-compose.yml?raw';
-import configExample from '../../../../../config.example.yaml?raw';
 
 ## Prerequisites
 
@@ -150,8 +149,4 @@ storage:
 ```
 :::
 
-### Reference config
-
-All available options with defaults:
-
-<Code code={configExample} lang="yaml" title="config.example.yaml" />
+For all available configuration options, see [Configuration](/configuration/).

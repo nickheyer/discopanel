@@ -1,0 +1,69 @@
+---
+title: Keycloak (OIDC)
+description: Set up DiscoPanel with Keycloak as an OpenID Connect identity provider.
+---
+
+import { Code, Aside } from '@astrojs/starlight/components';
+import composeFile from '../../../../../../oidc/keycloak/docker-compose.yaml?raw';
+import realmJson from '../../../../../../oidc/keycloak/config/realm.json?raw';
+
+This guide walks through running DiscoPanel with [Keycloak](https://www.keycloak.org/) as an OIDC identity provider using a ready-made Docker Compose stack. The included realm config pre-creates a client, roles, groups, protocol mappers, and a default admin user so everything works out of the box.
+
+## Prerequisites
+
+- Docker and Docker Compose
+
+## Docker Compose
+
+Clone the repo and navigate to the `oidc/keycloak/` directory, then start the stack:
+
+```bash
+cd oidc/keycloak
+docker compose up -d
+```
+
+Keycloak takes 30–60 seconds to start. DiscoPanel waits for it via a health check.
+
+<Code code={composeFile} lang="yaml" title="oidc/keycloak/docker-compose.yaml" />
+
+### Key environment variables
+
+| Variable | Purpose |
+|---|---|
+| `DISCOPANEL_AUTH_OIDC_ENABLED` | Enables OIDC authentication |
+| `DISCOPANEL_AUTH_OIDC_ISSUER_URI` | Keycloak realm URL — change if hosting on another machine or using a different realm name |
+| `DISCOPANEL_AUTH_OIDC_CLIENT_ID` | Must match the `clientId` in the realm config |
+| `DISCOPANEL_AUTH_OIDC_CLIENT_SECRET` | Must match the `secret` in the realm config — **change this for production** |
+| `DISCOPANEL_AUTH_OIDC_REDIRECT_URL` | The callback URL — update `localhost:8080` to your public domain |
+| `DISCOPANEL_AUTH_OIDC_ROLE_CLAIM` | Set to `groups` to read Keycloak group membership as DiscoPanel roles |
+
+## Realm configuration
+
+The included realm JSON is imported automatically on first start via `--import-realm`. It configures:
+
+- **Client** (`discopanel`): confidential client with standard (authorization code) flow
+- **Roles**: `admin` and `user` realm roles
+- **Groups**: `admin` and `user` groups mapped to their respective roles — new users are added to the `user` group by default
+- **Protocol mappers**: a `groups` mapper that puts group membership into the `groups` claim on all tokens, and a `realm-roles` mapper for the `roles` claim
+- **Default user**: `admin` / `admin` with both `admin` and `user` groups
+
+<Code code={realmJson} lang="json" title="oidc/keycloak/config/realm.json" />
+
+## Default credentials
+
+| Service | URL | Username | Password |
+|---|---|---|---|
+| DiscoPanel | [http://localhost:8080](http://localhost:8080) | — | Log in via OIDC |
+| Keycloak Admin Console | [http://localhost:8180/admin](http://localhost:8180/admin) | `admin` | `admin` |
+| Keycloak OIDC user | — | `admin` | `admin` |
+
+## Production notes
+
+<Aside type="caution">
+The included configuration uses development secrets and has no TLS. Before deploying to production:
+</Aside>
+
+- **Change all secrets**: `DISCOPANEL_AUTH_OIDC_CLIENT_SECRET`, `KC_BOOTSTRAP_ADMIN_PASSWORD`, the client `secret` in realm.json, and the Postgres password
+- **Enable TLS**: put Keycloak behind a reverse proxy with a real certificate and update `DISCOPANEL_AUTH_OIDC_ISSUER_URI` to `https://`
+- **Update redirect URIs**: change `localhost` entries in both the compose file and realm.json to your actual domain
+- **Disable local auth** (optional): set `DISCOPANEL_AUTH_LOCAL_ENABLED=false` if you want OIDC-only login

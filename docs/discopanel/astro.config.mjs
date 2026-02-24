@@ -15,6 +15,13 @@ export default defineConfig({
 				{ label: 'Introduction', slug: 'introduction' },
 				{ label: 'Getting Started', slug: 'getting-started' },
 				{ label: 'Configuration', slug: 'configuration' },
+				{
+					label: 'Guides',
+					items: [
+						{ label: 'Keycloak Auth Setup', slug: 'guides/keycloak' },
+						{ label: 'Authelia Auth Setup', slug: 'guides/authelia' },
+					],
+				},
 				{ label: 'FAQ', slug: 'faq' },
 				{ label: 'Troubleshooting', slug: 'troubleshooting' },
 				{ label: 'API Reference', slug: 'api' },

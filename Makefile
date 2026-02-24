@@ -44,7 +44,7 @@ dev-docs:
 prod: build-frontend
 	@echo "Building for production..."
 	@mkdir -p $(DATA_DIR)
-	go build -tags embed -o $(DISCOPANEL_BIN) cmd/discopanel/main.go
+	go build -o $(DISCOPANEL_BIN) cmd/discopanel/main.go
 
 # Build frontend for production
 build-frontend:

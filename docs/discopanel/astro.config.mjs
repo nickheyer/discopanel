@@ -17,7 +17,7 @@ export default defineConfig({
 				{ label: 'Configuration', slug: 'configuration' },
 				{ label: 'FAQ', slug: 'faq' },
 				{ label: 'Troubleshooting', slug: 'troubleshooting' },
-				{ label: 'API Docs', slug: 'api' },
+				{ label: 'API Reference', slug: 'api' },
 				{ label: 'Contributing', slug: 'contributing' },
 			],
 		}),

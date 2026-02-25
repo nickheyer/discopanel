@@ -13,7 +13,15 @@ export default defineConfig({
 			],
 			sidebar: [
 				{ label: 'Introduction', slug: 'introduction' },
-				{ label: 'Getting Started', slug: 'getting-started' },
+				{
+					label: 'Getting Started',
+					items: [
+						{ label: 'Docker Compose', slug: 'getting-started/docker-compose' },
+						{ label: 'Proxmox LXC', slug: 'getting-started/proxmox' },
+						{ label: 'Prebuilt Binaries', slug: 'getting-started/prebuilt-binaries' },
+						{ label: 'Building from Source', slug: 'getting-started/build-from-source' },
+					],
+				},
 				{ label: 'Configuration', slug: 'configuration' },
 				{
 					label: 'Guides',

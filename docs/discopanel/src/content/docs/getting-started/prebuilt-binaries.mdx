@@ -1,0 +1,53 @@
+---
+title: Prebuilt Binaries
+description: Install DiscoPanel from prebuilt release binaries.
+---
+
+## Prerequisites
+
+DiscoPanel manages Minecraft servers as Docker containers, so Docker is required.
+
+- [Docker Engine](https://docs.docker.com/engine/install/)
+
+## Download
+
+Grab a release from the [releases page](https://github.com/nickheyer/discopanel/releases). Packages are available for each platform:
+
+```
+discopanel-darwin-amd64.tar.gz
+discopanel-darwin-arm64.tar.gz
+discopanel-linux-amd64.tar.gz
+discopanel-linux-arm64.tar.gz
+discopanel-windows-amd64.exe.zip
+```
+
+:::note
+Darwin is the platform name for macOS. Only Linux is fully supported and tested — Windows installations may have issues.
+:::
+
+Extract the archive and run it:
+
+## Running
+
+```bash
+# Using default config (./config.yaml if it exists, otherwise defaults)
+./discopanel
+
+# Or point to a specific config file
+./discopanel -config /path/to/config.yaml
+```
+
+All config options can also be set via environment variables with the `DISCOPANEL_` prefix. For example, `server.port` becomes `DISCOPANEL_SERVER_PORT`. Environment variables take precedence over the config file.
+
+:::tip[Host path mapping]
+When running the binary directly on a host (not in a Docker container), do **not** set `DISCOPANEL_DATA_DIR` or `DISCOPANEL_HOST_DATA_PATH` — those are only for container path translation.
+
+To change where DiscoPanel stores its database and server data, set `DISCOPANEL_STORAGE_DATA_DIR` or configure it in your config file:
+
+```yaml
+storage:
+  data_dir: /your/path  # Default: ./data (relative to working directory)
+```
+:::
+
+For all available configuration options, see [Configuration](/configuration/).

@@ -2,15 +2,13 @@ package fuego
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strconv"
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/config"
+	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
 const (
@@ -20,18 +18,16 @@ const (
 )
 
 type Client struct {
-	apiKey     string
-	config     *config.Config
-	httpClient *http.Client
+	apiKey string
+	http   *indexers.HTTPClient
 }
 
 func NewClient(apiKey string, cfg *config.Config) *Client {
 	return &Client{
 		apiKey: apiKey,
-		config: cfg,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		http: indexers.NewHTTPClient("fuego", cfg.Server.UserAgent, map[string]string{
+			"x-api-key": apiKey,
+		}),
 	}
 }
 
@@ -171,7 +167,7 @@ const (
 
 func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader ModLoaderType, index, pageSize int) (*SearchModsResponse, error) {
 	if c.apiKey == "" {
-		return nil, fmt.Errorf("fuego API key not configured")
+		return nil, indexers.NewAuthConfigError("fuego", "API key not configured")
 	}
 
 	params := url.Values{}
@@ -194,27 +190,8 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 		params.Set("modLoaderType", strconv.Itoa(int(modLoader)))
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/mods/search?%s", BaseURL, params.Encode()), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("x-api-key", c.apiKey)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", c.config.Server.UserAgent)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, c.formatError(req, resp)
-	}
-
 	var result SearchModsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/mods/search?%s", BaseURL, params.Encode()), &result); err != nil {
 		return nil, err
 	}
 
@@ -223,32 +200,13 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 
 func (c *Client) GetModpackFiles(ctx context.Context, modID int) ([]File, error) {
 	if c.apiKey == "" {
-		return nil, fmt.Errorf("fuego API key not configured")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/mods/%d/files", BaseURL, modID), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("x-api-key", c.apiKey)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", c.config.Server.UserAgent)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, c.formatError(req, resp)
+		return nil, indexers.NewAuthConfigError("fuego", "API key not configured")
 	}
 
 	var result struct {
 		Data []File `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/mods/%d/files", BaseURL, modID), &result); err != nil {
 		return nil, err
 	}
 
@@ -257,43 +215,15 @@ func (c *Client) GetModpackFiles(ctx context.Context, modID int) ([]File, error)
 
 func (c *Client) GetModpack(ctx context.Context, modID int) (*Modpack, error) {
 	if c.apiKey == "" {
-		return nil, fmt.Errorf("fuego API key not configured")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/mods/%d", BaseURL, modID), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("x-api-key", c.apiKey)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", c.config.Server.UserAgent)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, c.formatError(req, resp)
+		return nil, indexers.NewAuthConfigError("fuego", "API key not configured")
 	}
 
 	var result struct {
 		Data Modpack `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/mods/%d", BaseURL, modID), &result); err != nil {
 		return nil, err
 	}
 
 	return &result.Data, nil
-}
-
-func (c *Client) formatError(req *http.Request, resp *http.Response) error {
-	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-	body := string(bodyBytes)
-	if body != "" {
-		return fmt.Errorf("fuego API error: %s (url=%s body=%s)", resp.Status, req.URL.String(), body)
-	}
-	return fmt.Errorf("fuego API error: %s (url=%s)", resp.Status, req.URL.String())
 }

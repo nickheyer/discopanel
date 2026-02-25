@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/nickheyer/discopanel/internal/config"
+	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
 const (
@@ -19,16 +17,12 @@ const (
 )
 
 type Client struct {
-	config     *config.Config
-	httpClient *http.Client
+	http *indexers.HTTPClient
 }
 
 func NewClient(cfg *config.Config) *Client {
 	return &Client{
-		config: cfg,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		http: indexers.NewHTTPClient("modrinth", cfg.Server.UserAgent, nil),
 	}
 }
 
@@ -169,17 +163,14 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 	}
 
 	if modLoader != "" {
-		// Modrinth uses categories for loaders
 		facets = append(facets, []string{fmt.Sprintf("categories:%s", strings.ToLower(modLoader))})
 	}
 
-	// Convert facets to JSON string
 	facetsJSON, err := json.Marshal(facets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal facets: %w", err)
 	}
 
-	// Build URL with query parameters
 	params := url.Values{}
 	if query != "" {
 		params.Set("query", query)
@@ -189,33 +180,9 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 	params.Set("offset", strconv.Itoa(offset))
 	params.Set("limit", strconv.Itoa(limit))
 
-	reqURL := fmt.Sprintf("%s/search?%s", BaseURL, params.Encode())
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", c.config.Server.UserAgent)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
-	}
-	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			fmt.Printf("failed to close response body: %v", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, c.formatError(req, resp)
-	}
-
 	var searchResp SearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/search?%s", BaseURL, params.Encode()), &searchResp); err != nil {
+		return nil, err
 	}
 
 	return &searchResp, nil
@@ -223,33 +190,9 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 
 // GetModpack retrieves detailed information about a specific modpack
 func (c *Client) GetModpack(ctx context.Context, modpackID string) (*ProjectDetails, error) {
-	reqURL := fmt.Sprintf("%s/project/%s", BaseURL, modpackID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", c.config.Server.UserAgent)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
-	}
-	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			fmt.Printf("failed to close response body: %v", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, c.formatError(req, resp)
-	}
-
 	var project ProjectDetails
-	if err := json.NewDecoder(resp.Body).Decode(&project); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/project/%s", BaseURL, modpackID), &project); err != nil {
+		return nil, err
 	}
 
 	return &project, nil
@@ -257,43 +200,10 @@ func (c *Client) GetModpack(ctx context.Context, modpackID string) (*ProjectDeta
 
 // GetModpackVersions retrieves all versions for a specific modpack
 func (c *Client) GetModpackVersions(ctx context.Context, modpackID string) ([]Version, error) {
-	reqURL := fmt.Sprintf("%s/project/%s/version", BaseURL, modpackID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", c.config.Server.UserAgent)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
-	}
-	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			fmt.Printf("failed to close response body: %v", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, c.formatError(req, resp)
-	}
-
 	var versions []Version
-	if err := json.NewDecoder(resp.Body).Decode(&versions); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/project/%s/version", BaseURL, modpackID), &versions); err != nil {
+		return nil, err
 	}
 
 	return versions, nil
-}
-
-func (c *Client) formatError(req *http.Request, resp *http.Response) error {
-	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-	body := string(bodyBytes)
-	if body != "" {
-		return fmt.Errorf("modrinth API error: %s (url=%s body=%s)", resp.Status, req.URL.String(), body)
-	}
-	return fmt.Errorf("modrinth API error: %s (url=%s)", resp.Status, req.URL.String())
 }

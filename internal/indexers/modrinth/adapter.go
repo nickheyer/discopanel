@@ -10,6 +10,12 @@ import (
 	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
+func init() {
+	indexers.RegisterIndexer("modrinth", func(_ string, cfg *config.Config) indexers.ModpackIndexer {
+		return NewIndexer(cfg)
+	})
+}
+
 // Implements ModpackIndexer
 var _ indexers.ModpackIndexer = (*ModrinthIndexer)(nil)
 

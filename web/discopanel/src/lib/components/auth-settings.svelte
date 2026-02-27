@@ -379,7 +379,7 @@
 					</Accordion>
 
 					<p class="text-xs text-muted-foreground">
-						Provider examples are available in the <a href="https://github.com/nickheyer/discopanel/tree/main/oidc" target="_blank" rel="noopener noreferrer" class="underline hover:text-foreground">oidc directory</a> of the project repo.
+						Provider examples are available in the <a href="https://docs.discopanel.app/introduction/" target="_blank" rel="noopener noreferrer" class="underline hover:text-foreground">discopanel docs</a>.
 					</p>
 				{/if}
 			</CardContent>

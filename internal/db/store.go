@@ -6,24 +6,21 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-type DBConfig struct {
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
-}
-
 type Store struct {
-	db *gorm.DB
+	db  *gorm.DB
+	cfg *config.Config
 }
 
-func NewSQLiteStore(dbPath string, config ...DBConfig) (*Store, error) {
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+func NewSQLiteStore(cfg *config.Config) (*Store, error) {
+	db, err := gorm.Open(sqlite.Open(cfg.Database.Path), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
@@ -33,30 +30,27 @@ func NewSQLiteStore(dbPath string, config ...DBConfig) (*Store, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Get underlying SQL database to configure connection pool
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database handle: %w", err)
 	}
 
-	// Apply connection pool configuration if provided
-	if len(config) > 0 {
-		cfg := config[0]
-		if cfg.MaxOpenConns > 0 {
-			sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
-		}
-		if cfg.MaxIdleConns > 0 {
-			sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
-		}
-		if cfg.ConnMaxLifetime > 0 {
-			sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
-		}
+	if cfg.Database.MaxConnections > 0 {
+		sqlDB.SetMaxOpenConns(cfg.Database.MaxConnections)
+	}
+	if cfg.Database.MaxIdleConns > 0 {
+		sqlDB.SetMaxIdleConns(cfg.Database.MaxIdleConns)
+	}
+	if cfg.Database.ConnMaxLifetime > 0 {
+		sqlDB.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetime) * time.Second)
 	}
 
-	store := &Store{db: db}
+	store := &Store{db: db, cfg: cfg}
 
-	if err := store.Migrate(); err != nil {
-		return nil, fmt.Errorf("failed to migrate database: %w", err)
+	if cfg.Database.AutoMigrate {
+		if err := store.Migrate(); err != nil {
+			return nil, fmt.Errorf("failed to migrate database: %w", err)
+		}
 	}
 
 	return store, nil
@@ -72,62 +66,6 @@ func (s *Store) Close() error {
 		return err
 	}
 	return sqlDB.Close()
-}
-
-func (s *Store) Migrate() error {
-	// Auto-migrate all models
-	err := s.db.AutoMigrate(
-		&Server{},
-		&ServerConfig{},
-		&Mod{},
-		&IndexedModpack{},
-		&IndexedModpackFile{},
-		&ModpackFavorite{},
-		&ProxyConfig{},
-		&ProxyListener{},
-		&User{},
-		&Role{},
-		&UserRole{},
-		&Session{},
-		&APIToken{},
-		&RegistrationInvite{},
-		&ScheduledTask{},
-		&TaskExecution{},
-		&ModuleTemplate{},
-		&Module{},
-		&SystemSetting{},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to auto-migrate: %w", err)
-	}
-
-	// Create indexes
-	if err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_servers_port ON servers(port)").Error; err != nil {
-		return err
-	}
-	if err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)").Error; err != nil {
-		return err
-	}
-
-	// Migrate User indexes: composite unique on (username, auth_provider), drop old single-column unique
-	s.db.Exec("DROP INDEX IF EXISTS idx_users_username")
-	s.db.Exec("DROP INDEX IF EXISTS idx_users_email")
-	if err := s.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_provider ON users(username, auth_provider)").Error; err != nil {
-		return err
-	}
-	if err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)").Error; err != nil {
-		return err
-	}
-	if err := s.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_oidc_identity ON users(oidc_subject, oidc_issuer) WHERE oidc_subject != ''").Error; err != nil {
-		return err
-	}
-
-	// Seed system roles
-	if err := s.SeedSystemRoles(); err != nil {
-		return fmt.Errorf("failed to seed system roles: %w", err)
-	}
-
-	return nil
 }
 
 // Server operations
@@ -262,7 +200,6 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 		}
 	}
 
-	// Helper functions
 	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
 	config.Type = stringPtr(string(server.ModLoader))
@@ -274,7 +211,6 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 }
 
 func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
-	// Helper functions to create pointers
 	boolPtr := func(b bool) *bool { return &b }
 	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
@@ -604,6 +540,24 @@ func (s *Store) UpdateGlobalSettings(ctx context.Context, config *ServerConfig) 
 	config.ID = GlobalSettingsID
 	config.ServerID = GlobalSettingsID
 	return s.db.WithContext(ctx).Save(config).Error
+}
+
+func (s *Store) SeedGlobalSettings() error {
+	ctx := context.Background()
+	_, isNew, err := s.GetGlobalSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if isNew || s.cfg.Minecraft.ResetGlobal {
+		gc := s.CreateDefaultServerConfig(GlobalSettingsID)
+		if len(s.cfg.Minecraft.GlobalConfig) > 0 {
+			mapstructure.WeakDecode(s.cfg.Minecraft.GlobalConfig, gc)
+			gc.ID = GlobalSettingsID + "-config"
+			gc.ServerID = GlobalSettingsID
+		}
+		return s.UpdateGlobalSettings(ctx, gc)
+	}
+	return nil
 }
 
 // ProxyConfig operations

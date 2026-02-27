@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/nickheyer/discopanel/internal/db"
 	"github.com/spf13/viper"
 )
 
@@ -57,13 +56,6 @@ type ServerConfig struct {
 	UserAgent    string `mapstructure:"user_agent" json:"user_agent"`
 }
 
-type DatabaseConfig struct {
-	Path            string `mapstructure:"path" json:"path"`
-	MaxConnections  int    `mapstructure:"max_connections" json:"max_connections"`
-	MaxIdleConns    int    `mapstructure:"max_idle_conns" json:"max_idle_conns"`
-	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime" json:"conn_max_lifetime"`
-}
-
 type DockerConfig struct {
 	SyncInterval int    `mapstructure:"sync_interval" json:"sync_interval"`
 	Host         string `mapstructure:"host" json:"host"`
@@ -94,9 +86,17 @@ type ModuleConfig struct {
 	PortRangeMax int  `mapstructure:"port_range_max" json:"port_range_max"`
 }
 
+type DatabaseConfig struct {
+	Path            string `mapstructure:"path" json:"path"`
+	MaxConnections  int    `mapstructure:"max_connections" json:"max_connections"`
+	MaxIdleConns    int    `mapstructure:"max_idle_conns" json:"max_idle_conns"`
+	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime" json:"conn_max_lifetime"`
+	AutoMigrate     bool   `mapstructure:"auto_migrate" json:"auto_migrate"`
+}
+
 type MinecraftConfig struct {
-	ResetGlobal  bool            `mapstructure:"reset_global" json:"reset_global"`
-	GlobalConfig db.ServerConfig `mapstructure:"global_config" json:"global_config"`
+	ResetGlobal  bool           `mapstructure:"reset_global" json:"reset_global"`
+	GlobalConfig map[string]any `mapstructure:"global_config" json:"global_config"`
 }
 
 type LoggingConfig struct {
@@ -174,6 +174,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.max_connections", 25)
 	v.SetDefault("database.max_idle_conns", 5)
 	v.SetDefault("database.conn_max_lifetime", 300)
+	v.SetDefault("database.auto_migrate", true)
 
 	// Docker defaults
 	v.SetDefault("docker.sync_interval", 5)
@@ -283,9 +284,4 @@ func validateConfig(cfg *Config) error {
 	}
 
 	return nil
-}
-
-// LoadGlobalServerConfig returns the global ServerConfig defaults from the config file
-func LoadGlobalServerConfig(cfg *Config) db.ServerConfig {
-	return cfg.Minecraft.GlobalConfig
 }

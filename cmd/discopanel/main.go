@@ -56,36 +56,14 @@ func main() {
 		}
 	}
 
-	// Initialize storage with connection pooling
-	store, err := storage.NewSQLiteStore(cfg.Database.Path, storage.DBConfig{
-		MaxOpenConns:    cfg.Database.MaxConnections,
-		MaxIdleConns:    cfg.Database.MaxIdleConns,
-		ConnMaxLifetime: time.Duration(cfg.Database.ConnMaxLifetime) * time.Second,
-	})
+	// Initialize storage w/ migrations and seeding
+	store, err := storage.NewSQLiteStore(cfg)
 	if err != nil {
 		log.Fatal("Failed to initialize storage: %v", err)
 	}
 	defer store.Close()
 
-	// Initialize global settings with config defaults if they don't exist
 	ctx := context.Background()
-	_, isNew, err := store.GetGlobalSettings(ctx)
-	if err != nil {
-		log.Fatal("Failed to get global settings: %v", err)
-	}
-
-	// Check if global settings are empty (just created) and populate with config defaults
-	if isNew || cfg.Minecraft.ResetGlobal {
-		// Copy the config defaults to global settings
-		globalConfig := config.LoadGlobalServerConfig(cfg)
-		globalConfig.ID = storage.GlobalSettingsID
-		globalConfig.ServerID = storage.GlobalSettingsID
-
-		if err := store.UpdateGlobalSettings(ctx, &globalConfig); err != nil {
-			log.Fatal("Failed to initialize global settings: %v", err)
-		}
-		log.Info("Initialized global settings from config file")
-	}
 
 	// Initialize Docker client with configuration
 	dockerClient, err := docker.NewClient(cfg.Docker.Host, log, docker.ClientConfig{

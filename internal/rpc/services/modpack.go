@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,8 +19,8 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/indexers"
-	"github.com/nickheyer/discopanel/internal/indexers/fuego"
-	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
+	_ "github.com/nickheyer/discopanel/internal/indexers/fuego"
+	_ "github.com/nickheyer/discopanel/internal/indexers/modrinth"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -48,6 +49,46 @@ func NewModpackService(store *storage.Store, cfg *config.Config, uploadManager *
 		log:           log,
 		uploadManager: uploadManager,
 	}
+}
+
+// getIndexer creates an indexer by name, looking up the fuego API key from settings when needed.
+func (s *ModpackService) getIndexer(ctx context.Context, name string) (indexers.ModpackIndexer, error) {
+	apiKey := ""
+	if name == "fuego" {
+		globalSettings, _, err := s.store.GetGlobalSettings(ctx)
+		if err != nil || globalSettings == nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get global settings"))
+		}
+		if globalSettings.CFAPIKey != nil {
+			apiKey = *globalSettings.CFAPIKey
+		}
+		if apiKey == "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("CurseForge API key not configured"))
+		}
+	}
+	idx, err := indexers.NewIndexer(name, apiKey, s.config)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	return idx, nil
+}
+
+// mapIndexerError maps IndexerError kinds to appropriate connect error codes.
+func mapIndexerError(err error, msg string) *connect.Error {
+	var ie *indexers.IndexerError
+	if errors.As(err, &ie) {
+		switch ie.Kind {
+		case indexers.ErrRateLimit:
+			return connect.NewError(connect.CodeResourceExhausted, fmt.Errorf("%s: %w", msg, err))
+		case indexers.ErrAuth:
+			return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("%s: %w", msg, err))
+		case indexers.ErrNotFound:
+			return connect.NewError(connect.CodeNotFound, fmt.Errorf("%s: %w", msg, err))
+		case indexers.ErrNetwork:
+			return connect.NewError(connect.CodeUnavailable, fmt.Errorf("%s: %w", msg, err))
+		}
+	}
+	return connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", msg, err))
 }
 
 // SearchModpacks searches for modpacks
@@ -318,40 +359,23 @@ func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Re
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("modpack not found"))
 	}
 
-	// Get appropriate indexer client
-	var indexerClient indexers.ModpackIndexer
-	switch modpack.Indexer {
-	case "fuego":
-		// Get API key from global settings
-		globalSettings, _, err := s.store.GetGlobalSettings(ctx)
-		if err != nil || globalSettings == nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get global settings"))
-		}
-
-		apiKey := ""
-		if globalSettings.CFAPIKey != nil {
-			apiKey = *globalSettings.CFAPIKey
-		}
-		if apiKey == "" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("CurseForge API key not configured"))
-		}
-		indexerClient = fuego.NewIndexer(apiKey, s.config)
-	case "modrinth":
-		indexerClient = modrinth.NewIndexer(s.config)
-	case "manual":
-		// For manual modpacks, return empty list
+	// Manual modpacks have no remote versions
+	if modpack.Indexer == "manual" {
 		return connect.NewResponse(&v1.GetModpackVersionsResponse{
 			Versions: []*v1.Version{},
 		}), nil
-	default:
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown indexer: %s", modpack.Indexer))
+	}
+
+	indexerClient, err := s.getIndexer(ctx, modpack.Indexer)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get files from the indexer
 	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerID)
 	if err != nil {
 		s.log.Error("Failed to get modpack files from %s: %v", modpack.Indexer, err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get modpack versions"))
+		return nil, mapIndexerError(err, "failed to get modpack versions")
 	}
 
 	// Convert files to versions
@@ -387,39 +411,16 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 		indexer = "fuego"
 	}
 
-	var indexerClient indexers.ModpackIndexer
-
-	switch indexer {
-	case "fuego":
-		// Get Fuego API key from global settings
-		globalSettings, _, err := s.store.GetGlobalSettings(ctx)
-		if err != nil {
-			s.log.Error("Failed to get global settings: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get global settings"))
-		}
-
-		apiKey := ""
-		if globalSettings.CFAPIKey != nil {
-			apiKey = *globalSettings.CFAPIKey
-		}
-
-		if apiKey == "" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("fuego API key not configured in global settings"))
-		}
-
-		indexerClient = fuego.NewIndexer(apiKey, s.config)
-	case "modrinth":
-		// Modrinth doesn't require an API key for public operations
-		indexerClient = modrinth.NewIndexer(s.config)
-	default:
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown indexer: %s", indexer))
+	indexerClient, err := s.getIndexer(ctx, indexer)
+	if err != nil {
+		return nil, err
 	}
 
 	// Search modpacks using the indexer
 	searchResp, err := indexerClient.SearchModpacks(ctx, msg.Query, msg.GameVersion, msg.ModLoader, 0, 50)
 	if err != nil {
 		s.log.Error("Failed to search %s: %v", indexer, err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to search %s: %w", indexer, err))
+		return nil, mapIndexerError(err, fmt.Sprintf("failed to search %s", indexer))
 	}
 
 	// Store modpacks in database
@@ -903,39 +904,16 @@ func (s *ModpackService) SyncModpackFiles(ctx context.Context, req *connect.Requ
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("modpack not found"))
 	}
 
-	var indexerClient indexers.ModpackIndexer
-
-	switch modpack.Indexer {
-	case "fuego":
-		// Get Fuego API key from global settings
-		globalSettings, _, err := s.store.GetGlobalSettings(ctx)
-		if err != nil {
-			s.log.Error("Failed to get global settings: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get global settings"))
-		}
-
-		apiKey := ""
-		if globalSettings.CFAPIKey != nil {
-			apiKey = *globalSettings.CFAPIKey
-		}
-
-		if apiKey == "" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("fuego API key not configured in global settings"))
-		}
-
-		indexerClient = fuego.NewIndexer(apiKey, s.config)
-	case "modrinth":
-		// Modrinth doesn't require an API key for public operations
-		indexerClient = modrinth.NewIndexer(s.config)
-	default:
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown indexer: %s", modpack.Indexer))
+	indexerClient, err := s.getIndexer(ctx, modpack.Indexer)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get files from the indexer
 	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerID)
 	if err != nil {
 		s.log.Error("Failed to get modpack files: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get modpack files"))
+		return nil, mapIndexerError(err, "failed to get modpack files")
 	}
 
 	// Store files in database

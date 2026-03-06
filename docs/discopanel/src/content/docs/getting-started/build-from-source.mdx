@@ -1,0 +1,57 @@
+---
+title: Building from Source
+description: Build DiscoPanel from source code.
+---
+
+## Prerequisites
+
+DiscoPanel manages Minecraft servers as Docker containers, so Docker is required both at build time and runtime.
+
+- **Go** 1.24+
+- **Node.js** 22+
+- **Docker** (also used to run [buf](https://buf.build/) for protobuf code generation)
+- **Make**
+
+## Build steps
+
+```bash
+# Clone the repo
+git clone https://github.com/nickheyer/discopanel.git
+cd discopanel
+
+# Generate protobuf code (Go + TypeScript) via Docker buf
+make gen
+
+# Install frontend dependencies and build
+cd web/discopanel && npm install && npm run build && cd ../..
+
+# Build the Go binary with embedded frontend
+go build -o discopanel cmd/discopanel/main.go
+```
+
+The `//go:embed` directives bake the frontend build into the binary so it serves the UI without a separate web server.
+
+## Running
+
+```bash
+# Using default config (./config.yaml if it exists, otherwise defaults)
+./discopanel
+
+# Or point to a specific config file
+./discopanel -config /path/to/config.yaml
+```
+
+All config options can also be set via environment variables with the `DISCOPANEL_` prefix. For example, `server.port` becomes `DISCOPANEL_SERVER_PORT`. Environment variables take precedence over the config file.
+
+:::tip[Host path mapping]
+When running the binary directly on a host (not in a Docker container), do **not** set `DISCOPANEL_DATA_DIR` or `DISCOPANEL_HOST_DATA_PATH` — those are only for container path translation.
+
+To change where DiscoPanel stores its database and server data, set `DISCOPANEL_STORAGE_DATA_DIR` or configure it in your config file:
+
+```yaml
+storage:
+  data_dir: /your/path  # Default: ./data (relative to working directory)
+```
+:::
+
+For all available configuration options, see [Configuration](/configuration/).

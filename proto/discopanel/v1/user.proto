@@ -10,6 +10,8 @@ option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;dis
 service UserService {
   // Get all system users
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  // Get a single user
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
   // Create new user account
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   // Modify user account
@@ -26,12 +28,22 @@ message ListUsersResponse {
   repeated User users = 1;
 }
 
+// Get user by ID
+message GetUserRequest {
+  string id = 1;
+}
+
+// Single user
+message GetUserResponse {
+  User user = 1;
+}
+
 // New user details
 message CreateUserRequest {
   string username = 1;
   string email = 2;
   string password = 3;
-  UserRole role = 4;
+  repeated string roles = 4;
 }
 
 // Created user
@@ -43,8 +55,8 @@ message CreateUserResponse {
 message UpdateUserRequest {
   string id = 1;
   optional string email = 2;
-  optional UserRole role = 3;
-  optional bool is_active = 4;
+  optional bool is_active = 3;
+  repeated string roles = 4;
 }
 
 // Updated user

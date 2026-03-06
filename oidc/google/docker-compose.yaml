@@ -1,0 +1,67 @@
+# DiscoPanel + Google (OIDC)
+#
+# This is a complete docker-compose with OIDC authentication pre-configured using Google as the identity provider.
+#
+# Unlike Keycloak/Authelia examples, Google is an external provider - no IdP container needed.
+#
+# PREREQUISITES:
+#   1. Go to https://console.cloud.google.com/apis/credentials
+#   2. Create or select a project
+#   3. Click "Create Credentials" > "OAuth client ID"
+#   4. Application type: "Web application"
+#   5. Authorized redirect URIs: add "http://localhost:8080/api/v1/auth/oidc/callback"
+#   6. Copy the Client ID and Client Secret into the environment variables below
+#
+# NOTE ON ROLES:
+#   Google does not include a "groups" claim in its ID token by default.
+#   Users will be assigned DiscoPanel's default roles on first login.
+#   To promote a user to admin, use the DiscoPanel UI after they log in.
+#
+#   If you use Google Workspace and want automatic role mapping, you can:
+#     - Use "hd" (hosted domain) as DISCOPANEL_AUTH_OIDC_ROLE_CLAIM with a role mapping
+#     - Or use Google Workspace Admin SDK to populate a custom claim via middleware
+#     - See: https://developers.google.com/identity/openid-connect/openid-connect
+
+services:
+  discopanel:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile.discopanel
+    #image: nickheyer/discopanel:dev
+    container_name: discopanel
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/discopanel:/app/data
+    environment:
+      - DISCOPANEL_DATA_DIR=/app/data
+      - DISCOPANEL_HOST_DATA_PATH=/tmp/discopanel
+      - TZ=UTC
+
+      #  ------------------------------------ AUTH CONFIG STARTS HERE FOR DISCOPANEL + GOOGLE ------------------------------------
+      - DISCOPANEL_AUTH_LOCAL_ENABLED=true
+      - DISCOPANEL_AUTH_OIDC_ENABLED=true
+
+      # GOOGLE OIDC ISSUER - DO NOT CHANGE
+      - DISCOPANEL_AUTH_OIDC_ISSUER_URI=https://accounts.google.com
+
+      # PASTE YOUR GOOGLE OAUTH CLIENT ID HERE (from Google Cloud Console)
+      - DISCOPANEL_AUTH_OIDC_CLIENT_ID=REPLACE_ME.apps.googleusercontent.com
+
+      # PASTE YOUR GOOGLE OAUTH CLIENT SECRET HERE (from Google Cloud Console)
+      - DISCOPANEL_AUTH_OIDC_CLIENT_SECRET=GOCSPX-REPLACE_ME
+
+      # FOR LOCAL DEV: Google allows http://localhost redirects without HTTPS.
+      # FOR PRODUCTION: Google requires HTTPS - change to your public domain (ie: https://mypanel.com/api/v1/auth/oidc/callback)
+      # THIS MUST MATCH EXACTLY WHAT YOU ENTERED IN GOOGLE CLOUD CONSOLE UNDER "Authorized redirect URIs"
+      - DISCOPANEL_AUTH_OIDC_REDIRECT_URL=http://localhost:8080/api/v1/auth/oidc/callback
+
+      # Google does not provide a "groups" claim by default.
+      # Leave empty to skip automatic role mapping - users get default roles and can be promoted manually.
+      # If using Google Workspace, you can set this to "hd" and add a role mapping (see below).
+      - DISCOPANEL_AUTH_OIDC_ROLE_CLAIM=
+
+      # OPTIONAL: Map Google Workspace domain to a DiscoPanel role.
+      # Uncomment and modify if using "hd" as ROLE_CLAIM above:
+      # - DISCOPANEL_AUTH_OIDC_ROLE_MAPPING={"yourdomain.com":"admin"}

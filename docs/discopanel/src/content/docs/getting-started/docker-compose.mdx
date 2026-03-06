@@ -1,0 +1,47 @@
+---
+title: Docker Compose
+description: Deploy DiscoPanel using Docker Compose.
+---
+
+import { Code } from '@astrojs/starlight/components';
+import dockerCompose from '../../../../../../docker-compose.yml?raw';
+
+## Prerequisites
+
+DiscoPanel manages Minecraft servers as Docker containers, so Docker is required.
+
+- [Docker Engine](https://docs.docker.com/engine/install/) with Docker Compose
+
+## Compose file
+
+The recommended way to run DiscoPanel. Create a `docker-compose.yml` or use the one from the repo:
+
+<Code code={dockerCompose} lang="yaml" title="docker-compose.yml" />
+
+Spin up your service:
+
+```bash
+docker compose up -d
+```
+
+## Volume paths
+
+DiscoPanel creates Docker bind mounts for each managed Minecraft server. When DiscoPanel runs inside a container, it needs to know both the container-internal path and the corresponding host path to set up those mounts correctly.
+
+| Variable | Purpose | Example |
+|---|---|---|
+| `DISCOPANEL_HOST_DATA_PATH` | The host path that `DISCOPANEL_DATA_DIR` is mounted from | `/opt/discopanel/data` |
+| `DISCOPANEL_DATA_DIR` | Where DiscoPanel reads/writes data inside the container — you can usually leave this as the default | `/app/data` |
+
+These **must** correspond to the same volume entry. If your compose file maps `/srv/minecraft/data:/app/data`, then set `DISCOPANEL_HOST_DATA_PATH=/srv/minecraft/data`.
+
+:::caution[SELinux]
+On Fedora, RHEL, CentOS, etc., append `:z` to volume mounts:
+```yaml
+- /var/run/docker.sock:/var/run/docker.sock:z
+```
+:::
+
+Once running, open **http://\<your-host\>:8080** and create your admin account.
+
+For all available configuration options, see [Configuration](/configuration/).

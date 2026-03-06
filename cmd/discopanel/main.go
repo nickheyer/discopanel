@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -56,36 +57,14 @@ func main() {
 		}
 	}
 
-	// Initialize storage with connection pooling
-	store, err := storage.NewSQLiteStore(cfg.Database.Path, storage.DBConfig{
-		MaxOpenConns:    cfg.Database.MaxConnections,
-		MaxIdleConns:    cfg.Database.MaxIdleConns,
-		ConnMaxLifetime: time.Duration(cfg.Database.ConnMaxLifetime) * time.Second,
-	})
+	// Initialize storage w/ migrations and seeding
+	store, err := storage.NewSQLiteStore(cfg)
 	if err != nil {
 		log.Fatal("Failed to initialize storage: %v", err)
 	}
 	defer store.Close()
 
-	// Initialize global settings with config defaults if they don't exist
 	ctx := context.Background()
-	_, isNew, err := store.GetGlobalSettings(ctx)
-	if err != nil {
-		log.Fatal("Failed to get global settings: %v", err)
-	}
-
-	// Check if global settings are empty (just created) and populate with config defaults
-	if isNew || cfg.Minecraft.ResetGlobal {
-		// Copy the config defaults to global settings
-		globalConfig := config.LoadGlobalServerConfig(cfg)
-		globalConfig.ID = storage.GlobalSettingsID
-		globalConfig.ServerID = storage.GlobalSettingsID
-
-		if err := store.UpdateGlobalSettings(ctx, &globalConfig); err != nil {
-			log.Fatal("Failed to initialize global settings: %v", err)
-		}
-		log.Info("Initialized global settings from config file")
-	}
 
 	// Initialize Docker client with configuration
 	dockerClient, err := docker.NewClient(cfg.Docker.Host, log, docker.ClientConfig{
@@ -209,6 +188,18 @@ func main() {
 
 	// Initialize RPC server with full configuration
 	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, log)
+
+	// Print recovery key
+	if key := rpcServer.RecoveryKey(); key != "" {
+		fmt.Fprintf(os.Stderr, "\n═══════════════════════════════════════════════════════════════════════\n")
+		fmt.Fprintf(os.Stderr, "RECOVERY KEY (use to reset panel access if locked out)\n")
+		fmt.Fprintf(os.Stderr, "%s\n", key)
+		fmt.Fprintf(os.Stderr, "═══════════════════════════════════════════════════════════════════════\n\n")
+		keyPath := filepath.Join(cfg.Storage.DataDir, "recovery.key")
+		if err := os.WriteFile(keyPath, []byte(key), 0600); err != nil {
+			log.Error("Failed to write recovery key file: %v", err)
+		}
+	}
 
 	// Auto-start servers that have auto_start enabled
 	log.Info("Checking for servers with auto-start enabled...")

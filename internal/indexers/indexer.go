@@ -2,7 +2,11 @@ package indexers
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"time"
+
+	"github.com/nickheyer/discopanel/internal/config"
 )
 
 // ModpackIndexer defines the interface for modpack indexing services
@@ -64,4 +68,31 @@ type ModpackFile struct {
 	ServerPackFileID *string   `json:"server_pack_file_id,omitempty"`
 	SortIndex        int       `json:"sort_index"`
 	VersionNumber    string    `json:"version_number"` // Human-readable version for Modrinth
+}
+
+// IndexerFactory creates a ModpackIndexer from an API key and config.
+type IndexerFactory func(apiKey string, cfg *config.Config) ModpackIndexer
+
+var (
+	registryMu sync.RWMutex
+	registry   = make(map[string]IndexerFactory)
+)
+
+// RegisterIndexer registers an IndexerFactory under the given name.
+// Typically called from an indexer package's init() function.
+func RegisterIndexer(name string, factory IndexerFactory) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	registry[name] = factory
+}
+
+// NewIndexer creates a ModpackIndexer by name using the factory registry.
+func NewIndexer(name string, apiKey string, cfg *config.Config) (ModpackIndexer, error) {
+	registryMu.RLock()
+	factory, ok := registry[name]
+	registryMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("unknown indexer: %s", name)
+	}
+	return factory(apiKey, cfg), nil
 }

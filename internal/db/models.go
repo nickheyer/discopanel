@@ -386,40 +386,71 @@ type ProxyListener struct {
 	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
-// UserRole defines the role of a user in the system
-type UserRole string
-
-const (
-	RoleAdmin  UserRole = "admin"  // Full access to all features
-	RoleEditor UserRole = "editor" // Can manage servers but not system settings
-	RoleViewer UserRole = "viewer" // Read-only access
-)
+// RegistrationInvite represents a shareable invite link for controlled registration
+type RegistrationInvite struct {
+	ID          string     `json:"id" gorm:"primaryKey"`
+	Code        string     `json:"code" gorm:"not null;uniqueIndex"`
+	Description string     `json:"description"`
+	Roles       []string   `json:"roles" gorm:"column:roles;serializer:json"`
+	PinHash     string     `json:"-" gorm:"column:pin_hash"`
+	MaxUses     int        `json:"max_uses" gorm:"default:0;column:max_uses"`
+	UseCount    int        `json:"use_count" gorm:"default:0;column:use_count"`
+	ExpiresAt   *time.Time `json:"expires_at" gorm:"column:expires_at"`
+	CreatedBy   string     `json:"created_by" gorm:"not null;column:created_by"`
+	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`
+}
 
 // User represents a user account
 type User struct {
 	ID           string     `json:"id" gorm:"primaryKey"`
-	Username     string     `json:"username" gorm:"not null;uniqueIndex"`
-	Email        *string    `json:"email" gorm:"uniqueIndex"` // Pointer allows NULL, unique only on non-NULL
-	PasswordHash string     `json:"-" gorm:"not null;column:password_hash"`
-	Role         UserRole   `json:"role" gorm:"not null;default:'viewer'"`
+	Username     string     `json:"username" gorm:"not null;uniqueIndex:idx_user_provider"`
+	Email        *string    `json:"email" gorm:"index"`
+	PasswordHash string     `json:"-" gorm:"column:password_hash"`
+	AuthProvider string     `json:"auth_provider" gorm:"not null;default:'local';uniqueIndex:idx_user_provider"`
+	OIDCSubject  string     `json:"oidc_subject" gorm:"column:oidc_subject;uniqueIndex:idx_oidc_identity,where:oidc_subject != ''"`
+	OIDCIssuer   string     `json:"oidc_issuer" gorm:"column:oidc_issuer;uniqueIndex:idx_oidc_identity,where:oidc_subject != ''"`
 	IsActive     bool       `json:"is_active" gorm:"not null;default:true"`
 	LastLogin    *time.Time `json:"last_login" gorm:"column:last_login"`
 	CreatedAt    time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt    time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
-// AuthConfig stores authentication configuration
-type AuthConfig struct {
-	ID                 string    `json:"id" gorm:"primaryKey"`
-	Enabled            bool      `json:"enabled" gorm:"not null;default:false"`
-	RecoveryKey        string    `json:"-" gorm:"column:recovery_key"`         // Secret key for account recovery
-	RecoveryKeyHash    string    `json:"-" gorm:"column:recovery_key_hash"`    // Hashed version for verification
-	JWTSecret          string    `json:"-" gorm:"column:jwt_secret"`           // Secret for JWT signing
-	SessionTimeout     int       `json:"session_timeout" gorm:"default:86400"` // Session timeout in seconds (default 24h)
-	RequireEmailVerify bool      `json:"require_email_verify" gorm:"default:false"`
-	AllowRegistration  bool      `json:"allow_registration" gorm:"default:false"` // Allow new user registration
-	CreatedAt          time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt          time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+// Role represents a role in the RBAC system
+type Role struct {
+	ID          string    `json:"id" gorm:"primaryKey"`
+	Name        string    `json:"name" gorm:"not null;uniqueIndex"`
+	Description string    `json:"description"`
+	IsSystem    bool      `json:"is_system" gorm:"not null;default:false"`
+	IsDefault   bool      `json:"is_default" gorm:"not null;default:false"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+// UserRole links users to roles
+type UserRole struct {
+	ID        string    `json:"id" gorm:"primaryKey"`
+	UserID    string    `json:"user_id" gorm:"not null;index;column:user_id"`
+	RoleName  string    `json:"role_name" gorm:"not null;index;column:role_name"`
+	Source    string    `json:"source" gorm:"not null;default:'local'"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+// SystemSetting stores key-value pairs for internal system configuration.
+type SystemSetting struct {
+	Key   string `gorm:"primaryKey"`
+	Value string `gorm:"not null"`
+}
+
+// APIToken represents a long-lived API token for programmatic access
+type APIToken struct {
+	ID         string     `json:"id" gorm:"primaryKey"`
+	UserID     string     `json:"user_id" gorm:"not null;index;column:user_id"`
+	Name       string     `json:"name" gorm:"not null"`
+	TokenHash  string     `json:"-" gorm:"not null;uniqueIndex;column:token_hash"`
+	ExpiresAt  *time.Time `json:"expires_at" gorm:"column:expires_at"`
+	LastUsedAt *time.Time `json:"last_used_at" gorm:"column:last_used_at"`
+	CreatedAt  time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	User       *User      `json:"-" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
 }
 
 // Session represents an active user session
@@ -428,8 +459,6 @@ type Session struct {
 	UserID    string    `json:"user_id" gorm:"not null;index;column:user_id"`
 	Token     string    `json:"-" gorm:"not null;uniqueIndex"`
 	ExpiresAt time.Time `json:"expires_at" gorm:"not null;index"`
-	IPAddress string    `json:"ip_address"`
-	UserAgent string    `json:"user_agent"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
 }

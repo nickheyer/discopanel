@@ -5,6 +5,11 @@ plugins:
     opt:
       - path=schemav1.yaml
 
+  - remote: buf.build/community/sudorandom-connect-openapi:v0.21.3
+    out: docs/discopanel/public
+    opt:
+      - path=schemav1.yaml
+
   # Generate Go code with protoc-gen-go
   - remote: buf.build/protocolbuffers/go
     out: pkg/proto
@@ -23,3 +28,4 @@ plugins:
     opt:
       - target=ts
       - import_extension=none
+    include_imports: true

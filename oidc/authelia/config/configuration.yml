@@ -1,0 +1,176 @@
+---
+# DiscoPanel - Authelia Configuration                
+#                                                       
+# This config is ready to use for development/testing. 
+# For production, change ALL secrets and generate new keys.
+
+server:
+  address: 'tcp://:9091'
+  tls:
+    certificate: '/config/tls.crt'
+    key: '/config/tls.key'
+
+log:
+  level: 'info'
+
+totp:
+  issuer: 'discopanel'
+
+identity_validation:
+  reset_password:
+    jwt_secret: 'discopanel-dev-jwt-reset-secret-change-me-in-production'
+
+# User accounts are stored in ./users_database.yml
+authentication_backend:
+  file:
+    path: '/config/users_database.yml'
+    password:
+      algorithm: 'argon2'
+      argon2:
+        variant: 'argon2id'
+        iterations: 3
+        memory: 65536
+        parallelism: 4
+        key_length: 32
+        salt_length: 16
+
+# Authelia needs a cookie domain for its login portal. ../docker-compose.yaml for instruction
+session:
+  secret: 'discopanel-dev-session-secret-change-me-in-production'
+  cookies:
+    - name: 'authelia_session'
+      domain: 'traefik.me'
+      authelia_url: 'https://authelia.traefik.me:9091'
+      expiration: '1 hour'
+      inactivity: '5 minutes'
+
+storage:
+  encryption_key: 'discopanel-dev-storage-encryption-key-change-me'
+  local:
+    path: '/config/db.sqlite3'
+
+notifier:
+  filesystem:
+    filename: '/config/notification.txt'
+
+access_control:
+  default_policy: 'one_factor'
+
+regulation:
+  max_retries: 5
+  find_time: '2 minutes'
+  ban_time: '5 minutes'
+
+identity_providers:
+  oidc:
+    hmac_secret: 'discopanel-dev-hmac-secret-must-be-at-least-sixty-four-characters-long-so-here-is-padding'
+    enable_client_debug_messages: true
+    minimum_parameter_entropy: 8
+    enforce_pkce: 'public_clients_only'
+
+    jwks:
+      - key_id: 'discopanel-dev'
+        algorithm: 'RS256'
+        use: 'sig'
+        key: |
+          -----BEGIN PRIVATE KEY-----
+          MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCwvYB+KRmfkaiV
+          KN/wRNdPekLl4XXu8ATxhxerg2KOE31lUcrlyezH/OLEOmd0VToPnMXBUKgIMDWP
+          bMdsAkeXrwAdzYOZM+Ls6bFy9lr70DD4SU4yc//6vNQfqBbQ5oR3IAURS6u9Atu9
+          XF+84RU/d46Sc3BhT7Z7U3VFDEt3MVLpFNLg6/YhRyguCQD24ZCE5orIwtmkSGpk
+          8dxcM2Bpj9y9wdkFLEeCWSI2owpCGEENldV09oPK+a8Xqz59XBvJki4Ax3BxOAhu
+          EKh5qe7d40ltQn3l1a8GM6gmKNwtKK4jNo/Gl5P0+4/wwoFdxT55w1GHijHW1OnT
+          rDwYEb15AgMBAAECggEAAlISqFVo0TgL4x18xz5YJ2J/E16g+kirf/JapLVea2gl
+          Gtn2lIrQsZWH8rSjnBrsXr0buZySAD2FzoLKoYfsIbk6Aqoqoq3UOnEdE9nZOvoy
+          Umg//xiX0VZ+YIYH+qk0Lw48EsyQDjTF5tgaJ7Q637D1rcWXQafWyQrA/O2a5g85
+          lGY4ExRXOsei+6bB1ygaYUQ1tEDyjV3VhkRNV6pfnSQljBvxVC1Xynod2mzFdzjk
+          AY6VRoYZ9Y5pw+V2vjiX+aI6gfwHgh4K5ogsEMUEWaPautxeKiPku+DXJ1Tb3xh0
+          RVDb8VoNxxlVUf21j/0ZUwgrFX0sYLXG4r8sj3H2wwKBgQD4yrajiSkpAk71o+t8
+          W2zfXYDUzjxojeCb7JraK4OzdkqGs+zSJERXcm4Q3scffBipiQ/s0sYErGCCKWo+
+          Z+FU9mU0edJf+QImk3tDXKkDVXaReK69tq/T7ug6vD0lKOFCDY9HF7D/+Jh6jpiH
+          TX1dnYgN82UYPSO05fqsd1QgwwKBgQC13GHpV1cDhyKDX8xzhsvZWvyznAX6lqmW
+          NlicwHbFCyRn9g0f1UCaSV0PsdDxK+91eCZ16jiu0lPDE6vDCoVHk00QEuux+B74
+          JO/0hr2mKxjcof3Na6wRAbQjbvl9BHrH7qRhdjpJRH+E2ZoectrAPrToWQOrtVBX
+          bn5yvBqFEwKBgCoWqSUrXBI6+L6nl3v3P4jeGaBmr2OEtP3L3jqQZ/xhQ6RcJfE6
+          /3DHxAUImykhZk6wCEipM6SwwLbkaLvb+QvVjzN8dHGV/54lDxJLR7BvsdpUT0N6
+          923kGddt5u41Zz40awu8302+cZUyMG2bV10R/GVXyr96AGNnEKxCl7HfAoGAC81C
+          eV8WoX76iWYFIZYk0nUqIwnEBZATb1EVjQ6cZosjkK+SCHfRWnHaXTNf6Na+EnR6
+          onpRtV6m2ukC44RiQ9PWU2225/S/JcFX5Rl9YzQ2x9KnYtZS80OWChqgjDFnOmRN
+          PJnsjGaqk9d/PeycL4+iM9Xa/CCnFxVvlUiJvAsCgYBbZPSgQtHlODNluqpr6i68
+          yKfDO2hrrvSA1Y8WteM52Gpmn5b1QlopZ0/4gYmWM4qMqQmtH3uWC7NDvQmqMeFW
+          VPt3B7EmnT9ugKE6L9sgHtY54fIrSr8DDLl6WNLWTey4ivfhlU6o/SxMjNb8VXL3
+          v0jKQTZz1R2wLqdxs1KRbg==
+          -----END PRIVATE KEY-----
+        certificate_chain: |
+          -----BEGIN CERTIFICATE-----
+          MIIDMTCCAhmgAwIBAgIUCQjLyj/HNDk2e4KdiOgmBH5dtOswDQYJKoZIhvcNAQEL
+          BQAwKDERMA8GA1UEAwwIYXV0aGVsaWExEzARBgNVBAoMCkRpc2NvUGFuZWwwHhcN
+          MjYwMjE2MjIxMjE1WhcNMzYwMjE0MjIxMjE1WjAoMREwDwYDVQQDDAhhdXRoZWxp
+          YTETMBEGA1UECgwKRGlzY29QYW5lbDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCC
+          AQoCggEBALC9gH4pGZ+RqJUo3/BE1096QuXhde7wBPGHF6uDYo4TfWVRyuXJ7Mf8
+          4sQ6Z3RVOg+cxcFQqAgwNY9sx2wCR5evAB3Ng5kz4uzpsXL2WvvQMPhJTjJz//q8
+          1B+oFtDmhHcgBRFLq70C271cX7zhFT93jpJzcGFPtntTdUUMS3cxUukU0uDr9iFH
+          KC4JAPbhkITmisjC2aRIamTx3FwzYGmP3L3B2QUsR4JZIjajCkIYQQ2V1XT2g8r5
+          rxerPn1cG8mSLgDHcHE4CG4QqHmp7t3jSW1CfeXVrwYzqCYo3C0oriM2j8aXk/T7
+          j/DCgV3FPnnDUYeKMdbU6dOsPBgRvXkCAwEAAaNTMFEwHQYDVR0OBBYEFNMzG9im
+          j+WQsYBQnEk5SbXRzhozMB8GA1UdIwQYMBaAFNMzG9imj+WQsYBQnEk5SbXRzhoz
+          MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAHy1bE1X/J4jiTSd
+          dzzV+7imfRKWjXA3l1R7ztfXil5KgQxoG9KyCGIsS5yRD94BH6k9n15wxFwa3xbw
+          aPzr6jAt+I/S4WLoAtWZkRDdnOMpCslydStvBJso9Sf3yP0omcfRab7B49JYg+4g
+          SaHFt0W5ncgaHNJat2uwtNa3XeMo3uyatZw99y16X2XlOzkhPWl0PHb2Wet6JGbW
+          rwfjJuT9gmr5LpIHXXIpoz8COQ/tWqDwcwxOh7Vhz4h8ohMaBF7DwtwEUU0HFe1L
+          KhlYOOn3iEYMCHoRCwqfuCty3kXbUigqOdC+3GD3sPJHsetZpju6mzgRUK6HwzB7
+          ry2+WVw=
+          -----END CERTIFICATE-----
+
+    lifespans:
+      access_token: '1h'
+      authorize_code: '1m'
+      id_token: '1h'
+      refresh_token: '90m'
+
+    # This policy puts "groups" directly in the ID token. Without it, groups only show up in the UserInfo endpoint, and Discopanel wouldn't read roles.
+    claims_policies:
+      discopanel:
+        id_token:
+          - 'groups'
+          - 'email'
+          - 'email_verified'
+          - 'preferred_username'
+          - 'name'
+
+    cors:
+      endpoints:
+        - 'authorization'
+        - 'token'
+        - 'revocation'
+        - 'introspection'
+        - 'userinfo'
+      allowed_origins_from_client_redirect_uris: true
+
+    clients:
+      - client_id: 'discopanel'
+        client_name: 'DiscoPanel'
+        # Plaintext secret: discopanel-dev-secret
+        client_secret: '$pbkdf2-sha512$310000$rjIc/fKRSBnSAe/FKJa.aQ$KIJjfQsCOexmk52nLb73HmJrcMkiDl3GRuWWpmdJN.talWSB.p7cq7zbiiVj4P0xV3YMeJtdlMfzWSVU2XSblw'
+        public: false
+        authorization_policy: 'one_factor'
+        claims_policy: 'discopanel'
+        redirect_uris:
+          - 'http://localhost:8080/api/v1/auth/oidc/callback'
+          - 'http://localhost:5173/api/v1/auth/oidc/callback'
+        scopes:
+          - 'openid'
+          - 'profile'
+          - 'email'
+          - 'groups'
+          - 'offline_access'
+        grant_types:
+          - 'authorization_code'
+          - 'refresh_token'
+        response_types:
+          - 'code'
+        response_modes:
+          - 'query'
+          - 'form_post'
+        token_endpoint_auth_method: 'client_secret_basic'

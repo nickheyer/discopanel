@@ -8,7 +8,14 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/config"
 	"github.com/nickheyer/discopanel/internal/indexers"
+	"github.com/nickheyer/discopanel/pkg/utils"
 )
+
+func init() {
+	indexers.RegisterIndexer("fuego", func(apiKey string, cfg *config.Config) indexers.ModpackIndexer {
+		return NewIndexer(apiKey, cfg)
+	})
+}
 
 // Implements ModpackIndexer
 var _ indexers.ModpackIndexer = (*FuegoIndexer)(nil)
@@ -141,8 +148,8 @@ func (f *FuegoIndexer) convertModpack(fm Modpack) indexers.Modpack {
 	}
 
 	// Deduplicate
-	gameVersions = deduplicateStrings(gameVersions)
-	modLoaders = deduplicateStrings(modLoaders)
+	gameVersions = utils.DeduplicateStrings(gameVersions)
+	modLoaders = utils.DeduplicateStrings(modLoaders)
 
 	logoURL := ""
 	if fm.Logo.ThumbnailURL != "" {
@@ -209,18 +216,4 @@ func (f *FuegoIndexer) convertFile(file File, modpackID string) indexers.Modpack
 		ModLoader:        modLoader,
 		ServerPackFileID: &serverPackID,
 	}
-}
-
-func deduplicateStrings(strings []string) []string {
-	seen := make(map[string]bool)
-	result := []string{}
-
-	for _, str := range strings {
-		if !seen[str] {
-			seen[str] = true
-			result = append(result, str)
-		}
-	}
-
-	return result
 }

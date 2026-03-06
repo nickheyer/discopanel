@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -127,10 +126,6 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 
 // Gets global settings
 func (s *ConfigService) GetGlobalSettings(ctx context.Context, req *connect.Request[v1.GetGlobalSettingsRequest]) (*connect.Response[v1.GetGlobalSettingsResponse], error) {
-	if err := s.checkAdminAuth(ctx); err != nil {
-		return nil, err
-	}
-
 	config, _, err := s.store.GetGlobalSettings(ctx)
 	if err != nil {
 		s.log.Error("Failed to get global settings: %v", err)
@@ -150,10 +145,6 @@ func (s *ConfigService) GetGlobalSettings(ctx context.Context, req *connect.Requ
 
 // Updates global settings
 func (s *ConfigService) UpdateGlobalSettings(ctx context.Context, req *connect.Request[v1.UpdateGlobalSettingsRequest]) (*connect.Response[v1.UpdateGlobalSettingsResponse], error) {
-	if err := s.checkAdminAuth(ctx); err != nil {
-		return nil, err
-	}
-
 	msg := req.Msg
 	config, _, err := s.store.GetGlobalSettings(ctx)
 	if err != nil {
@@ -180,24 +171,6 @@ func (s *ConfigService) UpdateGlobalSettings(ctx context.Context, req *connect.R
 	return connect.NewResponse(&v1.UpdateGlobalSettingsResponse{
 		Categories: categories,
 	}), nil
-}
-
-func (s *ConfigService) checkAdminAuth(ctx context.Context) error {
-	authConfig, _, err := s.store.GetAuthConfig(ctx)
-	if err != nil {
-		return connect.NewError(connect.CodeInternal, errors.New("failed to get auth configuration"))
-	}
-
-	if authConfig.Enabled {
-		user := auth.GetUserFromContext(ctx)
-		if user == nil {
-			return connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
-		}
-		if !auth.CheckPermission(user, storage.RoleAdmin) {
-			return connect.NewError(connect.CodePermissionDenied, errors.New("admin access required"))
-		}
-	}
-	return nil
 }
 
 func (s *ConfigService) recreateContainer(ctx context.Context, server *storage.Server, config *storage.ServerConfig) error {

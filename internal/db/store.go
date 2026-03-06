@@ -6,24 +6,21 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-type DBConfig struct {
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
-}
-
 type Store struct {
-	db *gorm.DB
+	db  *gorm.DB
+	cfg *config.Config
 }
 
-func NewSQLiteStore(dbPath string, config ...DBConfig) (*Store, error) {
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+func NewSQLiteStore(cfg *config.Config) (*Store, error) {
+	db, err := gorm.Open(sqlite.Open(cfg.Database.Path), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
@@ -33,33 +30,34 @@ func NewSQLiteStore(dbPath string, config ...DBConfig) (*Store, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Get underlying SQL database to configure connection pool
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database handle: %w", err)
 	}
 
-	// Apply connection pool configuration if provided
-	if len(config) > 0 {
-		cfg := config[0]
-		if cfg.MaxOpenConns > 0 {
-			sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
-		}
-		if cfg.MaxIdleConns > 0 {
-			sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
-		}
-		if cfg.ConnMaxLifetime > 0 {
-			sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
-		}
+	if cfg.Database.MaxConnections > 0 {
+		sqlDB.SetMaxOpenConns(cfg.Database.MaxConnections)
+	}
+	if cfg.Database.MaxIdleConns > 0 {
+		sqlDB.SetMaxIdleConns(cfg.Database.MaxIdleConns)
+	}
+	if cfg.Database.ConnMaxLifetime > 0 {
+		sqlDB.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetime) * time.Second)
 	}
 
-	store := &Store{db: db}
+	store := &Store{db: db, cfg: cfg}
 
-	if err := store.Migrate(); err != nil {
-		return nil, fmt.Errorf("failed to migrate database: %w", err)
+	if cfg.Database.AutoMigrate {
+		if err := store.Migrate(); err != nil {
+			return nil, fmt.Errorf("failed to migrate database: %w", err)
+		}
 	}
 
 	return store, nil
+}
+
+func (s *Store) DB() *gorm.DB {
+	return s.db
 }
 
 func (s *Store) Close() error {
@@ -68,40 +66,6 @@ func (s *Store) Close() error {
 		return err
 	}
 	return sqlDB.Close()
-}
-
-func (s *Store) Migrate() error {
-	// Auto-migrate all models
-	err := s.db.AutoMigrate(
-		&Server{},
-		&ServerConfig{},
-		&Mod{},
-		&IndexedModpack{},
-		&IndexedModpackFile{},
-		&ModpackFavorite{},
-		&ProxyConfig{},
-		&ProxyListener{},
-		&User{},
-		&AuthConfig{},
-		&Session{},
-		&ScheduledTask{},
-		&TaskExecution{},
-		&ModuleTemplate{},
-		&Module{},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to auto-migrate: %w", err)
-	}
-
-	// Create indexes
-	if err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_servers_port ON servers(port)").Error; err != nil {
-		return err
-	}
-	if err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)").Error; err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // Server operations
@@ -236,7 +200,6 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 		}
 	}
 
-	// Helper functions
 	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
 	config.Type = stringPtr(string(server.ModLoader))
@@ -248,7 +211,6 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 }
 
 func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
-	// Helper functions to create pointers
 	boolPtr := func(b bool) *bool { return &b }
 	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
@@ -580,6 +542,24 @@ func (s *Store) UpdateGlobalSettings(ctx context.Context, config *ServerConfig) 
 	return s.db.WithContext(ctx).Save(config).Error
 }
 
+func (s *Store) SeedGlobalSettings() error {
+	ctx := context.Background()
+	_, isNew, err := s.GetGlobalSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if isNew || s.cfg.Minecraft.ResetGlobal {
+		gc := s.CreateDefaultServerConfig(GlobalSettingsID)
+		if len(s.cfg.Minecraft.GlobalConfig) > 0 {
+			mapstructure.WeakDecode(s.cfg.Minecraft.GlobalConfig, gc)
+			gc.ID = GlobalSettingsID + "-config"
+			gc.ServerID = GlobalSettingsID
+		}
+		return s.UpdateGlobalSettings(ctx, gc)
+	}
+	return nil
+}
+
 // ProxyConfig operations
 func (s *Store) GetProxyConfig(ctx context.Context) (*ProxyConfig, bool, error) {
 	var config ProxyConfig
@@ -727,9 +707,9 @@ func (s *Store) GetUser(ctx context.Context, id string) (*User, error) {
 	return &user, nil
 }
 
-func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+func (s *Store) GetUserByUsernameAndProvider(ctx context.Context, username, provider string) (*User, error) {
 	var user User
-	err := s.db.WithContext(ctx).First(&user, "username = ?", username).Error
+	err := s.db.WithContext(ctx).First(&user, "username = ? AND auth_provider = ?", username, provider).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("user not found")
@@ -739,9 +719,9 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, 
 	return &user, nil
 }
 
-func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+func (s *Store) GetUserByOIDCSubject(ctx context.Context, subject string) (*User, error) {
 	var user User
-	err := s.db.WithContext(ctx).First(&user, "email = ?", email).Error
+	err := s.db.WithContext(ctx).First(&user, "oidc_subject = ?", subject).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("user not found")
@@ -763,11 +743,15 @@ func (s *Store) UpdateUser(ctx context.Context, user *User) error {
 
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Delete sessions
 		if err := tx.Where("user_id = ?", id).Delete(&Session{}).Error; err != nil {
 			return err
 		}
-		// Delete user
+		if err := tx.Where("user_id = ?", id).Delete(&APIToken{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&UserRole{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&User{}, "id = ?", id).Error
 	})
 }
@@ -778,31 +762,108 @@ func (s *Store) CountUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-// AuthConfig operations
-func (s *Store) GetAuthConfig(ctx context.Context) (*AuthConfig, bool, error) {
-	var config AuthConfig
-	err := s.db.WithContext(ctx).First(&config).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// Return default config if none exists
-			return &AuthConfig{
-				ID:                 "default",
-				Enabled:            false,
-				SessionTimeout:     86400, // 24 hours
-				RequireEmailVerify: false,
-				AllowRegistration:  false,
-			}, true, nil
-		}
-		return nil, false, err
+// Role operations
+func (s *Store) SeedSystemRoles() error {
+	roles := []Role{
+		{ID: "role-admin", Name: "admin", Description: "Full system access", IsSystem: true},
+		{ID: "role-user", Name: "user", Description: "Standard user access", IsSystem: true, IsDefault: true},
+		{ID: "role-anonymous", Name: "anonymous", Description: "Unauthenticated user access", IsSystem: true},
 	}
-	return &config, false, nil
+	for _, role := range roles {
+		var existing Role
+		if err := s.db.Where("name = ?", role.Name).First(&existing).Error; err == gorm.ErrRecordNotFound {
+			if err := s.db.Create(&role).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
-func (s *Store) SaveAuthConfig(ctx context.Context, config *AuthConfig) error {
-	if config.ID == "" {
-		config.ID = "default"
+func (s *Store) CreateRole(ctx context.Context, role *Role) error {
+	if role.ID == "" {
+		role.ID = uuid.New().String()
 	}
-	return s.db.WithContext(ctx).Save(config).Error
+	return s.db.WithContext(ctx).Create(role).Error
+}
+
+func (s *Store) GetRole(ctx context.Context, id string) (*Role, error) {
+	var role Role
+	err := s.db.WithContext(ctx).First(&role, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("role not found")
+		}
+		return nil, err
+	}
+	return &role, nil
+}
+
+func (s *Store) ListRoles(ctx context.Context) ([]*Role, error) {
+	var roles []*Role
+	err := s.db.WithContext(ctx).Order("is_system DESC, name ASC").Find(&roles).Error
+	return roles, err
+}
+
+func (s *Store) GetDefaultRoles(ctx context.Context) ([]*Role, error) {
+	var roles []*Role
+	err := s.db.WithContext(ctx).Where("is_default = ?", true).Find(&roles).Error
+	return roles, err
+}
+
+func (s *Store) UpdateRole(ctx context.Context, role *Role) error {
+	return s.db.WithContext(ctx).Save(role).Error
+}
+
+func (s *Store) DeleteRole(ctx context.Context, id string) error {
+	var role Role
+	if err := s.db.WithContext(ctx).First(&role, "id = ?", id).Error; err != nil {
+		return err
+	}
+	if role.IsSystem {
+		return fmt.Errorf("cannot delete system role")
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("role_name = ?", role.Name).Delete(&UserRole{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&Role{}, "id = ?", id).Error
+	})
+}
+
+// UserRole operations
+func (s *Store) AssignRole(ctx context.Context, userID, roleName, source string) error {
+	var existing UserRole
+	err := s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).First(&existing).Error
+	if err == nil {
+		return nil // Already assigned
+	}
+	ur := &UserRole{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		RoleName: roleName,
+		Source:   source,
+	}
+	return s.db.WithContext(ctx).Create(ur).Error
+}
+
+func (s *Store) UnassignRole(ctx context.Context, userID, roleName string) error {
+	return s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).Delete(&UserRole{}).Error
+}
+
+func (s *Store) GetUserRoleNames(ctx context.Context, userID string) ([]string, error) {
+	var names []string
+	err := s.db.WithContext(ctx).
+		Model(&UserRole{}).
+		Select("user_roles.role_name").
+		Joins("LEFT JOIN roles ON roles.name = user_roles.role_name").
+		Where("user_roles.user_id = ?", userID).
+		Order("roles.is_system DESC, roles.name ASC").
+		Pluck("user_roles.role_name", &names).Error
+	if err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 // Session operations
@@ -829,12 +890,139 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	return s.db.WithContext(ctx).Where("token = ?", token).Delete(&Session{}).Error
 }
 
-func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
-	return s.db.WithContext(ctx).Where("user_id = ?", userID).Delete(&Session{}).Error
-}
-
 func (s *Store) CleanExpiredSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
+}
+
+// CleanAllSessions deletes all sessions (used when JWT secret changes).
+func (s *Store) CleanAllSessions(ctx context.Context) error {
+	return s.db.WithContext(ctx).Where("1 = 1").Delete(&Session{}).Error
+}
+
+// ResetAllUsers deletes all sessions, API tokens, user roles, registration invites, and users.
+func (s *Store) ResetAllUsers(ctx context.Context) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("1 = 1").Delete(&Session{}).Error; err != nil {
+			return fmt.Errorf("failed to delete sessions: %w", err)
+		}
+		if err := tx.Where("1 = 1").Delete(&APIToken{}).Error; err != nil {
+			return fmt.Errorf("failed to delete api tokens: %w", err)
+		}
+		if err := tx.Where("1 = 1").Delete(&UserRole{}).Error; err != nil {
+			return fmt.Errorf("failed to delete user roles: %w", err)
+		}
+		if err := tx.Where("1 = 1").Delete(&RegistrationInvite{}).Error; err != nil {
+			return fmt.Errorf("failed to delete registration invites: %w", err)
+		}
+		if err := tx.Where("1 = 1").Delete(&User{}).Error; err != nil {
+			return fmt.Errorf("failed to delete users: %w", err)
+		}
+		return nil
+	})
+}
+
+// APIToken operations
+func (s *Store) CreateAPIToken(ctx context.Context, token *APIToken) error {
+	if token.ID == "" {
+		token.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(token).Error
+}
+
+func (s *Store) GetAPITokenByHash(ctx context.Context, hash string) (*APIToken, error) {
+	var token APIToken
+	err := s.db.WithContext(ctx).Where("token_hash = ?", hash).First(&token).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("api token not found")
+		}
+		return nil, err
+	}
+	return &token, nil
+}
+
+func (s *Store) ListAPITokensByUser(ctx context.Context, userID string) ([]APIToken, error) {
+	var tokens []APIToken
+	err := s.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Find(&tokens).Error
+	return tokens, err
+}
+
+func (s *Store) DeleteAPIToken(ctx context.Context, id, userID string) error {
+	result := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&APIToken{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("api token not found")
+	}
+	return nil
+}
+
+func (s *Store) UpdateAPITokenLastUsed(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Model(&APIToken{}).Where("id = ?", id).Update("last_used_at", time.Now()).Error
+}
+
+// RegistrationInvite operations
+func (s *Store) CreateRegistrationInvite(ctx context.Context, invite *RegistrationInvite) error {
+	if invite.ID == "" {
+		invite.ID = uuid.New().String()
+	}
+	return s.db.WithContext(ctx).Create(invite).Error
+}
+
+func (s *Store) GetRegistrationInvite(ctx context.Context, id string) (*RegistrationInvite, error) {
+	var invite RegistrationInvite
+	err := s.db.WithContext(ctx).First(&invite, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("invite not found")
+		}
+		return nil, err
+	}
+	return &invite, nil
+}
+
+func (s *Store) GetRegistrationInviteByCode(ctx context.Context, code string) (*RegistrationInvite, error) {
+	var invite RegistrationInvite
+	err := s.db.WithContext(ctx).First(&invite, "code = ?", code).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("invite not found")
+		}
+		return nil, err
+	}
+	return &invite, nil
+}
+
+func (s *Store) ListRegistrationInvites(ctx context.Context) ([]*RegistrationInvite, error) {
+	var invites []*RegistrationInvite
+	err := s.db.WithContext(ctx).Order("created_at DESC").Find(&invites).Error
+	return invites, err
+}
+
+func (s *Store) IncrementInviteUseCount(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Model(&RegistrationInvite{}).Where("id = ?", id).
+		Update("use_count", gorm.Expr("use_count + 1")).Error
+}
+
+func (s *Store) DeleteRegistrationInvite(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Delete(&RegistrationInvite{}, "id = ?", id).Error
+}
+
+// SystemSetting operations
+
+func (s *Store) GetSystemSetting(ctx context.Context, key string) (string, error) {
+	var setting SystemSetting
+	err := s.db.WithContext(ctx).First(&setting, "key = ?", key).Error
+	if err != nil {
+		return "", err
+	}
+	return setting.Value, nil
+}
+
+func (s *Store) SetSystemSetting(ctx context.Context, key, value string) error {
+	setting := SystemSetting{Key: key, Value: value}
+	return s.db.WithContext(ctx).Save(&setting).Error
 }
 
 // ScheduledTask operations

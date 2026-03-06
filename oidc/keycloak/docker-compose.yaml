@@ -1,0 +1,100 @@
+# DiscoPanel + Keycloak (OIDC)
+#
+# This is a complete docker-compose with OIDC authentication pre-configured using Keycloak.
+#
+# Keycloak takes ~30-60 seconds to start. DiscoPanel waits for it.
+#
+# Keycloak Admin UI (See KC_BOOTSTRAP_ADMIN_USERNAME/KC_BOOTSTRAP_ADMIN_PASSWORD below): http://localhost:8180/admin
+
+services:
+  discopanel:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile.discopanel
+    #image: nickheyer/discopanel:dev
+    container_name: discopanel
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/discopanel:/app/data
+    environment:
+      - DISCOPANEL_DATA_DIR=/app/data
+      - DISCOPANEL_HOST_DATA_PATH=/tmp/discopanel
+      - TZ=UTC
+
+      #  ------------------------------------ AUTH CONFIG STARTS HERE FOR DISCOPANEL + KEYCLOAK ------------------------------------
+      - DISCOPANEL_AUTH_LOCAL_ENABLED=true
+      - DISCOPANEL_AUTH_OIDC_ENABLED=true
+
+      # ONLY CHANGE THIS IF YOU ARE HOSTING OIDC ON ANOTHER MACHINE OR WITH A DIFFERENT "realm" NAME
+      - DISCOPANEL_AUTH_OIDC_ISSUER_URI=http://localhost:8180/realms/discopanel
+
+      # ONLY CHANGE THIS IF YOUR CLIENT NAME IS DIFFERENT
+      - DISCOPANEL_AUTH_OIDC_CLIENT_ID=discopanel
+
+      # YOU SHOULD CHANGE THIS HERE AS WELL AS IN oidc/keycloak/config/realm.json (inside the clients object)
+      - DISCOPANEL_AUTH_OIDC_CLIENT_SECRET=discopanel-dev-secret
+
+      # YOU SHOULD CHANGE "localhost:8080" TO WHATEVER YOUR PUBLIC DOMAIN IS FOR DISCOPANEL (ie: https://mypanel.com/api/v1/auth/oidc/callback)
+      - DISCOPANEL_AUTH_OIDC_REDIRECT_URL=http://localhost:8080/api/v1/auth/oidc/callback 
+
+      - DISCOPANEL_AUTH_OIDC_ROLE_CLAIM=groups
+
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: keycloak
+    command: start-dev --import-realm
+    volumes:
+      # THIS IS AN EXAMPLE REALM CONFIG, MODIFY AS NEEDED (WHICH MAY REQUIRE MODIFYING DISCOPANEL CONFIG TO MATCH, SEE ABOVE)
+      - ./config/realm.json:/opt/keycloak/data/import/realm.json:ro
+    environment:
+      # KEYCLOAK ADMIN LOGIN CREDENTIALS - CHANGE THESE!!!!!
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+
+      # KEYCLOAK DATABASE CONFIG, DONT CHANGE THESE UNLESS YOU KNOW WHAT YOU ARE DOING OR USING EXISTING DATABASE
+      - KC_DB=postgres
+      - KC_DB_URL_HOST=keycloak-db
+      - KC_DB_URL_DATABASE=keycloak
+      - KC_DB_USERNAME=keycloak
+      - KC_DB_PASSWORD=keycloak
+
+      # MISC KEYCLOAK CONFIGS
+      - KC_HOSTNAME_STRICT=false
+      - KC_HTTP_ENABLED=true
+      - KC_HEALTH_ENABLED=true
+      - KC_PROXY_HEADERS=xforwarded
+    ports:
+      - "8180:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; timeout 2 cat <&3 | grep -q '200 OK'"]
+      interval: 20s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+
+  keycloak-db:
+    image: postgres:17-alpine
+    container_name: keycloak-db
+    environment:
+      - POSTGRES_DB=keycloak
+      - POSTGRES_USER=keycloak
+      - POSTGRES_PASSWORD=keycloak
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  keycloak-db-data:

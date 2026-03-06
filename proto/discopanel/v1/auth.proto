@@ -3,30 +3,85 @@ syntax = "proto3";
 package discopanel.v1;
 
 import "discopanel/v1/common.proto";
+import "gnostic/openapi/v3/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+// Global OpenAPI security: Bearer token auth via session JWT or API token (dp_...)
+option (gnostic.openapi.v3.document) = {
+  info: {
+    title: "DiscoPanel API"
+    version: "2.x"
+    description: "DiscoPanel server management API. Authenticate using a session token (from Login/OIDC) or an API token (dp_... prefix) in the Authorization header.\n\n## Connect Protocol\n\nThis API uses the [Connect protocol](https://connectrpc.com/docs/protocol) over HTTP. All endpoints accept `POST` with `application/json` bodies. Connect clients may send the following optional headers:\n\n- `Connect-Protocol-Version: 1` — declares the Connect protocol version.\n- `Connect-Timeout-Ms: <ms>` — request deadline in milliseconds.\n\nThese headers are handled automatically by Connect client libraries and are not required when calling the API directly with curl or other HTTP clients."
+  }
+  components: {
+    security_schemes: {
+      additional_properties: [
+        {
+          name: "BearerAuth"
+          value: {
+            security_scheme: {
+              type: "http"
+              scheme: "bearer"
+              description: "Session JWT from login, or API token with dp_ prefix"
+            }
+          }
+        }
+      ]
+    }
+  }
+  security: [
+    {
+      additional_properties: [
+        {
+          name: "BearerAuth"
+          value: {
+            value: []
+          }
+        }
+      ]
+    }
+  ]
+};
 
-// Authentication and authorization service
+// Authentication service
 service AuthService {
-  // Check if auth is enabled
+  // Check auth system status (public)
   rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse);
-  // Authenticate user credentials
+  // Authenticate with local credentials (public)
   rpc Login(LoginRequest) returns (LoginResponse);
-  // Invalidate session token
+  // Invalidate session
   rpc Logout(LogoutRequest) returns (LogoutResponse);
-  // Create new user account
+  // Register new local account (public)
   rpc Register(RegisterRequest) returns (RegisterResponse);
-  // Reset password with recovery key
-  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
-  // Get auth configuration
-  rpc GetAuthConfig(GetAuthConfigRequest) returns (GetAuthConfigResponse);
-  // Modify auth configuration
-  rpc UpdateAuthConfig(UpdateAuthConfigRequest) returns (UpdateAuthConfigResponse);
   // Get authenticated user info
   rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
-  // Change user's own password
+  // Change own password (local auth only)
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+  // Get OIDC login redirect URL (public)
+  rpc GetOIDCLoginURL(GetOIDCLoginURLRequest) returns (GetOIDCLoginURLResponse);
+  // Get full auth configuration
+  rpc GetAuthConfig(GetAuthConfigRequest) returns (GetAuthConfigResponse);
+  // Update mutable auth settings
+  rpc UpdateAuthSettings(UpdateAuthSettingsRequest) returns (UpdateAuthSettingsResponse);
+  // Create a registration invite link
+  rpc CreateInvite(CreateInviteRequest) returns (CreateInviteResponse);
+  // List all registration invites
+  rpc ListInvites(ListInvitesRequest) returns (ListInvitesResponse);
+  // Get a specific invite by ID
+  rpc GetInvite(GetInviteRequest) returns (GetInviteResponse);
+  // Delete/revoke an invite
+  rpc DeleteInvite(DeleteInviteRequest) returns (DeleteInviteResponse);
+  // Validate an invite code (public)
+  rpc ValidateInvite(ValidateInviteRequest) returns (ValidateInviteResponse);
+  // Create a new API token for the authenticated user
+  rpc CreateAPIToken(CreateAPITokenRequest) returns (CreateAPITokenResponse);
+  // List all API tokens for the authenticated user
+  rpc ListAPITokens(ListAPITokensRequest) returns (ListAPITokensResponse);
+  // Delete/revoke an API token
+  rpc DeleteAPIToken(DeleteAPITokenRequest) returns (DeleteAPITokenResponse);
+  // Use recovery key to reset all users and return to first-user-setup (public)
+  rpc UseRecoveryKey(UseRecoveryKeyRequest) returns (UseRecoveryKeyResponse);
 }
 
 // Empty auth status request
@@ -34,12 +89,14 @@ message GetAuthStatusRequest {}
 
 // Auth system state
 message GetAuthStatusResponse {
-  bool enabled = 1;
-  bool first_user_setup = 2;
+  bool local_auth_enabled = 1;
+  bool oidc_enabled = 2;
   bool allow_registration = 3;
+  bool first_user_setup = 4;
+  bool anonymous_access_enabled = 5;
 }
 
-// User credentials
+// Local login credentials
 message LoginRequest {
   string username = 1;
   string password = 2;
@@ -60,64 +117,30 @@ message LogoutResponse {
   string message = 1;
 }
 
-// New account info
+// New local account
 message RegisterRequest {
   string username = 1;
   string email = 2;
   string password = 3;
+  optional string invite_code = 4;
+  optional string invite_pin = 5;
 }
 
-// Created user account
+// Created user
 message RegisterResponse {
   User user = 1;
-}
-
-// Password reset credentials
-message ResetPasswordRequest {
-  string username = 1;
-  string recovery_key = 2;
-  string new_password = 3;
-}
-
-// Reset confirmation
-message ResetPasswordResponse {
-  string message = 1;
-}
-
-// Empty config request
-message GetAuthConfigRequest {}
-
-// Current auth settings
-message GetAuthConfigResponse {
-  bool enabled = 1;
-  int32 session_timeout = 2;
-  bool require_email_verify = 3;
-  bool allow_registration = 4;
-}
-
-// Auth settings to update
-message UpdateAuthConfigRequest {
-  optional bool enabled = 1;
-  optional int32 session_timeout = 2;
-  optional bool require_email_verify = 3;
-  optional bool allow_registration = 4;
-}
-
-// Config update result
-message UpdateAuthConfigResponse {
-  string message = 1;
-  bool requires_first_user = 2; // If enabling auth with no users
 }
 
 // Empty current user request
 message GetCurrentUserRequest {}
 
-// Authenticated user info
+// Authenticated user with permissions
 message GetCurrentUserResponse {
   User user = 1;
+  repeated Permission permissions = 2;
 }
 
-// Password change credentials
+// Password change
 message ChangePasswordRequest {
   string old_password = 1;
   string new_password = 2;
@@ -125,5 +148,158 @@ message ChangePasswordRequest {
 
 // Password change confirmation
 message ChangePasswordResponse {
+  string message = 1;
+}
+
+// OIDC login URL request
+message GetOIDCLoginURLRequest {}
+
+// OIDC login redirect URL
+message GetOIDCLoginURLResponse {
+  string login_url = 1;
+}
+
+// Empty auth config request
+message GetAuthConfigRequest {}
+
+// Full auth configuration for admin display
+message GetAuthConfigResponse {
+  bool local_auth_enabled = 1;
+  bool allow_registration = 2;
+  bool anonymous_access = 3;
+  int32 session_timeout = 4;
+  bool oidc_enabled = 5;
+  // OIDC display details (non-secret, only populated when OIDC is enabled)
+  optional string oidc_issuer_uri = 6;
+  optional string oidc_client_id = 7;
+  optional string oidc_redirect_url = 8;
+  repeated string oidc_scopes = 9;
+  optional string oidc_role_claim = 10;
+  bool first_user_setup = 11;
+}
+
+// Update mutable auth settings (all fields optional, only provided fields are updated)
+message UpdateAuthSettingsRequest {
+  optional bool local_auth_enabled = 1;
+  optional bool allow_registration = 2;
+  optional bool anonymous_access = 3;
+  optional int32 session_timeout = 4;
+}
+
+// Returns the updated auth configuration
+message UpdateAuthSettingsResponse {
+  GetAuthConfigResponse config = 1;
+}
+
+// Registration invite link
+message RegistrationInvite {
+  string id = 1;
+  string code = 2;
+  string description = 3;
+  repeated string roles = 4;
+  bool has_pin = 5;
+  int32 max_uses = 6;
+  int32 use_count = 7;
+  google.protobuf.Timestamp expires_at = 8;
+  string created_by = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+// New invite with roles, optional PIN, and expiry
+message CreateInviteRequest {
+  string description = 1;
+  repeated string roles = 2;
+  optional string pin = 3;
+  int32 max_uses = 4;
+  optional int32 expires_in_hours = 5;
+}
+
+// Created invite details
+message CreateInviteResponse {
+  RegistrationInvite invite = 1;
+}
+
+// Empty list invites request
+message ListInvitesRequest {}
+
+// All registration invites
+message ListInvitesResponse {
+  repeated RegistrationInvite invites = 1;
+}
+
+// Invite lookup by ID
+message GetInviteRequest {
+  string id = 1;
+}
+
+// Single invite details
+message GetInviteResponse {
+  RegistrationInvite invite = 1;
+}
+
+// Invite deletion by ID
+message DeleteInviteRequest {
+  string id = 1;
+}
+
+// Empty delete invite confirmation
+message DeleteInviteResponse {}
+
+// Invite code to validate
+message ValidateInviteRequest {
+  string code = 1;
+}
+
+// Invite validity and PIN requirement
+message ValidateInviteResponse {
+  bool valid = 1;
+  bool requires_pin = 2;
+  string description = 3;
+}
+
+// API Token metadata (never includes the token value)
+message ApiToken {
+  string id = 1;
+  string name = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  google.protobuf.Timestamp last_used_at = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// New API token with name and optional expiry
+message CreateAPITokenRequest {
+  string name = 1;
+  optional int32 expires_in_days = 2;
+}
+
+// Plaintext token (shown once) and metadata
+message CreateAPITokenResponse {
+  string plaintext_token = 1;
+  ApiToken api_token = 2;
+}
+
+// Empty list API tokens request
+message ListAPITokensRequest {}
+
+// All API tokens for the authenticated user
+message ListAPITokensResponse {
+  repeated ApiToken api_tokens = 1;
+}
+
+// API token deletion by ID
+message DeleteAPITokenRequest {
+  string id = 1;
+}
+
+// Empty delete API token confirmation
+message DeleteAPITokenResponse {}
+
+// Recovery key to reset panel access
+message UseRecoveryKeyRequest {
+  string recovery_key = 1;
+}
+
+// Recovery key result
+message UseRecoveryKeyResponse {
   string message = 1;
 }

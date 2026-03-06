@@ -1,12 +1,14 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
-	"github.com/nickheyer/discopanel/internal/db"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
 
@@ -20,6 +22,38 @@ type Config struct {
 	Minecraft MinecraftConfig `mapstructure:"minecraft" json:"minecraft"`
 	Logging   LoggingConfig   `mapstructure:"logging" json:"logging"`
 	Upload    UploadConfig    `mapstructure:"upload" json:"upload"`
+	Auth      AuthConfig      `mapstructure:"auth" json:"auth"`
+}
+
+type AuthConfig struct {
+	SessionTimeout  int         `mapstructure:"session_timeout" json:"session_timeout"`
+	AnonymousAccess bool        `mapstructure:"anonymous_access" json:"anonymous_access"`
+	JWTSecret       string      `mapstructure:"jwt_secret" json:"jwt_secret"`
+	OIDC            OIDCConfig  `mapstructure:"oidc" json:"oidc"`
+	Local           LocalConfig `mapstructure:"local" json:"local"`
+}
+
+type OIDCConfig struct {
+	Enabled         bool              `mapstructure:"enabled" json:"enabled"`
+	IssuerURI       string            `mapstructure:"issuer_uri" json:"issuer_uri"`
+	ClientID        string            `mapstructure:"client_id" json:"client_id"`
+	ClientSecret    string            `mapstructure:"client_secret" json:"client_secret"`
+	RedirectURL     string            `mapstructure:"redirect_url" json:"redirect_url"`
+	Scopes          []string          `mapstructure:"scopes" json:"scopes"`
+	RoleClaim       string            `mapstructure:"role_claim" json:"role_claim"`
+	RoleMapping     map[string]string `mapstructure:"role_mapping" json:"role_mapping"`
+	RejectUnmapped  bool              `mapstructure:"reject_unmapped" json:"reject_unmapped"`
+	SkipTLSVerify   bool              `mapstructure:"skip_tls_verify" json:"skip_tls_verify"`
+	ExtraClaimsURL  string            `mapstructure:"extra_claims_url" json:"extra_claims_url"`
+	ExtraClaimsKey  string            `mapstructure:"extra_claims_key" json:"extra_claims_key"`
+	ExtraClaimsName string            `mapstructure:"extra_claims_name" json:"extra_claims_name"`
+	RequiredClaim   string            `mapstructure:"required_claim" json:"required_claim"`
+	RequiredValues  []string          `mapstructure:"required_values" json:"required_values"`
+}
+
+type LocalConfig struct {
+	Enabled           bool `mapstructure:"enabled" json:"enabled"`
+	AllowRegistration bool `mapstructure:"allow_registration" json:"allow_registration"`
 }
 
 type ServerConfig struct {
@@ -29,13 +63,6 @@ type ServerConfig struct {
 	WriteTimeout int    `mapstructure:"write_timeout" json:"write_timeout"`
 	IdleTimeout  int    `mapstructure:"idle_timeout" json:"idle_timeout"`
 	UserAgent    string `mapstructure:"user_agent" json:"user_agent"`
-}
-
-type DatabaseConfig struct {
-	Path            string `mapstructure:"path" json:"path"`
-	MaxConnections  int    `mapstructure:"max_connections" json:"max_connections"`
-	MaxIdleConns    int    `mapstructure:"max_idle_conns" json:"max_idle_conns"`
-	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime" json:"conn_max_lifetime"`
 }
 
 type DockerConfig struct {
@@ -68,9 +95,17 @@ type ModuleConfig struct {
 	PortRangeMax int  `mapstructure:"port_range_max" json:"port_range_max"`
 }
 
+type DatabaseConfig struct {
+	Path            string `mapstructure:"path" json:"path"`
+	MaxConnections  int    `mapstructure:"max_connections" json:"max_connections"`
+	MaxIdleConns    int    `mapstructure:"max_idle_conns" json:"max_idle_conns"`
+	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime" json:"conn_max_lifetime"`
+	AutoMigrate     bool   `mapstructure:"auto_migrate" json:"auto_migrate"`
+}
+
 type MinecraftConfig struct {
-	ResetGlobal  bool            `mapstructure:"reset_global" json:"reset_global"`
-	GlobalConfig db.ServerConfig `mapstructure:"global_config" json:"global_config"`
+	ResetGlobal  bool           `mapstructure:"reset_global" json:"reset_global"`
+	GlobalConfig map[string]any `mapstructure:"global_config" json:"global_config"`
 }
 
 type LoggingConfig struct {
@@ -120,9 +155,15 @@ func Load(configPath string) (*Config, error) {
 		// Config file not found; use defaults and environment
 	}
 
-	// Unmarshal config
+	// Unmarshal config with a decode hook that handles JSON strings from env
 	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
+	if err := v.Unmarshal(&cfg, func(dc *mapstructure.DecoderConfig) {
+		dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeDurationHookFunc(),
+			mapstructure.StringToSliceHookFunc(","),
+			jsonStringToMapHook(),
+		)
+	}); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 
@@ -148,6 +189,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.max_connections", 25)
 	v.SetDefault("database.max_idle_conns", 5)
 	v.SetDefault("database.conn_max_lifetime", 300)
+	v.SetDefault("database.auto_migrate", true)
 
 	// Docker defaults
 	v.SetDefault("docker.sync_interval", 5)
@@ -188,6 +230,28 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.max_backups", 5) // keep 5
 	v.SetDefault("logging.max_age", 30)    // 30 days
 	v.SetDefault("logging.compress", true) // compress rotated
+
+	// Auth defaults
+	v.SetDefault("auth.session_timeout", 86400)
+	v.SetDefault("auth.anonymous_access", false)
+	v.SetDefault("auth.jwt_secret", "")
+	v.SetDefault("auth.oidc.enabled", false)
+	v.SetDefault("auth.oidc.issuer_uri", "")
+	v.SetDefault("auth.oidc.client_id", "")
+	v.SetDefault("auth.oidc.client_secret", "")
+	v.SetDefault("auth.oidc.redirect_url", "")
+	v.SetDefault("auth.oidc.scopes", []string{"openid", "profile", "email"})
+	v.SetDefault("auth.oidc.role_claim", "groups")
+	v.SetDefault("auth.oidc.role_mapping", map[string]string{})
+	v.SetDefault("auth.oidc.reject_unmapped", false)
+	v.SetDefault("auth.oidc.skip_tls_verify", false)
+	v.SetDefault("auth.oidc.extra_claims_url", "")
+	v.SetDefault("auth.oidc.extra_claims_key", "")
+	v.SetDefault("auth.oidc.extra_claims_name", "")
+	v.SetDefault("auth.oidc.required_claim", "")
+	v.SetDefault("auth.oidc.required_values", []string{})
+	v.SetDefault("auth.local.enabled", true)
+	v.SetDefault("auth.local.allow_registration", false)
 
 	// Upload defaults
 	v.SetDefault("upload.session_ttl", 240)                // 4 hours (in minutes)
@@ -244,7 +308,16 @@ func validateConfig(cfg *Config) error {
 	return nil
 }
 
-// LoadGlobalServerConfig returns the global ServerConfig defaults from the config file
-func LoadGlobalServerConfig(cfg *Config) db.ServerConfig {
-	return cfg.Minecraft.GlobalConfig
+// Decodes JSON object strings into map types
+func jsonStringToMapHook() mapstructure.DecodeHookFuncType {
+	return func(from, to reflect.Type, data any) (any, error) {
+		if from.Kind() != reflect.String || to.Kind() != reflect.Map {
+			return data, nil
+		}
+		var m any
+		if err := json.Unmarshal([]byte(data.(string)), &m); err != nil {
+			return data, nil
+		}
+		return m, nil
+	}
 }

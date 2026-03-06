@@ -27,7 +27,7 @@ services:
       # You can set this to any path you'd like, but the path must exist AND you must use the same
       # absolute paths below for the below env vars (in the environment section at the bottom). Example:
       # DISCOPANEL_DATA_DIR=/app/data
-      # DISCOPANEL_HOST_DATA_PATH=/home/user/data
+      # DISCOPANEL_HOST_DATA_PATH=/opt/discopanel/data
       # (See environment)
       - /opt/discopanel/data:/app/data
       - /opt/discopanel/backups:/app/backups
@@ -39,8 +39,18 @@ services:
       - DISCOPANEL_DATA_DIR=/app/data
 
       # IMPORTANT: THIS MUST BE SET TO THE SAME PATH AS THE SERVER DATA PATH IN "volumes" above
-      - DISCOPANEL_HOST_DATA_PATH=/home/user/data
+      - DISCOPANEL_HOST_DATA_PATH=/opt/discopanel/data
       - TZ=UTC
+
+      # ── Authentication ──────────────────────────
+      # Local auth (username/password) is on by default.
+      # You create your first admin account on first login.
+      #
+      # Want to let new users sign up on their own?
+      # - DISCOPANEL_AUTH_LOCAL_ALLOW_REGISTRATION=true
+      #
+      # Want single sign-on (OIDC) with Keycloak, Authelia, etc?
+      # See the oidc/ folder for examples.
 
     # DONT FORGET THIS
     extra_hosts:

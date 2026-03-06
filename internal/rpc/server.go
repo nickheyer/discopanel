@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/internal/rbac"
+	"github.com/nickheyer/discopanel/internal/rpc/handlers"
 	"github.com/nickheyer/discopanel/internal/rpc/services"
 	"github.com/nickheyer/discopanel/internal/scheduler"
 	"github.com/nickheyer/discopanel/internal/ws"
@@ -25,6 +28,8 @@ import (
 	web "github.com/nickheyer/discopanel/web/discopanel"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // Server represents the Connect RPC server
@@ -36,7 +41,8 @@ type Server struct {
 	handler          http.Handler
 	proxyManager     *proxy.Manager
 	authManager      *auth.Manager
-	authMiddleware   *auth.Middleware
+	enforcer         *rbac.Enforcer
+	oidcHandler      *auth.OIDCHandler
 	logStreamer      *logger.LogStreamer
 	scheduler        *scheduler.Scheduler
 	metricsCollector *metrics.Collector
@@ -47,13 +53,28 @@ type Server struct {
 
 // Creates new Connect RPC server
 func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, moduleManager *module.Manager, log *logger.Logger) *Server {
-	// Initialize auth manager
-	authManager := auth.NewManager(store)
-	authMiddleware := auth.NewMiddleware(authManager, store)
+	// Initialize RBAC enforcer
+	enforcer, err := rbac.NewEnforcer(store.DB())
+	if err != nil {
+		log.Error("Failed to initialize RBAC enforcer: %v", err)
+	}
+	if enforcer != nil {
+		if err := enforcer.SeedDefaultPolicies(cfg.Auth.AnonymousAccess); err != nil {
+			log.Error("Failed to seed default policies: %v", err)
+		}
+	}
 
-	// Initialize auth on startup
-	if err := authManager.InitializeAuth(context.Background()); err != nil {
-		log.Error("Failed to initialize authentication: %v", err)
+	// Initialize auth manager
+	authManager, err := auth.NewManager(store, enforcer, &cfg.Auth)
+	if err != nil {
+		log.Error("Failed to initialize auth manager: %v", err)
+	}
+
+	// Initialize OIDC handler
+	oidcHandler, err := auth.NewOIDCHandler(authManager, store, &cfg.Auth.OIDC, log)
+	if err != nil {
+		log.Warn("Failed to initialize OIDC handler: %v", err)
+		oidcHandler, _ = auth.NewOIDCHandler(authManager, store, &config.OIDCConfig{}, log)
 	}
 
 	// Initialize log streamer
@@ -65,7 +86,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	uploadManager := upload.NewManager(cfg.Storage.TempDir, uploadTTL, cfg.Upload.MaxUploadSize, log)
 
 	// Initialize WebSocket hub
-	wsHub := ws.NewHub(logStreamer, authManager, store, docker, log)
+	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, docker, log)
 	go wsHub.Run()
 
 	s := &Server{
@@ -75,7 +96,8 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		log:              log,
 		proxyManager:     proxyManager,
 		authManager:      authManager,
-		authMiddleware:   authMiddleware,
+		enforcer:         enforcer,
+		oidcHandler:      oidcHandler,
 		logStreamer:      logStreamer,
 		scheduler:        sched,
 		metricsCollector: metricsCollector,
@@ -119,6 +141,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.ModpackServiceName,
 		discopanelv1connect.ModuleServiceName,
 		discopanelv1connect.ProxyServiceName,
+		discopanelv1connect.RoleServiceName,
 		discopanelv1connect.ServerServiceName,
 		discopanelv1connect.SupportServiceName,
 		discopanelv1connect.TaskServiceName,
@@ -131,6 +154,15 @@ func (s *Server) setupHandler() {
 	// Register WebSocket handler
 	mux.Handle("/ws", s.wsHub)
 
+	// Register OIDC HTTP handlers
+	if s.oidcHandler != nil && s.oidcHandler.IsEnabled() {
+		mux.HandleFunc("/api/v1/auth/oidc/login", s.oidcHandler.HandleLogin)
+		mux.HandleFunc("/api/v1/auth/oidc/callback", s.oidcHandler.HandleCallback)
+	}
+
+	// Serve dynamic OpenAPI spec
+	mux.HandleFunc("/api/v1/openapi.yaml", handlers.NewOpenAPIHandler(s.log, s.authManager.IsAnyAuthEnabled))
+
 	// Serve frontend for non-RPC routes
 	s.setupFrontend(mux)
 
@@ -141,7 +173,7 @@ func (s *Server) setupHandler() {
 // Registers all Connect RPC service handlers
 func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
 	// Create service instances
-	authService := services.NewAuthService(s.store, s.authManager, s.log)
+	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.log)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.log)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
@@ -152,6 +184,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
+	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.config, s.logStreamer, s.log)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
 
@@ -189,6 +222,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	userPath, userHandler := discopanelv1connect.NewUserServiceHandler(userService, opts...)
 	mux.Handle(userPath, userHandler)
 
+	rolePath, roleHandler := discopanelv1connect.NewRoleServiceHandler(roleService, opts...)
+	mux.Handle(rolePath, roleHandler)
+
 	modulePath, moduleHandler := discopanelv1connect.NewModuleServiceHandler(moduleService, opts...)
 	mux.Handle(modulePath, moduleHandler)
 
@@ -214,23 +250,81 @@ func (s *Server) loggingInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// Creates a Connect interceptor for authentication
+// Creates a Connect interceptor for authentication and authorization
 func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			// Extract token from auth header
-			token := ""
-			if authHeader := req.Header().Get("Authorization"); authHeader != "" {
-				token, _ = strings.CutPrefix(authHeader, "Bearer ")
-				token, _ = strings.CutPrefix(token, "bearer ")
+			procedure := req.Spec().Procedure
+
+			// Public procedures - no auth required
+			if rbac.PublicProcedures[procedure] {
+				return next(ctx, req)
 			}
 
-			// Validate user session or return valid anon user/session if auth disabled
-			user, err := s.authManager.ValidateSession(ctx, token)
-			if err == nil && user != nil {
-				ctx = context.WithValue(ctx, auth.UserContextKey, user)
-			} else if err != nil {
-				s.log.Debug("Auth: Token validation failed for %s: %v", req.Spec().Procedure, err)
+			// If no auth providers are enabled, bypass auth entirely - grant full admin access
+			if !s.authManager.IsAnyAuthEnabled() {
+				superUser := &auth.AuthenticatedUser{
+					ID:       "admin",
+					Username: "admin",
+					Roles:    []string{"admin"},
+					Provider: "none",
+				}
+				ctx = auth.WithUser(ctx, superUser)
+				return next(ctx, req)
+			}
+
+			// Extract token from Authorization header
+			token := ""
+			if authHeader := req.Header().Get("Authorization"); authHeader != "" {
+				token = strings.TrimPrefix(strings.TrimPrefix(authHeader, "Bearer "), "bearer ")
+			}
+
+			var user *auth.AuthenticatedUser
+
+			if token != "" {
+				var err error
+				if strings.HasPrefix(token, "dp_") {
+					// API token authentication
+					user, err = s.authManager.ValidateAPIToken(ctx, token)
+				} else {
+					// Session/JWT authentication
+					user, err = s.authManager.ValidateSession(ctx, token)
+				}
+				if err != nil {
+					s.log.Debug("Auth: Token validation failed for %s: %v", procedure, err)
+					return nil, connect.NewError(connect.CodeUnauthenticated, err)
+				}
+			} else if s.authManager.IsAnonymousAccessEnabled() {
+				// Anonymous access
+				user = s.authManager.AnonymousUser()
+			} else {
+				return nil, connect.NewError(connect.CodeUnauthenticated, auth.ErrInvalidToken)
+			}
+
+			// Set user in context
+			ctx = auth.WithUser(ctx, user)
+
+			// Authenticated-only procedures (no specific resource permission needed)
+			if rbac.AuthenticatedOnlyProcedures[procedure] {
+				return next(ctx, req)
+			}
+
+			// Check resource permission
+			if perm, ok := rbac.ProcedurePermissions[procedure]; ok {
+				if s.enforcer != nil {
+					objectID := "*"
+					if perm.ObjectIDField != "" {
+						objectID = extractObjectID(req, perm.ObjectIDField)
+					}
+					allowed, err := s.enforcer.Enforce(user.Roles, perm.Resource, perm.Action, objectID)
+					if err != nil {
+						s.log.Error("RBAC enforcement error: %v", err)
+						return nil, connect.NewError(connect.CodeInternal, err)
+					}
+					if !allowed {
+						return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("insufficient permissions for %s/%s", perm.Resource, perm.Action))
+					}
+				}
 			}
 
 			return next(ctx, req)
@@ -238,19 +332,20 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
+// pollingProcedures lists endpoints that are called frequently and should be excluded from logging.
+var pollingProcedures = []string{
+	"/discopanel.v1.AuthService/GetAuthStatus",
+	"/discopanel.v1.ServerService/ListServers",
+	"/discopanel.v1.ServerService/GetServer",
+	"/discopanel.v1.ServerService/GetServerLogs",
+	"/discopanel.v1.ProxyService/GetProxyStatus",
+	"/discopanel.v1.SupportService/GetApplicationLogs",
+	"/discopanel.v1.UploadService/UploadChunk",
+	"/discopanel.v1.UploadService/GetUploadStatus",
+}
+
 // Checks if a procedure is a polling endpoint or high-frequency endpoint
 func (s *Server) isPollingProcedure(procedure string) bool {
-	pollingProcedures := []string{
-		"/discopanel.v1.AuthService/GetAuthStatus",
-		"/discopanel.v1.ServerService/ListServers",
-		"/discopanel.v1.ServerService/GetServer",
-		"/discopanel.v1.ServerService/GetServerLogs",
-		"/discopanel.v1.ProxyService/GetProxyStatus",
-		"/discopanel.v1.SupportService/GetApplicationLogs",
-		"/discopanel.v1.UploadService/UploadChunk",
-		"/discopanel.v1.UploadService/GetUploadStatus",
-	}
-
 	return slices.Contains(pollingProcedures, procedure)
 }
 
@@ -286,7 +381,7 @@ func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
 			return
 		}
 
-		// Try to serve the file
+		// Try to serve the file directly (static assets like JS, CSS, images)
 		path := r.URL.Path
 		if path == "/" {
 			path = "/index.html"
@@ -329,6 +424,29 @@ func isConnectPath(path string) bool {
 		}
 	}
 	return false
+}
+
+// extractObjectID extracts a named string field from a protobuf request message
+// using reflection. Falls back to "*" if the field is missing or empty.
+func extractObjectID(req connect.AnyRequest, fieldName string) string {
+	msg, ok := req.Any().(proto.Message)
+	if !ok {
+		return "*"
+	}
+	fd := msg.ProtoReflect().Descriptor().Fields().ByName(protoreflect.Name(fieldName))
+	if fd == nil {
+		return "*"
+	}
+	val := msg.ProtoReflect().Get(fd)
+	if str := val.String(); str != "" {
+		return str
+	}
+	return "*"
+}
+
+// RecoveryKey returns the current recovery key from the auth manager.
+func (s *Server) RecoveryKey() string {
+	return s.authManager.GetRecoveryKey()
 }
 
 // Starts log streaming for a container

@@ -16,18 +16,19 @@
 	} from '@lucide/svelte';
 	import { ServerStatus, type Server as ServerType } from '$lib/proto/discopanel/v1/common_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { serversStore } from '$lib/stores/servers';
 
-	// Dashboard data - not from the polling store
+	// Dashboard data
 	let dashboardServers: ServerType[] = $state([]);
 	let isLoading = $state(true);
 	let isRefreshing = $state(false);
 	let currentTime = $state(new Date());
-	
 	// Load dashboard data with full stats
 	async function loadDashboardData() {
 		try {
 			const response = await rpcClient.server.listServers({ fullStats: true });
 			dashboardServers = response.servers;
+			serversStore.set(response.servers);
 		} catch (error) {
 			console.error('Failed to load dashboard data:', error);
 		}

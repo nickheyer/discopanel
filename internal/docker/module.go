@@ -228,7 +228,7 @@ func (c *Client) parseVolumeMounts(volumeJSON string, aliasCtx *alias.Context) [
 			Source:      source,
 			Target:      target,
 			ReadOnly:    vol.ReadOnly,
-			BindOptions: &mount.BindOptions{CreateMountpoint: true},
+			BindOptions: &mount.BindOptions{CreateMountpoint: !vol.ReadOnly},
 		})
 	}
 

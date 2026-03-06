@@ -10,19 +10,17 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Compile-time check that UserService implements the interface
 var _ discopanelv1connect.UserServiceHandler = (*UserService)(nil)
 
-// UserService implements the User service
 type UserService struct {
 	store       *storage.Store
 	authManager *auth.Manager
 	log         *logger.Logger
 }
 
-// NewUserService creates a new user service
 func NewUserService(store *storage.Store, authManager *auth.Manager, log *logger.Logger) *UserService {
 	return &UserService{
 		store:       store,
@@ -31,24 +29,17 @@ func NewUserService(store *storage.Store, authManager *auth.Manager, log *logger
 	}
 }
 
-// ListUsers lists all users (admin only)
 func (s *UserService) ListUsers(ctx context.Context, req *connect.Request[v1.ListUsersRequest]) (*connect.Response[v1.ListUsersResponse], error) {
-	// Check admin permission
-	user := auth.GetUserFromContext(ctx)
-	if user == nil || user.Role != storage.RoleAdmin {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("admin access required"))
-	}
-
 	users, err := s.store.ListUsers(ctx)
 	if err != nil {
 		s.log.Error("Failed to list users: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list users"))
 	}
 
-	// Convert DB users to proto users
-	protoUsers := make([]*v1.User, len(users))
-	for i, u := range users {
-		protoUsers[i] = dbUserToProto(u)
+	protoUsers := make([]*v1.User, 0, len(users))
+	for _, user := range users {
+		roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
+		protoUsers = append(protoUsers, dbUserToProto(user, roles))
 	}
 
 	return connect.NewResponse(&v1.ListUsersResponse{
@@ -56,61 +47,73 @@ func (s *UserService) ListUsers(ctx context.Context, req *connect.Request[v1.Lis
 	}), nil
 }
 
-// CreateUser creates a new user (admin only)
-func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.CreateUserRequest]) (*connect.Response[v1.CreateUserResponse], error) {
-	// Check admin permission
-	user := auth.GetUserFromContext(ctx)
-	if user == nil || user.Role != storage.RoleAdmin {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("admin access required"))
-	}
-
+func (s *UserService) GetUser(ctx context.Context, req *connect.Request[v1.GetUserRequest]) (*connect.Response[v1.GetUserResponse], error) {
 	msg := req.Msg
-
-	// Validate role
-	role := protoRoleToDBRole(msg.Role)
-	if role != storage.RoleAdmin && role != storage.RoleEditor && role != storage.RoleViewer {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid role"))
+	if msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("user ID is required"))
 	}
 
-	// Create user
-	newUser, err := s.authManager.CreateUser(ctx, msg.Username, msg.Email, msg.Password, role)
-	if err != nil {
-		s.log.Error("Failed to create user: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create user"))
-	}
-
-	return connect.NewResponse(&v1.CreateUserResponse{
-		User: dbUserToProto(newUser),
-	}), nil
-}
-
-// UpdateUser updates a user (admin only)
-func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.UpdateUserRequest]) (*connect.Response[v1.UpdateUserResponse], error) {
-	// Check admin permission
-	currentUser := auth.GetUserFromContext(ctx)
-	if currentUser == nil || currentUser.Role != storage.RoleAdmin {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("admin access required"))
-	}
-
-	msg := req.Msg
-
-	// Get the user to update
 	user, err := s.store.GetUser(ctx, msg.Id)
 	if err != nil {
-		s.log.Error("Failed to get user: %v", err)
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("user not found"))
 	}
 
-	// Update fields if provided
-	if msg.Email != nil {
-		if *msg.Email == "" {
-			user.Email = nil // Allow clearing email
-		} else {
-			user.Email = msg.Email
+	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
+
+	return connect.NewResponse(&v1.GetUserResponse{
+		User: dbUserToProto(user, roles),
+	}), nil
+}
+
+func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.CreateUserRequest]) (*connect.Response[v1.CreateUserResponse], error) {
+	msg := req.Msg
+
+	if msg.Username == "" || msg.Password == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("username and password are required"))
+	}
+
+	user, err := s.authManager.CreateLocalUser(ctx, msg.Username, msg.Email, msg.Password)
+	if err != nil {
+		s.log.Error("Failed to create user: %v", err)
+		return nil, connect.NewError(connect.CodeAlreadyExists, errors.New("failed to create user"))
+	}
+
+	// Assign roles
+	for _, roleName := range msg.Roles {
+		if err := s.store.AssignRole(ctx, user.ID, roleName, "local"); err != nil {
+			s.log.Error("Failed to assign role %s to user %s: %v", roleName, user.ID, err)
 		}
 	}
-	if msg.Role != nil {
-		user.Role = protoRoleToDBRole(*msg.Role)
+
+	// If no roles specified, assign default roles
+	if len(msg.Roles) == 0 {
+		defaultRoles, _ := s.store.GetDefaultRoles(ctx)
+		for _, role := range defaultRoles {
+			_ = s.store.AssignRole(ctx, user.ID, role.Name, "local")
+		}
+	}
+
+	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
+
+	return connect.NewResponse(&v1.CreateUserResponse{
+		User: dbUserToProto(user, roles),
+	}), nil
+}
+
+func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.UpdateUserRequest]) (*connect.Response[v1.UpdateUserResponse], error) {
+	msg := req.Msg
+
+	if msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("user ID is required"))
+	}
+
+	user, err := s.store.GetUser(ctx, msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("user not found"))
+	}
+
+	if msg.Email != nil {
+		user.Email = msg.Email
 	}
 	if msg.IsActive != nil {
 		user.IsActive = *msg.IsActive
@@ -121,24 +124,48 @@ func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.Up
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update user"))
 	}
 
+	// Update roles if provided
+	if len(msg.Roles) > 0 {
+		// Get current roles
+		currentRoles, _ := s.store.GetUserRoleNames(ctx, user.ID)
+
+		// Build sets for comparison
+		currentSet := make(map[string]bool)
+		for _, r := range currentRoles {
+			currentSet[r] = true
+		}
+		desiredSet := make(map[string]bool)
+		for _, r := range msg.Roles {
+			desiredSet[r] = true
+		}
+
+		// Remove roles not in desired set
+		for _, r := range currentRoles {
+			if !desiredSet[r] {
+				_ = s.store.UnassignRole(ctx, user.ID, r)
+			}
+		}
+
+		// Add roles not in current set
+		for _, r := range msg.Roles {
+			if !currentSet[r] {
+				_ = s.store.AssignRole(ctx, user.ID, r, "local")
+			}
+		}
+	}
+
+	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
+
 	return connect.NewResponse(&v1.UpdateUserResponse{
-		User: dbUserToProto(user),
+		User: dbUserToProto(user, roles),
 	}), nil
 }
 
-// DeleteUser deletes a user (admin only)
 func (s *UserService) DeleteUser(ctx context.Context, req *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error) {
-	// Check admin permission
-	currentUser := auth.GetUserFromContext(ctx)
-	if currentUser == nil || currentUser.Role != storage.RoleAdmin {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("admin access required"))
-	}
-
 	msg := req.Msg
 
-	// Prevent self-deletion
-	if currentUser.ID == msg.Id {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot delete your own account"))
+	if msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("user ID is required"))
 	}
 
 	if err := s.store.DeleteUser(ctx, msg.Id); err != nil {
@@ -147,6 +174,23 @@ func (s *UserService) DeleteUser(ctx context.Context, req *connect.Request[v1.De
 	}
 
 	return connect.NewResponse(&v1.DeleteUserResponse{
-		Message: "User deleted successfully",
+		Message: "user deleted",
 	}), nil
+}
+
+func dbUserToProto(user *storage.User, roles []string) *v1.User {
+	protoUser := &v1.User{
+		Id:           user.ID,
+		Username:     user.Username,
+		Email:        user.Email,
+		AuthProvider: user.AuthProvider,
+		IsActive:     user.IsActive,
+		Roles:        roles,
+		CreatedAt:    timestamppb.New(user.CreatedAt),
+		UpdatedAt:    timestamppb.New(user.UpdatedAt),
+	}
+	if user.LastLogin != nil {
+		protoUser.LastLogin = timestamppb.New(*user.LastLogin)
+	}
+	return protoUser
 }

@@ -1,6 +1,7 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker modules proto proto-clean proto-lint proto-format proto-breaking gen
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
 
 DATA_DIR := ./data
+DOCKER_DATA_DIR := /tmp/discopanel
 DB_FILE := $(DATA_DIR)/discopanel.db
 FRONTEND_DIR := web/discopanel
 DISCOPANEL_BIN := build/discopanel
@@ -28,17 +29,22 @@ run:
 
 dev: clean run
 
-# Build and run docker container for local dev
-dev-docker:
-	@echo "Building and running Docker container for development..."
-	docker compose -f docker-compose.dev.yaml build --no-cache
-	docker compose -f docker-compose.dev.yaml up
+# Build and run with OIDC provider (Keycloak)
+dev-auth-%: clean
+	docker compose -f oidc/$*/docker-compose.yaml down -v --remove-orphans
+	@docker run --rm -v /tmp:/tmp alpine rm -rf /tmp/discopanel
+	@echo "Building and running with OIDC provider..."
+	docker compose -f oidc/$*/docker-compose.yaml build --no-cache
+	docker compose -f oidc/$*/docker-compose.yaml up
 
+dev-docs:
+	cd docs/discopanel && npm run dev
+	
 # Production build and run
 prod: build-frontend
 	@echo "Building for production..."
 	@mkdir -p $(DATA_DIR)
-	go build -tags embed -o $(DISCOPANEL_BIN) cmd/discopanel/main.go
+	go build -o $(DISCOPANEL_BIN) cmd/discopanel/main.go
 
 # Build frontend for production
 build-frontend:
@@ -89,6 +95,10 @@ clean:
 	@if [ -d "$(DATA_DIR)" ]; then \
 		echo "Removing data directory..."; \
 		rm -rf $(DATA_DIR); \
+	fi
+	@if [ -d "$(DOCKER_DATA_DIR)" ]; then \
+		echo "Removing docker data directory..."; \
+		docker run --rm -v $(DOCKER_DATA_DIR):/tmp alpine sh -c 'rm -rf /tmp/*'; \
 	fi
 	@if [ -f "$(DISCOPANEL_BIN)" ]; then \
 		echo "Removing backend binary..."; \
@@ -179,6 +189,7 @@ help:
 	@echo "  make prod           - Build and run in production mode"
 	@echo "  make image          - Build and push Docker image to :dev tag"
 	@echo "  make dev-docker     - Build and run Docker container locally (no cache)"
+	@echo "  make dev-auth       - Build and run with OIDC provider (Keycloak)"
 	@echo "  make modules        - Build and push all module Docker images"
 	@echo "  make clean          - Remove data directory and build artifacts"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"

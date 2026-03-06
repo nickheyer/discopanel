@@ -46,7 +46,7 @@
 					window.addEventListener('load', () => {
 						window.parent.postMessage({ type: 'scalar-progress', value: 50 }, '*');
 						window.Scalar.createApiReference('#api-reference', {
-							url: '/schemav1.yaml',
+							url: '/api/v1/openapi.yaml',
 							hideClientButton: true,
               showDeveloperTools: 'never',
               showToolbar: 'never'

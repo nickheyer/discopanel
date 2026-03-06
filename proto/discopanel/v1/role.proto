@@ -1,0 +1,159 @@
+syntax = "proto3";
+
+package discopanel.v1;
+
+import "discopanel/v1/common.proto";
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
+
+// Role and permission management service
+service RoleService {
+  // List all roles
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+  // Get a single role
+  rpc GetRole(GetRoleRequest) returns (GetRoleResponse);
+  // Create a new custom role
+  rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
+  // Update a role
+  rpc UpdateRole(UpdateRoleRequest) returns (UpdateRoleResponse);
+  // Delete a custom role
+  rpc DeleteRole(DeleteRoleRequest) returns (DeleteRoleResponse);
+  // Get permission matrix for all roles
+  rpc GetPermissionMatrix(GetPermissionMatrixRequest) returns (GetPermissionMatrixResponse);
+  // Set permissions for a role
+  rpc UpdatePermissions(UpdatePermissionsRequest) returns (UpdatePermissionsResponse);
+  // Assign a role to a user
+  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
+  // Unassign a role from a user
+  rpc UnassignRole(UnassignRoleRequest) returns (UnassignRoleResponse);
+  // Get roles for a user
+  rpc GetUserRoles(GetUserRolesRequest) returns (GetUserRolesResponse);
+}
+
+// Empty list request
+message ListRolesRequest {}
+
+// All roles
+message ListRolesResponse {
+  repeated Role roles = 1;
+}
+
+// Get role by ID
+message GetRoleRequest {
+  string id = 1;
+}
+
+// Single role
+message GetRoleResponse {
+  Role role = 1;
+}
+
+// New role details
+message CreateRoleRequest {
+  string name = 1;
+  string description = 2;
+  bool is_default = 3;
+  repeated Permission permissions = 4;
+}
+
+// Created role
+message CreateRoleResponse {
+  Role role = 1;
+}
+
+// Role fields to update
+message UpdateRoleRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional bool is_default = 4;
+}
+
+// Updated role
+message UpdateRoleResponse {
+  Role role = 1;
+}
+
+// Role to delete
+message DeleteRoleRequest {
+  string id = 1;
+}
+
+// Deletion confirmation
+message DeleteRoleResponse {
+  string message = 1;
+}
+
+// Permission matrix request
+message GetPermissionMatrixRequest {
+  bool include_objects = 1;
+}
+
+// An object that can be scoped in permissions (e.g. a specific server)
+message ScopeableObject {
+  string id = 1;
+  string name = 2;
+  string resource = 3;
+  string scope_source = 4;  // Entity type providing scope (e.g., "servers" when files scoped by server)
+}
+
+// Valid actions per resource, derived from procedure mappings
+message ResourceActions {
+  string resource = 1;
+  repeated string actions = 2;
+}
+
+// Permission matrix response
+message GetPermissionMatrixResponse {
+  repeated ResourceActions resource_actions = 1;
+  map<string, RolePermissions> role_permissions = 2;
+  repeated ScopeableObject available_objects = 3;
+}
+
+// Permissions for a single role
+message RolePermissions {
+  repeated Permission permissions = 1;
+}
+
+// Update permissions for a role
+message UpdatePermissionsRequest {
+  string role_name = 1;
+  repeated Permission permissions = 2;
+}
+
+// Update confirmation
+message UpdatePermissionsResponse {
+  string message = 1;
+}
+
+// Assign role to user
+message AssignRoleRequest {
+  string user_id = 1;
+  string role_name = 2;
+}
+
+// Assignment confirmation
+message AssignRoleResponse {
+  string message = 1;
+}
+
+// Unassign role from user
+message UnassignRoleRequest {
+  string user_id = 1;
+  string role_name = 2;
+}
+
+// Unassignment confirmation
+message UnassignRoleResponse {
+  string message = 1;
+}
+
+// Get user roles request
+message GetUserRolesRequest {
+  string user_id = 1;
+}
+
+// User roles response
+message GetUserRolesResponse {
+  repeated string roles = 1;
+}

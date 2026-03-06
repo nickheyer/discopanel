@@ -7,7 +7,8 @@ import type { User, Permission } from '$lib/proto/discopanel/v1/common_pb';
 import {
 	LoginRequestSchema,
 	RegisterRequestSchema,
-	ChangePasswordRequestSchema
+	ChangePasswordRequestSchema,
+	UseRecoveryKeyRequestSchema
 } from '$lib/proto/discopanel/v1/auth_pb';
 
 interface AuthState {
@@ -216,6 +217,27 @@ function createAuthStore() {
 			} catch (error: any) {
 				throw new Error(error.message || 'Failed to change password');
 			}
+		},
+
+		async useRecoveryKey(key: string) {
+			const request = create(UseRecoveryKeyRequestSchema, { recoveryKey: key });
+			const response = await rpcClient.auth.useRecoveryKey(request);
+			if (browser) {
+				localStorage.removeItem('auth_token');
+			}
+			set({
+				user: null,
+				token: null,
+				permissions: [],
+				isAuthenticated: false,
+				isLoading: false,
+				localAuthEnabled: true,
+				oidcEnabled: false,
+				firstUserSetup: true,
+				allowRegistration: false,
+				anonymousAccessEnabled: false,
+			});
+			return response;
 		},
 
 		async validateSession() {

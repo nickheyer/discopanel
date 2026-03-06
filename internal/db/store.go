@@ -899,6 +899,28 @@ func (s *Store) CleanAllSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("1 = 1").Delete(&Session{}).Error
 }
 
+// ResetAllUsers deletes all sessions, API tokens, user roles, registration invites, and users.
+func (s *Store) ResetAllUsers(ctx context.Context) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("1 = 1").Delete(&Session{}).Error; err != nil {
+			return fmt.Errorf("failed to delete sessions: %w", err)
+		}
+		if err := tx.Where("1 = 1").Delete(&APIToken{}).Error; err != nil {
+			return fmt.Errorf("failed to delete api tokens: %w", err)
+		}
+		if err := tx.Where("1 = 1").Delete(&UserRole{}).Error; err != nil {
+			return fmt.Errorf("failed to delete user roles: %w", err)
+		}
+		if err := tx.Where("1 = 1").Delete(&RegistrationInvite{}).Error; err != nil {
+			return fmt.Errorf("failed to delete registration invites: %w", err)
+		}
+		if err := tx.Where("1 = 1").Delete(&User{}).Error; err != nil {
+			return fmt.Errorf("failed to delete users: %w", err)
+		}
+		return nil
+	})
+}
+
 // APIToken operations
 func (s *Store) CreateAPIToken(ctx context.Context, token *APIToken) error {
 	if token.ID == "" {

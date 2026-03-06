@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -187,6 +188,18 @@ func main() {
 
 	// Initialize RPC server with full configuration
 	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, log)
+
+	// Print recovery key
+	if key := rpcServer.RecoveryKey(); key != "" {
+		fmt.Fprintf(os.Stderr, "\n═══════════════════════════════════════════════════════════════════════\n")
+		fmt.Fprintf(os.Stderr, "RECOVERY KEY (use to reset panel access if locked out)\n")
+		fmt.Fprintf(os.Stderr, "%s\n", key)
+		fmt.Fprintf(os.Stderr, "═══════════════════════════════════════════════════════════════════════\n\n")
+		keyPath := filepath.Join(cfg.Storage.DataDir, "recovery.key")
+		if err := os.WriteFile(keyPath, []byte(key), 0600); err != nil {
+			log.Error("Failed to write recovery key file: %v", err)
+		}
+	}
 
 	// Auto-start servers that have auto_start enabled
 	log.Info("Checking for servers with auto-start enabled...")

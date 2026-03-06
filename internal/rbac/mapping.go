@@ -14,6 +14,7 @@ var PublicProcedures = map[string]bool{
 	"/discopanel.v1.AuthService/Register":        true,
 	"/discopanel.v1.AuthService/GetOIDCLoginURL":   true,
 	"/discopanel.v1.AuthService/ValidateInvite":    true,
+	"/discopanel.v1.AuthService/UseRecoveryKey":    true,
 }
 
 // AuthenticatedOnlyProcedures lists RPC procedures that require authentication

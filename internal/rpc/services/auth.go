@@ -525,6 +525,24 @@ func (s *AuthService) DeleteAPIToken(ctx context.Context, req *connect.Request[v
 	return connect.NewResponse(&v1.DeleteAPITokenResponse{}), nil
 }
 
+func (s *AuthService) UseRecoveryKey(ctx context.Context, req *connect.Request[v1.UseRecoveryKeyRequest]) (*connect.Response[v1.UseRecoveryKeyResponse], error) {
+	if req.Msg.RecoveryKey == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("recovery key is required"))
+	}
+
+	if err := s.authManager.UseRecoveryKey(ctx, req.Msg.RecoveryKey); err != nil {
+		if errors.Is(err, auth.ErrInvalidRecoveryKey) {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("invalid recovery key"))
+		}
+		s.log.Error("Recovery key reset failed: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("recovery reset failed"))
+	}
+
+	return connect.NewResponse(&v1.UseRecoveryKeyResponse{
+		Message: "panel reset to first-user setup",
+	}), nil
+}
+
 func dbAPITokenToProto(t *storage.APIToken) *v1.ApiToken {
 	pt := &v1.ApiToken{
 		Id:        t.ID,

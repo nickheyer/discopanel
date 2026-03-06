@@ -13,7 +13,7 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
-	import { Loader2, AlertCircle, TicketCheck } from '@lucide/svelte';
+	import { Loader2, AlertCircle, TicketCheck, KeyRound } from '@lucide/svelte';
 
 	let mode = $state<'login' | 'register'>('login');
 	let username = $state('');
@@ -29,6 +29,10 @@
 	});
 	let oidcEnabled = $state(false);
 	let localAuthEnabled = $state(true);
+
+	// Recovery state
+	let showRecovery = $state(false);
+	let recoveryKey = $state('');
 
 	// Invite state
 	let inviteCode = $state('');
@@ -164,6 +168,19 @@
 			}
 		} catch (err: any) {
 			error = err.message || 'Failed to initiate SSO login';
+		}
+	}
+
+	async function handleRecovery() {
+		error = '';
+		loading = true;
+		try {
+			await authStore.useRecoveryKey(recoveryKey);
+			toast.success('Panel reset to first-user setup');
+			window.location.reload();
+		} catch (err: any) {
+			error = err.message || 'Invalid recovery key';
+			loading = false;
 		}
 	}
 
@@ -418,6 +435,51 @@
 			{:else}
 				<!-- Login only (no registration) / SSO only -->
 				{@render loginForm()}
+			{/if}
+
+			{#if showRecovery}
+				<div class="space-y-4 mt-4">
+					<Alert variant="destructive">
+						<AlertCircle class="h-4 w-4" />
+						<AlertDescription>
+							This will delete all users, sessions, and invites. Server configs and data are preserved. This cannot be undone.
+						</AlertDescription>
+					</Alert>
+					<div class="space-y-2">
+						<Label for="recovery-key">Recovery Key</Label>
+						<Input
+							id="recovery-key"
+							type="password"
+							bind:value={recoveryKey}
+							disabled={loading}
+							placeholder="Paste your recovery key"
+						/>
+					</div>
+					<div class="flex gap-2">
+						<Button variant="outline" class="flex-1" onclick={() => { showRecovery = false; error = ''; }} disabled={loading}>
+							Cancel
+						</Button>
+						<Button variant="destructive" class="flex-1" onclick={handleRecovery} disabled={loading || !recoveryKey}>
+							{#if loading}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								Resetting...
+							{:else}
+								Reset Panel
+							{/if}
+						</Button>
+					</div>
+				</div>
+			{:else if !authStatus.firstUserSetup}
+				<div class="mt-4 text-center">
+					<button
+						type="button"
+						class="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+						onclick={() => showRecovery = true}
+					>
+						<KeyRound class="h-3 w-3" />
+						Forgot access? Recovery
+					</button>
+				</div>
 			{/if}
 
 			{#if $authStore.anonymousAccessEnabled}

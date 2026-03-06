@@ -30,6 +30,7 @@ var (
 	ErrSessionTimeoutMin    = errors.New("session timeout must be at least 300 seconds (5 minutes)")
 	ErrAPITokenExpired      = errors.New("api token has expired")
 	ErrAPITokenNotFound     = errors.New("api token not found")
+	ErrInvalidRecoveryKey   = errors.New("invalid recovery key")
 )
 
 // Auth override keys
@@ -41,10 +42,11 @@ const (
 )
 
 type Manager struct {
-	store     *db.Store
-	enforcer  *rbac.Enforcer
-	config    *config.AuthConfig
-	jwtSecret []byte
+	store       *db.Store
+	enforcer    *rbac.Enforcer
+	config      *config.AuthConfig
+	jwtSecret   []byte
+	recoveryKey string
 }
 
 const jwtSecretSettingKey = "jwt_secret"
@@ -77,11 +79,18 @@ func NewManager(store *db.Store, enforcer *rbac.Enforcer, cfg *config.AuthConfig
 		}
 	}
 
+	// Generate recovery key
+	recoveryBytes := make([]byte, 32)
+	if _, err := rand.Read(recoveryBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate recovery key: %w", err)
+	}
+
 	m := &Manager{
-		store:     store,
-		enforcer:  enforcer,
-		config:    cfg,
-		jwtSecret: secret,
+		store:       store,
+		enforcer:    enforcer,
+		config:      cfg,
+		jwtSecret:   secret,
+		recoveryKey: hex.EncodeToString(recoveryBytes),
 	}
 
 	m.loadSettingOverrides(ctx)
@@ -425,6 +434,21 @@ func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*Authe
 	}
 
 	return authUser, nil
+}
+
+func (m *Manager) GetRecoveryKey() string {
+	return m.recoveryKey
+}
+
+func (m *Manager) UseRecoveryKey(ctx context.Context, key string) error {
+	if m.recoveryKey == "" || key != m.recoveryKey {
+		return ErrInvalidRecoveryKey
+	}
+	if err := m.store.ResetAllUsers(ctx); err != nil {
+		return fmt.Errorf("failed to reset users: %w", err)
+	}
+	m.recoveryKey = ""
+	return nil
 }
 
 func (m *Manager) generateJWT(userID, username string, roles []string, expiresAt time.Time) (string, error) {

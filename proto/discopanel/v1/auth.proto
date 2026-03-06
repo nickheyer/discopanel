@@ -80,6 +80,8 @@ service AuthService {
   rpc ListAPITokens(ListAPITokensRequest) returns (ListAPITokensResponse);
   // Delete/revoke an API token
   rpc DeleteAPIToken(DeleteAPITokenRequest) returns (DeleteAPITokenResponse);
+  // Use recovery key to reset all users and return to first-user-setup (public)
+  rpc UseRecoveryKey(UseRecoveryKeyRequest) returns (UseRecoveryKeyResponse);
 }
 
 // Empty auth status request
@@ -291,3 +293,13 @@ message DeleteAPITokenRequest {
 
 // Empty delete API token confirmation
 message DeleteAPITokenResponse {}
+
+// Recovery key to reset panel access
+message UseRecoveryKeyRequest {
+  string recovery_key = 1;
+}
+
+// Recovery key result
+message UseRecoveryKeyResponse {
+  string message = 1;
+}

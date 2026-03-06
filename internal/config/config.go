@@ -1,11 +1,14 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
 
@@ -31,15 +34,21 @@ type AuthConfig struct {
 }
 
 type OIDCConfig struct {
-	Enabled       bool              `mapstructure:"enabled" json:"enabled"`
-	IssuerURI     string            `mapstructure:"issuer_uri" json:"issuer_uri"`
-	ClientID      string            `mapstructure:"client_id" json:"client_id"`
-	ClientSecret  string            `mapstructure:"client_secret" json:"client_secret"`
-	RedirectURL   string            `mapstructure:"redirect_url" json:"redirect_url"`
-	Scopes        []string          `mapstructure:"scopes" json:"scopes"`
-	RoleClaim     string            `mapstructure:"role_claim" json:"role_claim"`
-	RoleMapping   map[string]string `mapstructure:"role_mapping" json:"role_mapping"`
-	SkipTLSVerify bool              `mapstructure:"skip_tls_verify" json:"skip_tls_verify"`
+	Enabled         bool              `mapstructure:"enabled" json:"enabled"`
+	IssuerURI       string            `mapstructure:"issuer_uri" json:"issuer_uri"`
+	ClientID        string            `mapstructure:"client_id" json:"client_id"`
+	ClientSecret    string            `mapstructure:"client_secret" json:"client_secret"`
+	RedirectURL     string            `mapstructure:"redirect_url" json:"redirect_url"`
+	Scopes          []string          `mapstructure:"scopes" json:"scopes"`
+	RoleClaim       string            `mapstructure:"role_claim" json:"role_claim"`
+	RoleMapping     map[string]string `mapstructure:"role_mapping" json:"role_mapping"`
+	RejectUnmapped  bool              `mapstructure:"reject_unmapped" json:"reject_unmapped"`
+	SkipTLSVerify   bool              `mapstructure:"skip_tls_verify" json:"skip_tls_verify"`
+	ExtraClaimsURL  string            `mapstructure:"extra_claims_url" json:"extra_claims_url"`
+	ExtraClaimsKey  string            `mapstructure:"extra_claims_key" json:"extra_claims_key"`
+	ExtraClaimsName string            `mapstructure:"extra_claims_name" json:"extra_claims_name"`
+	RequiredClaim   string            `mapstructure:"required_claim" json:"required_claim"`
+	RequiredValues  []string          `mapstructure:"required_values" json:"required_values"`
 }
 
 type LocalConfig struct {
@@ -146,9 +155,15 @@ func Load(configPath string) (*Config, error) {
 		// Config file not found; use defaults and environment
 	}
 
-	// Unmarshal config
+	// Unmarshal config with a decode hook that handles JSON strings from env
 	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
+	if err := v.Unmarshal(&cfg, func(dc *mapstructure.DecoderConfig) {
+		dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeDurationHookFunc(),
+			mapstructure.StringToSliceHookFunc(","),
+			jsonStringToMapHook(),
+		)
+	}); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 
@@ -227,7 +242,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.oidc.redirect_url", "")
 	v.SetDefault("auth.oidc.scopes", []string{"openid", "profile", "email"})
 	v.SetDefault("auth.oidc.role_claim", "groups")
+	v.SetDefault("auth.oidc.role_mapping", map[string]string{})
+	v.SetDefault("auth.oidc.reject_unmapped", false)
 	v.SetDefault("auth.oidc.skip_tls_verify", false)
+	v.SetDefault("auth.oidc.extra_claims_url", "")
+	v.SetDefault("auth.oidc.extra_claims_key", "")
+	v.SetDefault("auth.oidc.extra_claims_name", "")
+	v.SetDefault("auth.oidc.required_claim", "")
+	v.SetDefault("auth.oidc.required_values", []string{})
 	v.SetDefault("auth.local.enabled", true)
 	v.SetDefault("auth.local.allow_registration", false)
 
@@ -284,4 +306,18 @@ func validateConfig(cfg *Config) error {
 	}
 
 	return nil
+}
+
+// Decodes JSON object strings into map types
+func jsonStringToMapHook() mapstructure.DecodeHookFuncType {
+	return func(from, to reflect.Type, data any) (any, error) {
+		if from.Kind() != reflect.String || to.Kind() != reflect.Map {
+			return data, nil
+		}
+		var m any
+		if err := json.Unmarshal([]byte(data.(string)), &m); err != nil {
+			return data, nil
+		}
+		return m, nil
+	}
 }

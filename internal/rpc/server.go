@@ -444,6 +444,11 @@ func extractObjectID(req connect.AnyRequest, fieldName string) string {
 	return "*"
 }
 
+// RecoveryKey returns the current recovery key from the auth manager.
+func (s *Server) RecoveryKey() string {
+	return s.authManager.GetRecoveryKey()
+}
+
 // Starts log streaming for a container
 func (s *Server) StartLogStreaming(containerID string) error {
 	return s.logStreamer.StartStreaming(containerID)

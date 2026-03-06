@@ -48,10 +48,10 @@ const authInterceptor: Interceptor = (next) => async (req) => {
   try {
     const res = await next(req);
     return res;
-  } catch (error: any) {
-    // Show error toast
-    if (!isSilent) {
-      const message = error.rawMessage || error.message || 'An error occurred';
+  } catch (error) {
+    const onLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login';
+    if (!isSilent && !onLoginPage) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
       toast.error(message);
     }
     throw error;

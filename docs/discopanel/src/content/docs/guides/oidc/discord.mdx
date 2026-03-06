@@ -1,0 +1,117 @@
+---
+title: Discord (OIDC)
+description: Set up DiscoPanel with Discord as an OpenID Connect identity provider.
+---
+
+import { Code, Aside, Steps } from '@astrojs/starlight/components';
+import composeFile from '../../../../../../../oidc/discord/docker-compose.yaml?raw';
+
+This guide walks through running DiscoPanel with [Discord](https://discord.com/developers/docs/topics/oauth2) as an OIDC identity provider. Discord supports OpenID Connect natively — no IdP container is needed.
+
+<Aside>
+By default, any Discord user can log in. To restrict access to members of a specific server, see [Guild restriction](#guild-restriction) below.
+</Aside>
+
+## Prerequisites
+
+- Docker and Docker Compose
+- A Discord account
+
+## Create a Discord application
+
+<Steps>
+1. Go to the [Discord Developer Portal — Applications](https://discord.com/developers/applications)
+
+2. Click **New Application**, give it a name, and save
+
+3. In the left sidebar, click **OAuth2**
+
+4. Under **Redirects**, click **Add Redirect** and enter `http://localhost:8080/api/v1/auth/oidc/callback`
+   - For production: use your public URL with HTTPS, e.g. `https://panel.example.com/api/v1/auth/oidc/callback`
+
+5. Copy the **Client ID** and **Client Secret** (click "Reset Secret" if you don't have one yet)
+</Steps>
+
+## Docker Compose
+
+Paste your Client ID and Client Secret into the compose file, then start the stack:
+
+```bash
+cd oidc/discord
+docker compose up -d
+```
+
+<Code code={composeFile} lang="yaml" title="oidc/discord/docker-compose.yaml" />
+
+### Key environment variables
+
+| Variable | Purpose |
+|---|---|
+| `DISCOPANEL_AUTH_OIDC_ENABLED` | Enables OIDC authentication |
+| `DISCOPANEL_AUTH_OIDC_ISSUER_URI` | Always `https://discord.com` — do not change |
+| `DISCOPANEL_AUTH_OIDC_CLIENT_ID` | Your Application ID from the Discord Developer Portal |
+| `DISCOPANEL_AUTH_OIDC_CLIENT_SECRET` | Your Client Secret from the Discord Developer Portal |
+| `DISCOPANEL_AUTH_OIDC_REDIRECT_URL` | The callback URL — must match exactly what you entered under Redirects |
+| `DISCOPANEL_AUTH_OIDC_SCOPES` | Must include `openid`, `identify`, and `email`. Add `guilds` or `guilds.members.read` for server restrictions |
+
+## Guild restriction
+
+Discord's OIDC tokens don't include server membership data, but the access token can fetch it from Discord's API. DiscoPanel supports this through the **extra claims** mechanism — a generic feature that fetches additional user data from a provider endpoint during login.
+
+### Restrict to a specific server
+
+Add `guilds` to your scopes and configure the extra claims to pull guild membership:
+
+```yaml
+- DISCOPANEL_AUTH_OIDC_SCOPES=openid,identify,email,guilds
+- DISCOPANEL_AUTH_OIDC_EXTRA_CLAIMS_URL=https://discord.com/api/users/@me/guilds
+- DISCOPANEL_AUTH_OIDC_EXTRA_CLAIMS_KEY=#.id
+- DISCOPANEL_AUTH_OIDC_EXTRA_CLAIMS_NAME=guilds
+- DISCOPANEL_AUTH_OIDC_REQUIRED_CLAIM=guilds
+- DISCOPANEL_AUTH_OIDC_REQUIRED_VALUES=YOUR_GUILD_ID
+```
+
+Replace `YOUR_GUILD_ID` with your Discord server's ID. To find it: enable Developer Mode in Discord settings, then right-click the server name and select **Copy Server ID**.
+
+`EXTRA_CLAIMS_KEY` is a [gjson path](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) — `#.id` extracts the `id` field from each object in the array. The result is stored as the `guilds` claim, and `REQUIRED_CLAIM` + `REQUIRED_VALUES` gate login on whether the guild ID is present.
+
+Users who aren't in the server will be turned away at login.
+
+### Map Discord roles to DiscoPanel roles
+
+If you want login restricted to a server **and** want Discord roles to translate to DiscoPanel roles, use the guild member endpoint instead. This requires:
+
+1. Adding `guilds.members.read` to your scopes
+2. Installing your Discord application in the server (OAuth2 → URL Generator → select `bot` → use the invite link)
+
+```yaml
+- DISCOPANEL_AUTH_OIDC_SCOPES=openid,identify,email,guilds.members.read
+- DISCOPANEL_AUTH_OIDC_EXTRA_CLAIMS_URL=https://discord.com/api/users/@me/guilds/YOUR_GUILD_ID/member
+- DISCOPANEL_AUTH_OIDC_EXTRA_CLAIMS_KEY=roles
+- DISCOPANEL_AUTH_OIDC_EXTRA_CLAIMS_NAME=discord_roles
+- DISCOPANEL_AUTH_OIDC_ROLE_CLAIM=discord_roles
+- DISCOPANEL_AUTH_OIDC_ROLE_MAPPING={"DISCORD_ROLE_ID":"admin","OTHER_ROLE_ID":"moderator"}
+- DISCOPANEL_AUTH_OIDC_REJECT_UNMAPPED=true
+```
+
+`EXTRA_CLAIMS_KEY=roles` pulls the `roles` array from the member response and stores it as the `discord_roles` claim. The role mapping then translates Discord role IDs to DiscoPanel roles. `REJECT_UNMAPPED=true` means users whose Discord roles don't match any mapping entry are denied login.
+
+Non-members are also rejected — Discord's API returns a 403 for users who aren't in the guild.
+
+To find role IDs: go to Server Settings → Roles, right-click a role, and select **Copy Role ID** (requires Developer Mode).
+
+## Default credentials
+
+| Service | URL | Login |
+|---|---|---|
+| DiscoPanel | [http://localhost:8080](http://localhost:8080) | Log in via Discord |
+
+## Production notes
+
+<Aside type="caution">
+Before deploying to production:
+</Aside>
+
+- **Update the redirect URI**: change `localhost:8080` to your public domain in both the compose file and the Discord Developer Portal
+- **HTTPS**: Discord allows `http://localhost` for development, but production deployments should use HTTPS
+- **Disable local auth** (optional): set `DISCOPANEL_AUTH_LOCAL_ENABLED=false` if you want OIDC-only login

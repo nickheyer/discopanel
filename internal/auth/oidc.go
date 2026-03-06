@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"maps"
 	"net/http"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	"github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/tidwall/gjson"
 	"golang.org/x/oauth2"
 )
 
@@ -186,6 +189,26 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch extra claims from provider API if configured
+	if h.config.ExtraClaimsURL != "" {
+		extra, err := h.fetchExtraClaims(ctx, oauth2Token.AccessToken)
+		if err != nil {
+			h.log.Error("OIDC: extra claims request failed (%s): %v", h.config.ExtraClaimsURL, err)
+			http.Redirect(w, r, "/login?error=membership_check_failed", http.StatusFound)
+			return
+		}
+		maps.Copy(claims, extra)
+	}
+
+	// Enforce required claim if configured
+	if h.config.RequiredClaim != "" && len(h.config.RequiredValues) > 0 {
+		if !h.checkRequiredClaim(claims) {
+			h.log.Warn("OIDC: login rejected — required claim %q not satisfied", h.config.RequiredClaim)
+			http.Redirect(w, r, "/login?error=access_denied", http.StatusFound)
+			return
+		}
+	}
+
 	// Extract user info from claims
 	sub := idToken.Subject
 	email, _ := claims["email"].(string)
@@ -208,7 +231,12 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Map OIDC claims to roles
-	h.mapClaimsToRoles(ctx, user.ID, claims)
+	mapped := h.mapClaimsToRoles(ctx, user.ID, claims)
+	if !mapped && h.config.RejectUnmapped {
+		h.log.Warn("OIDC: login rejected — no mapped roles for user %s", username)
+		http.Redirect(w, r, "/login?error=no_mapped_roles", http.StatusFound)
+		return
+	}
 
 	// Get user roles
 	roleNames, err := h.store.GetUserRoleNames(ctx, user.ID)
@@ -292,9 +320,10 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, e
 	return user, nil
 }
 
-func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claims map[string]any) {
+// Maps OIDC claim values to local roles
+func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claims map[string]any) bool {
 	if h.config.RoleClaim == "" {
-		return
+		return true
 	}
 
 	// Extract groups/roles from claims
@@ -302,7 +331,7 @@ func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claim
 	claimValue, ok := claims[h.config.RoleClaim]
 	if !ok {
 		h.log.Warn("OIDC: role claim %q not found in token claims", h.config.RoleClaim)
-		return
+		return false
 	}
 	switch v := claimValue.(type) {
 	case []any:
@@ -321,16 +350,136 @@ func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claim
 		}
 	}
 
-	// Map OIDC claims to local roles + use role mappings if provided in cfg
-	for _, claimVal := range claimValues {
-		if len(h.config.RoleMapping) > 0 {
+	// Resolve claim values to local role names without writing anything yet
+	var resolvedRoles []string
+	if len(h.config.RoleMapping) > 0 {
+		for _, claimVal := range claimValues {
 			if localRole, ok := h.config.RoleMapping[claimVal]; ok {
-				_ = h.store.AssignRole(ctx, userID, localRole, "oidc")
+				resolvedRoles = append(resolvedRoles, localRole)
 			}
-		} else {
-			_ = h.store.AssignRole(ctx, userID, claimVal, "oidc")
 		}
+	} else if !h.config.RejectUnmapped {
+		// No mapping configured and not rejecting unmapped — use claim values directly
+		resolvedRoles = claimValues
 	}
+
+	// Assign only after we know what (if anything) resolved
+	for _, roleName := range resolvedRoles {
+		_ = h.store.AssignRole(ctx, userID, roleName, "oidc")
+	}
+	return len(resolvedRoles) > 0
+}
+
+// Calls the configured extra claims URL with the access token.
+// Uses ExtraClaimsKey (gjson path) to extract a value from the response,
+// and stores it under ExtraClaimsName in the claims map.
+func (h *OIDCHandler) fetchExtraClaims(ctx context.Context, accessToken string) (map[string]any, error) {
+	client := http.DefaultClient
+	if h.httpClient != nil {
+		client = h.httpClient
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", h.config.ExtraClaimsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, body)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if !gjson.ValidBytes(body) {
+		return nil, fmt.Errorf("response is not valid JSON")
+	}
+
+	name := h.config.ExtraClaimsName
+	if name == "" {
+		name = "extra"
+	}
+
+	// If no key path configured, parse the whole response as the claim value
+	if h.config.ExtraClaimsKey == "" {
+		var parsed any
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, fmt.Errorf("failed to parse response: %w", err)
+		}
+		return map[string]any{name: parsed}, nil
+	}
+
+	result := gjson.GetBytes(body, h.config.ExtraClaimsKey)
+	if !result.Exists() {
+		return nil, fmt.Errorf("key %q not found in response", h.config.ExtraClaimsKey)
+	}
+
+	return map[string]any{name: gjsonToAny(result)}, nil
+}
+
+// gjsonToAny converts a gjson.Result to a native Go type for use in claims.
+func gjsonToAny(r gjson.Result) any {
+	if r.IsArray() {
+		var out []any
+		r.ForEach(func(_, v gjson.Result) bool {
+			out = append(out, gjsonToAny(v))
+			return true
+		})
+		return out
+	}
+	if r.IsObject() {
+		out := map[string]any{}
+		r.ForEach(func(k, v gjson.Result) bool {
+			out[k.String()] = gjsonToAny(v)
+			return true
+		})
+		return out
+	}
+	return r.Value()
+}
+
+// Returns true if the claims contain the required claim == value match
+func (h *OIDCHandler) checkRequiredClaim(claims map[string]any) bool {
+	value, ok := claims[h.config.RequiredClaim]
+	if !ok {
+		return false
+	}
+
+	required := make(map[string]bool, len(h.config.RequiredValues))
+	for _, v := range h.config.RequiredValues {
+		required[v] = true
+	}
+
+	switch v := value.(type) {
+	case []any:
+		for _, item := range v {
+			if required[fmt.Sprint(item)] {
+				return true
+			}
+		}
+	case []string:
+		for _, item := range v {
+			if required[item] {
+				return true
+			}
+		}
+	case string:
+		return required[v]
+	default:
+		return required[fmt.Sprint(v)]
+	}
+
+	return false
 }
 
 func generateState() (string, error) {

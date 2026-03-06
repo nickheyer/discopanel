@@ -8,6 +8,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'DiscoPanel',
+			favicon: '/favicon.png',
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/nickheyer/discopanel' },
 			],
@@ -26,8 +27,14 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
-						{ label: 'Keycloak Auth Setup', slug: 'guides/keycloak' },
-						{ label: 'Authelia Auth Setup', slug: 'guides/authelia' },
+						{
+							label: 'OIDC',
+							items: [
+								{ label: 'Keycloak', slug: 'guides/oidc/keycloak' },
+								{ label: 'Authelia', slug: 'guides/oidc/authelia' },
+								{ label: 'Google', slug: 'guides/oidc/google' },
+							],
+						},
 					],
 				},
 				{ label: 'FAQ', slug: 'faq' },

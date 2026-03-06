@@ -4,9 +4,9 @@ description: Set up DiscoPanel with Authelia as an OpenID Connect identity provi
 ---
 
 import { Code, Aside } from '@astrojs/starlight/components';
-import composeFile from '../../../../../../oidc/authelia/docker-compose.yaml?raw';
-import configYml from '../../../../../../oidc/authelia/config/configuration.yml?raw';
-import usersYml from '../../../../../../oidc/authelia/config/users_database.yml?raw';
+import composeFile from '../../../../../../../oidc/authelia/docker-compose.yaml?raw';
+import configYml from '../../../../../../../oidc/authelia/config/configuration.yml?raw';
+import usersYml from '../../../../../../../oidc/authelia/config/users_database.yml?raw';
 
 This guide walks through running DiscoPanel with [Authelia](https://www.authelia.com/) as an OIDC identity provider using a ready-made Docker Compose stack. Authelia provides a file-based user store, so no external database is needed.
 

@@ -4,8 +4,8 @@ description: Set up DiscoPanel with Keycloak as an OpenID Connect identity provi
 ---
 
 import { Code, Aside } from '@astrojs/starlight/components';
-import composeFile from '../../../../../../oidc/keycloak/docker-compose.yaml?raw';
-import realmJson from '../../../../../../oidc/keycloak/config/realm.json?raw';
+import composeFile from '../../../../../../../oidc/keycloak/docker-compose.yaml?raw';
+import realmJson from '../../../../../../../oidc/keycloak/config/realm.json?raw';
 
 This guide walks through running DiscoPanel with [Keycloak](https://www.keycloak.org/) as an OIDC identity provider using a ready-made Docker Compose stack. The included realm config pre-creates a client, roles, groups, protocol mappers, and a default admin user so everything works out of the box.
 

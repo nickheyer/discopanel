@@ -1,0 +1,94 @@
+---
+title: Google (OIDC)
+description: Set up DiscoPanel with Google as an OpenID Connect identity provider.
+---
+
+import { Code, Aside, Steps } from '@astrojs/starlight/components';
+import composeFile from '../../../../../../../oidc/google/docker-compose.yaml?raw';
+
+This guide walks through running DiscoPanel with [Google](https://developers.google.com/identity/openid-connect/openid-connect) as an OIDC identity provider. Unlike Keycloak or Authelia, Google is an external cloud provider — no IdP container is needed.
+
+<Aside>
+Google does not include a `groups` claim in its OIDC tokens. Users are assigned DiscoPanel's default roles on first login and can be promoted to admin via the DiscoPanel UI. See [Role mapping](#role-mapping) below for Google Workspace options.
+</Aside>
+
+## Prerequisites
+
+- Docker and Docker Compose
+- A Google account (or Google Workspace organization)
+
+## Create Google OAuth credentials
+
+<Steps>
+1. Go to the [Google Cloud Console — Credentials](https://console.cloud.google.com/apis/credentials)
+
+2. Create or select a project
+
+3. If you haven't already, configure the **OAuth consent screen**:
+   - User type: **External** (or **Internal** if using Google Workspace and you only want org users)
+   - App name, support email, and developer email are required
+   - Scopes: add `openid`, `profile`, and `email`
+   - For external apps: add test users while in "Testing" status, or publish the app for general access
+
+4. Click **Create Credentials** → **OAuth client ID**
+   - Application type: **Web application**
+   - Authorized redirect URIs: add `http://localhost:8080/api/v1/auth/oidc/callback`
+   - For production: add your public URL (must be HTTPS), e.g. `https://panel.example.com/api/v1/auth/oidc/callback`
+
+5. Copy the **Client ID** and **Client Secret**
+</Steps>
+
+## Docker Compose
+
+Paste your Client ID and Client Secret into the compose file, then start the stack:
+
+```bash
+cd oidc/google
+docker compose up -d
+```
+
+<Code code={composeFile} lang="yaml" title="oidc/google/docker-compose.yaml" />
+
+### Key environment variables
+
+| Variable | Purpose |
+|---|---|
+| `DISCOPANEL_AUTH_OIDC_ENABLED` | Enables OIDC authentication |
+| `DISCOPANEL_AUTH_OIDC_ISSUER_URI` | Always `https://accounts.google.com` — do not change |
+| `DISCOPANEL_AUTH_OIDC_CLIENT_ID` | Your OAuth Client ID from Google Cloud Console |
+| `DISCOPANEL_AUTH_OIDC_CLIENT_SECRET` | Your OAuth Client Secret from Google Cloud Console |
+| `DISCOPANEL_AUTH_OIDC_REDIRECT_URL` | The callback URL — must match exactly what you entered in Google Cloud Console |
+| `DISCOPANEL_AUTH_OIDC_ROLE_CLAIM` | Leave empty for Google — see [Role mapping](#role-mapping) below |
+
+## Role mapping
+
+Google's OIDC tokens include standard claims (`sub`, `email`, `name`, `picture`, `hd`) but **not** a `groups` claim. This means automatic group-to-role mapping isn't available out of the box.
+
+**For most setups**: leave `DISCOPANEL_AUTH_OIDC_ROLE_CLAIM` empty. Users get default roles on first login, and an admin can promote them in the DiscoPanel UI.
+
+**For Google Workspace organizations**: you can use the `hd` (hosted domain) claim to map an entire domain to a role:
+
+```yaml
+- DISCOPANEL_AUTH_OIDC_ROLE_CLAIM=hd
+- DISCOPANEL_AUTH_OIDC_ROLE_MAPPING={"yourdomain.com":"admin"}
+```
+
+This assigns the `admin` role to everyone who logs in from `yourdomain.com`.
+
+## Default credentials
+
+| Service | URL | Login |
+|---|---|---|
+| DiscoPanel | [http://localhost:8080](http://localhost:8080) | Log in via Google |
+
+## Production notes
+
+<Aside type="caution">
+Before deploying to production:
+</Aside>
+
+- **Use HTTPS**: Google requires HTTPS redirect URIs for non-localhost deployments
+- **Update the redirect URI**: change `localhost:8080` to your public domain in both the compose file and Google Cloud Console
+- **Publish the OAuth consent screen**: while in "Testing" status, only manually added test users can log in
+- **Restrict by organization** (optional): set the consent screen to **Internal** in Google Workspace to limit login to your org
+- **Disable local auth** (optional): set `DISCOPANEL_AUTH_LOCAL_ENABLED=false` if you want OIDC-only login

@@ -78,7 +78,7 @@ func seeds(s *Store) error {
 func migrations() []*gormigrate.Migration {
 	return []*gormigrate.Migration{
 		{
-			ID: "20260226_001_backfill_user_roles",
+			ID: "20260306_001_retry_backfill_user_roles",
 			Migrate: func(tx *gorm.DB) error {
 				// Find users that have no entry in user_roles
 				var usersWithoutRoles []User

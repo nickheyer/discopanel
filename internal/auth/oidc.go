@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -354,8 +355,11 @@ func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claim
 	var resolvedRoles []string
 	if len(h.config.RoleMapping) > 0 {
 		for _, claimVal := range claimValues {
-			if localRole, ok := h.config.RoleMapping[claimVal]; ok {
-				resolvedRoles = append(resolvedRoles, localRole)
+			for mapKey, localRole := range h.config.RoleMapping { // yaml map keys apparently lower case themselves?
+				if strings.EqualFold(claimVal, mapKey) {
+					resolvedRoles = append(resolvedRoles, localRole)
+					break
+				}
 			}
 		}
 	} else if !h.config.RejectUnmapped {

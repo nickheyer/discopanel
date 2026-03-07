@@ -33,6 +33,7 @@ export default defineConfig({
 								{ label: 'Keycloak', slug: 'guides/oidc/keycloak' },
 								{ label: 'Authelia', slug: 'guides/oidc/authelia' },
 								{ label: 'Google', slug: 'guides/oidc/google' },
+								{ label: 'Discord', slug: 'guides/oidc/discord' },
 							],
 						},
 					],

@@ -8,6 +8,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'DiscoPanel',
+			customCss: ['./src/styles/custom.css'],
 			favicon: '/favicon.png',
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/nickheyer/discopanel' },

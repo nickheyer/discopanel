@@ -38,6 +38,11 @@ func (s *Store) Migrate() error {
 		return fmt.Errorf("pre-migration backup failed: %w", err)
 	}
 
+	// Create all tables/columns
+	if err := s.db.AutoMigrate(allModels()...); err != nil {
+		return fmt.Errorf("schema migration failed: %w", err)
+	}
+
 	m := gormigrate.New(s.db, &gormigrate.Options{
 		TableName:                 "migrations",
 		IDColumnName:              "id",
@@ -45,10 +50,6 @@ func (s *Store) Migrate() error {
 		UseTransaction:            true,
 		ValidateUnknownMigrations: false,
 	}, migrations())
-
-	m.InitSchema(func(db *gorm.DB) error {
-		return db.AutoMigrate(allModels()...)
-	})
 
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("migration failed: %w", err)

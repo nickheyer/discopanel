@@ -224,6 +224,14 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		username = sub
 	}
 
+	// Resolve roles before creating user to avoid orphaned records on rejection
+	resolvedRoles := h.resolveClaimRoles(claims)
+	if len(resolvedRoles) == 0 && h.config.RejectUnmapped {
+		h.log.Warn("OIDC: login rejected — no mapped roles for user %s", username)
+		http.Redirect(w, r, "/login?error=no_mapped_roles", http.StatusFound)
+		return
+	}
+
 	user, err := h.findOrCreateOIDCUser(ctx, sub, username, email)
 	if err != nil {
 		h.log.Error("OIDC: failed to find or create user (sub=%s, username=%s): %v", sub, username, err)
@@ -231,12 +239,9 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map OIDC claims to roles
-	mapped := h.mapClaimsToRoles(ctx, user.ID, claims)
-	if !mapped && h.config.RejectUnmapped {
-		h.log.Warn("OIDC: login rejected — no mapped roles for user %s", username)
-		http.Redirect(w, r, "/login?error=no_mapped_roles", http.StatusFound)
-		return
+	// Assign resolved roles to user
+	for _, roleName := range resolvedRoles {
+		_ = h.store.AssignRole(ctx, user.ID, roleName, "oidc")
 	}
 
 	// Get user roles
@@ -321,10 +326,10 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, e
 	return user, nil
 }
 
-// Maps OIDC claim values to local roles
-func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claims map[string]any) bool {
+// Resolve OIDC claim values to local roles
+func (h *OIDCHandler) resolveClaimRoles(claims map[string]any) []string {
 	if h.config.RoleClaim == "" {
-		return true
+		return nil
 	}
 
 	// Extract groups/roles from claims
@@ -332,7 +337,7 @@ func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claim
 	claimValue, ok := claims[h.config.RoleClaim]
 	if !ok {
 		h.log.Warn("OIDC: role claim %q not found in token claims", h.config.RoleClaim)
-		return false
+		return nil
 	}
 	switch v := claimValue.(type) {
 	case []any:
@@ -342,7 +347,6 @@ func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claim
 			}
 		}
 	case string:
-		// Try JSON array
 		var arr []string
 		if err := json.Unmarshal([]byte(v), &arr); err == nil {
 			claimValues = arr
@@ -351,11 +355,11 @@ func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claim
 		}
 	}
 
-	// Resolve claim values to local role names without writing anything yet
+	// Resolve claim values to local role names
 	var resolvedRoles []string
 	if len(h.config.RoleMapping) > 0 {
 		for _, claimVal := range claimValues {
-			for mapKey, localRole := range h.config.RoleMapping { // yaml map keys apparently lower case themselves?
+			for mapKey, localRole := range h.config.RoleMapping {
 				if strings.EqualFold(claimVal, mapKey) {
 					resolvedRoles = append(resolvedRoles, localRole)
 					break
@@ -367,11 +371,7 @@ func (h *OIDCHandler) mapClaimsToRoles(ctx context.Context, userID string, claim
 		resolvedRoles = claimValues
 	}
 
-	// Assign only after we know what (if anything) resolved
-	for _, roleName := range resolvedRoles {
-		_ = h.store.AssignRole(ctx, userID, roleName, "oidc")
-	}
-	return len(resolvedRoles) > 0
+	return resolvedRoles
 }
 
 // Calls the configured extra claims URL with the access token.

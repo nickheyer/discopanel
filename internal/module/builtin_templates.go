@@ -26,7 +26,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			Ports: []*v1.ModulePort{
 				{Name: "Bedrock", ContainerPort: 19132, HostPort: 0, Protocol: "udp", ProxyEnabled: true},
 			},
-			DefaultAccessUrls: []string{"http://{{server.proxy_hostname}}:{{module.ports.Bedrock.host_port}}"},
+			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Bedrock.host_port}}"},
 			DefaultEnv: `{
 				"PUID": "{{host.uid}}",
 				"PGID": "{{host.gid}}",
@@ -90,7 +90,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				{Name: "Web", ContainerPort: 4326, HostPort: 0, Protocol: "http", ProxyEnabled: true},
 				{Name: "WS", ContainerPort: 4327, HostPort: 0, Protocol: "http", ProxyEnabled: true},
 			},
-			DefaultAccessUrls: []string{"http://{{server.proxy_hostname}}:{{module.ports.Web.host_port}}"},
+			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
 			DefaultEnv: `{
 				"RWA_ADMIN": "true",
 				"RWA_PASSWORD": "admin",
@@ -119,7 +119,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			Ports: []*v1.ModulePort{
 				{Name: "Metrics", ContainerPort: 9225, HostPort: 0, Protocol: "http", ProxyEnabled: true},
 			},
-			DefaultAccessUrls: []string{"http://{{server.proxy_hostname}}:{{module.ports.Metrics.host_port}}/metrics"},
+			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Metrics.host_port}}/metrics"},
 			DefaultEnv: `{
 				"EXPORT_SERVERS": "discopanel-server-{{server.id}}:25565",
 				"EXPORT_PORT": "{{module.ports.Metrics.container_port}}"
@@ -143,7 +143,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			Ports: []*v1.ModulePort{
 				{Name: "Web", ContainerPort: 8181, HostPort: 0, Protocol: "http", ProxyEnabled: true},
 			},
-			DefaultAccessUrls: []string{"http://{{server.proxy_hostname}}:{{module.ports.Web.host_port}}"},
+			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
 			DefaultEnv: `{
 				"DISCOPANEL_URL": "http://host.docker.internal:{{config.server.port}}",
 				"POLL_INTERVAL": "10s",

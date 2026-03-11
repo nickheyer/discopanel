@@ -381,6 +381,23 @@ func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, exp
 	return plaintext, token, nil
 }
 
+// Creates API token for a module, tied to the creating user's identity
+func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID string) (string, *db.APIToken, error) {
+	tokenName := fmt.Sprintf("module:%s:%s", moduleName, moduleID)
+	plaintext, token, err := m.GenerateAPIToken(ctx, userID, tokenName, nil)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Mark as module token
+	token.IsModuleToken = true
+	if err := m.store.DB().WithContext(ctx).Save(token).Error; err != nil {
+		return "", nil, fmt.Errorf("failed to mark token as module token: %w", err)
+	}
+
+	return plaintext, token, nil
+}
+
 // Validates a raw API token (dp_...) and returns the authenticated user.
 func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*AuthenticatedUser, error) {
 	if !strings.HasPrefix(rawToken, "dp_") {

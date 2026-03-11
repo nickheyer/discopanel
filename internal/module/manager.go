@@ -497,6 +497,13 @@ func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
 		}
 	}
 
+	// Clean up associated API token
+	if module.TokenID != "" {
+		if err := m.store.DeleteAPITokenByID(ctx, module.TokenID); err != nil {
+			m.logger.Error("Failed to delete module API token: %v", err)
+		}
+	}
+
 	// Delete from database
 	if err := m.store.DeleteModule(ctx, moduleID); err != nil {
 		return fmt.Errorf("failed to delete module from database: %w", err)

@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/nickheyer/discopanel/internal/alias"
+	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -29,6 +30,7 @@ type ModuleService struct {
 	docker        *docker.Client
 	moduleManager *module.Manager
 	proxyManager  *proxy.Manager
+	authManager   *auth.Manager
 	config        *config.Config
 	log           *logger.Logger
 	logStreamer   *logger.LogStreamer
@@ -40,6 +42,7 @@ func NewModuleService(
 	docker *docker.Client,
 	moduleManager *module.Manager,
 	proxyManager *proxy.Manager,
+	authManager *auth.Manager,
 	cfg *config.Config,
 	logStreamer *logger.LogStreamer,
 	log *logger.Logger,
@@ -49,6 +52,7 @@ func NewModuleService(
 		docker:        docker,
 		moduleManager: moduleManager,
 		proxyManager:  proxyManager,
+		authManager:   authManager,
 		config:        cfg,
 		logStreamer:   logStreamer,
 		log:           log,
@@ -151,7 +155,7 @@ func dbModuleTemplateToProto(t *storage.ModuleTemplate) *v1.ModuleTemplate {
 	}
 }
 
-func dbModuleToProto(m *storage.Module, serverName, templateName, serverProxyHostname string) *v1.Module {
+func dbModuleToProto(m *storage.Module, serverName, templateName, serverProxyHostname, createdByUsername string) *v1.Module {
 	if m == nil {
 		return nil
 	}
@@ -188,6 +192,8 @@ func dbModuleToProto(m *storage.Module, serverName, templateName, serverProxyHos
 		Metadata:              m.Metadata,
 		CmdOverride:           m.CmdOverride,
 		AccessUrls:            m.AccessUrls,
+		CreatedByUserId:       m.CreatedBy,
+		CreatedByUsername:     createdByUsername,
 	}
 
 	if m.LastStarted != nil {
@@ -195,6 +201,18 @@ func dbModuleToProto(m *storage.Module, serverName, templateName, serverProxyHos
 	}
 
 	return protoModule
+}
+
+// resolveCreatedByUsername looks up the username for a module's CreatedBy user ID
+func (s *ModuleService) resolveCreatedByUsername(ctx context.Context, userID string) string {
+	if userID == "" {
+		return ""
+	}
+	user, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return ""
+	}
+	return user.Username
 }
 
 // Template operations
@@ -444,7 +462,8 @@ func (s *ModuleService) ListModules(ctx context.Context, req *connect.Request[v1
 			templateName = template.Name
 		}
 
-		protoModules = append(protoModules, dbModuleToProto(m, serverName, templateName, serverProxyHostname))
+		createdByUsername := s.resolveCreatedByUsername(ctx, m.CreatedBy)
+		protoModules = append(protoModules, dbModuleToProto(m, serverName, templateName, serverProxyHostname, createdByUsername))
 	}
 
 	return connect.NewResponse(&v1.ListModulesResponse{
@@ -485,8 +504,9 @@ func (s *ModuleService) GetModule(ctx context.Context, req *connect.Request[v1.G
 		templateName = template.Name
 	}
 
+	createdByUsername := s.resolveCreatedByUsername(ctx, module.CreatedBy)
 	return connect.NewResponse(&v1.GetModuleResponse{
-		Module: dbModuleToProto(module, serverName, templateName, serverProxyHostname),
+		Module: dbModuleToProto(module, serverName, templateName, serverProxyHostname, createdByUsername),
 	}), nil
 }
 
@@ -555,8 +575,10 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		}
 	}
 
+	moduleID := uuid.New().String()
+
 	module := &storage.Module{
-		ID:                    uuid.New().String(),
+		ID:                    moduleID,
 		Name:                  msg.Name,
 		ServerID:              msg.ServerId,
 		TemplateID:            msg.TemplateId,
@@ -578,6 +600,20 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		Metadata:              msg.Metadata,
 		CmdOverride:           msg.CmdOverride,
 		AccessUrls:            msg.AccessUrls,
+	}
+
+	// Generate module API token tied to the creating user
+	if user := auth.GetUserFromContext(ctx); user != nil {
+		module.CreatedBy = user.ID
+		if s.authManager != nil {
+			plaintext, token, err := s.authManager.GenerateModuleToken(ctx, user.ID, msg.Name, moduleID)
+			if err != nil {
+				s.log.Error("Failed to generate module token: %v", err)
+			} else {
+				module.TokenID = token.ID
+				module.TokenPlaintext = plaintext
+			}
+		}
 	}
 
 	// Use template defaults for access URLs if not provided
@@ -605,8 +641,9 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		}
 	}()
 
+	createdByUsername := s.resolveCreatedByUsername(ctx, module.CreatedBy)
 	return connect.NewResponse(&v1.CreateModuleResponse{
-		Module: dbModuleToProto(module, server.Name, template.Name, server.ProxyHostname),
+		Module: dbModuleToProto(module, server.Name, template.Name, server.ProxyHostname, createdByUsername),
 	}), nil
 }
 
@@ -742,8 +779,9 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		templateName = template.Name
 	}
 
+	createdByUsername := s.resolveCreatedByUsername(ctx, module.CreatedBy)
 	return connect.NewResponse(&v1.UpdateModuleResponse{
-		Module: dbModuleToProto(module, serverName, templateName, serverProxyHostname),
+		Module: dbModuleToProto(module, serverName, templateName, serverProxyHostname, createdByUsername),
 	}), nil
 }
 

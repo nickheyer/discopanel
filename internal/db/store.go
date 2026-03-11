@@ -943,7 +943,7 @@ func (s *Store) GetAPITokenByHash(ctx context.Context, hash string) (*APIToken, 
 
 func (s *Store) ListAPITokensByUser(ctx context.Context, userID string) ([]APIToken, error) {
 	var tokens []APIToken
-	err := s.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Find(&tokens).Error
+	err := s.db.WithContext(ctx).Where("user_id = ? AND (is_module_token = ? OR is_module_token IS NULL)", userID, false).Order("created_at DESC").Find(&tokens).Error
 	return tokens, err
 }
 
@@ -956,6 +956,10 @@ func (s *Store) DeleteAPIToken(ctx context.Context, id, userID string) error {
 		return fmt.Errorf("api token not found")
 	}
 	return nil
+}
+
+func (s *Store) DeleteAPITokenByID(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Where("id = ?", id).Delete(&APIToken{}).Error
 }
 
 func (s *Store) UpdateAPITokenLastUsed(ctx context.Context, id string) error {

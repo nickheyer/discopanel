@@ -33,8 +33,9 @@ type Info struct {
 
 // Host contains host system information for alias resolution
 type Host struct {
-	UID int `json:"uid"`
-	GID int `json:"gid"`
+	UID      int    `json:"uid"`
+	GID      int    `json:"gid"`
+	Hostname string `json:"hostname"`
 }
 
 // Context holds the objects available for alias resolution
@@ -57,11 +58,29 @@ func NewContext() *Context {
 	}
 }
 
+// Derived from host fields
+func (ctx *Context) populateComputed() {
+	if ctx.Host == nil {
+		ctx.Host = &Host{UID: os.Getuid(), GID: os.Getgid()}
+	}
+	if ctx.Host.Hostname == "" {
+		if ctx.Server != nil && ctx.Server.ProxyHostname != "" {
+			ctx.Host.Hostname = ctx.Server.ProxyHostname
+		} else if ctx.Config != nil && ctx.Config.Server.Host != "" {
+			ctx.Host.Hostname = ctx.Config.Server.Host
+			if ctx.Host.Hostname == "0.0.0.0" {
+				ctx.Host.Hostname = "localhost"
+			}
+		}
+	}
+}
+
 // GetAvailableAliases returns all available aliases with their metadata
 func GetAvailableAliases(ctx *Context) []Info {
 	if ctx == nil {
 		ctx = NewContext()
 	}
+	ctx.populateComputed()
 
 	// Always generate from zero values first to get all static aliases
 	staticSources := []struct {
@@ -300,6 +319,7 @@ func Substitute(input string, ctx *Context) string {
 	if ctx == nil {
 		ctx = NewContext()
 	}
+	ctx.populateComputed()
 
 	type subSource struct {
 		prefix string

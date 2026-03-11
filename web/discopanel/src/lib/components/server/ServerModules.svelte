@@ -80,7 +80,7 @@
 			);
 			modules = response.modules;
 			modules.forEach(m => loadAliases(m.id));
-		} catch (error) {
+		} catch {
 			if (!silent) toast.error('Failed to load modules');
 		} finally {
 			if (!silent) loading = false;
@@ -91,7 +91,7 @@
 		try {
 			const response = await rpcClient.module.listModuleTemplates({});
 			templates = response.templates;
-		} catch (error) {
+		} catch {
 			toast.error('Failed to load module templates');
 		}
 	}
@@ -296,7 +296,7 @@
 			</div>
 		{:else}
 			<div class="grid gap-4 grid-cols-1 lg:grid-cols-2">
-				{#each modules as module}
+				{#each modules as module (module.id)}
 					{@const isLoading = actionLoading === module.id}
 					<Card class="group relative overflow-hidden border shadow-sm hover:shadow-md transition-all">
 						<div class="absolute top-0 left-0 right-0 h-1 {module.status === ModuleStatus.RUNNING ? 'bg-green-500' : module.status === ModuleStatus.ERROR ? 'bg-red-500' : 'bg-gray-300'}"></div>
@@ -309,7 +309,11 @@
 											{getStatusLabel(module.status)}
 										</Badge>
 									</div>
-									<p class="text-sm text-muted-foreground truncate">{module.templateName}</p>
+									<p class="text-sm text-muted-foreground truncate">
+									{module.templateName}{#if module.createdByUsername}
+										<span class="ml-2 text-muted-foreground/60">by {module.createdByUsername}</span>
+									{/if}
+								</p>
 								</div>
 								<div class="flex items-center gap-1 ml-2">
 									{#if module.status === ModuleStatus.STOPPED}
@@ -378,7 +382,7 @@
 							<div class="text-xs mb-3 space-y-1">
 								{#if module.ports?.length}
 									<div class="flex flex-wrap gap-1.5">
-										{#each module.ports as port}
+										{#each module.ports as port (port.name)}
 											<Badge variant="outline" class="font-mono text-[10px] px-1.5 py-0">
 												{port.name || 'Port'}: {port.hostPort || '?'}→{port.containerPort}/{(port.protocol || 'tcp').toUpperCase()}
 											</Badge>
@@ -397,7 +401,7 @@
 
 							{#if module.accessUrls?.length}
 								<div class="space-y-1 mb-3">
-									{#each module.accessUrls as url}
+									{#each module.accessUrls as url (url)}
 										{@const resolved = resolve(url)}
 										<div class="flex items-center gap-2 p-2 rounded bg-muted/50">
 											<ExternalLink class="h-3 w-3 text-muted-foreground flex-shrink-0" />
@@ -437,7 +441,7 @@
 									{/if}
 									{#if module.metadata && Object.keys(module.metadata).length > 0}
 										<div class="space-y-0.5">
-											{#each Object.entries(module.metadata) as [key, value]}
+											{#each Object.entries(module.metadata) as [key, value] (key)}
 												<div class="flex items-center gap-1.5 text-muted-foreground">
 													<Info class="h-3 w-3 flex-shrink-0" />
 													<span class="font-medium">{key}:</span>

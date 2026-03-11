@@ -51,12 +51,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	apiToken := os.Getenv("DISCOPANEL_API_TOKEN")
 	httpClient := &http.Client{Timeout: 30 * time.Second}
+
+	var clientOpts []connect.ClientOption
+	if apiToken != "" {
+		fmt.Println("Using DISCOPANEL_API_TOKEN for authentication")
+		clientOpts = append(clientOpts, connect.WithInterceptors(authInterceptor(apiToken)))
+	}
+
 	p := &panel{
-		serverClient:    discopanelv1connect.NewServerServiceClient(httpClient, apiURL),
-		minecraftClient: discopanelv1connect.NewMinecraftServiceClient(httpClient, apiURL),
-		configClient:    discopanelv1connect.NewConfigServiceClient(httpClient, apiURL),
-		modpackClient:   discopanelv1connect.NewModpackServiceClient(httpClient, apiURL),
+		serverClient:    discopanelv1connect.NewServerServiceClient(httpClient, apiURL, clientOpts...),
+		minecraftClient: discopanelv1connect.NewMinecraftServiceClient(httpClient, apiURL, clientOpts...),
+		configClient:    discopanelv1connect.NewConfigServiceClient(httpClient, apiURL, clientOpts...),
+		modpackClient:   discopanelv1connect.NewModpackServiceClient(httpClient, apiURL, clientOpts...),
 		serverID:        serverID,
 		poll:            poll,
 		tmpl:            tmpl,
@@ -316,4 +324,14 @@ func envDuration(k string, d time.Duration) time.Duration {
 		}
 	}
 	return d
+}
+
+// authInterceptor injects a Bearer token into every outgoing RPC request.
+func authInterceptor(token string) connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			req.Header().Set("Authorization", "Bearer "+token)
+			return next(ctx, req)
+		}
+	}
 }

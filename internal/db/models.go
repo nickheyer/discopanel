@@ -443,14 +443,15 @@ type SystemSetting struct {
 
 // APIToken represents a long-lived API token for programmatic access
 type APIToken struct {
-	ID         string     `json:"id" gorm:"primaryKey"`
-	UserID     string     `json:"user_id" gorm:"not null;index;column:user_id"`
-	Name       string     `json:"name" gorm:"not null"`
-	TokenHash  string     `json:"-" gorm:"not null;uniqueIndex;column:token_hash"`
-	ExpiresAt  *time.Time `json:"expires_at" gorm:"column:expires_at"`
-	LastUsedAt *time.Time `json:"last_used_at" gorm:"column:last_used_at"`
-	CreatedAt  time.Time  `json:"created_at" gorm:"autoCreateTime"`
-	User       *User      `json:"-" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+	ID            string     `json:"id" gorm:"primaryKey"`
+	UserID        string     `json:"user_id" gorm:"not null;index;column:user_id"`
+	Name          string     `json:"name" gorm:"not null"`
+	TokenHash     string     `json:"-" gorm:"not null;uniqueIndex;column:token_hash"`
+	ExpiresAt     *time.Time `json:"expires_at" gorm:"column:expires_at"`
+	LastUsedAt    *time.Time `json:"last_used_at" gorm:"column:last_used_at"`
+	IsModuleToken bool       `json:"is_module_token" gorm:"default:false;column:is_module_token"`
+	CreatedAt     time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	User          *User      `json:"-" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
 }
 
 // Session represents an active user session
@@ -670,6 +671,11 @@ type Module struct {
 
 	// Access URL templates
 	AccessUrls []string `json:"access_urls" gorm:"column:access_urls;serializer:json"`
+
+	// Creator tracking and module API token
+	CreatedBy      string `json:"created_by" gorm:"column:created_by"`
+	TokenID        string `json:"token_id" gorm:"column:token_id"`
+	TokenPlaintext string `json:"-" gorm:"column:token_plaintext"`
 
 	// Relationships
 	Server   *Server         `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`

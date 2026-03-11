@@ -62,24 +62,23 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 			continue
 		}
 
-		protocol := port.Protocol
-		if protocol == "" {
-			protocol = "tcp"
+		dockerProto := "tcp"
+		if port.Protocol == "udp" {
+			dockerProto = "udp"
 		}
 
-		// Add to exposed ports (for internal Docker network access)
-		exposedPorts[nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, protocol))] = struct{}{}
+		natPort := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, dockerProto))
+		exposedPorts[natPort] = struct{}{}
 
-		// Add port binding if host port specified and proxy not enabled for this port
-		// When proxy is enabled, the DiscoPanel proxy handles host port binding
+		// Bind host port when proxy is not enabled for this port
 		if port.HostPort > 0 && !port.ProxyEnabled {
-			portBindings[nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, protocol))] = []nat.PortBinding{
+			portBindings[natPort] = []nat.PortBinding{
 				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", port.HostPort)},
 			}
 		}
 
 		c.log.Debug("Added port for module %s: %s (%d:%d/%s, proxy=%t)",
-			module.ID, port.Name, port.HostPort, port.ContainerPort, protocol, port.ProxyEnabled)
+			module.ID, port.Name, port.HostPort, port.ContainerPort, port.Protocol, port.ProxyEnabled)
 	}
 
 	// Build mounts from module configuration only (frontend sends complete config)
@@ -178,6 +177,11 @@ func (c *Client) buildModuleEnv(module *models.Module, server *models.Server, al
 		fmt.Sprintf("DISCOPANEL_MODULE_ID=%s", module.ID),
 		fmt.Sprintf("DISCOPANEL_MODULE_NAME=%s", module.Name),
 	)
+
+	// Add module API token if available
+	if module.TokenPlaintext != "" {
+		env = append(env, fmt.Sprintf("DISCOPANEL_API_TOKEN=%s", module.TokenPlaintext))
+	}
 
 	// Add module environment variables (frontend sends complete config with alias substitution)
 	if module.EnvOverrides != "" {

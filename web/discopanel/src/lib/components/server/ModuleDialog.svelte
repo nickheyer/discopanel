@@ -4,6 +4,8 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Dialog, DialogContent } from '$lib/components/ui/dialog';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
+	import { AlertTriangle } from '@lucide/svelte';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import AliasHelper from '$lib/components/ui/AliasHelper.svelte';
@@ -61,6 +63,9 @@
 	let serverModules = $state<Module[]>([]);
 
 	let serverId = $derived(mode === 'create' ? server?.id : module?.serverId);
+	let hasProxy = $derived(
+		mode === 'create' ? !!server?.proxyHostname : !!module?.serverProxyHostname
+	);
 
 	const navItems: { id: ConfigSection; label: string; icon: typeof Settings }[] = [
 		{ id: 'general', label: 'General', icon: Settings },
@@ -104,7 +109,7 @@
 
 	function parseVolumes(json: string): VolumeMount[] {
 		try {
-			return JSON.parse(json || '[]').map((v: any) => ({
+			return JSON.parse(json || '[]').map((v: Record<string, unknown>) => ({
 				hostPath: v.source || '',
 				containerPath: v.target || '',
 				readOnly: v.read_only || false
@@ -327,6 +332,44 @@
 		step = 'configure';
 	}
 
+	let warnings = $state<string[]>([]);
+	let warningResolve: ((proceed: boolean) => void) | null = null;
+
+	function showWarnings(): Promise<boolean> {
+		const w: string[] = [];
+
+		if (ports.some((p) => p.proxyEnabled) && !hasProxy) {
+			w.push('One or more ports have proxy enabled, but this server has no proxy hostname configured. Proxy-routed ports won\'t be accessible from the host');
+		}
+
+		if (ports.some((p) => p.hostPort === 0 && p.containerPort > 0)) {
+			w.push('One or more ports have no host port assigned. They will not be accessible from outside the container.');
+		}
+
+		if (memory < 64) {
+			w.push(`Memory limit is set to ${memory}MB, which is very low and may cause the container to be killed.`);
+		}
+
+		if (w.length === 0) return Promise.resolve(true);
+
+		warnings = w;
+		return new Promise((resolve) => {
+			warningResolve = resolve;
+		});
+	}
+
+	function handleWarningProceed() {
+		warnings = [];
+		warningResolve?.(true);
+		warningResolve = null;
+	}
+
+	function handleWarningCancel() {
+		warnings = [];
+		warningResolve?.(false);
+		warningResolve = null;
+	}
+
 	$effect(() => {
 		if (open && mode === 'edit' && module) {
 			name = module.name;
@@ -357,6 +400,9 @@
 	});
 
 	async function handleSubmit() {
+		const proceed = await showWarnings();
+		if (!proceed) return;
+
 		submitting = true;
 		try {
 			const portsPayload = ports
@@ -507,7 +553,7 @@
 
 					<!-- Navigation -->
 					<nav class="flex-1 p-4 space-y-1">
-						{#each navItems as item}
+						{#each navItems as item (item.id)}
 							{@const Icon = item.icon}
 							<button
 								onclick={() => (activeSection = item.id)}
@@ -719,7 +765,7 @@
 
 								{#if ports.length > 0}
 									<div class="space-y-4">
-										{#each ports as port, i}
+										{#each ports as port, i (port.containerPort)}
 											<div class="p-6 border rounded-xl bg-card space-y-4">
 												<div class="flex items-center justify-between">
 													<span class="font-medium">Port {i + 1}</span>
@@ -782,6 +828,25 @@
 													<Checkbox bind:checked={port.proxyEnabled} />
 													<span class="text-sm">Enable proxy for this port</span>
 												</label>
+												{#if port.proxyEnabled && !hasProxy}
+													<div class="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400">
+														<Info class="h-4 w-4 mt-0.5 flex-shrink-0" />
+														<div class="flex-1 text-xs">
+															<p>This server has no proxy hostname configured. Proxy-routed ports won't be accessible from the host.</p>
+															<Button
+																variant="outline"
+																size="sm"
+																class="mt-2 h-7 text-xs"
+																onclick={() => {
+																	port.proxyEnabled = false;
+																	if (port.protocol === 'http') port.protocol = 'tcp';
+																}}
+															>
+																Fix: switch to direct TCP binding
+															</Button>
+														</div>
+													</div>
+												{/if}
 											</div>
 										{/each}
 									</div>
@@ -817,7 +882,7 @@
 
 								{#if envVars.length > 0}
 									<div class="space-y-3">
-										{#each envVars as env, i}
+										{#each envVars as env, i (i)}
 											<div class="flex items-center gap-3 p-4 border rounded-lg bg-card">
 												<Input
 													bind:value={env.key}
@@ -873,7 +938,7 @@
 
 								{#if volumes.length > 0}
 									<div class="space-y-4">
-										{#each volumes as vol, i}
+										{#each volumes as vol, i (i)}
 											<div class="p-6 border rounded-xl bg-card space-y-4">
 												<div class="flex items-center justify-between">
 													<span class="font-medium">Volume {i + 1}</span>
@@ -953,7 +1018,7 @@
 
 									{#if dependencies.length > 0}
 										<div class="space-y-3">
-											{#each dependencies as dep, i}
+											{#each dependencies as dep, i (i)}
 												<div class="flex items-center gap-4 p-4 border rounded-lg bg-card">
 													<Select
 														type="single"
@@ -969,7 +1034,7 @@
 															>
 														</SelectTrigger>
 														<SelectContent>
-															{#each serverModules as mod}
+															{#each serverModules as mod (mod.id)}
 																<SelectItem value={mod.id}>{mod.name}</SelectItem>
 															{/each}
 														</SelectContent>
@@ -1072,7 +1137,7 @@
 
 									{#if eventHooks.length > 0}
 										<div class="space-y-4">
-											{#each eventHooks as hook, i}
+											{#each eventHooks as hook, i (i)}
 												<div class="p-6 border rounded-xl bg-card space-y-4">
 													<div class="flex items-center justify-between">
 														<span class="font-medium">Hook {i + 1}</span>
@@ -1209,7 +1274,7 @@
 
 									{#if metadata.length > 0}
 										<div class="space-y-3">
-											{#each metadata as entry, i}
+											{#each metadata as entry, i (i)}
 												<div class="flex items-center gap-3 p-4 border rounded-lg bg-card">
 													<Input
 														bind:value={entry.key}
@@ -1283,3 +1348,31 @@
 		{/if}
 	</DialogContent>
 </Dialog>
+
+<AlertDialog.Root open={warnings.length > 0} onOpenChange={(o) => { if (!o) handleWarningCancel(); }}>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title class="flex items-center gap-2">
+				<AlertTriangle class="h-5 w-5 text-amber-500" />
+				Review Warnings
+			</AlertDialog.Title>
+			<AlertDialog.Description>
+				The following issues were detected. You can still proceed, but you may want to review them first.
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<div class="space-y-2 py-2">
+			{#each warnings as warning (warning)}
+				<div class="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm">
+					<AlertTriangle class="h-4 w-4 mt-0.5 flex-shrink-0" />
+					<span>{warning}</span>
+				</div>
+			{/each}
+		</div>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel onclick={handleWarningCancel}>Go Back</AlertDialog.Cancel>
+			<AlertDialog.Action onclick={handleWarningProceed}>
+				{mode === 'create' ? 'Create Anyway' : 'Save Anyway'}
+			</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>

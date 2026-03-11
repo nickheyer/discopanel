@@ -274,6 +274,10 @@ message Module {
   string cmd_override = 31;
   // Access URL templates
   repeated string access_urls = 32;
+  // User ID of the user who created this module.
+  string created_by_user_id = 33;
+  // Username of the user who created this module (for display).
+  string created_by_username = 34;
 }
 
 // ListModuleTemplatesRequest filters the template list.

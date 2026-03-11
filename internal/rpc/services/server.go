@@ -1,10 +1,12 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1358,6 +1360,73 @@ func (s *ServerService) SendCommand(ctx context.Context, req *connect.Request[v1
 	return connect.NewResponse(&v1.SendCommandResponse{
 		Success: true,
 		Output:  output,
+	}), nil
+}
+
+// Reads the server's latest.log and uploads it to mclo.gs
+func (s *ServerService) UploadToMCLogs(ctx context.Context, req *connect.Request[v1.UploadToMCLogsRequest]) (*connect.Response[v1.UploadToMCLogsResponse], error) {
+	server, err := s.store.GetServer(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+
+	logPath := filepath.Join(server.DataPath, "logs", "latest.log")
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		s.log.Error("Failed to read server log file: %v", err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("log file not found"))
+	}
+
+	if len(content) == 0 {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("log file is empty"))
+	}
+
+	// Truncate to 25000 lines if needed
+	lines := bytes.Split(content, []byte("\n"))
+	if len(lines) > 25000 {
+		lines = lines[len(lines)-25000:]
+		content = bytes.Join(lines, []byte("\n"))
+	}
+
+	// Build mclo.gs request
+	payload, _ := json.Marshal(map[string]string{
+		"content": string(content),
+		"source":  fmt.Sprintf("DiscoPanel-%s", server.Name),
+	})
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.mclo.gs/1/log", bytes.NewReader(payload))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create request"))
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		s.log.Error("Failed to upload to mclo.gs: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to upload to mclo.gs"))
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read mclo.gs response"))
+	}
+
+	var result struct {
+		Success bool   `json:"success"`
+		URL     string `json:"url"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to parse mclo.gs response"))
+	}
+
+	if !result.Success {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("mclo.gs error: %s", result.Error))
+	}
+
+	return connect.NewResponse(&v1.UploadToMCLogsResponse{
+		Url: result.URL,
 	}), nil
 }
 

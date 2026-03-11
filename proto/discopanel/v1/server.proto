@@ -35,6 +35,8 @@ service ServerService {
   rpc RecreateServer(RecreateServerRequest) returns (RecreateServerResponse);
   // Execute console command
   rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
+  // Upload server logs to mclo.gs
+  rpc UploadToMCLogs(UploadToMCLogsRequest) returns (UploadToMCLogsResponse);
 }
 
 // Server list options
@@ -213,4 +215,14 @@ message SendCommandResponse {
   bool success = 1;
   string output = 2;
   string error = 3;
+}
+
+// Server to upload logs for
+message UploadToMCLogsRequest {
+  string id = 1;
+}
+
+// mclo.gs upload result
+message UploadToMCLogsResponse {
+  string url = 1;
 }

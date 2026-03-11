@@ -5,12 +5,13 @@
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
-	import { GetServerLogsRequestSchema, ClearServerLogsRequestSchema, SendCommandRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
+	import { GetServerLogsRequestSchema, ClearServerLogsRequestSchema, SendCommandRequestSchema, UploadToMCLogsRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import { ResizablePaneGroup, ResizablePane, ResizableHandle } from '$lib/components/ui/resizable';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
-	import { Terminal, Send, Loader2, Download, Trash2, RefreshCw, Wifi, WifiOff } from '@lucide/svelte';
+	import { Terminal, Send, Loader2, Download, Upload, Trash2, RefreshCw, Wifi, WifiOff } from '@lucide/svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import AnsiToHtml from 'ansi-to-html';
 	import { getStringForEnum } from '$lib/utils';
 	import { wsClient } from '$lib/stores/websocket.svelte';
@@ -216,6 +217,23 @@
 		toast.success('Console cleared');
 	}
 
+	let uploading = $state(false);
+
+	async function uploadToMCLogs() {
+		if (uploading) return;
+		uploading = true;
+		try {
+			const request = create(UploadToMCLogsRequestSchema, { id: server.id });
+			const response = await rpcClient.server.uploadToMCLogs(request);
+			await navigator.clipboard.writeText(response.url);
+			toast.success('mclo.gs URL copied to clipboard');
+		} catch (error) {
+			toast.error('Failed to upload to mclo.gs: ' + (error instanceof Error ? error.message : 'Unknown error'));
+		} finally {
+			uploading = false;
+		}
+	}
+
 	function downloadLogs() {
 		const logText = logEntries.map(entry => entry.message).join('\n');
 		const blob = new Blob([logText], { type: 'text/plain' });
@@ -270,37 +288,70 @@
 				{/if}
 				</div>
 				<div class="flex items-center gap-1">
-					<Button
-						size="sm"
-						variant="ghost"
-						onclick={fetchLogs}
-						disabled={loading}
-						class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
-					>
-						{#if loading}
-							<Loader2 class="h-3 w-3 animate-spin" />
-						{:else}
-							<RefreshCw class="h-3 w-3" />
-						{/if}
-					</Button>
-					<Button
-						size="sm"
-						variant="ghost"
-						onclick={downloadLogs}
-						disabled={logEntries.length === 0}
-						class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
-					>
-						<Download class="h-3 w-3" />
-					</Button>
-					<Button
-						size="sm"
-						variant="ghost"
-						onclick={clearLogs}
-						disabled={logEntries.length === 0}
-						class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
-					>
-						<Trash2 class="h-3 w-3" />
-					</Button>
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							<Button
+								size="sm"
+								variant="ghost"
+								onclick={fetchLogs}
+								disabled={loading}
+								class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
+							>
+								{#if loading}
+									<Loader2 class="h-3 w-3 animate-spin" />
+								{:else}
+									<RefreshCw class="h-3 w-3" />
+								{/if}
+							</Button>
+						</Tooltip.Trigger>
+						<Tooltip.Content>Refresh logs</Tooltip.Content>
+					</Tooltip.Root>
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							<Button
+								size="sm"
+								variant="ghost"
+								onclick={uploadToMCLogs}
+								disabled={uploading}
+								class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
+							>
+								{#if uploading}
+									<Loader2 class="h-3 w-3 animate-spin" />
+								{:else}
+									<Upload class="h-3 w-3" />
+								{/if}
+							</Button>
+						</Tooltip.Trigger>
+						<Tooltip.Content>Upload to mclo.gs</Tooltip.Content>
+					</Tooltip.Root>
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							<Button
+								size="sm"
+								variant="ghost"
+								onclick={downloadLogs}
+								disabled={logEntries.length === 0}
+								class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
+							>
+								<Download class="h-3 w-3" />
+							</Button>
+						</Tooltip.Trigger>
+						<Tooltip.Content>Download logs</Tooltip.Content>
+					</Tooltip.Root>
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							<Button
+								size="sm"
+								variant="ghost"
+								onclick={clearLogs}
+								disabled={logEntries.length === 0}
+								class="h-7 w-7 p-0 text-zinc-400 hover:text-white"
+							>
+								<Trash2 class="h-3 w-3" />
+							</Button>
+						</Tooltip.Trigger>
+						<Tooltip.Content>Clear console</Tooltip.Content>
+					</Tooltip.Root>
 				</div>
 			</div>
 			<div
@@ -314,8 +365,9 @@
 							No logs available. {[ServerStatus.RUNNING, ServerStatus.STARTING, ServerStatus.UNHEALTHY].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
 						</div>
 					{:else}
-						{#each logEntries as entry}
+						{#each logEntries as entry, i (i)}
 							<div class="log-line whitespace-pre-wrap break-all" data-type={entry.level}>
+								<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 								{@html ansiConverter.toHtml(entry.message)}
 							</div>
 						{/each}

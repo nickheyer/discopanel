@@ -83,7 +83,7 @@
 				serversStore.updateServer(server);
 				loading = false;
 			}
-		} catch (error) {
+		} catch {
 			// Only show error if still on the same server and no data yet
 			if (serverId === requestedId && !server) {
 				toast.error('Failed to load server');
@@ -98,26 +98,30 @@
 		actionLoading = true;
 		try {
 			switch (action) {
-				case 'start':
+				case 'start': {
 					const startRequest = create(StartServerRequestSchema, { id: server.id });
 					await rpcClient.server.startServer(startRequest);
 					toast.success('Server is starting...');
 					break;
-				case 'stop':
+				}
+				case 'stop': {
 					const stopRequest = create(StopServerRequestSchema, { id: server.id });
 					await rpcClient.server.stopServer(stopRequest);
 					toast.success('Server is stopping...');
 					break;
-				case 'restart':
+				}
+				case 'restart': {
 					const restartRequest = create(RestartServerRequestSchema, { id: server.id });
 					await rpcClient.server.restartServer(restartRequest);
 					toast.success('Server is restarting...');
 					break;
-				case 'recreate':
+				}
+				case 'recreate': {
 					const recreateRequest = create(RecreateServerRequestSchema, { id: server.id });
 					await rpcClient.server.recreateServer(recreateRequest);
 					toast.success('Server is being recreated...');
 					break;
+				}
 			}
 			await loadServer();
 		} catch (error) {
@@ -382,13 +386,13 @@
 							<div class="flex items-center justify-center h-20 rounded-xl bg-gradient-to-br from-muted/30 to-muted/10 border border-border/30 overflow-hidden">
 								{#if server.status === ServerStatus.RUNNING}
 									<div class="heartbeat-container">
-										{#each Array(5) as _, i}
+										{#each Array(5) as _, i (i)}
 											<div class="heartbeat-bar bg-green-500" style="animation-delay: {i * 0.15}s"></div>
 										{/each}
 									</div>
 								{:else if server.status === ServerStatus.UNHEALTHY}
 									<div class="heartbeat-container">
-										{#each Array(5) as _, i}
+										{#each Array(5) as _, i (i)}
 											<div class="heartbeat-bar heartbeat-erratic text-purple-500" style="animation-delay: {i * 0.1}s; height: {20 + Math.random() * 30}px"></div>
 										{/each}
 									</div>
@@ -396,19 +400,19 @@
 									<div class="w-full h-0.5 bg-gray-500/50"></div>
 								{:else if server.status === ServerStatus.STARTING}
 									<div class="heartbeat-container">
-										{#each Array(5) as _, i}
+										{#each Array(5) as _, i (i)}
 											<div class="heartbeat-bar heartbeat-slow bg-yellow-500" style="animation-delay: {i * 0.2}s"></div>
 										{/each}
 									</div>
 								{:else if server.status === ServerStatus.CREATING}
 									<div class="heartbeat-container">
-										{#each Array(5) as _, i}
+										{#each Array(5) as _, i (i)}
 											<div class="heartbeat-bar heartbeat-slow bg-blue-500" style="animation-delay: {i * 0.2}s"></div>
 										{/each}
 									</div>
 								{:else}
 									<div class="heartbeat-container">
-										{#each Array(5) as _, i}
+										{#each Array(5) as _, i (i)}
 											<div class="heartbeat-bar heartbeat-slow bg-orange-500" style="animation-delay: {i * 0.25}s"></div>
 										{/each}
 									</div>
@@ -595,7 +599,7 @@
 							</div>
 							{#if server.playerSample && server.playerSample.length > 0}
 								<div class="flex flex-wrap gap-1.5">
-									{#each server.playerSample as playerName}
+									{#each server.playerSample as playerName (playerName)}
 										<div class="flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors duration-500"
 											style="background: rgb({colors.bg} / 0.1); border-color: rgb({colors.bg} / 0.2);">
 											<img

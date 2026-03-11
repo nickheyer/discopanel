@@ -10,6 +10,7 @@ import {
 	ChangePasswordRequestSchema,
 	UseRecoveryKeyRequestSchema
 } from '$lib/proto/discopanel/v1/auth_pb';
+import * as _ from 'lodash-es';
 
 interface AuthState {
 	user: User | null;
@@ -152,7 +153,7 @@ function createAuthStore() {
 		},
 
 		async logout() {
-			let currentState: AuthState = get({ subscribe });
+			const currentState: AuthState = get({ subscribe });
 
 			try {
 				if (currentState.token) {
@@ -214,8 +215,8 @@ function createAuthStore() {
 				});
 				const response = await rpcClient.auth.changePassword(request);
 				return response;
-			} catch (error: any) {
-				throw new Error(error.message || 'Failed to change password');
+			} catch (error) {
+				throw new Error(_.get(error, 'message') || 'Failed to change password');
 			}
 		},
 

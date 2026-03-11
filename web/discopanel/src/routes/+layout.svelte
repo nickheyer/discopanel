@@ -31,31 +31,31 @@
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
 	import { get } from 'svelte/store';
-	import { serversStore, runningServers } from '$lib/stores/servers';
+	import { serversStore, runningServers, activitySortedServers } from '$lib/stores/servers';
 	import { authStore, currentUser, canAccessSettings, authEnabled } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
-	import { Server, Home, Settings, Package, User, LogOut, LogIn, FileText, Sun, Moon } from '@lucide/svelte';
+	import { Server, Home, Settings, Package, User as UserIcon, LogOut, LogIn, FileText, Sun, Moon } from '@lucide/svelte';
 	import { toggleMode, mode } from 'mode-watcher';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus, type User } from '$lib/proto/discopanel/v1/common_pb';
 
 	let { children } = $props();
 
-	let servers = $derived($serversStore);
+	let servers = $derived($activitySortedServers);
 	let runningCount = $derived($runningServers.length);
 	let user = $derived($currentUser);
 	let showSettingsNav = $derived($canAccessSettings);
 	let loading = $state(true);
 	let isAuthEnabled = $derived($authEnabled);
 
-	function getUserInitials(user: any) {
+	function getUserInitials(user: User) {
 		if (!user) return '';
 		return user.username.slice(0, 2).toUpperCase();
 	}
 
-	function getDisplayRole(user: any): string {
+	function getDisplayRole(user: User): string {
 		if (!user?.roles?.length) return 'No roles';
 		return user.roles[0];
 	}
@@ -215,7 +215,7 @@
 								<SidebarGroupLabel>Quick Access</SidebarGroupLabel>
 								<SidebarGroupContent>
 									<SidebarMenu>
-										{#each servers.slice(0, 5) as server}
+										{#each servers as server (server.id)}
 											<SidebarMenuItem>
 												<SidebarMenuButton isActive={page.url.pathname === `/servers/${server.id}`}>
 													{#snippet child({ props })}
@@ -278,7 +278,7 @@
 									</DropdownMenuLabel>
 									<DropdownMenuSeparator />
 									<DropdownMenuItem onclick={() => goto('/profile')}>
-										<User class="mr-2 h-4 w-4" />
+										<UserIcon class="mr-2 h-4 w-4" />
 										<span>Profile</span>
 									</DropdownMenuItem>
 									<DropdownMenuSeparator />

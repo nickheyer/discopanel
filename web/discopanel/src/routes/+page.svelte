@@ -16,7 +16,8 @@
 	} from '@lucide/svelte';
 	import { ServerStatus, type Server as ServerType } from '$lib/proto/discopanel/v1/common_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
-	import { serversStore } from '$lib/stores/servers';
+	import { serversStore, sortServersByActivity } from '$lib/stores/servers';
+	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 
 	// Dashboard data
 	let dashboardServers: ServerType[] = $state([]);
@@ -147,7 +148,7 @@
 
 
 
-	const formatUptime = (lastStarted: any) => {
+	const formatUptime = (lastStarted?: Timestamp) => {
 		if (!lastStarted) return 'Never';
 		const start = new Date(Number(lastStarted.seconds) * 1000);
 		const diff = currentTime.getTime() - start.getTime();
@@ -376,7 +377,7 @@
 					</div>
 				{:else}
 					<div class="space-y-3">
-						{#each dashboardServers.slice(0, 5) as server}
+						{#each sortServersByActivity([...dashboardServers]).slice(0, 5) as server (server.id)}
 							{@const StatusIcon = getStatusIcon(server.status)}
 							<div class="group flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors">
 								<div class="flex items-center gap-3 flex-1">
@@ -444,7 +445,7 @@
 					</div>
 				{:else}
 					<div class="space-y-3">
-						{#each recentActivity as activity, i}
+						{#each recentActivity as activity, i (activity)}
 							<div class="flex items-start gap-3 animate-in fade-in-50 slide-in-from-right-2" style="animation-delay: {300 + i * 50}ms">
 								<div class="mt-1">
 									{#if activity.status === ServerStatus.RUNNING}

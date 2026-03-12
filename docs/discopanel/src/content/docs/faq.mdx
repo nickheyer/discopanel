@@ -65,9 +65,23 @@ Go to https://console.curseforge.com/#/api-keys
 </details>
 
 <details>
+  <summary>Why can't I change my RAM allocation in the server JVM config?</summary>
+
+RAM maximums are adjusted via the Memory field in the overview section. It is done this way so that the minecraft docker container can have some amount of RAM available to handle all the other things it needs to do other than just run a minecraft server. The JVM allocation is then computed from the Memory value it is given to have enough space.
+
+</details>
+
+<details>
   <summary>Where do I find my logs?</summary>
 
 In Settings → Logs.
+
+</details>
+
+<details>
+  <summary>I'm using Simple Voice Chat or Square/Dynmap and I want to expose that port. How do I do that?</summary>
+
+This is best done using the 'Additional Ports' section of the overview tab of the server you want t adjust. At current there is no reverse prox built into Discopanel for these, but Simple Voice Chat does have its own implementation that you should check out.
 
 </details>
 
@@ -110,6 +124,11 @@ If you're uploading a new mod, you can do it via:
 
 Both options are configured in the **Docker Container Overrides** section of the Overview tab. They are not currently exposed in the normal config options but are useful nonetheless.
 
+  </details>
+
+  <details>
+    <summary>Modrinth</summary>
+    Check [here](https://docker-minecraft-server.readthedocs.io/en/latest/types-and-platforms/mod-platforms/modrinth-modpacks/).
   </details>
 </details>
 

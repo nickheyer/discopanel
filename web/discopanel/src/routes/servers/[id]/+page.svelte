@@ -24,7 +24,7 @@
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
 	import ServerSettings from '$lib/components/server-settings.svelte';
 	import ServerMods from '$lib/components/server-mods.svelte';
-	import ServerFiles from '$lib/components/server-files.svelte';
+	import ServerFiles from '$lib/components/files/server-files.svelte';
 	import ServerRouting from '$lib/components/server-routing.svelte';
 	import ServerTasks from '$lib/components/server-tasks.svelte';
 	import ServerModules from '$lib/components/server/ServerModules.svelte';

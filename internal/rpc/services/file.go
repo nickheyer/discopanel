@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -231,7 +233,7 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 	}), nil
 }
 
-// DeleteFile deletes a file
+// DeleteFile deletes a file or multiple files (bulk)
 func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.DeleteFileRequest]) (*connect.Response[v1.DeleteFileResponse], error) {
 	msg := req.Msg
 
@@ -241,36 +243,41 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	// Clean and validate path
-	fullPath := filepath.Join(server.DataPath, msg.Path)
-	if !strings.HasPrefix(fullPath, server.DataPath) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
+	// Build list of paths to delete: prefer bulk paths, fall back to single path
+	paths := msg.Paths
+	if len(paths) == 0 && msg.Path != "" {
+		paths = []string{msg.Path}
+	}
+	if len(paths) == 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
 	}
 
-	// Don't allow deleting root directory
-	if fullPath == server.DataPath {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot delete server root directory"))
-	}
-
-	// Check if exists
-	info, err := os.Stat(fullPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, connect.NewError(connect.CodeNotFound, errors.New("file not found"))
+	for _, p := range paths {
+		fullPath := filepath.Join(server.DataPath, p)
+		if !strings.HasPrefix(fullPath, server.DataPath) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid path: %s", p))
 		}
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to access file"))
-	}
+		if fullPath == server.DataPath {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot delete server root directory"))
+		}
 
-	// Delete file or directory
-	if info.IsDir() {
-		err = os.RemoveAll(fullPath)
-	} else {
-		err = os.Remove(fullPath)
-	}
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // Skip already-deleted files in bulk
+			}
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to access %s", p))
+		}
 
-	if err != nil {
-		s.log.Error("Failed to delete file: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete file"))
+		if info.IsDir() {
+			err = os.RemoveAll(fullPath)
+		} else {
+			err = os.Remove(fullPath)
+		}
+		if err != nil {
+			s.log.Error("Failed to delete %s: %v", p, err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete %s", p))
+		}
 	}
 
 	return connect.NewResponse(&v1.DeleteFileResponse{}), nil
@@ -402,6 +409,247 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		Message:        "Archive extracted successfully",
 		FilesExtracted: int32(filesExtracted),
 	}), nil
+}
+
+// CreateFolder creates a new directory
+func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.CreateFolderRequest]) (*connect.Response[v1.CreateFolderResponse], error) {
+	msg := req.Msg
+
+	server, err := s.store.GetServer(ctx, msg.ServerId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
+	}
+
+	fullPath := filepath.Join(server.DataPath, msg.Path)
+	if !strings.HasPrefix(fullPath, server.DataPath) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
+	}
+
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
+		s.log.Error("Failed to create folder: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create folder"))
+	}
+
+	return connect.NewResponse(&v1.CreateFolderResponse{
+		Message: "Folder created successfully",
+	}), nil
+}
+
+// MoveFile moves a file or directory to a new location
+func (s *FileService) MoveFile(ctx context.Context, req *connect.Request[v1.MoveFileRequest]) (*connect.Response[v1.MoveFileResponse], error) {
+	msg := req.Msg
+
+	server, err := s.store.GetServer(ctx, msg.ServerId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
+	}
+
+	srcFull := filepath.Join(server.DataPath, msg.SourcePath)
+	dstFull := filepath.Join(server.DataPath, msg.DestinationPath)
+
+	if !strings.HasPrefix(srcFull, server.DataPath) || !strings.HasPrefix(dstFull, server.DataPath) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
+	}
+
+	if _, err := os.Stat(srcFull); err != nil {
+		if os.IsNotExist(err) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("source not found"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to access source"))
+	}
+
+	// Ensure destination parent exists
+	if err := os.MkdirAll(filepath.Dir(dstFull), 0755); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create destination directory"))
+	}
+
+	// Try rename first, fall back to copy+delete for cross-device moves
+	if err := os.Rename(srcFull, dstFull); err != nil {
+		srcInfo, statErr := os.Stat(srcFull)
+		if statErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to move file"))
+		}
+		if srcInfo.IsDir() {
+			if copyErr := files.CopyDir(srcFull, dstFull); copyErr != nil {
+				s.log.Error("Failed to copy dir for move: %v", copyErr)
+				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to move directory"))
+			}
+		} else {
+			if copyErr := files.CopyFile(srcFull, dstFull); copyErr != nil {
+				s.log.Error("Failed to copy file for move: %v", copyErr)
+				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to move file"))
+			}
+		}
+		os.RemoveAll(srcFull)
+	}
+
+	return connect.NewResponse(&v1.MoveFileResponse{
+		Message: "File moved successfully",
+	}), nil
+}
+
+// CopyFile copies a file or directory
+func (s *FileService) CopyFile(ctx context.Context, req *connect.Request[v1.CopyFileRequest]) (*connect.Response[v1.CopyFileResponse], error) {
+	msg := req.Msg
+
+	server, err := s.store.GetServer(ctx, msg.ServerId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
+	}
+
+	srcFull := filepath.Join(server.DataPath, msg.SourcePath)
+	dstFull := filepath.Join(server.DataPath, msg.DestinationPath)
+
+	if !strings.HasPrefix(srcFull, server.DataPath) || !strings.HasPrefix(dstFull, server.DataPath) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
+	}
+
+	srcInfo, err := os.Stat(srcFull)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("source not found"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to access source"))
+	}
+
+	// If src and dst are the same, generate a "copy" name to avoid truncation
+	if srcFull == dstFull {
+		dstFull = uniqueCopyPath(dstFull, srcInfo.IsDir())
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dstFull), 0755); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create destination directory"))
+	}
+
+	if srcInfo.IsDir() {
+		if err := files.CopyDir(srcFull, dstFull); err != nil {
+			s.log.Error("Failed to copy directory: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to copy directory"))
+		}
+	} else {
+		if err := files.CopyFile(srcFull, dstFull); err != nil {
+			s.log.Error("Failed to copy file: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to copy file"))
+		}
+	}
+
+	return connect.NewResponse(&v1.CopyFileResponse{
+		Message: "File copied successfully",
+	}), nil
+}
+
+// CreateArchive creates a zip archive from selected paths
+func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1.CreateArchiveRequest]) (*connect.Response[v1.CreateArchiveResponse], error) {
+	msg := req.Msg
+
+	server, err := s.store.GetServer(ctx, msg.ServerId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
+	}
+
+	if len(msg.Paths) == 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
+	}
+
+	// Validate all paths
+	for _, p := range msg.Paths {
+		fullPath := filepath.Join(server.DataPath, p)
+		if !strings.HasPrefix(fullPath, server.DataPath) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid path: %s", p))
+		}
+	}
+
+	// Determine archive name and destination
+	archiveName := msg.ArchiveName
+	if archiveName == "" {
+		archiveName = fmt.Sprintf("archive_%s.zip", time.Now().Format("20060102_150405"))
+	}
+	if !strings.HasSuffix(archiveName, ".zip") {
+		archiveName += ".zip"
+	}
+
+	destDir := msg.DestinationPath
+	if destDir == "" {
+		destDir = "."
+	}
+	destFull := filepath.Join(server.DataPath, destDir, archiveName)
+	if !strings.HasPrefix(destFull, server.DataPath) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid destination path"))
+	}
+
+	count, err := files.CreateZipArchive(msg.Paths, server.DataPath, destFull)
+	if err != nil {
+		s.log.Error("Failed to create archive: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create archive"))
+	}
+
+	archivePath, _ := filepath.Rel(server.DataPath, destFull)
+	return connect.NewResponse(&v1.CreateArchiveResponse{
+		Message:       "Archive created successfully",
+		ArchivePath:   archivePath,
+		FilesArchived: int32(count),
+	}), nil
+}
+
+// DownloadArchive creates a zip in memory and returns the bytes
+func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[v1.DownloadArchiveRequest]) (*connect.Response[v1.DownloadArchiveResponse], error) {
+	msg := req.Msg
+
+	server, err := s.store.GetServer(ctx, msg.ServerId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
+	}
+
+	if len(msg.Paths) == 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
+	}
+
+	for _, p := range msg.Paths {
+		fullPath := filepath.Join(server.DataPath, p)
+		if !strings.HasPrefix(fullPath, server.DataPath) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid path: %s", p))
+		}
+	}
+
+	var buf bytes.Buffer
+	_, err = files.CreateZipToWriter(msg.Paths, server.DataPath, &buf)
+	if err != nil {
+		s.log.Error("Failed to create download archive: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create archive"))
+	}
+
+	filename := "download.zip"
+	if len(msg.Paths) == 1 {
+		base := filepath.Base(msg.Paths[0])
+		filename = strings.TrimSuffix(base, filepath.Ext(base)) + ".zip"
+	}
+
+	return connect.NewResponse(&v1.DownloadArchiveResponse{
+		Content:  buf.Bytes(),
+		Filename: filename,
+	}), nil
+}
+
+// uniqueCopyPath generates a non-colliding "name (copy).ext" path.
+func uniqueCopyPath(fullPath string, isDir bool) string {
+	dir := filepath.Dir(fullPath)
+	base := filepath.Base(fullPath)
+
+	var stem, ext string
+	if isDir {
+		stem = base
+	} else {
+		ext = filepath.Ext(base)
+		stem = strings.TrimSuffix(base, ext)
+	}
+
+	candidate := filepath.Join(dir, stem+" (copy)"+ext)
+	for i := 2; ; i++ {
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+		candidate = filepath.Join(dir, fmt.Sprintf("%s (copy %d)%s", stem, i, ext))
+	}
 }
 
 // Helper functions

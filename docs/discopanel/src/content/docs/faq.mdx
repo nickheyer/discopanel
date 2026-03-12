@@ -6,138 +6,145 @@ description: Frequently asked questions.
 Answers to the questions that get asked over and over.
 
 <details>
-  <summary>
-    <h2>How do I update Discopanel?</h2>
-  </summary>
-    <details>
-      <summary><h3>Docker Compose</h3></summary>
-      In the folder where your compose.yml file is, do:
-    
-  1. `docker compose down`
-  2. `docker pull nickheyer/discopanel`
-  3. `docker compose up -d`
-  
-  </details>
-  
+  <summary>How do I update Discopanel?</summary>
+
   <details>
-    <summary>
-      <h3>Proxmox Helper Script</h3>
-    </summary>
-    Open console for the container and enter <code>update</code>!
+    <summary>Docker Compose</summary>
+
+In the folder where your `compose.yml` file is, run:
+
+1. `docker compose down`
+2. `docker pull nickheyer/discopanel`
+3. `docker compose up -d`
+
   </details>
 
   <details>
-    <summary>
-      <h3>Source</h3>
-    </summary>
-    idk download the new binary and run it
-        
-*needs more specific documentation*
+    <summary>Proxmox Helper Script</summary>
+
+Open the console for the container and enter `update`.
+
+  </details>
+
+  <details>
+    <summary>Source</summary>
+
+Download the new binary and run it.
+
+*Needs more specific documentation.*
+
   </details>
 </details>
 
 <details>
-  <summary>
-    <h2>I'm using host networking but I already have something using port 8080. How do I make Discopanel use another port?</h2>
-  </summary>
-  If you're using the config.yaml for configuring options, you can just set this option:
+  <summary>I'm using host networking but something is already on port 8080. How do I change the port?</summary>
 
-  ```yaml
+If you're using `config.yaml`, set this option:
+
+```yaml
 server:
   port: "8080"
 ```
 
-  Or you can set the `DISCOPANEL_SERVER_PORT` environment variable to whatever port you want!
+Or set the `DISCOPANEL_SERVER_PORT` environment variable to whatever port you want.
+
 </details>
 
 <details>
-  <summary><h2>How do I setup the proxy for my servers?</summary>
-    ## TODO
+  <summary>How do I set up the proxy for my servers?</summary>
+
+*TODO*
+
 </details>
 
 <details>
-  <summary><h2>How do I get an API key from Curseforge</summary>
-    Go to https://console.curseforge.com/#/api-keys !
+  <summary>How do I get an API key from Curseforge?</summary>
+
+Go to https://console.curseforge.com/#/api-keys
+
 </details>
 
 <details>
-  <summary>
-    Where do I find my logs?
-  </summary>
-  In settings and then logs!
+  <summary>Where do I find my logs?</summary>
+
+In Settings → Logs.
+
 </details>
 
 <details>
-  <summary>
-    <h2>How do I stop Discopanel from updating my servers?</h2>
-  </summary>
+  <summary>How do I stop Discopanel from updating my servers?</summary>
+
   <details>
     <summary>Curseforge</summary>
-Jump down to the Curseforge config options of the desired server and either edit the <code>CF_URL</code>, <code>CF_FILE_ID</code> or <code>CF_FILENAME_MATCHER</code> fields to the corresponding ID that holds the specific version you want to pin it to.
-    
-  
-  
-  For example, if I wanted to pin my ATM10 server to v2.42 I could set:
-  - `CF_URL`: https://www.curseforge.com/minecraft/modpacks/all-the-mods-10/files/6378501
-  - `CF_FILE_ID`: 6378501
-  - `CF_FILENAME_MATCHER`: 2.42
-  
-  
-More information can be found in itzg/docker-minecraft's docs, which can be found [here](https://docker-minecraft-server.readthedocs.io/en/latest/)
+
+Jump to the Curseforge config options of the desired server and edit the `CF_URL`, `CF_FILE_ID`, or `CF_FILENAME_MATCHER` fields to pin a specific version.
+
+For example, to pin ATM10 to v2.42:
+- `CF_URL`: `https://www.curseforge.com/minecraft/modpacks/all-the-mods-10/files/6378501`
+- `CF_FILE_ID`: `6378501`
+- `CF_FILENAME_MATCHER`: `2.42`
+
+More info in the [itzg/docker-minecraft docs](https://docker-minecraft-server.readthedocs.io/en/latest/).
+
   </details>
+
   <details>
-    <summary>
-      Modrinth
-    </summary>
-    Refer to the [itzg/docker-minecraft docs here](https://docker-minecraft-server.readthedocs.io/en/latest/types-and-platforms/mod-platforms/modrinth-modpacks/#modpack-version)
+    <summary>Modrinth</summary>
+
+Refer to the [itzg/docker-minecraft docs](https://docker-minecraft-server.readthedocs.io/en/latest/types-and-platforms/mod-platforms/modrinth-modpacks/#modpack-version).
+
   </details>
 </details>
 
 <details>
-  <summary>
-    <h2>Discopanel keeps deleting the mods I upload to it. How do I get it to stop?</h2>
-  </summary>
+  <summary>Discopanel keeps deleting the mods I upload. How do I stop it?</summary>
+
   <details>
-    <summary>
-      <h3>Curseforge</h3>
-    </summary>
-    If you're uploading a new mod, you can do it via:
-<ul>
-  <li>Adownload repo via the <code>CF_DOWNLOADS_REPO</code> environment variable and just download the mods you want to that folder.</li>
-  <li>The <code>CURSEFORGE_FILES</code> environment variable using the project ID and file ID for mod you want and then version of the mod you want.</li>
-  <ul><li>If you wanted to add Distant Horizons version 2.45-b to your server, you would type <code>508933:7375285</code> in the environment variable</li></ul>
-</ul>
+    <summary>Curseforge</summary>
 
-  Both of these options would have to be configured in the Docker Container Overrides section of the Overview tab. They are not at current exposed in the normal config options but are extremely useful nontheless.
+If you're uploading a new mod, you can do it via:
+
+- A download repo via the `CF_DOWNLOADS_REPO` environment variable — just download the mods you want to that folder.
+- The `CURSEFORGE_FILES` environment variable using the project ID and file ID for the mod you want.
+  - For example, to add Distant Horizons v2.45-b, you would set `508933:7375285`.
+
+Both options are configured in the **Docker Container Overrides** section of the Overview tab. They are not currently exposed in the normal config options but are useful nonetheless.
+
   </details>
 </details>
 
 <details>
-  <summary>
-    <h2>Failed to start server: [failed_precondition] ... etc'</h2>
-  </summary>
-  This is usually due to a permissions issue. Discopanel runs minecraft server containers as PUID:GID 1000:1000 by default so if that user or group does not have access to the directory that Discopanel is installed in, then that will cause this issue. Using `ls -a` to show permissions on files and directories, `chown` to change ownership of files and directories and `chmod` to change the permissions of files and directories will be very helpful for troubleshooting and solving the issue on a Linux host.
+  <summary>Failed to start server: [failed_precondition] ... etc</summary>
+
+This is usually a permissions issue. Discopanel runs Minecraft server containers as `PUID:GID 1000:1000` by default, so if that user/group doesn't have access to Discopanel's install directory, you'll hit this error. Use `ls -la` to check permissions, `chown` to change ownership, and `chmod` to adjust permissions.
+
 </details>
 
 <details>
-  <summary>
-    <h2>Anything related to fuego, Curseforge API or download issues that show up in the console window of a server.</h2>
-  </summary>
-  These are likely not something that we can help with unfortunately. Either your DNS is not working properly, Curseforge's API is having issues or your connection to Curseforge's servers are otherwise hindered, for example, by a firewall.
+  <summary>Issues related to Fuego, Curseforge API, or download errors in the server console</summary>
+
+These are likely not something we can help with. Either your DNS isn't working properly, Curseforge's API is having issues, or your connection to Curseforge is otherwise blocked (e.g. by a firewall).
+
 </details>
 
 <details>
-  <summary><h2>Discopanel ran out of memory or otherwise failed when I tried to upload a file to it.</h2></summary>
-You should attempt to upload the file using tools like <code>scp</code> or <code>ftp</code> to move that file directly into the folder that it needs to be in.
-  <p><bold>Make sure the file that you upload has the right permissions so that Discopanel can read and write to it properly!</bold></p>
+  <summary>Discopanel ran out of memory or failed when uploading a file</summary>
+
+Try uploading the file using `scp` or `ftp` to move it directly into the folder it needs to be in.
+
+**Make sure the file has the right permissions so Discopanel can read and write to it.**
+
 </details>
 
 <details>
-  <summary><h2>Does Discopanel have a widget of some kind?</h2></summary>
-  Yep! We have a Glance widget. It is in the community repo but it is not yet merged at time of writing.
-  <br />
-It can be [found here!]: https://github.com/glanceapp/community-widgets/pull/263
-  <img source="/discopanel_glance_widget.png"/>
+  <summary>Does Discopanel have a widget?</summary>
+
+Yep! We have a Glance widget. It's in the community repo but not yet merged at time of writing.
+
+[Found here](https://github.com/glanceapp/community-widgets/pull/263)
+
+<img src="/discopanel_glance_widget.png" />
+
 </details>
 
 *This section is a work in progress.*

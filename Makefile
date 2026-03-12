@@ -27,7 +27,12 @@ run:
 	BACKEND_PID=$$!; \
 	wait $$BACKEND_PID $$FRONTEND_PID
 
-dev: clean run
+restore:
+	@echo "Restoring seeded db for dev"
+	@mkdir -p $(DATA_DIR)
+	cp dev/discopanel.db data/discopanel.db || echo "No saved dev state, starting new db"
+
+dev: clean restore run
 
 # Build and run with OIDC provider (Keycloak)
 dev-auth-%: clean

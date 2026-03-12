@@ -14,6 +14,7 @@ data/
 tmp/
 sandbox/
 backups/
+dev/
 *.db
 config.yaml
 

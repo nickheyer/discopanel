@@ -1,6 +1,7 @@
 package files
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"fmt"
@@ -219,7 +220,130 @@ func IsTextFile(path string) bool {
 	return true
 }
 
+// CreateZipToWriter writes a zip archive of the given paths to the writer.
+// basePath is the root directory used to calculate relative paths in the archive.
+// Returns the number of files archived.
+func CreateZipToWriter(paths []string, basePath string, w io.Writer) (int, error) {
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	count := 0
+	for _, p := range paths {
+		fullPath := filepath.Join(basePath, p)
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			return count, fmt.Errorf("failed to stat %s: %w", p, err)
+		}
+
+		if info.IsDir() {
+			err = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				rel, _ := filepath.Rel(basePath, path)
+				if d.IsDir() {
+					// Add directory entry with trailing slash
+					_, err := zw.Create(rel + "/")
+					return err
+				}
+				fi, err := d.Info()
+				if err != nil {
+					return err
+				}
+				header, err := zip.FileInfoHeader(fi)
+				if err != nil {
+					return err
+				}
+				header.Name = rel
+				header.Method = zip.Deflate
+				writer, err := zw.CreateHeader(header)
+				if err != nil {
+					return err
+				}
+				f, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				_, err = io.Copy(writer, f)
+				count++
+				return err
+			})
+			if err != nil {
+				return count, fmt.Errorf("failed to add directory %s to zip: %w", p, err)
+			}
+		} else {
+			header, err := zip.FileInfoHeader(info)
+			if err != nil {
+				return count, fmt.Errorf("failed to create header for %s: %w", p, err)
+			}
+			header.Name = p
+			header.Method = zip.Deflate
+			writer, err := zw.CreateHeader(header)
+			if err != nil {
+				return count, fmt.Errorf("failed to create zip entry for %s: %w", p, err)
+			}
+			f, err := os.Open(fullPath)
+			if err != nil {
+				return count, fmt.Errorf("failed to open %s: %w", p, err)
+			}
+			_, err = io.Copy(writer, f)
+			f.Close()
+			if err != nil {
+				return count, fmt.Errorf("failed to write %s to zip: %w", p, err)
+			}
+			count++
+		}
+	}
+	return count, nil
+}
+
+// CreateZipArchive creates a zip archive file on disk from the given paths.
+func CreateZipArchive(paths []string, basePath string, destPath string) (int, error) {
+	f, err := os.Create(destPath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create archive file: %w", err)
+	}
+	defer f.Close()
+
+	count, err := CreateZipToWriter(paths, basePath, f)
+	if err != nil {
+		os.Remove(destPath)
+		return 0, err
+	}
+	return count, nil
+}
+
+// CopyDir recursively copies a directory tree from src to dst.
+func CopyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("failed to stat source: %w", err)
+	}
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return fmt.Errorf("failed to create destination: %w", err)
+	}
+
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		return CopyFile(path, target)
+	})
+}
+
 func CopyFile(src, dst string) error {
+	// Prevent copying a file onto itself — os.Create truncates before io.Copy reads.
+	if filepath.Clean(src) == filepath.Clean(dst) {
+		return fmt.Errorf("source and destination are the same file: %s", src)
+	}
+
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return err

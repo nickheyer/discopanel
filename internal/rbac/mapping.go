@@ -74,6 +74,11 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.FileService/DeleteFile":       {Resource: ResourceFiles, Action: ActionDelete, ObjectIDField: "server_id"},
 	"/discopanel.v1.FileService/RenameFile":       {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
 	"/discopanel.v1.FileService/ExtractArchive":   {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/CreateFolder":     {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/MoveFile":         {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/CopyFile":         {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/CreateArchive":    {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/DownloadArchive":  {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
 
 	// ── ModService ─────────────────────────────────────────────────────
 	"/discopanel.v1.ModService/ListMods":          {Resource: ResourceMods, Action: ActionRead, ObjectIDField: "server_id"},

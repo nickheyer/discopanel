@@ -54,6 +54,7 @@
 	let editor = $state<monaco.editor.IStandaloneCodeEditor | null>(null);
 	let loadedFilePath = $state<string | null>(null);
 	let resizeObserver = $state<ResizeObserver | null>(null);
+	let contentLoaded = $state(false);
 
 	// Load file content when dialog opens
 	$effect(() => {
@@ -70,6 +71,7 @@
 			originalContent = '';
 			isFullscreen = false;
 			loadedFilePath = null;
+			contentLoaded = false;
 			if (editor) {
 				editor.dispose();
 				editor = null;
@@ -83,7 +85,7 @@
 
 	// Create editor when content is loaded
 	$effect(() => {
-		if (open && editorContainer && content !== '' && !editor && !loading) {
+		if (open && editorContainer && contentLoaded && !editor && !loading) {
 			createEditor();
 		}
 	});
@@ -109,6 +111,7 @@
 			const text = new TextDecoder().decode(response.content);
 			content = text;
 			originalContent = text;
+			contentLoaded = true;
 		} catch {
 			toast.error('Failed to load file content');
 			onClose();

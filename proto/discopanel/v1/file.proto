@@ -20,6 +20,16 @@ service FileService {
   rpc RenameFile(RenameFileRequest) returns (RenameFileResponse);
   // Unzip archive file
   rpc ExtractArchive(ExtractArchiveRequest) returns (ExtractArchiveResponse);
+  // Create a new folder
+  rpc CreateFolder(CreateFolderRequest) returns (CreateFolderResponse);
+  // Move a file or directory
+  rpc MoveFile(MoveFileRequest) returns (MoveFileResponse);
+  // Copy a file or directory
+  rpc CopyFile(CopyFileRequest) returns (CopyFileResponse);
+  // Create a zip archive from selected paths
+  rpc CreateArchive(CreateArchiveRequest) returns (CreateArchiveResponse);
+  // Download multiple files/folders as a zip
+  rpc DownloadArchive(DownloadArchiveRequest) returns (DownloadArchiveResponse);
 }
 
 // File metadata and tree
@@ -88,10 +98,73 @@ message UpdateFileResponse {
 message DeleteFileRequest {
   string server_id = 1;
   string path = 2;
+  repeated string paths = 3; // Bulk delete
 }
 
 // Empty delete response
 message DeleteFileResponse {}
+
+// Folder creation parameters
+message CreateFolderRequest {
+  string server_id = 1;
+  string path = 2;
+}
+
+// Folder creation result
+message CreateFolderResponse {
+  string message = 1;
+}
+
+// File move parameters
+message MoveFileRequest {
+  string server_id = 1;
+  string source_path = 2;
+  string destination_path = 3;
+}
+
+// File move result
+message MoveFileResponse {
+  string message = 1;
+}
+
+// File copy parameters
+message CopyFileRequest {
+  string server_id = 1;
+  string source_path = 2;
+  string destination_path = 3;
+}
+
+// File copy result
+message CopyFileResponse {
+  string message = 1;
+}
+
+// Archive creation parameters
+message CreateArchiveRequest {
+  string server_id = 1;
+  repeated string paths = 2;
+  string destination_path = 3;
+  string archive_name = 4;
+}
+
+// Archive creation result
+message CreateArchiveResponse {
+  string message = 1;
+  string archive_path = 2;
+  int32 files_archived = 3;
+}
+
+// Archive download parameters
+message DownloadArchiveRequest {
+  string server_id = 1;
+  repeated string paths = 2;
+}
+
+// Archive download result
+message DownloadArchiveResponse {
+  bytes content = 1;
+  string filename = 2;
+}
 
 // File rename parameters
 message RenameFileRequest {

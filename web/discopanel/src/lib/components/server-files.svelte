@@ -3,7 +3,7 @@
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
 	import { Progress } from '$lib/components/ui/progress';
-	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw, Plus, FolderPlus, FilePlus, Pencil, Package, X } from '@lucide/svelte';
+	import { Loader2, Upload, Download, Trash2, FolderOpen, Folder, File, FileText, FileCode, Image, Archive, FileEdit, RefreshCw, FolderPlus, FilePlus, Pencil, Package, X } from '@lucide/svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
@@ -15,6 +15,8 @@
 	import { Dialog as DialogPrimitive } from "bits-ui";
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import { SvelteSet } from 'svelte/reactivity';
+	import * as _ from 'lodash-es';
 
 	interface Props {
 		server: Server;
@@ -52,7 +54,7 @@
 			loading = true;
 			uploading = false;
 			selectedPath = '';
-			expandedDirs = new Set();
+			expandedDirs = new SvelteSet();
 			editingFile = null;
 			showEditor = false;
 			hasLoaded = false;
@@ -81,7 +83,7 @@
 				tree: true
 			});
 			files = response.files;
-		} catch (error) {
+		} catch {
 			toast.error('Failed to load files');
 		} finally {
 			loading = false;
@@ -112,7 +114,7 @@
 		} else {
 			expandedDirs.add(path);
 		}
-		expandedDirs = new Set(expandedDirs);
+		expandedDirs = new SvelteSet(expandedDirs);
 	}
 
 	async function handleFileSelect(event: Event, path?: string) {
@@ -147,8 +149,8 @@
 			}
 			toast.success(`Uploaded ${fileList.length} file(s) to ${uploadPath || 'root'}`);
 			await loadFiles();
-		} catch (error: any) {
-			if (error.message === 'Upload cancelled') {
+		} catch (error) {
+			if (_.get(error, 'message') === 'Upload cancelled') {
 				toast.info('Upload cancelled');
 			} else {
 				toast.error('Failed to upload files');
@@ -193,7 +195,7 @@
 			a.download = file.name;
 			a.click();
 			URL.revokeObjectURL(url);
-		} catch (error) {
+		} catch {
 			toast.error('Failed to download file');
 		}
 	}
@@ -209,7 +211,7 @@
 			});
 			toast.success(`${file.isDir ? 'Directory' : 'File'} deleted`);
 			await loadFiles();
-		} catch (error) {
+		} catch {
 			toast.error(`Failed to delete ${file.isDir ? 'directory' : 'file'}`);
 		}
 	}
@@ -255,7 +257,7 @@
 			});
 			toast.success(`Created file: ${fileName}`);
 			await loadFiles();
-		} catch (error) {
+		} catch {
 			toast.error('Failed to create file');
 		}
 	}
@@ -280,7 +282,7 @@
 				path: `${fullPath}/.gitkeep`
 			});
 			await loadFiles();
-		} catch (error) {
+		} catch {
 			toast.error('Failed to create folder');
 		}
 	}
@@ -303,21 +305,21 @@
 			});
 			toast.success(`Renamed ${item.name} to ${newName}`);
 			await loadFiles();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to rename item');
+		} catch (error) {
+			toast.error(_.get(error, 'message') || 'Failed to rename item');
 		}
 	}
 
 	async function extractArchive(file: FileInfo) {
 		try {
-			const result = await rpcClient.file.extractArchive({
+			await rpcClient.file.extractArchive({
 				serverId: server.id,
 				path: file.path
 			});
 			toast.success(`Archive extracted successfully`);
 			await loadFiles();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to extract archive');
+		} catch (error) {
+			toast.error(_.get(error, 'message') || 'Failed to extract archive');
 		}
 	}
 
@@ -393,7 +395,7 @@
 			</div>
 		{:else}
 			<div class="space-y-0.5">
-				{#each flatFiles as file}
+				{#each flatFiles as file (file.path)}
 					{@const Icon = getFileIcon(file)}
 					{@const indent = getIndentLevel(file)}
 					<div 

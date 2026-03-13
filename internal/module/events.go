@@ -9,25 +9,28 @@ import (
 	"github.com/nickheyer/discopanel/internal/alias"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // EventDispatcher handles server events and triggers module hooks
 type EventDispatcher struct {
-	manager *Manager
-	store   *storage.Store
-	docker  *docker.Client
-	logger  *logger.Logger
+	manager        *Manager
+	store          *storage.Store
+	docker         *docker.Client
+	logger         *logger.Logger
+	webhookManager *webhook.Manager
 }
 
 // NewEventDispatcher creates a new event dispatcher
-func NewEventDispatcher(manager *Manager, store *storage.Store, docker *docker.Client, log *logger.Logger) *EventDispatcher {
+func NewEventDispatcher(manager *Manager, store *storage.Store, docker *docker.Client, webhookMgr *webhook.Manager, log *logger.Logger) *EventDispatcher {
 	return &EventDispatcher{
-		manager: manager,
-		store:   store,
-		docker:  docker,
-		logger:  log,
+		manager:        manager,
+		store:          store,
+		docker:         docker,
+		logger:         log,
+		webhookManager: webhookMgr,
 	}
 }
 
@@ -147,29 +150,39 @@ func (d *EventDispatcher) sendRCON(ctx context.Context, serverID string, command
 
 // Helper methods for common event triggers
 
-// OnServerStart triggers MODULE_EVENT_TYPE_SERVER_START for all modules
+// OnServerStart triggers MODULE_EVENT_TYPE_SERVER_START for all modules and webhooks
 func (d *EventDispatcher) OnServerStart(ctx context.Context, serverID string) {
 	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_SERVER_START)
+	d.dispatchWebhook(ctx, serverID, storage.WebhookEventServerStart, nil)
 }
 
-// OnServerStop triggers MODULE_EVENT_TYPE_SERVER_STOP for all modules
+// OnServerStop triggers MODULE_EVENT_TYPE_SERVER_STOP for all modules and webhooks
 func (d *EventDispatcher) OnServerStop(ctx context.Context, serverID string) {
 	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_SERVER_STOP)
+	d.dispatchWebhook(ctx, serverID, storage.WebhookEventServerStop, nil)
 }
 
-// OnServerHealthy triggers MODULE_EVENT_TYPE_SERVER_HEALTHY for all modules
-func (d *EventDispatcher) OnServerHealthy(ctx context.Context, serverID string) {
-	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_SERVER_HEALTHY)
+// OnServerRestart triggers webhooks for server restart
+func (d *EventDispatcher) OnServerRestart(ctx context.Context, serverID string) {
+	d.dispatchWebhook(ctx, serverID, storage.WebhookEventServerRestart, nil)
 }
 
-// OnPlayerJoin triggers MODULE_EVENT_TYPE_PLAYER_JOIN for all modules
-func (d *EventDispatcher) OnPlayerJoin(ctx context.Context, serverID string) {
-	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_PLAYER_JOIN)
-}
+// dispatchWebhook sends a webhook event
+func (d *EventDispatcher) dispatchWebhook(ctx context.Context, serverID string, eventType storage.WebhookEventType, data map[string]interface{}) {
+	if d.webhookManager == nil {
+		return
+	}
 
-// OnPlayerLeave triggers MODULE_EVENT_TYPE_PLAYER_LEAVE for all modules
-func (d *EventDispatcher) OnPlayerLeave(ctx context.Context, serverID string) {
-	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_PLAYER_LEAVE)
+	server, err := d.store.GetServer(ctx, serverID)
+	if err != nil {
+		d.logger.Error("Failed to get server for webhook dispatch: %v", err)
+		return
+	}
+
+	payload := webhook.BuildPayload(string(eventType), server, nil, data)
+	if err := d.webhookManager.Dispatch(ctx, serverID, eventType, payload); err != nil {
+		d.logger.Error("Failed to dispatch webhook: %v", err)
+	}
 }
 
 // evaluateCondition evaluates a simple condition expression using the alias system

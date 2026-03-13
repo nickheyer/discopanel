@@ -1227,6 +1227,9 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			s.log.Error("Failed to clear ephemeral config fields: %v", err)
 		}
 
+		// Dispatch restart webhook (even though it's a fresh start, user requested restart)
+		s.moduleManager.OnServerRestart(ctx, server.ID)
+
 		return connect.NewResponse(&v1.RestartServerResponse{
 			Status: "starting",
 		}), nil
@@ -1250,6 +1253,9 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 	if err := s.store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
 		s.log.Error("Failed to clear ephemeral config fields: %v", err)
 	}
+
+	// Dispatch restart webhook
+	s.moduleManager.OnServerRestart(ctx, server.ID)
 
 	return connect.NewResponse(&v1.RestartServerResponse{
 		Status: "restarting",

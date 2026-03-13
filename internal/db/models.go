@@ -685,3 +685,46 @@ type Module struct {
 	MemoryUsage float64 `json:"memory_usage" gorm:"-"`
 	CPUPercent  float64 `json:"cpu_percent" gorm:"-"`
 }
+
+// WebhookEventType defines the events that can trigger webhooks
+type WebhookEventType string
+
+const (
+	WebhookEventServerStart   WebhookEventType = "server_start"
+	WebhookEventServerStop    WebhookEventType = "server_stop"
+	WebhookEventServerRestart WebhookEventType = "server_restart"
+)
+
+// WebhookFormat defines the payload format for webhooks
+type WebhookFormat string
+
+const (
+	WebhookFormatGeneric WebhookFormat = "generic"
+	WebhookFormatDiscord WebhookFormat = "discord"
+)
+
+// Webhook represents a webhook configuration for a server
+type Webhook struct {
+	ID        string          `json:"id" gorm:"primaryKey"`
+	ServerID  string          `json:"server_id" gorm:"not null;index;column:server_id"`
+	Name      string          `json:"name" gorm:"not null"`
+	URL       string          `json:"url" gorm:"not null"`
+	Secret    string          `json:"-" gorm:"column:secret"` // HMAC signing secret (hidden from JSON)
+	Events    []string        `json:"events" gorm:"column:events;serializer:json"`
+	Enabled   bool            `json:"enabled" gorm:"not null;default:true"`
+	Format    WebhookFormat   `json:"format" gorm:"not null;default:generic"`
+
+	// Retry configuration
+	MaxRetries   int `json:"max_retries" gorm:"default:3;column:max_retries"`
+	RetryDelayMs int `json:"retry_delay_ms" gorm:"default:1000;column:retry_delay_ms"`
+	TimeoutMs    int `json:"timeout_ms" gorm:"default:5000;column:timeout_ms"`
+
+	// Custom headers (JSON map)
+	Headers map[string]string `json:"headers" gorm:"column:headers;serializer:json"`
+
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+
+	// Relationships
+	Server *Server `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+}

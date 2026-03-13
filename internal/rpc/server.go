@@ -21,6 +21,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/rpc/handlers"
 	"github.com/nickheyer/discopanel/internal/rpc/services"
 	"github.com/nickheyer/discopanel/internal/scheduler"
+	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/internal/ws"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -49,10 +50,11 @@ type Server struct {
 	moduleManager    *module.Manager
 	uploadManager    *upload.Manager
 	wsHub            *ws.Hub
+	webhookManager   *webhook.Manager
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, moduleManager *module.Manager, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, moduleManager *module.Manager, webhookMgr *webhook.Manager, log *logger.Logger) *Server {
 	// Initialize RBAC enforcer
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
@@ -104,6 +106,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		moduleManager:    moduleManager,
 		uploadManager:    uploadManager,
 		wsHub:            wsHub,
+		webhookManager:   webhookMgr,
 	}
 
 	s.setupHandler()
@@ -147,6 +150,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.TaskServiceName,
 		discopanelv1connect.UploadServiceName,
 		discopanelv1connect.UserServiceName,
+		discopanelv1connect.WebhookServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
@@ -187,6 +191,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
+	webhookService := services.NewWebhookService(s.store, s.webhookManager, s.log)
 
 	// Register service handlers
 	authPath, authHandler := discopanelv1connect.NewAuthServiceHandler(authService, opts...)
@@ -230,6 +235,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	uploadPath, uploadHandler := discopanelv1connect.NewUploadServiceHandler(uploadService, opts...)
 	mux.Handle(uploadPath, uploadHandler)
+
+	webhookPath, webhookHandler := discopanelv1connect.NewWebhookServiceHandler(webhookService, opts...)
+	mux.Handle(webhookPath, webhookHandler)
 }
 
 // The HTTP handler for the server

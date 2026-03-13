@@ -19,6 +19,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc"
 	"github.com/nickheyer/discopanel/internal/scheduler"
+	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -174,20 +175,25 @@ func main() {
 	}
 	defer metricsCollector.Stop()
 
+	// Initialize webhook manager
+	webhookManager := webhook.NewManager(store, log, 5) // 5 worker goroutines
+	webhookManager.Start()
+	defer webhookManager.Stop()
+
 	// Initialize builtin module templates
 	if err := module.InitBuiltinTemplates(store); err != nil {
 		log.Error("Failed to initialize builtin module templates: %v", err)
 	}
 
 	// Initialize module manager
-	moduleManager := module.NewManager(store, dockerClient, cfg, proxyManager, log)
+	moduleManager := module.NewManager(store, dockerClient, cfg, proxyManager, webhookManager, log)
 	if err := moduleManager.Start(); err != nil {
 		log.Error("Failed to start module manager: %v", err)
 	}
 	defer moduleManager.Stop()
 
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, log)
+	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, webhookManager, log)
 
 	// Print recovery key
 	if key := rpcServer.RecoveryKey(); key != "" {

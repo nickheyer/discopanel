@@ -16,21 +16,23 @@ import (
 
 // EventDispatcher handles server events and triggers module hooks
 type EventDispatcher struct {
-	manager *Manager
-	store   *storage.Store
-	docker  *docker.Client
-	sender  *command.Sender
-	logger  *logger.Logger
+	manager  *Manager
+	store    *storage.Store
+	docker   *docker.Client
+	sender   *command.Sender
+	logger   *logger.Logger
+	eventBus EventBus
 }
 
 // NewEventDispatcher creates a new event dispatcher
-func NewEventDispatcher(manager *Manager, store *storage.Store, docker *docker.Client, sender *command.Sender, log *logger.Logger) *EventDispatcher {
+func NewEventDispatcher(manager *Manager, store *storage.Store, docker *docker.Client, sender *command.Sender, eventBus EventBus, log *logger.Logger) *EventDispatcher {
 	return &EventDispatcher{
-		manager: manager,
-		store:   store,
-		docker:  docker,
-		sender:  sender,
-		logger:  log,
+		manager:  manager,
+		store:    store,
+		docker:   docker,
+		sender:   sender,
+		logger:   log,
+		eventBus: eventBus,
 	}
 }
 
@@ -150,14 +152,27 @@ func (d *EventDispatcher) sendRCON(ctx context.Context, serverID string, command
 
 // Helper methods for common event triggers
 
-// OnServerStart triggers MODULE_EVENT_TYPE_SERVER_START for all modules
+// OnServerStart triggers MODULE_EVENT_TYPE_SERVER_START for modules and event-triggered tasks
 func (d *EventDispatcher) OnServerStart(ctx context.Context, serverID string) {
 	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_SERVER_START)
+	if d.eventBus != nil {
+		d.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStart)
+	}
 }
 
-// OnServerStop triggers MODULE_EVENT_TYPE_SERVER_STOP for all modules
+// OnServerStop triggers MODULE_EVENT_TYPE_SERVER_STOP for modules and event-triggered tasks
 func (d *EventDispatcher) OnServerStop(ctx context.Context, serverID string) {
 	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_SERVER_STOP)
+	if d.eventBus != nil {
+		d.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStop)
+	}
+}
+
+// OnServerRestart fires event-triggered tasks subscribed to server restart.
+func (d *EventDispatcher) OnServerRestart(ctx context.Context, serverID string) {
+	if d.eventBus != nil {
+		d.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerRestart)
+	}
 }
 
 // OnServerHealthy triggers MODULE_EVENT_TYPE_SERVER_HEALTHY for all modules

@@ -8,15 +8,19 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Switch } from '$lib/components/ui/switch';
-	import * as Select from '$lib/components/ui/select';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { Loader2, Plus, Trash2, Webhook, Play, CheckCircle2, XCircle, ExternalLink, Copy, Edit2, ChevronDown } from '@lucide/svelte';
+	import { Loader2, Plus, Trash2, Webhook, Play, Copy, Edit2, ChevronDown } from '@lucide/svelte';
 	import * as Collapsible from '$lib/components/ui/collapsible';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { Webhook as WebhookType } from '$lib/proto/discopanel/v1/webhook_pb';
 	import { WebhookEventType, WebhookFormat, CreateWebhookRequestSchema, UpdateWebhookRequestSchema, ToggleWebhookRequestSchema, TestWebhookRequestSchema, DeleteWebhookRequestSchema, ListWebhooksRequestSchema } from '$lib/proto/discopanel/v1/webhook_pb';
 	import { create } from '@bufbuild/protobuf';
+	import { EditorView } from '@codemirror/view';
+	import { EditorState, Compartment } from '@codemirror/state';
+	import { json } from '@codemirror/lang-json';
+	import { oneDark } from '@codemirror/theme-one-dark';
+	import { basicSetup } from 'codemirror';
 
 	let { server, active }: { server: Server, active?: boolean } = $props();
 
@@ -37,10 +41,42 @@
 	let webhookSecret = $state('');
 	let webhookFormat = $state<WebhookFormat>(WebhookFormat.GENERIC);
 	let selectedEvents = $state<WebhookEventType[]>([]);
+	let payloadTemplate = $state('');
+	let customizePayload = $state(false);
 	let maxRetries = $state(3);
 	let retryDelayMs = $state(1000);
 	let timeoutMs = $state(5000);
 	let showAdvanced = $state(false);
+
+	// Template presets loaded from backend (keyed by name)
+	let templatePresets = $state<Record<string, string>>({});
+
+	// CodeMirror editor
+	let editorContainer = $state<HTMLDivElement>();
+	let editorView = $state<EditorView | null>(null);
+	const editableCompartment = new Compartment();
+
+	// Preset display names (order matters for rendering)
+	const presetLabels: Record<string, string> = {
+		discord: 'Discord',
+		slack: 'Slack',
+		teams: 'Teams',
+		ntfy: 'ntfy',
+		generic: 'Generic',
+	};
+
+	// Auto-detect format from URL
+	function isDiscordUrl(url: string): boolean {
+		return url.includes('discord.com/api/webhooks') || url.includes('discordapp.com/api/webhooks');
+	}
+
+	function getDefaultPresetKey(url: string): string {
+		return isDiscordUrl(url) ? 'discord' : 'generic';
+	}
+
+	function getDefaultTemplate(url: string): string {
+		return templatePresets[getDefaultPresetKey(url)] || '';
+	}
 
 	// All available events
 	const allEvents: { type: WebhookEventType; label: string; description: string }[] = [
@@ -74,12 +110,96 @@
 		}
 	});
 
+	// Create/destroy editor when dialog opens/closes
+	$effect(() => {
+		if (showCreateDialog && editorContainer && !editorView) {
+			createEditor();
+		}
+		if (!showCreateDialog && editorView) {
+			destroyEditor();
+		}
+	});
+
+	// Sync editor content and editable state when customizePayload or URL changes
+	$effect(() => {
+		if (!editorView) return;
+		const displayValue = customizePayload ? payloadTemplate : getDefaultTemplate(webhookUrl);
+		const currentValue = editorView.state.doc.toString();
+		const transactions: any[] = [];
+		if (displayValue !== currentValue) {
+			transactions.push({ changes: { from: 0, to: editorView.state.doc.length, insert: displayValue } });
+		}
+		transactions.push({ effects: editableCompartment.reconfigure(EditorView.editable.of(customizePayload)) });
+		for (const t of transactions) {
+			editorView.dispatch(t);
+		}
+	});
+
+	// Cleanup on unmount
+	$effect(() => {
+		return () => {
+			destroyEditor();
+		};
+	});
+
+	function createEditor() {
+		if (!editorContainer) return;
+
+		const displayValue = customizePayload ? payloadTemplate : getDefaultTemplate(webhookUrl);
+
+		editorView = new EditorView({
+			parent: editorContainer,
+			state: EditorState.create({
+				doc: displayValue,
+				extensions: [
+					basicSetup,
+					json(),
+					oneDark,
+					editableCompartment.of(EditorView.editable.of(customizePayload)),
+					EditorView.updateListener.of((update) => {
+						if (update.docChanged && customizePayload) {
+							payloadTemplate = update.state.doc.toString();
+						}
+					}),
+					EditorView.theme({
+						'&': { fontSize: '12px', height: '100%' },
+						'.cm-scroller': { overflow: 'auto', fontFamily: "'JetBrains Mono', 'Fira Code', monospace" },
+						'.cm-content': { padding: '8px 0' },
+						'&.cm-focused': { outline: 'none' },
+					}),
+				],
+			}),
+		});
+	}
+
+	function destroyEditor() {
+		if (editorView) {
+			editorView.destroy();
+			editorView = null;
+		}
+	}
+
+	function applyPreset(key: string) {
+		const template = templatePresets[key];
+		if (template) {
+			payloadTemplate = template;
+			if (editorView) {
+				editorView.dispatch({
+					changes: { from: 0, to: editorView.state.doc.length, insert: template }
+				});
+			}
+		}
+	}
+
 	async function loadWebhooks() {
 		try {
 			loading = true;
 			const request = create(ListWebhooksRequestSchema, { serverId: server.id });
 			const response = await rpcClient.webhook.listWebhooks(request);
 			webhooks = response.webhooks;
+			if (response.templatePresets) {
+				templatePresets = { ...response.templatePresets };
+			}
 		} catch (error) {
 			toast.error('Failed to load webhooks');
 		} finally {
@@ -93,6 +213,8 @@
 		webhookSecret = '';
 		webhookFormat = WebhookFormat.GENERIC;
 		selectedEvents = [];
+		payloadTemplate = '';
+		customizePayload = false;
 		maxRetries = 3;
 		retryDelayMs = 1000;
 		timeoutMs = 5000;
@@ -109,9 +231,11 @@
 		selectedWebhook = webhook;
 		webhookName = webhook.name;
 		webhookUrl = webhook.url;
-		webhookSecret = ''; // Don't show existing secret
+		webhookSecret = '';
 		webhookFormat = webhook.format;
 		selectedEvents = [...webhook.events];
+		payloadTemplate = webhook.payloadTemplate;
+		customizePayload = !!webhook.payloadTemplate;
 		maxRetries = webhook.maxRetries;
 		retryDelayMs = webhook.retryDelayMs;
 		timeoutMs = webhook.timeoutMs;
@@ -134,15 +258,18 @@
 
 		creating = true;
 		try {
+			const effectiveFormat = isDiscordUrl(webhookUrl) ? WebhookFormat.DISCORD : WebhookFormat.GENERIC;
+			const effectiveTemplate = customizePayload ? payloadTemplate : '';
+
 			if (selectedWebhook) {
-				// Update existing webhook
 				const request = create(UpdateWebhookRequestSchema, {
 					id: selectedWebhook.id,
 					name: webhookName,
 					url: webhookUrl,
 					secret: webhookSecret || undefined,
 					events: selectedEvents,
-					format: webhookFormat,
+					format: effectiveFormat,
+					payloadTemplate: effectiveTemplate,
 					maxRetries: maxRetries,
 					retryDelayMs: retryDelayMs,
 					timeoutMs: timeoutMs,
@@ -150,14 +277,14 @@
 				await rpcClient.webhook.updateWebhook(request);
 				toast.success('Webhook updated successfully');
 			} else {
-				// Create new webhook
 				const request = create(CreateWebhookRequestSchema, {
 					serverId: server.id,
 					name: webhookName,
 					url: webhookUrl,
 					secret: webhookSecret || undefined,
 					events: selectedEvents,
-					format: webhookFormat,
+					format: effectiveFormat,
+					payloadTemplate: effectiveTemplate,
 					maxRetries: maxRetries,
 					retryDelayMs: retryDelayMs,
 					timeoutMs: timeoutMs,
@@ -278,7 +405,7 @@
 									{webhook.enabled ? 'Enabled' : 'Disabled'}
 								</Badge>
 								<Badge variant="outline" class="text-xs">
-									{getFormatLabel(webhook.format)}
+									{webhook.payloadTemplate ? 'Custom' : (isDiscordUrl(webhook.url) ? 'Discord' : getFormatLabel(webhook.format))}
 								</Badge>
 							</div>
 							<div class="flex items-center gap-2 text-sm text-muted-foreground">
@@ -340,7 +467,7 @@
 
 <!-- Create/Edit Dialog -->
 <Dialog.Root bind:open={showCreateDialog}>
-	<Dialog.Content class="sm:max-w-[600px]">
+	<Dialog.Content class="sm:max-w-[1060px]">
 		<Dialog.Header>
 			<Dialog.Title>{selectedWebhook ? 'Edit Webhook' : 'Create Webhook'}</Dialog.Title>
 			<Dialog.Description>
@@ -348,85 +475,142 @@
 			</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="space-y-4 py-4">
-			<!-- Basic Settings -->
-			<div class="space-y-2">
-				<Label for="name">Name</Label>
-				<Input id="name" bind:value={webhookName} placeholder="My Webhook" />
-			</div>
+		<div class="flex gap-6 py-4">
+			<!-- Left: Configuration -->
+			<div class="flex-1 space-y-4 min-w-0">
+				<div class="space-y-2">
+					<Label for="name">Name</Label>
+					<Input id="name" bind:value={webhookName} placeholder="My Webhook" />
+				</div>
 
-			<div class="space-y-2">
-				<Label>Format</Label>
-				<Select.Root
-					type="single"
-					name="webhookFormat"
-					value={webhookFormat.toString()}
-					onValueChange={(v) => { if (v) webhookFormat = parseInt(v) as WebhookFormat; }}
-				>
-					<Select.Trigger class="w-full">
-						{getFormatLabel(webhookFormat)}
-					</Select.Trigger>
-					<Select.Content>
-						<Select.Item value={WebhookFormat.GENERIC.toString()} label="Generic JSON">Generic JSON</Select.Item>
-						<Select.Item value={WebhookFormat.DISCORD.toString()} label="Discord">Discord (Embed format)</Select.Item>
-					</Select.Content>
-				</Select.Root>
-			</div>
+				<div class="space-y-2">
+					<Label for="url">URL</Label>
+					<Input id="url" bind:value={webhookUrl} placeholder={isDiscordUrl(webhookUrl) ? 'https://discord.com/api/webhooks/...' : 'https://example.com/webhook'} />
+				</div>
 
-			<div class="space-y-2">
-				<Label for="url">URL</Label>
-				<Input id="url" bind:value={webhookUrl} placeholder={Number(webhookFormat) === WebhookFormat.DISCORD ? 'https://discord.com/api/webhooks/...' : 'https://example.com/webhook'} />
-			</div>
+				<div class="space-y-2">
+					<Label>Events</Label>
+					<div class="grid grid-cols-2 gap-2 p-3 rounded-lg border border-border/50 bg-muted/20">
+						{#each allEvents as event}
+							<label class="flex items-center gap-2 cursor-pointer hover:bg-muted/40 p-2 rounded">
+								<Checkbox
+									checked={selectedEvents.includes(event.type)}
+									onCheckedChange={() => toggleEvent(event.type)}
+								/>
+								<div>
+									<span class="text-sm font-medium">{event.label}</span>
+									<p class="text-xs text-muted-foreground">{event.description}</p>
+								</div>
+							</label>
+						{/each}
+					</div>
+				</div>
 
-			<div class="space-y-2">
-				<Label>Events</Label>
-				<div class="grid grid-cols-2 gap-2 p-3 rounded-lg border border-border/50 bg-muted/20">
-					{#each allEvents as event}
-						<label class="flex items-center gap-2 cursor-pointer hover:bg-muted/40 p-2 rounded">
-							<Checkbox
-								checked={selectedEvents.includes(event.type)}
-								onCheckedChange={() => toggleEvent(event.type)}
-							/>
-							<div>
-								<span class="text-sm font-medium">{event.label}</span>
-								<p class="text-xs text-muted-foreground">{event.description}</p>
+				<!-- Advanced Settings -->
+				<Collapsible.Root bind:open={showAdvanced}>
+					<Collapsible.Trigger class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full py-2">
+						<ChevronDown class="h-4 w-4 transition-transform {showAdvanced ? 'rotate-180' : ''}" />
+						Advanced Settings
+					</Collapsible.Trigger>
+					<Collapsible.Content>
+						<div class="space-y-4 pt-2">
+							<div class="space-y-2">
+								<Label for="secret">Secret (optional)</Label>
+								<Input id="secret" type="password" bind:value={webhookSecret} placeholder={selectedWebhook?.hasSecret ? '(unchanged)' : 'HMAC signing secret'} />
+								<p class="text-xs text-muted-foreground">Used to sign the webhook payload with HMAC-SHA256</p>
 							</div>
-						</label>
-					{/each}
+
+							<div class="grid grid-cols-3 gap-4">
+								<div class="space-y-2">
+									<Label for="maxRetries">Max Retries</Label>
+									<Input id="maxRetries" type="number" bind:value={maxRetries} min={0} max={10} />
+								</div>
+								<div class="space-y-2">
+									<Label for="retryDelay">Retry Delay (ms)</Label>
+									<Input id="retryDelay" type="number" bind:value={retryDelayMs} min={100} max={60000} />
+								</div>
+								<div class="space-y-2">
+									<Label for="timeout">Timeout (ms)</Label>
+									<Input id="timeout" type="number" bind:value={timeoutMs} min={1000} max={30000} />
+								</div>
+							</div>
+						</div>
+					</Collapsible.Content>
+				</Collapsible.Root>
+			</div>
+
+			<!-- Right: Payload Template (always visible) -->
+			<div class="w-[520px] shrink-0 flex flex-col gap-3 border-l border-border/50 pl-6">
+				<div class="flex items-center justify-between">
+					<div>
+						<Label class="text-sm">Customize Payload</Label>
+						<p class="text-xs text-muted-foreground mt-0.5">
+							{#if customizePayload}
+								Using custom payload template
+							{:else}
+								Using default {presetLabels[getDefaultPresetKey(webhookUrl)] || 'Generic'} preset
+							{/if}
+						</p>
+					</div>
+					<Switch
+						checked={customizePayload}
+						onCheckedChange={(checked) => {
+							customizePayload = checked;
+							if (checked && !payloadTemplate) {
+								payloadTemplate = getDefaultTemplate(webhookUrl);
+							}
+						}}
+					/>
+				</div>
+
+				<!-- Presets -->
+				<div class="{!customizePayload ? 'opacity-40 pointer-events-none' : ''}">
+					<p class="text-xs font-medium text-muted-foreground mb-1.5">Presets</p>
+					<div class="flex flex-wrap gap-1">
+						{#each Object.keys(presetLabels) as key}
+							{#if templatePresets[key]}
+								<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => applyPreset(key)}>
+									{presetLabels[key]}
+								</Button>
+							{/if}
+						{/each}
+					</div>
+				</div>
+
+				<!-- CodeMirror Editor -->
+				<div
+					bind:this={editorContainer}
+					class="h-[300px] rounded-md border border-border/50 overflow-hidden {!customizePayload ? 'opacity-50 pointer-events-none' : ''}"
+				></div>
+
+				<!-- Variables reference (always visible) -->
+				<div class="{!customizePayload ? 'opacity-40' : ''}">
+					<p class="text-xs font-medium text-muted-foreground mb-1">Available variables</p>
+					<div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-muted-foreground font-mono p-2 rounded border border-border/50 bg-muted/20">
+						{#each [
+							['{{.event}}', 'Event name'],
+							['{{.timestamp}}', 'ISO 8601 timestamp'],
+							['{{.title}}', 'Event title'],
+							['{{.color}}', 'Color (int, for Discord)'],
+							['{{.server_id}}', 'Server ID'],
+							['{{.server_name}}', 'Server name'],
+							['{{.server_status}}', 'Server status'],
+							['{{.server_mc_version}}', 'MC version'],
+							['{{.server_mod_loader}}', 'Mod loader'],
+							['{{.server_players}}', 'Player count'],
+							['{{.server_max_players}}', 'Max players'],
+							['{{.server_port}}', 'Server port'],
+						] as [variable, description]}
+							<button
+								class="text-left hover:text-foreground transition-colors cursor-pointer"
+								title="Copy {variable}"
+								onclick={() => { navigator.clipboard.writeText(variable); toast.success(`Copied ${variable}`); }}
+							>{variable}</button>
+							<span class="font-sans">{description}</span>
+						{/each}
+					</div>
 				</div>
 			</div>
-
-			<!-- Advanced Settings -->
-			<Collapsible.Root bind:open={showAdvanced}>
-				<Collapsible.Trigger class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full py-2">
-					<ChevronDown class="h-4 w-4 transition-transform {showAdvanced ? 'rotate-180' : ''}" />
-					Advanced Settings
-				</Collapsible.Trigger>
-				<Collapsible.Content>
-					<div class="space-y-4 pt-2">
-						<div class="space-y-2">
-							<Label for="secret">Secret (optional)</Label>
-							<Input id="secret" type="password" bind:value={webhookSecret} placeholder={selectedWebhook?.hasSecret ? '(unchanged)' : 'HMAC signing secret'} />
-							<p class="text-xs text-muted-foreground">Used to sign the webhook payload with HMAC-SHA256</p>
-						</div>
-
-						<div class="grid grid-cols-3 gap-4">
-							<div class="space-y-2">
-								<Label for="maxRetries">Max Retries</Label>
-								<Input id="maxRetries" type="number" bind:value={maxRetries} min={0} max={10} />
-							</div>
-							<div class="space-y-2">
-								<Label for="retryDelay">Retry Delay (ms)</Label>
-								<Input id="retryDelay" type="number" bind:value={retryDelayMs} min={100} max={60000} />
-							</div>
-							<div class="space-y-2">
-								<Label for="timeout">Timeout (ms)</Label>
-								<Input id="timeout" type="number" bind:value={timeoutMs} min={1000} max={30000} />
-							</div>
-						</div>
-					</div>
-				</Collapsible.Content>
-			</Collapsible.Root>
 		</div>
 
 		<Dialog.Footer>

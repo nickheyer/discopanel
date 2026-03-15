@@ -719,6 +719,9 @@ type Webhook struct {
 	RetryDelayMs int `json:"retry_delay_ms" gorm:"default:1000;column:retry_delay_ms"`
 	TimeoutMs    int `json:"timeout_ms" gorm:"default:5000;column:timeout_ms"`
 
+	// Custom payload template (Go text/template syntax, renders request body)
+	PayloadTemplate string `json:"payload_template" gorm:"column:payload_template;type:text"`
+
 	// Custom headers (JSON map)
 	Headers map[string]string `json:"headers" gorm:"column:headers;serializer:json"`
 

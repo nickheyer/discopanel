@@ -7,7 +7,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/webhook"
+	webhookpkg "github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -20,12 +20,12 @@ var _ discopanelv1connect.WebhookServiceHandler = (*WebhookService)(nil)
 // WebhookService implements the Webhook service
 type WebhookService struct {
 	store          *storage.Store
-	webhookManager *webhook.Manager
+	webhookManager *webhookpkg.Manager
 	log            *logger.Logger
 }
 
 // NewWebhookService creates a new webhook service
-func NewWebhookService(store *storage.Store, webhookManager *webhook.Manager, log *logger.Logger) *WebhookService {
+func NewWebhookService(store *storage.Store, webhookManager *webhookpkg.Manager, log *logger.Logger) *WebhookService {
 	return &WebhookService{
 		store:          store,
 		webhookManager: webhookManager,
@@ -104,9 +104,10 @@ func webhookToProto(w *storage.Webhook) *v1.Webhook {
 		MaxRetries:   int32(w.MaxRetries),
 		RetryDelayMs: int32(w.RetryDelayMs),
 		TimeoutMs:    int32(w.TimeoutMs),
-		Headers:      w.Headers,
-		CreatedAt:    timestamppb.New(w.CreatedAt),
-		UpdatedAt:    timestamppb.New(w.UpdatedAt),
+		Headers:         w.Headers,
+		PayloadTemplate: w.PayloadTemplate,
+		CreatedAt:       timestamppb.New(w.CreatedAt),
+		UpdatedAt:       timestamppb.New(w.UpdatedAt),
 	}
 }
 
@@ -123,7 +124,8 @@ func (s *WebhookService) ListWebhooks(ctx context.Context, req *connect.Request[
 	}
 
 	return connect.NewResponse(&v1.ListWebhooksResponse{
-		Webhooks: protoWebhooks,
+		Webhooks:        protoWebhooks,
+		TemplatePresets: webhookpkg.TemplatePresets(),
 	}), nil
 }
 
@@ -155,6 +157,13 @@ func (s *WebhookService) CreateWebhook(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("at least one event is required"))
 	}
 
+	// Validate payload template if provided
+	if req.Msg.PayloadTemplate != "" {
+		if err := webhookpkg.ValidateTemplate(req.Msg.PayloadTemplate); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("payload_template: %v", err))
+		}
+	}
+
 	// Verify server exists
 	_, err := s.store.GetServer(ctx, req.Msg.ServerId)
 	if err != nil {
@@ -182,18 +191,19 @@ func (s *WebhookService) CreateWebhook(ctx context.Context, req *connect.Request
 	}
 
 	webhook := &storage.Webhook{
-		ID:           uuid.New().String(),
-		ServerID:     req.Msg.ServerId,
-		Name:         req.Msg.Name,
-		URL:          req.Msg.Url,
-		Secret:       req.Msg.Secret,
-		Events:       events,
-		Enabled:      true,
-		Format:       protoWebhookFormatToDB(req.Msg.Format),
-		MaxRetries:   maxRetries,
-		RetryDelayMs: retryDelayMs,
-		TimeoutMs:    timeoutMs,
-		Headers:      req.Msg.Headers,
+		ID:              uuid.New().String(),
+		ServerID:        req.Msg.ServerId,
+		Name:            req.Msg.Name,
+		URL:             req.Msg.Url,
+		Secret:          req.Msg.Secret,
+		Events:          events,
+		Enabled:         true,
+		Format:          protoWebhookFormatToDB(req.Msg.Format),
+		PayloadTemplate: req.Msg.PayloadTemplate,
+		MaxRetries:      maxRetries,
+		RetryDelayMs:    retryDelayMs,
+		TimeoutMs:       timeoutMs,
+		Headers:         req.Msg.Headers,
 	}
 
 	if err := s.store.CreateWebhook(ctx, webhook); err != nil {
@@ -233,6 +243,14 @@ func (s *WebhookService) UpdateWebhook(ctx context.Context, req *connect.Request
 	}
 	if req.Msg.Format != nil {
 		webhook.Format = protoWebhookFormatToDB(*req.Msg.Format)
+	}
+	if req.Msg.PayloadTemplate != nil {
+		if *req.Msg.PayloadTemplate != "" {
+			if err := webhookpkg.ValidateTemplate(*req.Msg.PayloadTemplate); err != nil {
+				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("payload_template: %v", err))
+			}
+		}
+		webhook.PayloadTemplate = *req.Msg.PayloadTemplate
 	}
 	if req.Msg.MaxRetries != nil {
 		webhook.MaxRetries = int(*req.Msg.MaxRetries)

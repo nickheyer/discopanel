@@ -60,6 +60,12 @@ message Webhook {
 
   google.protobuf.Timestamp created_at = 13;
   google.protobuf.Timestamp updated_at = 14;
+
+  // Custom payload template (Go text/template syntax)
+  // When set, this template is rendered with event data to produce the request body.
+  // Available variables: .event, .timestamp, .server_id, .server_name, .server_status,
+  // .server_mc_version, .server_mod_loader, .server_players, .server_max_players, .server_port
+  string payload_template = 15;
 }
 
 // List webhooks request
@@ -70,6 +76,9 @@ message ListWebhooksRequest {
 // List of webhooks
 message ListWebhooksResponse {
   repeated Webhook webhooks = 1;
+
+  // Payload template presets keyed by name (e.g. "generic", "discord", "slack", "teams", "ntfy")
+  map<string, string> template_presets = 2;
 }
 
 // Get webhook request
@@ -98,6 +107,9 @@ message CreateWebhookRequest {
 
   // Optional custom headers
   map<string, string> headers = 10;
+
+  // Custom payload template (Go text/template syntax)
+  string payload_template = 11;
 }
 
 // Newly created webhook
@@ -122,6 +134,9 @@ message UpdateWebhookRequest {
   // Custom headers (replaces existing headers)
   map<string, string> headers = 10;
   bool clear_headers = 11;  // If true, clear all headers before applying new ones
+
+  // Custom payload template (Go text/template syntax)
+  optional string payload_template = 12;
 }
 
 // Updated webhook details

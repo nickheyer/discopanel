@@ -87,7 +87,7 @@
 		}
 
 		// Create a new instance with updated values
-		const updates: any = {};
+		const updates = create(DockerOverridesSchema, {});
 
 		// Copy existing values
 		if (overrides.environment && Object.keys(overrides.environment).length > 0) updates.environment = { ...overrides.environment };
@@ -192,7 +192,7 @@
 		updateOverride('volumes', volumes.length > 0 ? volumes : undefined);
 	}
 
-	function updateVolumeField(index: number, field: keyof VolumeMount, value: any) {
+	function updateVolumeField(index: number, field: keyof VolumeMount, value: unknown) {
 		const volumes = [...(overrides?.volumes || [])];
 		if (volumes[index]) {
 			volumes[index] = create(VolumeMountSchema, {
@@ -249,7 +249,7 @@
 							oninput={(e) => updateJsonText(e.currentTarget.value)}
 							disabled={disabled}
 							placeholder={"{}"}
-							class="font-mono text-xs min-h-[200px] {jsonError ? 'border-destructive' : ''}"
+							class="font-mono text-xs min-h-50 {jsonError ? 'border-destructive' : ''}"
 						/>
 						{#if jsonError}
 							<div class="flex items-center gap-2 text-destructive text-xs">
@@ -291,7 +291,7 @@
 						{#if overrides?.environment && Object.keys(overrides.environment).length > 0}
 							<div class="rounded-lg border bg-muted/20 p-3">
 								<div class="space-y-2">
-									{#each Object.entries(overrides.environment) as [key, value]}
+									{#each Object.entries(overrides.environment) as [key, value] (key)}
 										<div class="flex items-center gap-2">
 											<Input
 												value={key}
@@ -346,7 +346,7 @@
 						{#if overrides?.volumes && overrides.volumes.length > 0}
 							<div class="rounded-lg border bg-muted/20 p-3">
 								<div class="space-y-3">
-									{#each overrides.volumes as volume, i}
+									{#each overrides.volumes as volume, i (i)}
 										<div class="space-y-2 p-2 rounded border bg-background/50">
 											<div class="flex items-center gap-2">
 												<div class="flex-1 grid grid-cols-2 gap-2">
@@ -381,11 +381,25 @@
 													<input
 														type="checkbox"
 														checked={volume.readOnly}
-														onchange={(e) => updateVolumeField(i, 'readOnly', e.currentTarget.checked)}
+														onchange={(e) => { updateVolumeField(i, 'readOnly', e.currentTarget.checked); if (e.currentTarget.checked) updateVolumeField(i, 'createDir', false); }}
 														disabled={disabled}
 														class="h-3 w-3"
 													/>
 													<span class="text-xs text-muted-foreground">Read Only</span>
+												</label>
+												<label class="flex items-center gap-2">
+													<input
+														type="checkbox"
+														checked={volume.createDir}
+														onchange={(e) => {
+															updateVolumeField(i, 'createDir', e.currentTarget.checked);
+															if (e.currentTarget.checked) {
+																updateVolumeField(i, 'readOnly', false);
+															}}}
+														disabled={disabled}
+														class="h-3 w-3"
+													/>
+													<span class="text-xs text-muted-foreground">Pre-create Dir</span>
 												</label>
 												<select
 													value={volume.type || 'bind'}

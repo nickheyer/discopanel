@@ -30,6 +30,7 @@
 		hostPath: string;
 		containerPath: string;
 		readOnly: boolean;
+		createDir: boolean;
 	}
 
 	interface PortConfig {
@@ -110,7 +111,8 @@
 				.map((v) => ({
 					source: v.hostPath.trim(),
 					target: v.containerPath.trim(),
-					read_only: v.readOnly
+					read_only: v.readOnly,
+					create_dir: v.createDir
 				}))
 		);
 	}
@@ -124,7 +126,7 @@
 	}
 
 	function addVolume() {
-		volumes = [...volumes, { hostPath: '', containerPath: '', readOnly: false }];
+		volumes = [...volumes, { hostPath: '', containerPath: '', readOnly: false, createDir: false }];
 	}
 
 	function removeVolume(index: number) {
@@ -291,7 +293,7 @@
 </script>
 
 <Dialog bind:open>
-	<DialogContent class="!max-w-6xl !w-[95vw] !h-[85vh] !p-0 !gap-0 overflow-hidden flex flex-col" showCloseButton={false}>
+	<DialogContent class="max-w-6xl! w-[95vw]! h-[85vh]! p-0! gap-0! overflow-hidden flex flex-col" showCloseButton={false}>
 		<div class="flex h-full">
 			<!-- Sidebar -->
 			<div class="w-64 border-r bg-muted/30 flex flex-col">
@@ -312,7 +314,7 @@
 
 				<!-- Navigation -->
 				<nav class="flex-1 p-4 space-y-1">
-					{#each navItems as item}
+					{#each navItems as item (item.id)}
 						{@const Icon = item.icon}
 						<button
 							onclick={() => (activeSection = item.id)}
@@ -522,7 +524,7 @@
 
 							{#if ports.length > 0}
 								<div class="space-y-4">
-									{#each ports as port, i}
+									{#each ports as port, i (i)}
 										<div class="p-6 border rounded-xl bg-card space-y-4">
 											<div class="flex items-center justify-between">
 												<span class="font-medium">Port {i + 1}</span>
@@ -632,7 +634,7 @@
 
 							{#if envVars.length > 0}
 								<div class="space-y-3">
-									{#each envVars as env, i}
+									{#each envVars as env, i (i)}
 										<div class="flex items-center gap-3 p-4 border rounded-lg bg-card">
 											<Input
 												bind:value={env.key}
@@ -691,7 +693,7 @@
 
 							{#if volumes.length > 0}
 								<div class="space-y-4">
-									{#each volumes as vol, i}
+									{#each volumes as vol, i (i)}
 										<div class="p-6 border rounded-xl bg-card space-y-4">
 											<div class="flex items-center justify-between">
 												<span class="font-medium">Volume {i + 1}</span>
@@ -724,10 +726,16 @@
 												</div>
 											</div>
 
-											<label class="flex items-center gap-3 pt-2">
-												<Checkbox bind:checked={vol.readOnly} />
-												<span class="text-sm">Read-only mount</span>
-											</label>
+											<div class="flex items-center gap-6 pt-2">
+												<label class="flex items-center gap-3">
+													<Checkbox checked={vol.readOnly} onCheckedChange={(checked) => { vol.readOnly = !!checked; if (vol.readOnly) vol.createDir = false; }} />
+													<span class="text-sm">Read-only mount</span>
+												</label>
+												<label class="flex items-center gap-3">
+													<Checkbox checked={vol.createDir} onCheckedChange={(checked) => { vol.createDir = !!checked; if (vol.createDir) vol.readOnly = false; }} />
+													<span class="text-sm">Pre-create directory</span>
+												</label>
+											</div>
 										</div>
 									{/each}
 								</div>
@@ -781,7 +789,7 @@
 
 								{#if defaultHooks.length > 0}
 									<div class="space-y-4">
-										{#each defaultHooks as hook, i}
+										{#each defaultHooks as hook, i (i)}
 											<div class="p-6 border rounded-xl bg-card space-y-4">
 												<div class="flex items-center justify-between">
 													<span class="font-medium">Hook {i + 1}</span>
@@ -906,7 +914,7 @@
 
 								{#if metadata.length > 0}
 									<div class="space-y-3">
-										{#each metadata as entry, i}
+										{#each metadata as entry, i (i)}
 											<div class="flex items-center gap-3 p-4 border rounded-lg bg-card">
 												<Input
 													bind:value={entry.key}

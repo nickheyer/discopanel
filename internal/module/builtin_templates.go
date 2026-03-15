@@ -72,9 +72,12 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				"EXCLUDES": "*.jar,cache,logs,*.tmp",
 				"TZ": "{{server.config.tz}}"
 			}`,
-			DefaultVolumes: `[{"source": "{{server.data_path}}", "target": "/data", "read_only": true}, {"source": "{{config.storage.backup_dir}}", "target": "/backups", "read_only": false}]`,
-			Documentation:  "Coordinates backups with the Minecraft server via RCON. Automatically flushes data, pauses writes, and resumes after backup. RCON settings are pulled from server config. Backups stored in global backup directory.",
-			DefaultMemory:  256,
+			DefaultVolumes: `[
+				{"source": "{{server.data_path}}", "target": "/data", "read_only": true},
+				{"source": "{{config.storage.backup_dir}}", "target": "/backups", "read_only": false}
+				]`,
+			Documentation: "Coordinates backups with the Minecraft server via RCON. Automatically flushes data, pauses writes, and resumes after backup. RCON settings are pulled from server config. Backups stored in global backup directory.",
+			DefaultMemory: 256,
 		},
 		{
 			ID:             "builtin-rcon-web",
@@ -129,6 +132,35 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			HealthCheckPort: 9225,
 			Documentation:   "Exports server status, player count, TPS, and other metrics in Prometheus format. Connect to /metrics endpoint to scrape metrics.",
 			DefaultMemory:   512,
+		},
+		{
+			ID:             "builtin-bluemap",
+			Name:           "BlueMap",
+			Description:    "Interactive 3D map renderer for Minecraft worlds with a web-based viewer. Renders overworld, nether, and end dimensions.",
+			Type:           storage.ModuleTemplateTypeBuiltin,
+			DockerImage:    "ghcr.io/bluemap-minecraft/bluemap:latest",
+			Category:       "monitoring",
+			SupportsProxy:  true,
+			RequiresServer: true,
+			Icon:           "map",
+			DefaultCmd:     "-r -u -w",
+			Ports: []*v1.ModulePort{
+				{Name: "Web", ContainerPort: 8100, HostPort: 0, Protocol: "http", ProxyEnabled: true},
+			},
+			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
+			DefaultEnv:        `{}`,
+			DefaultVolumes: `[
+				{"source": "{{server.data_path}}/modules/bluemap/config", "target": "/app/config", "read_only": false, "create_dir": true},
+				{"source": "{{server.data_path}}/world", "target": "/app/world", "read_only": true},
+				{"source": "{{server.data_path}}/modules/bluemap/data", "target": "/app/data", "read_only": false, "create_dir": true},
+				{"source": "{{server.data_path}}/modules/bluemap/web", "target": "/app/web", "read_only": false, "create_dir": true}
+				]`,
+			HealthCheckPath: "/",
+			HealthCheckPort: 8100,
+			Documentation:   "Renders 3D maps of your Minecraft worlds accessible via a web interface. Supports overworld, nether, and end dimensions. World volumes are mounted read-only from the server data path. Config, data, and web assets are stored in the bluemap module directory.",
+			DefaultMemory:   2048,
+			DefaultUID:      1000,
+			DefaultGID:      1000,
 		},
 		{
 			ID:             "builtin-status-panel",

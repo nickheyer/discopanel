@@ -152,6 +152,8 @@ func dbModuleTemplateToProto(t *storage.ModuleTemplate) *v1.ModuleTemplate {
 		DefaultCmd:            t.DefaultCmd,
 		DefaultAccessUrls:     t.DefaultAccessUrls,
 		DefaultMemory:         int32(t.DefaultMemory),
+		DefaultUid:            int32(t.DefaultUID),
+		DefaultGid:            int32(t.DefaultGID),
 	}
 }
 
@@ -194,6 +196,8 @@ func dbModuleToProto(m *storage.Module, serverName, templateName, serverProxyHos
 		AccessUrls:            m.AccessUrls,
 		CreatedByUserId:       m.CreatedBy,
 		CreatedByUsername:     createdByUsername,
+		Uid:                  int32(m.UID),
+		Gid:                  int32(m.GID),
 	}
 
 	if m.LastStarted != nil {
@@ -295,6 +299,8 @@ func (s *ModuleService) CreateModuleTemplate(ctx context.Context, req *connect.R
 		Metadata:              msg.Metadata,
 		DefaultCmd:            msg.DefaultCmd,
 		DefaultAccessUrls:     msg.DefaultAccessUrls,
+		DefaultUID:            int(msg.DefaultUid),
+		DefaultGID:            int(msg.DefaultGid),
 	}
 
 	if err := s.store.CreateModuleTemplate(ctx, template); err != nil {
@@ -376,6 +382,12 @@ func (s *ModuleService) UpdateModuleTemplate(ctx context.Context, req *connect.R
 	}
 	if len(msg.DefaultAccessUrls) > 0 {
 		template.DefaultAccessUrls = msg.DefaultAccessUrls
+	}
+	if msg.DefaultUid != nil {
+		template.DefaultUID = int(*msg.DefaultUid)
+	}
+	if msg.DefaultGid != nil {
+		template.DefaultGID = int(*msg.DefaultGid)
 	}
 
 	if err := s.store.UpdateModuleTemplate(ctx, template); err != nil {
@@ -600,6 +612,8 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		Metadata:              msg.Metadata,
 		CmdOverride:           msg.CmdOverride,
 		AccessUrls:            msg.AccessUrls,
+		UID:                   int(msg.Uid),
+		GID:                   int(msg.Gid),
 	}
 
 	// Generate module API token tied to the creating user
@@ -627,6 +641,13 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		} else {
 			module.Memory = 512 // Default 512MB
 		}
+	}
+
+	if module.UID == 0 && template.DefaultUID > 0 {
+		module.UID = template.DefaultUID
+	}
+	if module.GID == 0 && template.DefaultGID > 0 {
+		module.GID = template.DefaultGID
 	}
 
 	if err := s.store.CreateModule(ctx, module); err != nil {
@@ -751,6 +772,18 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 	}
 	if len(msg.AccessUrls) > 0 {
 		module.AccessUrls = msg.AccessUrls
+	}
+	if msg.Uid != nil {
+		if int(*msg.Uid) != module.UID {
+			module.UID = int(*msg.Uid)
+			needsRecreate = true
+		}
+	}
+	if msg.Gid != nil {
+		if int(*msg.Gid) != module.GID {
+			module.GID = int(*msg.Gid)
+			needsRecreate = true
+		}
 	}
 
 	if err := s.store.UpdateModule(ctx, module); err != nil {

@@ -618,6 +618,10 @@ type ModuleTemplate struct {
 
 	// Default resource limits
 	DefaultMemory int `json:"default_memory" gorm:"column:default_memory;default:512"` // Default memory in MB
+
+	// Default UID/GID for container user
+	DefaultUID int `json:"default_uid" gorm:"column:default_uid;default:0"`
+	DefaultGID int `json:"default_gid" gorm:"column:default_gid;default:0"`
 }
 
 // Module represents a running instance of a module template attached to a server
@@ -637,6 +641,10 @@ type Module struct {
 	// Resource limits
 	Memory   int     `json:"memory" gorm:"default:512"`
 	CPULimit float64 `json:"cpu_limit" gorm:"column:cpu_limit"`
+
+	// Container user
+	UID int `json:"uid" gorm:"column:uid;default:0"`
+	GID int `json:"gid" gorm:"column:gid;default:0"`
 
 	// Lifecycle
 	AutoStart             bool   `json:"auto_start" gorm:"default:false;column:auto_start"`

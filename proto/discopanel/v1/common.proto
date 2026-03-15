@@ -117,6 +117,7 @@ message VolumeMount {
   string target = 2; // Container path
   bool read_only = 3; // Mount as read-only
   string type = 4; // Mount type: "bind" or "volume" (defaults to "bind")
+  bool create_dir = 5; // Pre-create source dir
 }
 
 // Container runtime customization

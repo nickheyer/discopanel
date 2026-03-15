@@ -31,7 +31,7 @@
 	}
 
 	interface EnvVar { key: string; value: string; }
-	interface VolumeMount { hostPath: string; containerPath: string; readOnly: boolean; }
+	interface VolumeMount { hostPath: string; containerPath: string; readOnly: boolean; createDir: boolean; }
 	interface MetadataEntry { key: string; value: string; }
 
 	type ConfigSection = 'general' | 'ports' | 'environment' | 'volumes' | 'advanced';
@@ -91,7 +91,8 @@
 				.map((v) => ({
 					source: v.hostPath.trim(),
 					target: v.containerPath.trim(),
-					read_only: v.readOnly
+					read_only: v.readOnly,
+					create_dir: v.createDir
 				}))
 		);
 	}
@@ -112,7 +113,8 @@
 			return JSON.parse(json || '[]').map((v: Record<string, unknown>) => ({
 				hostPath: v.source || '',
 				containerPath: v.target || '',
-				readOnly: v.read_only || false
+				readOnly: v.read_only || false,
+				createDir: v.create_dir || false
 			}));
 		} catch {
 			return [];
@@ -181,7 +183,7 @@
 		envVars = envVars.filter((_, idx) => idx !== i);
 	}
 	function addVolume() {
-		volumes = [...volumes, { hostPath: '', containerPath: '', readOnly: false }];
+		volumes = [...volumes, { hostPath: '', containerPath: '', readOnly: false, createDir: false }];
 	}
 	function removeVolume(i: number) {
 		volumes = volumes.filter((_, idx) => idx !== i);
@@ -320,6 +322,7 @@
 		envVars = parseEnvVars(template.defaultEnv || '{}');
 		volumes = parseVolumes(template.defaultVolumes || '[]');
 		ports = parsePorts(template.ports);
+		memory = template.defaultMemory;
 		let nextPort = portResponse.port;
 		for (const port of ports) {
 			if (port.hostPort === 0) {
@@ -493,7 +496,7 @@
 </script>
 
 <Dialog bind:open>
-	<DialogContent class="!max-w-6xl !w-[95vw] !h-[85vh] !p-0 !gap-0 overflow-hidden flex flex-col" showCloseButton={false}>
+	<DialogContent class="max-w-6xl! w-[95vw]! h-[85vh]! p-0! gap-0! overflow-hidden flex flex-col" showCloseButton={false}>
 		{#if mode === 'create' && step === 'select'}
 			<!-- Template Selection -->
 			<div class="flex flex-col h-full">
@@ -830,7 +833,7 @@
 												</label>
 												{#if port.proxyEnabled && !hasProxy}
 													<div class="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400">
-														<Info class="h-4 w-4 mt-0.5 flex-shrink-0" />
+														<Info class="h-4 w-4 mt-0.5 shrink-0" />
 														<div class="flex-1 text-xs">
 															<p>This server has no proxy hostname configured. Proxy-routed ports won't be accessible from the host.</p>
 															<Button
@@ -971,10 +974,24 @@
 													</div>
 												</div>
 
-												<label class="flex items-center gap-3 pt-2">
-													<Checkbox bind:checked={vol.readOnly} />
-													<span class="text-sm">Read-only mount</span>
-												</label>
+												<div class="flex items-center gap-6 pt-2">
+													<label class="flex items-center gap-3">
+														<Checkbox checked={vol.readOnly} onCheckedChange={(checked) => {
+															vol.readOnly = !!checked;
+															if (vol.readOnly) {
+																vol.createDir = false;
+															}}} />
+														<span class="text-sm">Read-only mount</span>
+													</label>
+													<label class="flex items-center gap-3">
+														<Checkbox checked={vol.createDir} onCheckedChange={(checked) => {
+															vol.createDir = !!checked;
+															if (vol.createDir) {
+																vol.readOnly = false;
+															}}} />
+														<span class="text-sm">Pre-create directory</span>
+													</label>
+												</div>
 											</div>
 										{/each}
 									</div>
@@ -1363,7 +1380,7 @@
 		<div class="space-y-2 py-2">
 			{#each warnings as warning (warning)}
 				<div class="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm">
-					<AlertTriangle class="h-4 w-4 mt-0.5 flex-shrink-0" />
+					<AlertTriangle class="h-4 w-4 mt-0.5 shrink-0" />
 					<span>{warning}</span>
 				</div>
 			{/each}

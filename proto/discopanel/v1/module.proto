@@ -206,6 +206,10 @@ message ModuleTemplate {
   repeated string default_access_urls = 23;
   // Default memory allocation in MB
   int32 default_memory = 24;
+  // Default UID to run the container as
+  int32 default_uid = 25;
+  // Default GID to run the container as
+  int32 default_gid = 26;
 }
 
 // Module represents a running module instance attached to a server.
@@ -278,6 +282,10 @@ message Module {
   string created_by_user_id = 33;
   // Username of the user who created this module (for display).
   string created_by_username = 34;
+  // UID to run the container as.
+  int32 uid = 35;
+  // GID to run the container as.
+  int32 gid = 36;
 }
 
 // ListModuleTemplatesRequest filters the template list.
@@ -344,6 +352,10 @@ message CreateModuleTemplateRequest {
   string default_cmd = 18;
   // Default access URL templates
   repeated string default_access_urls = 19;
+  // Default UID to run the container as
+  int32 default_uid = 20;
+  // Default GID to run the container as
+  int32 default_gid = 21;
 }
 
 // CreateModuleTemplateResponse contains the created template.
@@ -374,6 +386,8 @@ message UpdateModuleTemplateRequest {
   map<string, string> metadata = 18;
   optional string default_cmd = 19;
   repeated string default_access_urls = 20;
+  optional int32 default_uid = 21;
+  optional int32 default_gid = 22;
 }
 
 // UpdateModuleTemplateResponse contains the updated template.
@@ -458,6 +472,10 @@ message CreateModuleRequest {
   string cmd_override = 20;
   // Access URL templates
   repeated string access_urls = 21;
+  // UID to run the container as
+  int32 uid = 22;
+  // GID to run the container as
+  int32 gid = 23;
 }
 
 // CreateModuleResponse contains the created module.
@@ -488,6 +506,8 @@ message UpdateModuleRequest {
   optional string cmd_override = 18;
   // Access URL templates
   repeated string access_urls = 19;
+  optional int32 uid = 20;
+  optional int32 gid = 21;
 }
 
 // UpdateModuleResponse contains the updated module.

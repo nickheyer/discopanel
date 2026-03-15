@@ -23,6 +23,8 @@
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
+	import { resolve } from '$app/paths';
+	import * as _ from 'lodash-es';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
@@ -165,15 +167,12 @@
 
 		try {
 			// Get configuration from the server
-			const response = await rpcClient.modpack.getModpackConfig({ id: modpack.id });
-
-			// Config is a map of key-value pairs (response.config) - currently unused
+			const cfg = await rpcClient.modpack.getModpackConfig({ id: modpack.id });
 			formData.name = modpack.name || '';
 			formData.description = modpack.summary || '';
-			// Convert mod loader string to enum - this needs mapping
-			formData.modLoader = 0; // Will be set based on modpack data
+			formData.modLoader = _.get(cfg, 'mod_loader', 0); // Will be set based on modpack data
 			formData.mcVersion = modpack.mcVersion || '';
-			formData.memory = modpack.recommendedRam || 2048;
+			formData.memory =  _.get(cfg, 'memory', modpack.recommendedRam || 2048);
 			formData.dockerImage = modpack.dockerImage || '';
 			await loadModpackVersions(modpack.id);
 		} catch (error) {
@@ -264,7 +263,7 @@
 			// Create the server
 			const response = await rpcClient.server.createServer(createRequest);
 			toast.success(`Server "${response.server?.name}" created successfully!`);
-			goto(`/servers/${response.server?.id}`);
+			goto(resolve(`/servers/${response.server?.id}`));
 		} catch (error) {
 			toast.error(`Failed to create server: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		} finally {
@@ -274,18 +273,18 @@
 
 </script>
 
-<div class="h-full overflow-y-auto bg-gradient-to-br from-background to-muted/10">
+<div class="h-full overflow-y-auto bg-linear-to-br from-background to-muted/10">
 	<div class="space-y-8 p-4 sm:p-6 lg:p-8 pt-4 sm:pt-6">
 	<div class="flex items-center gap-4 pb-6 border-b-2 border-border/50">
 		<Button variant="ghost" size="icon" href="/servers" class="shrink-0 h-12 w-12 rounded-xl hover:bg-muted">
 			<ArrowLeft class="h-5 w-5" />
 		</Button>
 		<div class="flex items-center gap-4">
-			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+			<div class="h-16 w-16 rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
 				<Package class="h-8 w-8 text-primary" />
 			</div>
 			<div class="space-y-1">
-				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Create New Server</h2>
+				<h2 class="text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Create New Server</h2>
 				<p class="text-base text-muted-foreground">Set up a new Minecraft server instance with your preferred configuration</p>
 			</div>
 		</div>
@@ -293,7 +292,7 @@
 
 	<form onsubmit={handleSubmit}>
 		<div class="grid gap-6 lg:grid-cols-2">
-			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
+			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-linear-to-br from-card to-card/90">
 				<CardHeader class="pb-6">
 					<div class="flex items-center gap-3">
 						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -336,7 +335,7 @@
 						</div>
 						
 						{#if selectedModpack}
-							<Card class="border-2 border-primary/30 bg-gradient-to-br from-primary/10 to-primary/5 shadow-lg">
+							<Card class="border-2 border-primary/30 bg-linear-to-br from-primary/10 to-primary/5 shadow-lg">
 								<CardContent class="p-5">
 									<div class="flex items-start gap-3">
 										{#if selectedModpack.logoUrl}
@@ -418,7 +417,7 @@
 							</Card>
 						{:else if favoriteModpacks.length === 0}
 							<p class="text-sm text-muted-foreground">
-								Visit the <a href="/modpacks" class="underline">Modpacks</a> page to browse and favorite modpacks
+								Visit the <a href={resolve("/modpacks")} class="underline">Modpacks</a> page to browse and favorite modpacks
 							</p>
 						{/if}
 					</div>
@@ -444,7 +443,7 @@
 							placeholder="A fun server for friends..."
 							bind:value={formData.description}
 							disabled={loading}
-							class="min-h-[80px] resize-none"
+							class="min-h-20 resize-none"
 						/>
 					</div>
 
@@ -507,7 +506,7 @@
 				</CardContent>
 			</Card>
 
-			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-gradient-to-br from-card to-card/90">
+			<Card class="border-2 hover:border-primary/30 transition-colors shadow-xl bg-linear-to-br from-card to-card/90">
 				<CardHeader class="pb-6">
 					<div class="flex items-center gap-3">
 						<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -844,7 +843,7 @@
 			<Button variant="outline" href="/servers" disabled={loading} size="lg">
 				Cancel
 			</Button>
-			<Button type="submit" disabled={loading || loadingVersions} size="lg" class="min-w-[140px]">
+			<Button type="submit" disabled={loading || loadingVersions} size="lg" class="min-w-35">
 				{#if loading}
 					<Loader2 class="h-4 w-4 mr-2 animate-spin" />
 					Creating...
@@ -868,7 +867,7 @@
 		
 		<div class="overflow-y-auto flex-1 -mx-6 px-6">
 			<div class="grid gap-4">
-				{#each favoriteModpacks as modpack}
+				{#each favoriteModpacks as modpack (modpack.id)}
 					<Card 
 						class="cursor-pointer hover:shadow-md transition-shadow"
 						onclick={() => selectModpack(modpack)}

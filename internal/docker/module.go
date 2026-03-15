@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	shellparse "github.com/arkady-emelyanov/go-shellparse"
 	"github.com/docker/docker/api/types/container"
@@ -17,10 +18,11 @@ import (
 
 // ModuleVolumeMount represents a volume mount from module configuration
 type ModuleVolumeMount struct {
-	Source   string `json:"source"`
-	Target   string `json:"target"`
-	ReadOnly bool   `json:"read_only,omitempty"`
-	Type     string `json:"type,omitempty"` // "bind" or "volume"
+	Source    string `json:"source"`
+	Target    string `json:"target"`
+	ReadOnly  bool   `json:"read_only,omitempty"`
+	Type      string `json:"type,omitempty"`       // "bind" or "volume"
+	CreateDir bool   `json:"create_dir,omitempty"` // Pre-create source dirs
 }
 
 // Create container for a module w/ optional map of sibling modules by name for inter-module references
@@ -82,7 +84,20 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 	}
 
 	// Build mounts from module configuration only (frontend sends complete config)
-	mounts := c.parseVolumeMounts(module.VolumeOverrides, aliasCtx)
+	vols := c.parseModuleVolumes(module.VolumeOverrides, aliasCtx)
+
+	// Pre-create bind mounts
+	for _, vol := range vols {
+		if vol.CreateDir && !vol.ReadOnly && (vol.Type == "" || vol.Type == "bind") {
+			if _, err := os.Stat(vol.Source); os.IsNotExist(err) {
+				if err := os.MkdirAll(vol.Source, 0755); err != nil {
+					c.log.Warn("Failed to pre-create mount directory %s: %v", vol.Source, err)
+				}
+			}
+		}
+	}
+
+	mounts := c.moduleVolumesToMounts(vols)
 
 	config := &container.Config{
 		Image:        imageName,
@@ -98,6 +113,11 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 			"discopanel.module.template_id": module.TemplateID,
 			"discopanel.managed":            "true",
 		},
+	}
+
+	// Set container user id + group id if non root
+	if module.UID > 0 || module.GID > 0 {
+		config.User = fmt.Sprintf("%d:%d", module.UID, module.GID)
 	}
 
 	// Set container command if specified (module override takes precedence over template default)
@@ -197,8 +217,8 @@ func (c *Client) buildModuleEnv(module *models.Module, server *models.Server, al
 	return env
 }
 
-// parseVolumeMounts parses JSON volume configuration and returns mounts
-func (c *Client) parseVolumeMounts(volumeJSON string, aliasCtx *alias.Context) []mount.Mount {
+// JSON volume configuration and substitutes
+func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) []ModuleVolumeMount {
 	if volumeJSON == "" || volumeJSON == "[]" {
 		return nil
 	}
@@ -209,6 +229,17 @@ func (c *Client) parseVolumeMounts(volumeJSON string, aliasCtx *alias.Context) [
 		return nil
 	}
 
+	// Sub aliases in paths
+	for i := range volumes {
+		volumes[i].Source = alias.Substitute(volumes[i].Source, aliasCtx)
+		volumes[i].Target = alias.Substitute(volumes[i].Target, aliasCtx)
+	}
+
+	return volumes
+}
+
+// Module volumes to Docker mount specs
+func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount) []mount.Mount {
 	var mounts []mount.Mount
 
 	for _, vol := range volumes {
@@ -217,20 +248,16 @@ func (c *Client) parseVolumeMounts(volumeJSON string, aliasCtx *alias.Context) [
 			mountType = mount.TypeVolume
 		}
 
-		// Substitute aliases in source and target paths
-		source := alias.Substitute(vol.Source, aliasCtx)
-		target := alias.Substitute(vol.Target, aliasCtx)
-
 		// Skip mounts with empty source or target
-		if source == "" || target == "" {
-			c.log.Warn("Skipping volume mount with empty source or target: source=%q, target=%q", source, target)
+		if vol.Source == "" || vol.Target == "" {
+			c.log.Warn("Skipping volume mount with empty source or target: source=%q, target=%q", vol.Source, vol.Target)
 			continue
 		}
 
 		mounts = append(mounts, mount.Mount{
 			Type:        mountType,
-			Source:      source,
-			Target:      target,
+			Source:      vol.Source,
+			Target:      vol.Target,
 			ReadOnly:    vol.ReadOnly,
 			BindOptions: &mount.BindOptions{CreateMountpoint: !vol.ReadOnly},
 		})

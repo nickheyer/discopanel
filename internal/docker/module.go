@@ -115,9 +115,10 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		},
 	}
 
-	// Set container user id + group id if non root
-	if module.UID > 0 || module.GID > 0 {
-		config.User = fmt.Sprintf("%d:%d", module.UID, module.GID)
+	// Set uid + gid
+	uid, gid := alias.Substitute(module.UID, aliasCtx), alias.Substitute(module.GID, aliasCtx)
+	if uid != "" || gid != "" {
+		config.User = fmt.Sprintf("%s:%s", uid, gid)
 	}
 
 	// Set container command if specified (module override takes precedence over template default)
@@ -254,9 +255,15 @@ func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount) []mount.Moun
 			continue
 		}
 
+		// Translate bind mount sources to host paths when running in a container
+		source := vol.Source
+		if mountType == mount.TypeBind {
+			source = TranslateToHostPath(source)
+		}
+
 		mounts = append(mounts, mount.Mount{
 			Type:        mountType,
-			Source:      vol.Source,
+			Source:      source,
 			Target:      vol.Target,
 			ReadOnly:    vol.ReadOnly,
 			BindOptions: &mount.BindOptions{CreateMountpoint: !vol.ReadOnly},

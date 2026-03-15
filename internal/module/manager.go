@@ -228,7 +228,53 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 	}
 
 	m.logger.Info("Started module: %s", module.Name)
+
+	// Run init command in background if configured
+	if module.InitCommand != "" {
+		go m.runInitCommand(module.ID)
+	}
+
 	return nil
+}
+
+// runInitCommand executes the module's init command after an optional delay
+func (m *Manager) runInitCommand(moduleID string) {
+	ctx := context.Background()
+
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		m.logger.Error("Init command: failed to get module %s: %v", moduleID, err)
+		return
+	}
+
+	if module.InitCommandDelay > 0 {
+		m.logger.Info("Init command: waiting %ds before executing for module %s", module.InitCommandDelay, module.Name)
+		time.Sleep(time.Duration(module.InitCommandDelay) * time.Second)
+	}
+
+	// Verify container is still running
+	status, err := m.GetModuleStatus(ctx, moduleID)
+	if err != nil || status != storage.ModuleStatusRunning {
+		m.logger.Warn("Init command: module %s is no longer running, skipping", module.Name)
+		return
+	}
+
+	m.logger.Info("Init command: executing for module %s: %s", module.Name, module.InitCommand)
+	output, err := m.docker.Exec(ctx, module.ContainerID, []string{"sh", "-c", module.InitCommand})
+	if err != nil {
+		m.logger.Error("Init command: failed for module %s: %v", module.Name, err)
+		return
+	}
+	if output != "" {
+		m.logger.Info("Init command: output for module %s: %s", module.Name, output)
+	}
+
+	if module.RestartAfterInit {
+		m.logger.Info("Init command: restarting module %s after init", module.Name)
+		if err := m.docker.RestartContainer(ctx, module.ContainerID, 5*time.Second); err != nil {
+			m.logger.Error("Init command: failed to restart module %s: %v", module.Name, err)
+		}
+	}
 }
 
 // startDependencies starts and waits for module dependencies

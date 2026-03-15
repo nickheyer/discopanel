@@ -73,6 +73,25 @@ type dockerImagesCache struct {
 
 var dockerCache = &dockerImagesCache{}
 
+// Converts a container-internal path to a host path.
+// When DISCOPANEL_HOST_DATA_PATH is not set (running on host), it returns the path unchanged.
+func TranslateToHostPath(path string) string {
+	hostDataPath := os.Getenv("DISCOPANEL_HOST_DATA_PATH")
+	if hostDataPath == "" {
+		return path
+	}
+	containerDataDir := os.Getenv("DISCOPANEL_DATA_DIR")
+	if containerDataDir == "" {
+		containerDataDir = "/app/data"
+	}
+	relPath, err := filepath.Rel(containerDataDir, path)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		// Path is not under the container data dir, return as-is
+		return path
+	}
+	return filepath.Join(hostDataPath, relPath)
+}
+
 // Fetches the docker images manifest from itzg
 func fetchDockerImages() ([]DockerImageTag, error) {
 	// Check cache first
@@ -406,16 +425,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	}
 
 	// Handle path translation when DiscoPanel runs in a container
-	dataPath := server.DataPath
-	if hostDataPath := os.Getenv("DISCOPANEL_HOST_DATA_PATH"); hostDataPath != "" {
-		containerDataDir := os.Getenv("DISCOPANEL_DATA_DIR")
-		if containerDataDir == "" {
-			containerDataDir = "/app/data"
-		}
-		if relPath, err := filepath.Rel(containerDataDir, server.DataPath); err == nil {
-			dataPath = filepath.Join(hostDataPath, relPath)
-		}
-	}
+	dataPath := TranslateToHostPath(server.DataPath)
 
 	if err := os.MkdirAll(server.DataPath, 0755); err != nil {
 		return "", fmt.Errorf("failed to create server data directory: %w", err)

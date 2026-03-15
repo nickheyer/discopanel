@@ -129,31 +129,34 @@ func dbModuleTemplateToProto(t *storage.ModuleTemplate) *v1.ModuleTemplate {
 		return nil
 	}
 	return &v1.ModuleTemplate{
-		Id:                    t.ID,
-		Name:                  t.Name,
-		Description:           t.Description,
-		Type:                  dbModuleTemplateTypeToProto(t.Type),
-		DockerImage:           t.DockerImage,
-		DefaultEnv:            t.DefaultEnv,
-		DefaultVolumes:        t.DefaultVolumes,
-		HealthCheckPath:       t.HealthCheckPath,
-		HealthCheckPort:       int32(t.HealthCheckPort),
-		RequiresServer:        t.RequiresServer,
-		SupportsProxy:         t.SupportsProxy,
-		Icon:                  t.Icon,
-		Category:              t.Category,
-		Documentation:         t.Documentation,
-		CreatedAt:             timestamppb.New(t.CreatedAt),
-		UpdatedAt:             timestamppb.New(t.UpdatedAt),
-		Ports:                 t.Ports,
-		SuggestedDependencies: t.SuggestedDependencies,
-		DefaultHooks:          t.DefaultHooks,
-		Metadata:              t.Metadata,
-		DefaultCmd:            t.DefaultCmd,
-		DefaultAccessUrls:     t.DefaultAccessUrls,
-		DefaultMemory:         int32(t.DefaultMemory),
-		DefaultUid:            int32(t.DefaultUID),
-		DefaultGid:            int32(t.DefaultGID),
+		Id:                      t.ID,
+		Name:                    t.Name,
+		Description:             t.Description,
+		Type:                    dbModuleTemplateTypeToProto(t.Type),
+		DockerImage:             t.DockerImage,
+		DefaultEnv:              t.DefaultEnv,
+		DefaultVolumes:          t.DefaultVolumes,
+		HealthCheckPath:         t.HealthCheckPath,
+		HealthCheckPort:         int32(t.HealthCheckPort),
+		RequiresServer:          t.RequiresServer,
+		SupportsProxy:           t.SupportsProxy,
+		Icon:                    t.Icon,
+		Category:                t.Category,
+		Documentation:           t.Documentation,
+		CreatedAt:               timestamppb.New(t.CreatedAt),
+		UpdatedAt:               timestamppb.New(t.UpdatedAt),
+		Ports:                   t.Ports,
+		SuggestedDependencies:   t.SuggestedDependencies,
+		DefaultHooks:            t.DefaultHooks,
+		Metadata:                t.Metadata,
+		DefaultCmd:              t.DefaultCmd,
+		DefaultAccessUrls:       t.DefaultAccessUrls,
+		DefaultMemory:           int32(t.DefaultMemory),
+		DefaultUid:              t.DefaultUID,
+		DefaultGid:              t.DefaultGID,
+		DefaultInitCommand:      t.DefaultInitCommand,
+		DefaultInitCommandDelay: int32(t.DefaultInitCommandDelay),
+		DefaultRestartAfterInit: t.DefaultRestartAfterInit,
 	}
 }
 
@@ -196,8 +199,11 @@ func dbModuleToProto(m *storage.Module, serverName, templateName, serverProxyHos
 		AccessUrls:            m.AccessUrls,
 		CreatedByUserId:       m.CreatedBy,
 		CreatedByUsername:     createdByUsername,
-		Uid:                  int32(m.UID),
-		Gid:                  int32(m.GID),
+		Uid:                   m.UID,
+		Gid:                   m.GID,
+		InitCommand:           m.InitCommand,
+		InitCommandDelay:      int32(m.InitCommandDelay),
+		RestartAfterInit:      m.RestartAfterInit,
 	}
 
 	if m.LastStarted != nil {
@@ -279,28 +285,31 @@ func (s *ModuleService) CreateModuleTemplate(ctx context.Context, req *connect.R
 	}
 
 	template := &storage.ModuleTemplate{
-		ID:                    uuid.New().String(),
-		Name:                  msg.Name,
-		Description:           msg.Description,
-		Type:                  storage.ModuleTemplateTypeCustom, // User-created templates are always custom
-		DockerImage:           msg.DockerImage,
-		DefaultEnv:            msg.DefaultEnv,
-		DefaultVolumes:        msg.DefaultVolumes,
-		HealthCheckPath:       msg.HealthCheckPath,
-		HealthCheckPort:       int(msg.HealthCheckPort),
-		RequiresServer:        msg.RequiresServer,
-		SupportsProxy:         msg.SupportsProxy,
-		Icon:                  msg.Icon,
-		Category:              msg.Category,
-		Documentation:         msg.Documentation,
-		Ports:                 msg.Ports,
-		SuggestedDependencies: msg.SuggestedDependencies,
-		DefaultHooks:          msg.DefaultHooks,
-		Metadata:              msg.Metadata,
-		DefaultCmd:            msg.DefaultCmd,
-		DefaultAccessUrls:     msg.DefaultAccessUrls,
-		DefaultUID:            int(msg.DefaultUid),
-		DefaultGID:            int(msg.DefaultGid),
+		ID:                      uuid.New().String(),
+		Name:                    msg.Name,
+		Description:             msg.Description,
+		Type:                    storage.ModuleTemplateTypeCustom, // User-created templates are always custom
+		DockerImage:             msg.DockerImage,
+		DefaultEnv:              msg.DefaultEnv,
+		DefaultVolumes:          msg.DefaultVolumes,
+		HealthCheckPath:         msg.HealthCheckPath,
+		HealthCheckPort:         int(msg.HealthCheckPort),
+		RequiresServer:          msg.RequiresServer,
+		SupportsProxy:           msg.SupportsProxy,
+		Icon:                    msg.Icon,
+		Category:                msg.Category,
+		Documentation:           msg.Documentation,
+		Ports:                   msg.Ports,
+		SuggestedDependencies:   msg.SuggestedDependencies,
+		DefaultHooks:            msg.DefaultHooks,
+		Metadata:                msg.Metadata,
+		DefaultCmd:              msg.DefaultCmd,
+		DefaultAccessUrls:       msg.DefaultAccessUrls,
+		DefaultUID:              msg.DefaultUid,
+		DefaultGID:              msg.DefaultGid,
+		DefaultInitCommand:      msg.DefaultInitCommand,
+		DefaultInitCommandDelay: int(msg.DefaultInitCommandDelay),
+		DefaultRestartAfterInit: msg.DefaultRestartAfterInit,
 	}
 
 	if err := s.store.CreateModuleTemplate(ctx, template); err != nil {
@@ -384,10 +393,19 @@ func (s *ModuleService) UpdateModuleTemplate(ctx context.Context, req *connect.R
 		template.DefaultAccessUrls = msg.DefaultAccessUrls
 	}
 	if msg.DefaultUid != nil {
-		template.DefaultUID = int(*msg.DefaultUid)
+		template.DefaultUID = *msg.DefaultUid
 	}
 	if msg.DefaultGid != nil {
-		template.DefaultGID = int(*msg.DefaultGid)
+		template.DefaultGID = *msg.DefaultGid
+	}
+	if msg.DefaultInitCommand != nil {
+		template.DefaultInitCommand = *msg.DefaultInitCommand
+	}
+	if msg.DefaultInitCommandDelay != nil {
+		template.DefaultInitCommandDelay = int(*msg.DefaultInitCommandDelay)
+	}
+	if msg.DefaultRestartAfterInit != nil {
+		template.DefaultRestartAfterInit = *msg.DefaultRestartAfterInit
 	}
 
 	if err := s.store.UpdateModuleTemplate(ctx, template); err != nil {
@@ -612,8 +630,11 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		Metadata:              msg.Metadata,
 		CmdOverride:           msg.CmdOverride,
 		AccessUrls:            msg.AccessUrls,
-		UID:                   int(msg.Uid),
-		GID:                   int(msg.Gid),
+		UID:                   msg.Uid,
+		GID:                   msg.Gid,
+		InitCommand:           msg.InitCommand,
+		InitCommandDelay:      int(msg.InitCommandDelay),
+		RestartAfterInit:      msg.RestartAfterInit,
 	}
 
 	// Generate module API token tied to the creating user
@@ -643,11 +664,20 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		}
 	}
 
-	if module.UID == 0 && template.DefaultUID > 0 {
+	if module.UID == "" && template.DefaultUID != "" {
 		module.UID = template.DefaultUID
 	}
-	if module.GID == 0 && template.DefaultGID > 0 {
+	if module.GID == "" && template.DefaultGID != "" {
 		module.GID = template.DefaultGID
+	}
+	if module.InitCommand == "" && template.DefaultInitCommand != "" {
+		module.InitCommand = template.DefaultInitCommand
+	}
+	if module.InitCommandDelay == 0 && template.DefaultInitCommandDelay > 0 {
+		module.InitCommandDelay = template.DefaultInitCommandDelay
+	}
+	if !module.RestartAfterInit && template.DefaultRestartAfterInit {
+		module.RestartAfterInit = template.DefaultRestartAfterInit
 	}
 
 	if err := s.store.CreateModule(ctx, module); err != nil {
@@ -774,16 +804,25 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		module.AccessUrls = msg.AccessUrls
 	}
 	if msg.Uid != nil {
-		if int(*msg.Uid) != module.UID {
-			module.UID = int(*msg.Uid)
+		if *msg.Uid != module.UID {
+			module.UID = *msg.Uid
 			needsRecreate = true
 		}
 	}
 	if msg.Gid != nil {
-		if int(*msg.Gid) != module.GID {
-			module.GID = int(*msg.Gid)
+		if *msg.Gid != module.GID {
+			module.GID = *msg.Gid
 			needsRecreate = true
 		}
+	}
+	if msg.InitCommand != nil {
+		module.InitCommand = *msg.InitCommand
+	}
+	if msg.InitCommandDelay != nil {
+		module.InitCommandDelay = int(*msg.InitCommandDelay)
+	}
+	if msg.RestartAfterInit != nil {
+		module.RestartAfterInit = *msg.RestartAfterInit
 	}
 
 	if err := s.store.UpdateModule(ctx, module); err != nil {

@@ -50,6 +50,11 @@
 	let detached = $state(false);
 	let memory = $state(512);
 	let cpuLimit = $state(1.0);
+	let uid = $state('');
+	let gid = $state('');
+	let initCommand = $state('');
+	let initCommandDelay = $state(0);
+	let restartAfterInit = $state(false);
 	let startImmediately = $state(true);
 	let envVars = $state<EnvVar[]>([]);
 	let volumes = $state<VolumeMount[]>([]);
@@ -296,6 +301,11 @@
 		detached = false;
 		memory = 512;
 		cpuLimit = 1.0;
+		uid = '';
+		gid = '';
+		initCommand = '';
+		initCommandDelay = 0;
+		restartAfterInit = false;
 		envVars = [];
 		volumes = [];
 		startImmediately = true;
@@ -323,6 +333,11 @@
 		volumes = parseVolumes(template.defaultVolumes || '[]');
 		ports = parsePorts(template.ports);
 		memory = template.defaultMemory;
+		uid = template.defaultUid;
+		gid = template.defaultGid;
+		initCommand = template.defaultInitCommand;
+		initCommandDelay = template.defaultInitCommandDelay;
+		restartAfterInit = template.defaultRestartAfterInit;
 		let nextPort = portResponse.port;
 		for (const port of ports) {
 			if (port.hostPort === 0) {
@@ -381,6 +396,11 @@
 			detached = module.detached;
 			memory = module.memory;
 			cpuLimit = module.cpuLimit;
+			uid = module.uid;
+			gid = module.gid;
+			initCommand = module.initCommand;
+			initCommandDelay = module.initCommandDelay;
+			restartAfterInit = module.restartAfterInit;
 			envVars = parseEnvVars(module.envOverrides || '{}');
 			volumes = parseVolumes(module.volumeOverrides || '[]');
 			ports = parsePorts(module.ports);
@@ -452,7 +472,12 @@
 					healthCheckTimeout,
 					healthCheckRetries,
 					eventHooks: hooksPayload,
-					metadata: metadataToMap()
+					metadata: metadataToMap(),
+					uid,
+					gid,
+					initCommand,
+					initCommandDelay,
+					restartAfterInit
 				});
 				toast.success(`Module "${name}" created`);
 			} else if (module) {
@@ -472,7 +497,12 @@
 					healthCheckTimeout,
 					healthCheckRetries,
 					eventHooks: hooksPayload,
-					metadata: metadataToMap()
+					metadata: metadataToMap(),
+					uid,
+					gid,
+					initCommand,
+					initCommandDelay,
+					restartAfterInit
 				});
 				toast.success(`Module "${name}" updated`);
 			}
@@ -675,6 +705,33 @@
 												class="h-12 text-base"
 											/>
 											<p class="text-sm text-muted-foreground">Fraction of CPU cores</p>
+										</div>
+									</div>
+								</div>
+
+								<!-- Container User -->
+								<div class="space-y-4">
+									<h3 class="text-base font-medium">Container User</h3>
+									<div class="grid grid-cols-2 gap-6">
+										<div class="space-y-3">
+											<Label for="uid">UID</Label>
+											<Input
+												id="uid"
+												bind:value={uid}
+												placeholder={'{{host.uid}}'}
+												class="h-12 text-base font-mono"
+											/>
+											<p class="text-sm text-muted-foreground">User ID or alias</p>
+										</div>
+										<div class="space-y-3">
+											<Label for="gid">GID</Label>
+											<Input
+												id="gid"
+												bind:value={gid}
+												placeholder={'{{host.gid}}'}
+												class="h-12 text-base font-mono"
+											/>
+											<p class="text-sm text-muted-foreground">Group ID or alias</p>
 										</div>
 									</div>
 								</div>
@@ -1133,6 +1190,55 @@
 												class="h-11"
 											/>
 											<p class="text-xs text-muted-foreground">Failures before unhealthy</p>
+										</div>
+									</div>
+								</div>
+
+								<!-- Init Command -->
+								<div class="space-y-4">
+									<div>
+										<h3 class="text-lg font-medium">Init Command</h3>
+										<p class="text-sm text-muted-foreground mt-1">
+											Execute a command inside the container after it starts
+										</p>
+									</div>
+
+									<div class="p-6 border rounded-lg bg-card space-y-4">
+										<div class="space-y-2">
+											<Label>Command</Label>
+											<Input
+												bind:value={initCommand}
+												placeholder="sh -c 'sed -i ...'"
+												class="font-mono h-11"
+											/>
+											<p class="text-xs text-muted-foreground">
+												Shell command to exec inside the container after start
+											</p>
+										</div>
+										<div class="grid grid-cols-2 gap-6">
+											<div class="space-y-2">
+												<Label>Delay (seconds)</Label>
+												<Input
+													type="number"
+													bind:value={initCommandDelay}
+													min={0}
+													class="h-11"
+												/>
+												<p class="text-xs text-muted-foreground">
+													Seconds to wait after start before running
+												</p>
+											</div>
+											<div class="flex items-center pt-6">
+												<label class="flex items-center gap-3">
+													<Checkbox bind:checked={restartAfterInit} />
+													<div>
+														<span class="text-sm font-medium">Restart after init</span>
+														<p class="text-xs text-muted-foreground">
+															Restart the container after the command runs
+														</p>
+													</div>
+												</label>
+											</div>
 										</div>
 									</div>
 								</div>

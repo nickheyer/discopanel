@@ -90,6 +90,7 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		CpuPercent:      server.CPUPercent,
 		DiskUsage:       server.DiskUsage,
 		DiskTotal:       server.DiskTotal,
+		WorldSize:       server.WorldSize,
 		PlayersOnline:   int32(server.PlayersOnline),
 		Tps:             server.TPS,
 		AdditionalPorts: server.AdditionalPorts,
@@ -264,6 +265,7 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 					server.CPUPercent = m.CPUPercent
 					server.DiskUsage = m.DiskUsage
 					server.DiskTotal = m.DiskTotal
+					server.WorldSize = m.WorldSize
 					server.PlayersOnline = m.PlayersOnline
 					server.TPS = m.TPS
 
@@ -321,6 +323,7 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 			server.CPUPercent = m.CPUPercent
 			server.DiskUsage = m.DiskUsage
 			server.DiskTotal = m.DiskTotal
+			server.WorldSize = m.WorldSize
 			server.PlayersOnline = m.PlayersOnline
 			server.TPS = m.TPS
 

@@ -20,8 +20,9 @@ type ServerMetrics struct {
 	ServerID      string
 	CPUPercent    float64
 	MemoryUsage   float64 // MB
-	DiskUsage     int64   // bytes
+	DiskUsage     int64   // bytes (total server data)
 	DiskTotal     int64   // bytes
+	WorldSize     int64   // bytes (world directory only)
 	PlayersOnline int
 	TPS           float64
 	LastUpdated   time.Time
@@ -337,13 +338,18 @@ func (c *Collector) collectDiskUsage() {
 			continue
 		}
 
+		totalSize, err := files.CalculateDirSize(server.DataPath)
+		if err != nil {
+			continue
+		}
+
 		// Calculate world directory size
 		worldPath, err := files.FindWorldDir(server.DataPath)
 		if err != nil {
 			continue
 		}
 
-		totalSize, err := files.CalculateDirSize(worldPath)
+		totalWorldSize, err := files.CalculateDirSize(worldPath)
 		if err != nil {
 			continue
 		}
@@ -351,6 +357,7 @@ func (c *Collector) collectDiskUsage() {
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {
 			m.DiskUsage = totalSize
 			m.DiskTotal = diskTotal
+			m.WorldSize = totalWorldSize
 			m.LastUpdated = time.Now()
 		})
 	}

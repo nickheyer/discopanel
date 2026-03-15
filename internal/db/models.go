@@ -95,8 +95,9 @@ type Server struct {
 	// Runtime stats (not persisted to DB)
 	MemoryUsage   float64 `json:"memory_usage" gorm:"-"`   // Current memory usage in MB
 	CPUPercent    float64 `json:"cpu_percent" gorm:"-"`    // Current CPU usage percentage
-	DiskUsage     int64   `json:"disk_usage" gorm:"-"`     // Current disk usage in bytes
+	DiskUsage     int64   `json:"disk_usage" gorm:"-"`     // Total server data size in bytes
 	DiskTotal     int64   `json:"disk_total" gorm:"-"`     // Total disk space available in bytes
+	WorldSize     int64   `json:"world_size" gorm:"-"`     // World directory size in bytes
 	PlayersOnline int     `json:"players_online" gorm:"-"` // Current players online
 	TPS           float64 `json:"tps" gorm:"-"`            // Current TPS (20 is optimal)
 
@@ -620,8 +621,13 @@ type ModuleTemplate struct {
 	DefaultMemory int `json:"default_memory" gorm:"column:default_memory;default:512"` // Default memory in MB
 
 	// Default UID/GID for container user
-	DefaultUID int `json:"default_uid" gorm:"column:default_uid;default:0"`
-	DefaultGID int `json:"default_gid" gorm:"column:default_gid;default:0"`
+	DefaultUID string `json:"default_uid" gorm:"column:default_uid;default:''"`
+	DefaultGID string `json:"default_gid" gorm:"column:default_gid;default:''"`
+
+	// Init command to exec inside the container after start
+	DefaultInitCommand      string `json:"default_init_command" gorm:"column:default_init_command;default:''"`
+	DefaultInitCommandDelay int    `json:"default_init_command_delay" gorm:"column:default_init_command_delay;default:0"`
+	DefaultRestartAfterInit bool   `json:"default_restart_after_init" gorm:"column:default_restart_after_init;default:false"`
 }
 
 // Module represents a running instance of a module template attached to a server
@@ -642,9 +648,9 @@ type Module struct {
 	Memory   int     `json:"memory" gorm:"default:512"`
 	CPULimit float64 `json:"cpu_limit" gorm:"column:cpu_limit"`
 
-	// Container user
-	UID int `json:"uid" gorm:"column:uid;default:0"`
-	GID int `json:"gid" gorm:"column:gid;default:0"`
+	// Container user (supports alias substitution, e.g. "{{host.uid}}")
+	UID string `json:"uid" gorm:"column:uid;default:''"`
+	GID string `json:"gid" gorm:"column:gid;default:''"`
 
 	// Lifecycle
 	AutoStart             bool   `json:"auto_start" gorm:"default:false;column:auto_start"`
@@ -676,6 +682,11 @@ type Module struct {
 
 	// Optional command override (overrides template's default_cmd)
 	CmdOverride string `json:"cmd_override" gorm:"column:cmd_override"`
+
+	// Init command to exec inside the container after start
+	InitCommand      string `json:"init_command" gorm:"column:init_command;default:''"`
+	InitCommandDelay int    `json:"init_command_delay" gorm:"column:init_command_delay;default:0"`
+	RestartAfterInit bool   `json:"restart_after_init" gorm:"column:restart_after_init;default:false"`
 
 	// Access URL templates
 	AccessUrls []string `json:"access_urls" gorm:"column:access_urls;serializer:json"`

@@ -72,6 +72,11 @@
 	let icon = $state('');
 	let category = $state('');
 	let documentation = $state('');
+	let defaultUid = $state('');
+	let defaultGid = $state('');
+	let defaultInitCommand = $state('');
+	let defaultInitCommandDelay = $state(0);
+	let defaultRestartAfterInit = $state(false);
 
 	// Environment variables and volumes as editable arrays
 	let envVars = $state<EnvVar[]>([]);
@@ -230,6 +235,11 @@
 		icon = '';
 		category = '';
 		documentation = '';
+		defaultUid = '';
+		defaultGid = '';
+		defaultInitCommand = '';
+		defaultInitCommandDelay = 0;
+		defaultRestartAfterInit = false;
 		envVars = [];
 		volumes = [];
 		ports = [];
@@ -279,7 +289,12 @@
 					delaySeconds: h.delaySeconds,
 					condition: h.condition
 				})),
-				metadata: metadataToMap()
+				metadata: metadataToMap(),
+				defaultUid,
+				defaultGid,
+				defaultInitCommand,
+				defaultInitCommandDelay,
+				defaultRestartAfterInit
 			});
 			toast.success(`Template "${name}" created`);
 			open = false;
@@ -474,6 +489,37 @@
 											class="h-11"
 										/>
 										<p class="text-sm text-muted-foreground">0 = use first configured port</p>
+									</div>
+								</div>
+							</div>
+
+							<div class="space-y-4">
+								<div>
+									<h3 class="text-base font-medium">Container User</h3>
+									<p class="text-sm text-muted-foreground mt-1">
+										Default UID/GID for the container process
+									</p>
+								</div>
+								<div class="grid grid-cols-2 gap-6 p-6 border rounded-lg bg-card">
+									<div class="space-y-3">
+										<Label for="defaultUid">Default UID</Label>
+										<Input
+											id="defaultUid"
+											bind:value={defaultUid}
+											placeholder={'{{host.uid}}'}
+											class="h-11 font-mono"
+										/>
+										<p class="text-sm text-muted-foreground">User ID or alias</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="defaultGid">Default GID</Label>
+										<Input
+											id="defaultGid"
+											bind:value={defaultGid}
+											placeholder={'{{host.gid}}'}
+											class="h-11 font-mono"
+										/>
+										<p class="text-sm text-muted-foreground">Group ID or alias</p>
 									</div>
 								</div>
 							</div>
@@ -892,6 +938,55 @@
 										No default event hooks configured
 									</div>
 								{/if}
+							</div>
+
+							<!-- Init Command -->
+							<div class="space-y-4">
+								<div>
+									<h3 class="text-lg font-medium">Default Init Command</h3>
+									<p class="text-sm text-muted-foreground mt-1">
+										Command to exec inside the container after it starts
+									</p>
+								</div>
+
+								<div class="p-6 border rounded-lg bg-card space-y-4">
+									<div class="space-y-2">
+										<Label>Command</Label>
+										<Input
+											bind:value={defaultInitCommand}
+											placeholder="sh -c 'sed -i ...'"
+											class="font-mono h-11"
+										/>
+										<p class="text-xs text-muted-foreground">
+											Shell command to exec inside the container after start
+										</p>
+									</div>
+									<div class="grid grid-cols-2 gap-6">
+										<div class="space-y-2">
+											<Label>Delay (seconds)</Label>
+											<Input
+												type="number"
+												bind:value={defaultInitCommandDelay}
+												min={0}
+												class="h-11"
+											/>
+											<p class="text-xs text-muted-foreground">
+												Seconds to wait after start before running
+											</p>
+										</div>
+										<div class="flex items-center pt-6">
+											<label class="flex items-center gap-3">
+												<Checkbox bind:checked={defaultRestartAfterInit} />
+												<div>
+													<span class="text-sm font-medium">Restart after init</span>
+													<p class="text-xs text-muted-foreground">
+														Restart the container after the command runs
+													</p>
+												</div>
+											</label>
+										</div>
+									</div>
+								</div>
 							</div>
 
 							<!-- Metadata -->

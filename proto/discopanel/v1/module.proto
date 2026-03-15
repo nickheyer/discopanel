@@ -206,10 +206,16 @@ message ModuleTemplate {
   repeated string default_access_urls = 23;
   // Default memory allocation in MB
   int32 default_memory = 24;
-  // Default UID to run the container as
-  int32 default_uid = 25;
-  // Default GID to run the container as
-  int32 default_gid = 26;
+  // Default UID to run the container
+  string default_uid = 25;
+  // Default GID to run the container
+  string default_gid = 26;
+  // Command to exec inside the container after start (e.g., sed to patch config files)
+  string default_init_command = 27;
+  // Seconds to wait after container is healthy before running init command
+  int32 default_init_command_delay = 28;
+  // Whether to restart the container after init command completes
+  bool default_restart_after_init = 29;
 }
 
 // Module represents a running module instance attached to a server.
@@ -282,10 +288,16 @@ message Module {
   string created_by_user_id = 33;
   // Username of the user who created this module (for display).
   string created_by_username = 34;
-  // UID to run the container as.
-  int32 uid = 35;
-  // GID to run the container as.
-  int32 gid = 36;
+  // UID to run the container
+  string uid = 35;
+  // GID to run the container
+  string gid = 36;
+  // Command to exec inside the container after start
+  string init_command = 37;
+  // Seconds to wait after container is healthy before running init command
+  int32 init_command_delay = 38;
+  // Whether to restart the container after init command completes
+  bool restart_after_init = 39;
 }
 
 // ListModuleTemplatesRequest filters the template list.
@@ -352,10 +364,16 @@ message CreateModuleTemplateRequest {
   string default_cmd = 18;
   // Default access URL templates
   repeated string default_access_urls = 19;
-  // Default UID to run the container as
-  int32 default_uid = 20;
-  // Default GID to run the container as
-  int32 default_gid = 21;
+  // Default UID to run the container
+  string default_uid = 20;
+  // Default GID to run the container
+  string default_gid = 21;
+  // Default init command to exec after start
+  string default_init_command = 22;
+  // Default delay before running init command
+  int32 default_init_command_delay = 23;
+  // Default restart after init
+  bool default_restart_after_init = 24;
 }
 
 // CreateModuleTemplateResponse contains the created template.
@@ -386,8 +404,11 @@ message UpdateModuleTemplateRequest {
   map<string, string> metadata = 18;
   optional string default_cmd = 19;
   repeated string default_access_urls = 20;
-  optional int32 default_uid = 21;
-  optional int32 default_gid = 22;
+  optional string default_uid = 21;
+  optional string default_gid = 22;
+  optional string default_init_command = 23;
+  optional int32 default_init_command_delay = 24;
+  optional bool default_restart_after_init = 25;
 }
 
 // UpdateModuleTemplateResponse contains the updated template.
@@ -472,10 +493,16 @@ message CreateModuleRequest {
   string cmd_override = 20;
   // Access URL templates
   repeated string access_urls = 21;
-  // UID to run the container as
-  int32 uid = 22;
-  // GID to run the container as
-  int32 gid = 23;
+  // UID to run the container
+  string uid = 22;
+  // GID to run the container
+  string gid = 23;
+  // Init command to exec after start
+  string init_command = 24;
+  // Delay before running init command
+  int32 init_command_delay = 25;
+  // Restart after init
+  bool restart_after_init = 26;
 }
 
 // CreateModuleResponse contains the created module.
@@ -506,8 +533,11 @@ message UpdateModuleRequest {
   optional string cmd_override = 18;
   // Access URL templates
   repeated string access_urls = 19;
-  optional int32 uid = 20;
-  optional int32 gid = 21;
+  optional string uid = 20;
+  optional string gid = 21;
+  optional string init_command = 22;
+  optional int32 init_command_delay = 23;
+  optional bool restart_after_init = 24;
 }
 
 // UpdateModuleResponse contains the updated module.

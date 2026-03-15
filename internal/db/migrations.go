@@ -30,6 +30,7 @@ func allModels() []any {
 		&ModuleTemplate{},
 		&Module{},
 		&SystemSetting{},
+		&Webhook{},
 	}
 }
 

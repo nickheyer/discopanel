@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -265,8 +266,8 @@
 				searchModpacks(),
 				loadUploadedPacks()
 			]);
-		} catch (error: any) {
-			if (error.message === 'Upload cancelled') {
+		} catch (error: unknown) {
+			if (error instanceof Error && error.message === 'Upload cancelled') {
 				toast.info('Upload cancelled');
 			}
 		} finally {
@@ -404,7 +405,7 @@
 					</SelectTrigger>
 					<SelectContent>
 						<SelectItem value="">All Versions</SelectItem>
-						{#each gameVersions as version}
+						{#each gameVersions as version (version)}
 							<SelectItem value={version}>{version}</SelectItem>
 						{/each}
 					</SelectContent>
@@ -414,7 +415,7 @@
 						<span>{searchParams.modLoader ? modLoaders.find(l => l.value === searchParams.modLoader)?.label : 'All Loaders'}</span>
 					</SelectTrigger>
 					<SelectContent>
-						{#each modLoaders as loader}
+						{#each modLoaders as loader (loader.value)}
 							<SelectItem value={loader.value}>{loader.label}</SelectItem>
 						{/each}
 					</SelectContent>
@@ -481,7 +482,7 @@
 	{/if}
 	
 	<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-		{#each displayModpacks as modpack}
+		{#each displayModpacks as modpack (modpack.id)}
 			<Card class="group relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
 				<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 				<CardHeader class="relative">
@@ -529,7 +530,7 @@
 					<div class="space-y-2">
 						{#if parseJsonArray(modpack.modLoaders).length > 0}
 							<div class="flex flex-wrap gap-1">
-								{#each parseJsonArray(modpack.modLoaders) as loader}
+								{#each parseJsonArray(modpack.modLoaders) as loader (loader)}
 									<Badge variant="outline" class="text-xs">{loader}</Badge>
 								{/each}
 							</div>
@@ -548,7 +549,7 @@
 					<div class="flex items-center justify-between mt-4 gap-2">
 						<div class="flex items-center gap-2">
 							{#if modpack.websiteUrl}
-								<a href={modpack.websiteUrl} target="_blank" rel="noopener noreferrer">
+								<a href={resolve(modpack.websiteUrl)} target="_blank" rel="noopener noreferrer">
 									<Button variant="outline" size="sm">
 										<ExternalLink class="h-3 w-3 mr-1" />
 										View
@@ -567,7 +568,7 @@
 								</Button>
 							{/if}
 						</div>
-						<Button size="sm" onclick={() => goto(`/servers/new?modpack=${modpack.id}`)} class="font-semibold shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
+						<Button size="sm" onclick={() => goto(resolve(`/servers/new?modpack=${modpack.id}`))} class="font-semibold shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
 							Use in Server
 						</Button>
 					</div>

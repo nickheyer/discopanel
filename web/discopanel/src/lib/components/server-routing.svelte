@@ -66,7 +66,7 @@
 			routingInfo = response;
 			hostname = response.proxyHostname || '';
 			originalHostname = hostname;
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to load routing information');
 		} finally {
 			loading = false;
@@ -77,7 +77,7 @@
 		try {
 			const response = await rpcClient.proxy.getProxyRoutes({});
 			allRoutes = response.routes;
-		} catch (error) {
+		} catch (_e) {
 			// Not critical
 		}
 	}
@@ -123,8 +123,8 @@
 			// Reload routing info to get updated server state
 			await loadRoutingInfo();
 			await loadAllRoutes();
-		} catch (error: any) {
-			if (error.message.includes('Conflict')) {
+		} catch (error: unknown) {
+			if (error instanceof Error && error.message.includes('Conflict')) {
 				hostnameError = 'Hostname already in use by another server';
 			} else {
 				toast.error('Failed to save routing configuration');
@@ -308,7 +308,7 @@
 				</CardHeader>
 				<CardContent>
 					<div class="space-y-2">
-						{#each allRoutes as route}
+						{#each allRoutes as route (route.serverId)}
 							<div class="flex items-center justify-between p-3 rounded-lg bg-muted/50">
 								<div>
 									<p class="font-mono text-sm">{route.hostname}</p>

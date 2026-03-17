@@ -30,9 +30,23 @@
 	let { server, onUpdate }: Props = $props();
 
 	let saving = $state(false);
-	let isDirty = $state(false);
-	
-  function safeToString(data?: any): string | undefined {
+	let isDirty = $derived(
+		formData.name !== server.name ||
+		formData.description !== (server.description || '') ||
+		formData.port !== server.port ||
+		formData.maxPlayers !== server.maxPlayers ||
+		formData.memory !== server.memory ||
+		formData.modLoader !== enumToString(ModLoader, server.modLoader) ||
+		formData.mcVersion !== server.mcVersion ||
+		formData.dockerImage !== server.dockerImage ||
+		formData.detached !== server.detached ||
+		formData.autoStart !== server.autoStart ||
+		formData.tpsCommand !== (server.tpsCommand || '') ||
+		safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
+		safeToString($state.snapshot(formData.dockerOverrides)) !== safeToString(server.dockerOverrides)
+	);
+
+  function safeToString(data?: unknown): string | undefined {
     if (!data) return undefined;
     try {
       return JSON.stringify(data, (_, value) => typeof value === 'bigint' ? value.toString() : value);
@@ -97,7 +111,6 @@
 				dockerOverrides: server.dockerOverrides
 			});
 			saving = false;
-			isDirty = false;
 			// Reload options for new server
 			loadOptions();
 		}
@@ -106,24 +119,6 @@
 	// Load available options
 	$effect(() => {
 		loadOptions();
-	});
-
-	// Watch for changes
-	$effect(() => {
-		isDirty =
-			formData.name !== server.name ||
-			formData.description !== (server.description || '') ||
-			formData.port !== server.port ||
-			formData.maxPlayers !== server.maxPlayers ||
-			formData.memory !== server.memory ||
-			formData.modLoader !== enumToString(ModLoader, server.modLoader) ||
-			formData.mcVersion !== server.mcVersion ||
-			formData.dockerImage !== server.dockerImage ||
-			formData.detached !== server.detached ||
-			formData.autoStart !== server.autoStart ||
-			formData.tpsCommand !== (server.tpsCommand || '') ||
-			safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
-			safeToString($state.snapshot(formData.dockerOverrides)) !== safeToString(server.dockerOverrides);
 	});
 
 	async function loadOptions() {
@@ -138,7 +133,7 @@
 			minecraftVersions = versions;
 			modLoaders = loaders;
 			dockerImages = images;
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to load options');
 		} finally {
 			loadingOptions = false;
@@ -176,15 +171,14 @@
 			await rpcClient.server.updateServer(request);
 			toast.success('Server settings updated. Restart the server to apply changes.');
 			onUpdate?.();
-			isDirty = false;
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to update server settings');
 		} finally {
 			saving = false;
 		}
 	}
 
-	function getCompatibleModLoaders(mcVersion: string) {
+	function getCompatibleModLoaders(_mcVersion: string) {
 		// The proto doesn't include version compatibility info, so all loaders are shown
 		// Backend has SupportedVersions field but it's not populated or sent via proto
 		return modLoaders?.modloaders || [];

@@ -99,8 +99,8 @@
 	});
 </script>
 
-<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-	<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
+<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
+	<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
 	<CardHeader class="relative pb-4">
 		<div class="flex items-center justify-between">
 			<div>
@@ -198,7 +198,7 @@
 		<!-- Info Notice -->
 		<div class="rounded-lg border border-border/50 bg-muted/30 p-4">
 			<div class="flex gap-3">
-				<ScrollText class="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+				<ScrollText class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
 				<div class="space-y-1 text-sm text-muted-foreground">
 					<p class="font-medium">Log Information</p>
 					<p class="text-xs leading-relaxed">

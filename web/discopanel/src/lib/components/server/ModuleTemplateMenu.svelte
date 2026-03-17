@@ -16,7 +16,7 @@
 
 	let categories = $derived.by(() => {
 		if (!templates) return [];
-		const cats = new Set<string>();
+		const cats = new Set<string>(); // eslint-disable-line svelte/prefer-svelte-reactivity
 		templates.forEach((t) => {
 			if (t.category) cats.add(t.category);
 		});
@@ -40,7 +40,7 @@
 		>
 			All
 		</Button>
-		{#each categories as cat}
+		{#each categories as cat (cat)}
 			<Button
 				variant={selectedCategory === cat ? 'default' : 'outline'}
 				size="sm"
@@ -54,7 +54,7 @@
 {/if}
 
 <div class="space-y-3">
-	{#each filteredTemplates as template}
+	{#each filteredTemplates as template (template.name)}
 		<button
 			class="w-full flex items-center gap-5 p-5 rounded-xl border bg-card text-left hover:bg-muted/50 hover:border-primary/50 transition-all group"
 			onclick={() => onSelect(template)}

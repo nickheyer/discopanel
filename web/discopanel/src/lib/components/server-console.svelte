@@ -380,7 +380,7 @@
 	<ResizableHandle class="bg-zinc-800 hover:bg-zinc-700" />
 
 	<div class="flex flex-col bg-zinc-950">
-		<div class="flex flex-shrink-0 gap-2 border-t border-zinc-800 p-3">
+		<div class="flex shrink-0 gap-2 border-t border-zinc-800 p-3">
 			<div class="flex flex-1 items-center gap-2">
 				<span class="font-mono text-sm text-green-500">$</span>
 				<input
@@ -402,7 +402,7 @@
 			</Button>
 		</div>
 
-		<div class="flex flex-shrink-0 items-center justify-between px-3 pb-2 text-xs text-zinc-500">
+		<div class="flex shrink-0 items-center justify-between px-3 pb-2 text-xs text-zinc-500">
 			<div class="flex items-center gap-4">
 				<label class="flex items-center gap-2">
 					<input type="checkbox" bind:checked={autoScroll} class="h-3 w-3 rounded" />

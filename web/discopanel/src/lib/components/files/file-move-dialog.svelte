@@ -2,6 +2,7 @@
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import { DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { Folder, FolderOpen, ChevronRight, ChevronDown } from '@lucide/svelte';
 	import type { FileInfo } from '$lib/proto/discopanel/v1/file_pb';
 
@@ -16,13 +17,13 @@
 	let { open, title, files, onConfirm, onClose }: Props = $props();
 
 	let selectedPath = $state('');
-	let expanded = $state<Set<string>>(new Set());
+	let expanded = new SvelteSet<string>();
 
 	// Reset when dialog opens
 	$effect(() => {
 		if (open) {
 			selectedPath = '';
-			expanded = new Set();
+			expanded.clear();
 		}
 	});
 
@@ -36,7 +37,6 @@
 		} else {
 			expanded.add(path);
 		}
-		expanded = new Set(expanded);
 	}
 </script>
 
@@ -57,7 +57,7 @@
 				/ (Root)
 			</button>
 			{#snippet dirTree(dirs: FileInfo[], depth: number)}
-				{#each getDirs(dirs) as dir}
+				{#each getDirs(dirs) as dir (dir.path)}
 					<div>
 						<button
 							class="flex items-center gap-1 w-full py-1.5 text-sm hover:bg-muted/50 text-left

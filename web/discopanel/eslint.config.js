@@ -10,6 +10,9 @@ import svelteConfig from './svelte.config.js';
 const gitignorePath = fileURLToPath(new URL('./.gitignore', import.meta.url));
 
 export default ts.config(
+	{
+		ignores: ['src/lib/xterm.js', 'src/lib/proto/**', 'static/scalar.js']
+	},
 	includeIgnoreFile(gitignorePath),
 	js.configs.recommended,
 	...ts.configs.recommended,

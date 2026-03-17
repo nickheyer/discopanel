@@ -272,7 +272,7 @@
 </script>
 
 <Dialog {open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
-	<DialogContent showCloseButton={false} class={isFullscreen ? "!max-w-[95vw] !w-[95vw] h-[95vh] flex flex-col sm:!max-w-[95vw]" : "!max-w-[90vw] !w-[90vw] h-[85vh] flex flex-col sm:!max-w-[90vw]"}>
+	<DialogContent showCloseButton={false} class={isFullscreen ? "max-w-[95vw]! w-[95vw]! h-[95vh] flex flex-col sm:max-w-[95vw]!" : "max-w-[90vw]! w-[90vw]! h-[85vh] flex flex-col sm:max-w-[90vw]!"}>
 		<div class="absolute right-4 top-4 flex gap-1">
 			<button
 				onclick={toggleFullscreen}
@@ -292,7 +292,7 @@
 				<span class="sr-only">Close</span>
 			</DialogPrimitive.Close>
 		</div>
-		<DialogHeader class="flex-shrink-0">
+		<DialogHeader class="shrink-0">
 			<DialogTitle class="flex items-center gap-2">
 				{#if file}
 					{file.name}
@@ -319,7 +319,7 @@
 			<div bind:this={editorContainer} class="w-full h-full"></div>
 		</div>
 		
-		<DialogFooter class="flex-shrink-0">
+		<DialogFooter class="shrink-0">
 			<div class="flex items-center justify-between w-full">
 				<div class="flex items-center gap-4 text-sm text-muted-foreground">
 					<span>

@@ -18,7 +18,7 @@
 				<meta name="viewport" content="width=device-width, initial-scale=1">
 				<script src="` +
 		asset('/scalar.js' as Asset) +
-		`"><\/script>
+		`">${"<"}/script>
         <style>
           /* Hide "Powered by Scalar" link... */
           a[href="https://www.scalar.com"] {
@@ -53,7 +53,7 @@
 						});
 						window.parent.postMessage({ type: 'scalar-loaded' }, '*');
 					});
-				<\/script>
+				${"<"}/script>
 			</body>
 			</html>
 		`;
@@ -103,11 +103,11 @@
 <div class="flex h-full w-full flex-col overflow-hidden">
   <div class="flex shrink-0 items-center justify-between border-b-2 border-border/50 p-6">
     <div class="flex items-center gap-4">
-      <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 shadow-lg">
+      <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 shadow-lg">
         <FileText class="h-8 w-8 text-primary" />
       </div>
       <div class="space-y-1">
-        <h2 class="bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-4xl font-bold tracking-tight text-transparent">API</h2>
+        <h2 class="bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-4xl font-bold tracking-tight text-transparent">API</h2>
         <p class="text-base text-muted-foreground">Explore the Discopanel API</p>
       </div>
     </div>

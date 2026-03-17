@@ -158,7 +158,7 @@
 
 <Dialog bind:open>
 	<DialogContent class="max-w-4xl h-[80vh] flex flex-col p-0 gap-0">
-		<DialogHeader class="px-4 py-3 border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
+		<DialogHeader class="px-4 py-3 border-b border-zinc-800 bg-zinc-900 shrink-0">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-2">
 					<Terminal class="h-4 w-4 text-green-500" />
@@ -222,8 +222,9 @@
 						{/if}
 					</div>
 				{:else}
-					{#each logEntries as entry}
+					{#each logEntries as entry, i (i)}
 						<div class="log-line whitespace-pre-wrap break-all" data-type={entry.level}>
+							<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 							{@html ansiConverter.toHtml(entry.message)}
 						</div>
 					{/each}
@@ -231,7 +232,7 @@
 			</div>
 		</div>
 
-		<div class="flex items-center justify-between px-4 py-2 border-t border-zinc-800 bg-zinc-950 text-xs text-zinc-500 flex-shrink-0">
+		<div class="flex items-center justify-between px-4 py-2 border-t border-zinc-800 bg-zinc-950 text-xs text-zinc-500 shrink-0">
 			<div class="flex items-center gap-4">
 				<label class="flex items-center gap-2">
 					<input type="checkbox" bind:checked={autoScroll} class="h-3 w-3 rounded" />

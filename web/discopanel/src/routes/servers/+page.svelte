@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
+	import { resolve } from '$app/paths';
 	import { serversStore, sortServersByActivity } from '$lib/stores/servers';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
@@ -160,19 +161,19 @@
 	}
 </script>
 
-<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-gradient-to-br from-background to-muted/10">
+<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-linear-to-br from-background to-muted/10">
 	<div class="flex items-center justify-between pb-6 border-b-2 border-border/50">
 		<div class="flex items-center gap-4">
-			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg animate-in fade-in-50 duration-500">
+			<div class="h-16 w-16 rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg animate-in fade-in-50 duration-500">
 				<ServerIcon class="h-8 w-8 text-primary" />
 			</div>
 			<div class="space-y-1 animate-in slide-in-from-left-5 duration-500">
-				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Servers</h2>
+				<h2 class="text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Servers</h2>
 				<p class="text-base text-muted-foreground">Manage and monitor your Minecraft server instances</p>
 			</div>
 		</div>
 		<div class="flex items-center gap-2 animate-in slide-in-from-right-5 duration-500">
-			<Button href="/servers/new" size="default" class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
+			<Button href="/servers/new" size="default" class="bg-linear-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
 				<Plus class="h-5 w-5 mr-2" />
 				New Server
 			</Button>
@@ -213,17 +214,17 @@
 		<Card class="animate-in fade-in-50 slide-in-from-bottom-5 duration-500 border-border/50">
 			<CardContent class="text-center py-16">
 				{#if servers.length === 0}
-					<div class="mx-auto h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center mb-4">
+					<div class="mx-auto h-16 w-16 rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center mb-4">
 						<ServerIcon class="h-8 w-8 text-primary" />
 					</div>
 					<h3 class="text-lg font-semibold mb-1">No servers yet</h3>
 					<p class="text-sm text-muted-foreground mb-6">Create your first Minecraft server to get started</p>
-					<Button href="/servers/new" class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
+					<Button href="/servers/new" class="bg-linear-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
 						<Plus class="h-4 w-4 mr-2" />
 						Create Server
 					</Button>
 				{:else}
-					<div class="mx-auto h-16 w-16 rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center mb-4">
+					<div class="mx-auto h-16 w-16 rounded-2xl bg-linear-to-br from-muted to-muted/50 flex items-center justify-center mb-4">
 						<Search class="h-8 w-8 text-muted-foreground" />
 					</div>
 					<h3 class="text-lg font-semibold mb-1">No results found</h3>
@@ -235,18 +236,18 @@
 		<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
 			{#each filteredServers as server, i (server.id)}
 				<Card
-					class="group relative overflow-hidden border-0 shadow-lg hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-background via-background/95 to-background/90 hover:-translate-y-1 animate-in fade-in-50 slide-in-from-bottom-3 h-full"
+					class="group relative overflow-hidden border-0 shadow-lg hover:shadow-2xl transition-all duration-500 bg-linear-to-br from-background via-background/95 to-background/90 hover:-translate-y-1 animate-in fade-in-50 slide-in-from-bottom-3 h-full"
 					style="animation-delay: {150 + i * 75}ms"
 				>
 					<!-- Status accent line -->
-					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent {getStatusAccentColor(server.status)} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent {getStatusAccentColor(server.status)} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 					<!-- Hover wash -->
-					<div class="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute inset-0 bg-linear-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 
 					<CardHeader class="relative pb-3">
 						<div class="flex items-start justify-between gap-2">
 							<div class="flex items-start gap-3 flex-1 min-w-0">
-								<div class="h-10 w-10 shrink-0 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+								<div class="h-10 w-10 shrink-0 rounded-xl bg-linear-to-br from-blue-500/20 to-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
 									<ServerIcon class="h-5 w-5 text-blue-500" />
 								</div>
 								<div class="min-w-0 flex-1 space-y-1">
@@ -332,7 +333,7 @@
 					</CardContent>
 
 					<!-- Clickable overlay for bottom half -->
-					<a href="/servers/{server.id}" class="absolute inset-x-0 bottom-0 h-1/2 z-10 cursor-pointer flex items-end justify-center pb-4 opacity-0 group-hover:opacity-100 transition-all duration-300 bg-gradient-to-t from-primary/10 to-transparent">
+					<a href={resolve(`/servers/${server.id}`)} class="absolute inset-x-0 bottom-0 h-1/2 z-10 cursor-pointer flex items-end justify-center pb-4 opacity-0 group-hover:opacity-100 transition-all duration-300 bg-gradient-to-t from-primary/10 to-transparent">
 					</a>
 				</Card>
 			{/each}

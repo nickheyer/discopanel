@@ -4,6 +4,7 @@
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { serversStore } from '$lib/stores/servers';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -164,7 +165,7 @@
 			await rpcClient.server.deleteServer(deleteRequest);
 			serversStore.removeServer(server.id);
 			toast.success('Server deleted successfully');
-			goto('/servers');
+			goto(resolve('/servers'));
 		} catch (error) {
 			toast.error(`Failed to delete server: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		} finally {
@@ -178,14 +179,14 @@
 		<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 	</div>
 {:else if server}
-	<div class="h-full flex flex-col p-4 sm:p-6 lg:p-8 pt-4 sm:pt-6 bg-gradient-to-br from-background to-muted/20">
-		<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between flex-shrink-0 mb-4 sm:mb-6 pb-4 sm:pb-6 border-b-2 border-border/50 gap-4">
+	<div class="h-full flex flex-col p-4 sm:p-6 lg:p-8 pt-4 sm:pt-6 bg-linear-to-br from-background to-muted/20">
+		<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between shrink-0 mb-4 sm:mb-6 pb-4 sm:pb-6 border-b-2 border-border/50 gap-4">
 			<div class="flex items-center gap-3 sm:gap-4">
-				<div class="h-12 w-12 sm:h-16 sm:w-16 rounded-xl sm:rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+				<div class="h-12 w-12 sm:h-16 sm:w-16 rounded-xl sm:rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
 					<Package class="h-6 w-6 sm:h-8 sm:w-8 text-primary" />
 				</div>
 				<div class="space-y-1">
-					<h2 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">{server.name}</h2>
+					<h2 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">{server.name}</h2>
 					<p class="text-sm sm:text-base text-muted-foreground">{server.description || ''}</p>
 					{#if server.description || (!server.description || server.description === '')}
 						<p class="text-xs text-muted-foreground/70 mt-1">
@@ -315,26 +316,26 @@
 			</div>
 		</div>
 
-		<div class="grid gap-4 sm:gap-5 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 flex-shrink-0 mb-6 sm:mb-8">
-			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-background via-background/95 to-background/90 hover:-translate-y-1">
+		<div class="grid gap-4 sm:gap-5 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 shrink-0 mb-6 sm:mb-8">
+			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-linear-to-br from-background via-background/95 to-background/90 hover:-translate-y-1">
 				{#if server.status === ServerStatus.RUNNING}
-					<div class="absolute inset-0 bg-gradient-to-br from-green-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-green-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute inset-0 bg-linear-to-br from-green-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent via-green-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{:else if server.status === ServerStatus.UNHEALTHY}
-					<div class="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-purple-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute inset-0 bg-linear-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent via-purple-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{:else if server.status === ServerStatus.STOPPED}
-					<div class="absolute inset-0 bg-gradient-to-br from-gray-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-gray-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute inset-0 bg-linear-to-br from-gray-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent via-gray-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{:else if server.status === ServerStatus.STARTING}
-					<div class="absolute inset-0 bg-gradient-to-br from-yellow-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-yellow-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute inset-0 bg-linear-to-br from-yellow-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent via-yellow-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{:else if server.status === ServerStatus.CREATING}
-					<div class="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-blue-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute inset-0 bg-linear-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent via-blue-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{:else}
-					<div class="absolute inset-0 bg-gradient-to-br from-orange-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-					<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-orange-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute inset-0 bg-linear-to-br from-orange-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+					<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent via-orange-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				{/if}
 				
 				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -344,37 +345,37 @@
 					</div>
 					<div class="relative">
 						{#if server.status === ServerStatus.RUNNING}
-							<div class="absolute inset-0 bg-gradient-to-br from-green-500/20 to-green-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-green-500/10 to-green-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+							<div class="absolute inset-0 bg-linear-to-br from-green-500/20 to-green-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-14 w-14 rounded-2xl bg-linear-to-br from-green-500/10 to-green-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<div class="relative">
 									<Activity class="h-7 w-7 text-green-500" />
 								</div>
 							</div>
 						{:else if server.status === ServerStatus.UNHEALTHY}
-							<div class="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-purple-500/10 to-purple-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+							<div class="absolute inset-0 bg-linear-to-br from-purple-500/20 to-purple-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-14 w-14 rounded-2xl bg-linear-to-br from-purple-500/10 to-purple-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<div class="relative">
 									<Activity class="h-7 w-7 text-purple-500" />
 								</div>
 							</div>
 						{:else if server.status === ServerStatus.STOPPED}
-							<div class="absolute inset-0 bg-gradient-to-br from-gray-500/20 to-gray-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-gray-500/10 to-gray-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+							<div class="absolute inset-0 bg-linear-to-br from-gray-500/20 to-gray-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-14 w-14 rounded-2xl bg-linear-to-br from-gray-500/10 to-gray-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<Square class="h-7 w-7 text-gray-500" />
 							</div>
 						{:else if server.status === ServerStatus.STARTING}
-							<div class="absolute inset-0 bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-yellow-500/10 to-yellow-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+							<div class="absolute inset-0 bg-linear-to-br from-yellow-500/20 to-yellow-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-14 w-14 rounded-2xl bg-linear-to-br from-yellow-500/10 to-yellow-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<Loader2 class="h-7 w-7 text-yellow-500 animate-spin" />
 							</div>
 						{:else if server.status === ServerStatus.CREATING}
-							<div class="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-blue-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500/10 to-blue-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+							<div class="absolute inset-0 bg-linear-to-br from-blue-500/20 to-blue-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-14 w-14 rounded-2xl bg-linear-to-br from-blue-500/10 to-blue-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<Loader2 class="h-7 w-7 text-blue-500 animate-spin" />
 							</div>
 						{:else}
-							<div class="absolute inset-0 bg-gradient-to-br from-orange-500/20 to-orange-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-							<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-orange-500/10 to-orange-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+							<div class="absolute inset-0 bg-linear-to-br from-orange-500/20 to-orange-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-14 w-14 rounded-2xl bg-linear-to-br from-orange-500/10 to-orange-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<RotateCw class="h-7 w-7 text-orange-500 animate-pulse" />
 							</div>
 						{/if}
@@ -383,7 +384,7 @@
 				<CardContent class="pt-1">
 					<div class="space-y-4">
 						<div class="relative">
-							<div class="flex items-center justify-center h-20 rounded-xl bg-gradient-to-br from-muted/30 to-muted/10 border border-border/30 overflow-hidden">
+							<div class="flex items-center justify-center h-20 rounded-xl bg-linear-to-br from-muted/30 to-muted/10 border border-border/30 overflow-hidden">
 								{#if server.status === ServerStatus.RUNNING}
 									<div class="heartbeat-container">
 										{#each Array(5) as _, i (i)}
@@ -468,25 +469,25 @@
 				</CardContent>
 			</Card>
 
-			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-background via-background/95 to-background/90 hover:-translate-y-1">
-				<div class="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-				<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-blue-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-linear-to-br from-background via-background/95 to-background/90 hover:-translate-y-1">
+				<div class="absolute inset-0 bg-linear-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+				<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent via-blue-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
 					<div class="space-y-1">
 						<CardTitle class="text-xs font-bold text-muted-foreground/70 uppercase tracking-widest">Connection</CardTitle>
 						<p class="text-xs text-muted-foreground/50">Server address</p>
 					</div>
 					<div class="relative">
-						<div class="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-blue-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-						<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500/10 to-blue-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+						<div class="absolute inset-0 bg-linear-to-br from-blue-500/20 to-blue-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+						<div class="relative h-14 w-14 rounded-2xl bg-linear-to-br from-blue-500/10 to-blue-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 							<ExternalLink class="h-7 w-7 text-blue-500 group-hover:animate-pulse" />
 						</div>
 					</div>
 				</CardHeader>
 				<CardContent class="pt-1">
 					<div class="relative group/copy">
-						<div class="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl blur-xl opacity-0 group-hover/copy:opacity-100 transition-opacity duration-500"></div>
-						<div class="relative flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-muted/50 to-muted/30 backdrop-blur-sm border border-border/50 group-hover/copy:border-primary/30 transition-all duration-300">
+						<div class="absolute inset-0 bg-linear-to-r from-blue-500/10 to-purple-500/10 rounded-xl blur-xl opacity-0 group-hover/copy:opacity-100 transition-opacity duration-500"></div>
+						<div class="relative flex items-center justify-between p-3 rounded-xl bg-linear-to-r from-muted/50 to-muted/30 backdrop-blur-sm border border-border/50 group-hover/copy:border-primary/30 transition-all duration-300">
 							<div class="flex-1 min-w-0">
 								<span class="font-mono text-sm font-bold block truncate text-foreground/90">
 									{#if server.proxyHostname}
@@ -514,20 +515,20 @@
 				</CardContent>
 			</Card>
 
-			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-background via-background/95 to-background/90 hover:-translate-y-1 flex flex-col">
-				<div class="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-				<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-purple-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-linear-to-br from-background via-background/95 to-background/90 hover:-translate-y-1 flex flex-col">
+				<div class="absolute inset-0 bg-linear-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+				<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent via-purple-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 
 				<!-- Server Info Section (2/3) -->
-				<div class="flex-[2] flex flex-col min-h-0">
+				<div class="flex-2 flex flex-col min-h-0">
 					<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 						<div class="space-y-1">
 							<CardTitle class="text-xs font-bold text-muted-foreground/70 uppercase tracking-widest">Server Info</CardTitle>
 							<p class="text-xs text-muted-foreground/50">Details & versions</p>
 						</div>
 						<div class="relative">
-							<div class="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-							<div class="relative h-12 w-12 rounded-2xl bg-gradient-to-br from-purple-500/10 to-purple-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+							<div class="absolute inset-0 bg-linear-to-br from-purple-500/20 to-purple-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+							<div class="relative h-12 w-12 rounded-2xl bg-linear-to-br from-purple-500/10 to-purple-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 								<Info class="h-6 w-6 text-purple-500 group-hover:animate-pulse" />
 							</div>
 						</div>
@@ -568,7 +569,7 @@
 								onclick={() => copyToClipboard(server?.id)}>
 								<span class="text-[10px] text-muted-foreground/60">Server ID</span>
 								<div class="flex items-center gap-1">
-									<span class="text-[10px] font-mono text-muted-foreground/70 truncate max-w-[80px]">
+									<span class="text-[10px] font-mono text-muted-foreground/70 truncate max-w-20">
 										{server.id}
 									</span>
 									<Copy class="h-2.5 w-2.5 text-muted-foreground/40 opacity-0 group-hover/copy:opacity-100 transition-opacity" />
@@ -591,10 +592,10 @@
 								<span class="text-sm font-mono font-bold transition-colors duration-500"
 									style="color: rgb({colors.text});">{server.playersOnline}/{maxPlayers}</span>
 							</div>
-							<div class="relative h-2 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden mb-2">
+							<div class="relative h-2 bg-linear-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden mb-2">
 								<div class="relative h-full rounded-full transition-all duration-700"
 									style="width: {Math.min(playersPercent, 100)}%; background: linear-gradient(to right, rgb({colors.barFrom}), rgb({colors.barTo}));">
-									<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+									<div class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"></div>
 								</div>
 							</div>
 							{#if server.playerSample && server.playerSample.length > 0}
@@ -621,7 +622,7 @@
 						</div>
 					</div>
 				{:else}
-					<div class="flex-1 border-t border-border/30 bg-gradient-to-b from-gray-500/5 to-transparent">
+					<div class="flex-1 border-t border-border/30 bg-linear-to-b from-gray-500/5 to-transparent">
 						<div class="px-6 py-3">
 							<div class="flex items-center justify-between mb-2">
 								<span class="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-widest">Players</span>
@@ -633,17 +634,17 @@
 				{/if}
 			</Card>
 
-			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-background via-background/95 to-background/90 hover:-translate-y-1">
-				<div class="absolute inset-0 bg-gradient-to-br from-orange-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-				<div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-orange-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+			<Card class="group relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-500 bg-linear-to-br from-background via-background/95 to-background/90 hover:-translate-y-1">
+				<div class="absolute inset-0 bg-linear-to-br from-orange-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+				<div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-transparent via-orange-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
 					<div class="space-y-1">
 						<CardTitle class="text-xs font-bold text-muted-foreground/70 uppercase tracking-widest">Performance</CardTitle>
 						<p class="text-xs text-muted-foreground/50">Resources & metrics</p>
 					</div>
 					<div class="relative">
-						<div class="absolute inset-0 bg-gradient-to-br from-orange-500/20 to-orange-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-						<div class="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-orange-500/10 to-orange-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
+						<div class="absolute inset-0 bg-linear-to-br from-orange-500/20 to-orange-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+						<div class="relative h-14 w-14 rounded-2xl bg-linear-to-br from-orange-500/10 to-orange-600/10 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
 							<Cpu class="h-7 w-7 text-orange-500 group-hover:animate-pulse" />
 						</div>
 					</div>
@@ -664,11 +665,11 @@
 									</span>
 								{/if}
 							</div>
-							<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+							<div class="relative h-3 bg-linear-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
 								{#if server.memoryUsage}
-									<div class="relative h-full bg-gradient-to-r from-orange-500 to-yellow-500 rounded-full transition-all duration-700"
+									<div class="relative h-full bg-linear-to-r from-orange-500 to-yellow-500 rounded-full transition-all duration-700"
 										style="width: {Math.min((Number(server.memoryUsage) / server.memory) * 100, 100)}%">
-										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+										<div class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"></div>
 									</div>
 								{:else}
 									<div class="h-full bg-muted/50"></div>
@@ -691,11 +692,11 @@
 									<span class="text-xs font-mono text-muted-foreground/50">--</span>
 								{/if}
 							</div>
-							<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+							<div class="relative h-3 bg-linear-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
 								{#if server.cpuPercent !== undefined}
-									<div class="relative h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-700" 
+									<div class="relative h-full bg-linear-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-700" 
 										style="width: {Math.min(server.cpuPercent, 100)}%">
-										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+										<div class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"></div>
 									</div>
 								{:else}
 									<div class="h-full bg-muted/50"></div>
@@ -713,12 +714,12 @@
 									<span class="text-xs font-mono text-muted-foreground/50">--</span>
 								{/if}
 							</div>
-							<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+							<div class="relative h-3 bg-linear-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
 								{#if server.diskUsage !== undefined && Number(server.diskUsage) > 0 && server.diskTotal}
 									{@const diskPercent = (Number(server.diskUsage) / Number(server.diskTotal)) * 100}
-									<div class="relative h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-700" 
+									<div class="relative h-full bg-linear-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-700" 
 										style="width: {Math.min(diskPercent, 100)}%">
-										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+										<div class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"></div>
 									</div>
 								{:else}
 									<div class="h-full bg-muted/50"></div>
@@ -741,11 +742,11 @@
 									<span class="text-xs font-semibold text-muted-foreground/70">TPS</span>
 									<span class="text-xs font-mono text-green-500">{server.tps.toFixed(1)}</span>
 								</div>
-								<div class="relative h-3 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+								<div class="relative h-3 bg-linear-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
 
-									<div class="relative h-full bg-gradient-to-r from-green-500 to-emerald-500 rounded-full transition-all duration-700"
+									<div class="relative h-full bg-linear-to-r from-green-500 to-emerald-500 rounded-full transition-all duration-700"
 										style="width: {Math.min(tpsPercent, 100)}%">
-										<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+										<div class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"></div>
 									</div>
 								</div>
 							</div>
@@ -759,7 +760,7 @@
 		<Tabs value="overview" class="flex-1 flex flex-col min-h-0 gap-4" onValueChange={(value) => {
 			activeTab = value
 		}}>
-			<div class="flex-shrink-0 w-full overflow-x-auto">
+			<div class="shrink-0 w-full overflow-x-auto">
 				<TabsList class="inline-flex w-full min-w-max sm:grid sm:grid-cols-8 h-12 sm:h-14 p-1 bg-muted/50 backdrop-blur-sm">
 					<TabsTrigger value="overview" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Overview</TabsTrigger>
 					<TabsTrigger value="console" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Console</TabsTrigger>

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { ResizablePaneGroup, ResizablePane } from '$lib/components/ui/resizable';
@@ -55,7 +54,7 @@
 			loading = true;
 			const response = await rpcClient.mod.listMods({ serverId: server.id });
 			mods = response.mods;
-		} catch (error) {
+		} catch (_e) {
 			if (server.modLoader !== ModLoader.VANILLA) {
 				toast.error('Failed to load mods');
 			}
@@ -95,8 +94,8 @@
 			}
 			toast.success(`Uploaded ${fileList.length} mod(s)`);
 			await loadMods();
-		} catch (error: any) {
-			if (error.message === 'Upload cancelled') {
+		} catch (error: unknown) {
+			if (error instanceof Error && error.message === 'Upload cancelled') {
 				toast.info('Upload cancelled');
 			} else {
 				toast.error('Failed to upload mod');
@@ -130,7 +129,7 @@
 			});
 			toast.success(`Mod ${!mod.enabled ? 'enabled' : 'disabled'}`);
 			await loadMods();
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to toggle mod');
 		}
 	}
@@ -146,7 +145,7 @@
 			});
 			toast.success('Mod deleted');
 			await loadMods();
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to delete mod');
 		}
 	}
@@ -164,7 +163,7 @@
 			a.download = mod.fileName;
 			a.click();
 			URL.revokeObjectURL(url);
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to download mod');
 		}
 	}
@@ -274,7 +273,7 @@
 			</div>
 		{:else}
 			<div class="space-y-2">
-				{#each mods as mod}
+				{#each mods as mod (mod.id)}
 					<div class="flex items-center justify-between p-4 rounded-lg border">
 						<div class="flex items-center gap-4">
 							<button

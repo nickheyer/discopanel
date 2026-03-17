@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import { SvelteMap, SvelteSet, SvelteURL } from 'svelte/reactivity';
 	import { replaceState } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
@@ -33,10 +35,10 @@
 	let highlightedField = $state<string | null>(null);
 
 	// Track original and current values
-	let originalValues = $state<Map<string, string | null>>(new Map());
-	let currentValues = $state<Map<string, string | null>>(new Map());
-	let originalEnabled = $state<Set<string>>(new Set());
-	let currentEnabled = $state<Set<string>>(new Set());
+	let originalValues: Map<string, string | null> = new SvelteMap();
+	let currentValues: Map<string, string | null> = new SvelteMap();
+	let originalEnabled: Set<string> = new SvelteSet();
+	let currentEnabled: Set<string> = new SvelteSet();
 
 	// Derived state
 	let isSaving = $derived(externalSaving || saving);
@@ -67,7 +69,7 @@
 
 	// Calculate modified fields
 	let modifiedFields = $derived.by(() => {
-		const modified = new Set<string>();
+		const modified = new SvelteSet<string>();
 		for (const [key, value] of currentValues) {
 			const origValue = originalValues.get(key);
 			const wasEnabled = originalEnabled.has(key);
@@ -87,7 +89,7 @@
 
 	// Count modified fields per category
 	let modifiedCountByCategory = $derived.by(() => {
-		const counts = new Map<string, number>();
+		const counts = new SvelteMap<string, number>();
 		for (const cat of filteredCategories) {
 			const catId = getCategoryId(cat.name);
 			let count = 0;
@@ -156,10 +158,10 @@
 	function processConfig(configData: ConfigCategory[]) {
 		categories = configData;
 
-		const newOriginalValues = new Map<string, string | null>();
-		const newCurrentValues = new Map<string, string | null>();
-		const newOriginalEnabled = new Set<string>();
-		const newCurrentEnabled = new Set<string>();
+		const newOriginalValues = new SvelteMap<string, string | null>();
+		const newCurrentValues = new SvelteMap<string, string | null>();
+		const newOriginalEnabled = new SvelteSet<string>();
+		const newCurrentEnabled = new SvelteSet<string>();
 
 		const isGlobal = !server;
 
@@ -232,13 +234,13 @@
 	}
 
 	function handleReset() {
-		currentValues = new Map(originalValues);
-		currentEnabled = new Set(originalEnabled);
+		currentValues = new SvelteMap(originalValues);
+		currentEnabled = new SvelteSet(originalEnabled);
 	}
 
 	function toggleFieldEnabled(key: string, enabled: boolean, prop: ConfigProperty) {
-		const newEnabled = new Set(currentEnabled);
-		const newValues = new Map(currentValues);
+		const newEnabled = new SvelteSet(currentEnabled);
+		const newValues = new SvelteMap(currentValues);
 
 		if (enabled) {
 			newEnabled.add(key);
@@ -254,7 +256,7 @@
 	}
 
 	function updateValue(key: string, value: string | boolean) {
-		const newValues = new Map(currentValues);
+		const newValues = new SvelteMap(currentValues);
 		const strValue = typeof value === 'boolean' ? String(value) : value;
 		newValues.set(key, strValue || null);
 		currentValues = newValues;
@@ -289,13 +291,13 @@
 
 	function selectCategory(categoryId: string) {
 		activeCategory = categoryId;
-		const url = new URL(window.location.href);
+		const url = new SvelteURL(window.location.href);
 		url.hash = categoryId;
-		replaceState(url.toString(), {});
+		replaceState(resolve(url.pathname + url.search + url.hash), {});
 	}
 
 	async function copyLinkToClipboard(anchor: string) {
-		const url = new URL(window.location.href);
+		const url = new SvelteURL(window.location.href);
 		url.hash = anchor;
 		const success = await copyToClipboard(url.toString());
 		if (success) {
@@ -345,7 +347,7 @@
 </script>
 
 <Card class="h-full flex flex-col pb-0 gap-0">
-	<CardHeader class="flex-shrink-0 border-b pb-0 mb-0">
+	<CardHeader class="shrink-0 border-b pb-0 mb-0">
 		<div class="flex flex-col sm:flex-row sm:items-center justify-between">
 			<div>
 				<CardTitle>
@@ -401,9 +403,9 @@
 		{:else}
 			<div class="flex h-full">
 				<!-- Category Sidebar -->
-				<div class="w-48 flex-shrink-0 border-r bg-muted/20 overflow-y-auto">
+				<div class="w-48 shrink-0 border-r bg-muted/20 overflow-y-auto">
 					<nav class="p-2 space-y-1">
-						{#each filteredCategories as category}
+						{#each filteredCategories as category (category.name)}
 							{@const categoryId = getCategoryId(category.name)}
 							{@const isActive = activeCategory === categoryId}
 							{@const modCount = modifiedCountByCategory.get(categoryId) ?? 0}
@@ -429,7 +431,7 @@
 				<!-- Fields Panel -->
 				<div class="flex-1 flex flex-col min-w-0">
 					<!-- Category Header -->
-					<div class="flex-shrink-0 px-4 py-3 border-b bg-muted/10">
+					<div class="shrink-0 px-4 py-3 border-b bg-muted/10">
 						<h3 class="font-semibold">{currentCategoryName}</h3>
 						<p class="text-xs text-muted-foreground">{currentCategoryProps.length} fields</p>
 					</div>
@@ -530,7 +532,7 @@
 												</span>
 											</SelectTrigger>
 											<SelectContent>
-												{#each prop.options as option}
+												{#each prop.options as option (option)}
 													<SelectItem value={option}>{option || '(empty)'}</SelectItem>
 												{/each}
 											</SelectContent>

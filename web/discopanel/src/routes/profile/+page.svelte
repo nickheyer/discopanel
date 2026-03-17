@@ -101,8 +101,8 @@
 			createdToken = resp.plaintextToken;
 			toast.success('API token created');
 			await loadTokens();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to create API token');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to create API token');
 		} finally {
 			creatingToken = false;
 		}
@@ -114,8 +114,8 @@
 			await rpcClient.auth.deleteAPIToken({ id });
 			toast.success('API token deleted');
 			await loadTokens();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to delete API token');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to delete API token');
 		} finally {
 			deletingTokenId = null;
 		}
@@ -179,8 +179,8 @@
 				newPassword: '',
 				confirmPassword: ''
 			};
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to change password');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to change password');
 		} finally {
 			saving = false;
 		}
@@ -191,12 +191,12 @@
 	{#if user}
 		<!-- Header with Avatar -->
 		<div class="flex items-center gap-6 pb-6 border-b-2 border-border/50">
-			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">
+			<div class="h-16 w-16 rounded-2xl bg-linear-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">
 				<span class="text-2xl font-bold text-primary-foreground">{initials}</span>
 			</div>
 			<div class="space-y-1">
 				<div class="flex items-center gap-3">
-					<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">{user.username}</h2>
+					<h2 class="text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">{user.username}</h2>
 					<Badge variant={getRoleBadgeVariant(primaryRole)} class="text-sm">{primaryRole}</Badge>
 				</div>
 				<p class="text-base text-muted-foreground">Manage your account settings and security</p>
@@ -205,11 +205,11 @@
 
 		<div class="grid gap-6 md:grid-cols-2">
 			<!-- Account Information -->
-			<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+			<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
+				<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
 				<CardHeader class="relative">
 					<div class="flex items-center gap-3">
-						<div class="h-10 w-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+						<div class="h-10 w-10 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
 							<User class="h-5 w-5 text-primary" />
 						</div>
 						<div>
@@ -257,7 +257,7 @@
 						<div class="flex-1">
 							<p class="text-xs text-muted-foreground mb-1">Roles</p>
 							<div class="flex flex-wrap gap-1.5">
-								{#each user.roles || [] as role}
+								{#each user.roles || [] as role (role)}
 									<Badge variant={getRoleBadgeVariant(role)}>{role}</Badge>
 								{/each}
 								{#if !user.roles?.length}
@@ -302,11 +302,11 @@
 			</Card>
 
 			<!-- Security Card -->
-			<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-				<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+			<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
+				<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
 				<CardHeader class="relative">
 					<div class="flex items-center gap-3">
-						<div class="h-10 w-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+						<div class="h-10 w-10 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
 							<Key class="h-5 w-5 text-primary" />
 						</div>
 						<div>
@@ -392,12 +392,12 @@
 		</div>
 
 		<!-- API Tokens Card (full width) -->
-		<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+		<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
+			<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
 			<CardHeader class="relative">
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3">
-						<div class="h-10 w-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+						<div class="h-10 w-10 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
 							<KeyRound class="h-5 w-5 text-primary" />
 						</div>
 						<div>
@@ -435,7 +435,7 @@
 								</TableRow>
 							</TableHeader>
 							<TableBody>
-								{#each apiTokens as token}
+								{#each apiTokens as token (token.id)}
 									<TableRow>
 										<TableCell class="font-medium">
 											<div class="flex items-center gap-2">
@@ -590,7 +590,11 @@
 
 							<div class="space-y-2">
 								<p class="text-sm font-medium">Example usage</p>
-								<pre class="font-mono text-xs bg-card border rounded-lg p-4 overflow-x-auto whitespace-pre text-muted-foreground">curl {window.location.origin}/discopanel.v1.UserService/ListUsers \{"\n"}  -X POST \{"\n"}  -H 'Content-Type: application/json' \{"\n"}  -H 'Authorization: Bearer {createdToken}' \{"\n"}  -d '{"{}"}'</pre>
+								<pre class="font-mono text-xs bg-card border rounded-lg p-4 overflow-x-auto whitespace-pre text-muted-foreground">curl {window.location.origin}/discopanel.v1.UserService/ListUsers \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer {createdToken}' \
+  -d '{"{}"}'</pre>
 							</div>
 						</div>
 					{:else}

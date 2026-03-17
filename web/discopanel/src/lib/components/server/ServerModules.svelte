@@ -23,7 +23,7 @@
 	let templates = $state<ModuleTemplate[]>([]);
 	let loading = $state(true);
 	let actionLoading = $state<string | null>(null);
-	let aliasValues = $state<Record<string, string>>({});
+	let aliasValues = $state<Record<string, Record<string, string>>>({});
 
 	// Dialog state
 	let createDialogOpen = $state(false);
@@ -102,12 +102,13 @@
 				{ serverId: server.id, moduleId },
 				silentCallOptions
 			);
-			aliasValues = { ...aliasValues, ...response.aliases };
+			aliasValues = { ...aliasValues, [moduleId]: response.aliases };
 		} catch { /* ignore */ }
 	}
 
-	function resolve(input: string): string {
-		return input.replace(/\{\{[^}]+\}\}/g, match => aliasValues[match] ?? match);
+	function resolve(input: string, moduleId: string): string {
+		const vals = aliasValues[moduleId] ?? {};
+		return input.replace(/\{\{[^}]+\}\}/g, match => vals[match] ?? match);
 	}
 
 	async function handleStartModule(module: Module) {
@@ -402,10 +403,11 @@
 							{#if module.accessUrls?.length}
 								<div class="space-y-1 mb-3">
 									{#each module.accessUrls as url (url)}
-										{@const resolved = resolve(url)}
+										{@const resolved = resolve(url, module.id)}
 										<div class="flex items-center gap-2 p-2 rounded bg-muted/50">
-											<ExternalLink class="h-3 w-3 text-muted-foreground flex-shrink-0" />
-											<a
+											<ExternalLink class="h-3 w-3 text-muted-foreground shrink-0" />
+											<!-- eslint-disable svelte/no-navigation-without-resolve -- external URL -->
+										<a
 												href={resolved}
 												target="_blank"
 												rel="noopener noreferrer"
@@ -413,6 +415,7 @@
 											>
 												{resolved}
 											</a>
+											<!-- eslint-enable svelte/no-navigation-without-resolve -->
 										</div>
 									{/each}
 								</div>
@@ -443,9 +446,9 @@
 										<div class="space-y-0.5">
 											{#each Object.entries(module.metadata) as [key, value] (key)}
 												<div class="flex items-center gap-1.5 text-muted-foreground">
-													<Info class="h-3 w-3 flex-shrink-0" />
+													<Info class="h-3 w-3 shrink-0" />
 													<span class="font-medium">{key}:</span>
-													<span class="text-foreground truncate">{resolve(value)}</span>
+													<span class="text-foreground truncate">{resolve(value, module.id)}</span>
 												</div>
 											{/each}
 										</div>

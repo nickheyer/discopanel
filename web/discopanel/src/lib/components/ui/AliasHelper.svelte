@@ -3,6 +3,7 @@
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { AliasCategory, type AliasInfo } from '$lib/proto/discopanel/v1/module_pb';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { Braces, Server, Box, Sparkles, Loader2, Check, Copy } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { copyToClipboard } from '$lib/utils/clipboard';
@@ -98,7 +99,7 @@
 
 	// Group aliases by category
 	let groupedAliases = $derived.by(() => {
-		const groups = new Map<AliasCategory, AliasInfo[]>();
+		const groups = new SvelteMap<AliasCategory, AliasInfo[]>();
 		for (const alias of aliases) {
 			if (!groups.has(alias.category)) {
 				groups.set(alias.category, []);
@@ -134,7 +135,7 @@
 			</div>
 		{:else}
 			<div class="divide-y">
-				{#each [...groupedAliases.entries()] as [category, categoryAliases]}
+				{#each [...groupedAliases.entries()] as [category, categoryAliases] (category)}
 					{@const CategoryIcon = getCategoryIcon(category)}
 					<div class="p-2">
 						<div class="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-muted-foreground">
@@ -142,7 +143,7 @@
 							{getCategoryLabel(category)}
 						</div>
 						<div class="space-y-1">
-							{#each categoryAliases as alias}
+							{#each categoryAliases as alias (alias.alias)}
 								<button
 									type="button"
 									class="w-full text-left p-2 rounded-md hover:bg-muted/50 transition-colors group"
@@ -154,7 +155,7 @@
 										</code>
 										<div class="flex items-center gap-2">
 											{#if alias.exampleValue}
-												<span class="text-xs text-muted-foreground font-mono truncate max-w-[100px]" title={alias.exampleValue}>
+												<span class="text-xs text-muted-foreground font-mono truncate max-w-25" title={alias.exampleValue}>
 													= {alias.exampleValue}
 												</span>
 											{/if}

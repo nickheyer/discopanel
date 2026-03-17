@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { create } from '@bufbuild/protobuf';
 	import { authStore } from '$lib/stores/auth';
 	import { rpcClient } from '$lib/api/rpc-client';
@@ -51,7 +52,7 @@
 			window.history.replaceState({}, '', '/login');
 			authStore.validateSession().then(valid => {
 				if (valid) {
-					goto('/');
+					goto(resolve('/'));
 				} else {
 					error = 'Session validation failed. Please try again.';
 				}
@@ -64,7 +65,7 @@
 
 		// If already authenticated, redirect to home
 		if ($authStore.isAuthenticated) {
-			goto('/');
+			goto(resolve('/'));
 			return;
 		}
 
@@ -76,7 +77,7 @@
 
 			// If auth is disabled and not first user setup, redirect to home
 			if (!status.enabled && !status.firstUserSetup) {
-				goto('/');
+				goto(resolve('/'));
 				return;
 			}
 
@@ -117,10 +118,10 @@
 			await authStore.login(username, password);
 			toast.success('Logged in successfully');
 			setTimeout(() => {
-				goto('/');
+				goto(resolve('/'));
 			}, 100);
-		} catch (err: any) {
-			error = err.message || 'Login failed';
+		} catch (err: unknown) {
+			error = err instanceof Error ? err.message : 'Login failed';
 			loading = false;
 		}
 	}
@@ -152,10 +153,10 @@
 				'Admin account created successfully' :
 				'Account created successfully');
 			setTimeout(() => {
-				goto('/');
+				goto(resolve('/'));
 			}, 100);
-		} catch (err: any) {
-			error = err.message || 'Registration failed';
+		} catch (err: unknown) {
+			error = err instanceof Error ? err.message : 'Registration failed';
 			loading = false;
 		}
 	}
@@ -166,8 +167,8 @@
 			if (response.loginUrl) {
 				window.location.href = response.loginUrl;
 			}
-		} catch (err: any) {
-			error = err.message || 'Failed to initiate SSO login';
+		} catch (err: unknown) {
+			error = err instanceof Error ? err.message : 'Failed to initiate SSO login';
 		}
 	}
 
@@ -178,8 +179,8 @@
 			await authStore.useRecoveryKey(recoveryKey);
 			toast.success('Panel reset to first-user setup');
 			window.location.reload();
-		} catch (err: any) {
-			error = err.message || 'Invalid recovery key';
+		} catch (err: unknown) {
+			error = err instanceof Error ? err.message : 'Invalid recovery key';
 			loading = false;
 		}
 	}
@@ -491,7 +492,7 @@
 						<span class="bg-background px-2 text-muted-foreground">Or</span>
 					</div>
 				</div>
-				<Button variant="ghost" class="w-full" onclick={() => goto('/')}>
+				<Button variant="ghost" class="w-full" onclick={() => goto(resolve('/'))}>
 					Continue as Guest
 				</Button>
 			{/if}

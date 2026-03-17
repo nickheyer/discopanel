@@ -37,7 +37,7 @@
 		onchange?.(ports);
 	}
 
-	function updatePort(index: number, field: keyof AdditionalPort, value: any) {
+	function updatePort(index: number, field: keyof AdditionalPort, value: string | number) {
 		ports[index] = {
 			...ports[index],
 			[field]: value
@@ -113,7 +113,7 @@
 				</div>
 
 				<!-- Port entries -->
-				{#each ports as port, index}
+				{#each ports as port, index (index)}
 					<div class="space-y-2">
 						<div class="grid grid-cols-12 gap-2 items-center">
 							<div class="col-span-4">

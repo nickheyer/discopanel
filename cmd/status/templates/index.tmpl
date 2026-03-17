@@ -65,13 +65,13 @@
 <body class="bg-background text-foreground min-h-screen flex items-center justify-center p-4 font-sans antialiased">
     <div class="w-full max-w-lg">
         <div class="relative pb-4">
-        <div class="bg-gradient-to-br from-card via-card to-background border border-border rounded-2xl overflow-hidden shadow-2xl relative z-10">
+        <div class="bg-linear-to-br from-card via-card to-background border border-border rounded-2xl overflow-hidden shadow-2xl relative z-10">
             {{if .Error}}
             <!-- Error State -->
             <div class="relative p-6 border-b border-border">
-                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-500 to-red-400"></div>
+                <div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-red-500 to-red-400"></div>
                 <div class="flex items-start gap-4">
-                    <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-red-500/20 to-red-400/20 flex items-center justify-center relative">
+                    <div class="shrink-0 w-12 h-12 rounded-xl bg-linear-to-br from-red-500/20 to-red-400/20 flex items-center justify-center relative">
                         <div class="absolute inset-0 rounded-xl bg-red-500/20 blur-xl"></div>
                         <div class="flex items-center gap-0.5 h-6 relative">
                             <div class="heartbeat-bar w-[3px] bg-red-500 rounded-sm animate-heartbeat-erratic"></div>
@@ -137,25 +137,25 @@
             <div class="relative p-6 border-b border-border">
                 <!-- Status gradient bar -->
                 {{if eq $statusClass "running"}}
-                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-green-500 to-emerald-500"></div>
+                <div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-green-500 to-emerald-500"></div>
                 {{else if or (eq $statusClass "starting") (eq $statusClass "stopping") (eq $statusClass "restarting")}}
-                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-500 to-yellow-400"></div>
+                <div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-yellow-500 to-yellow-400"></div>
                 {{else if or (eq $statusClass "error") (eq $statusClass "unhealthy")}}
-                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-500 to-red-400"></div>
+                <div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-red-500 to-red-400"></div>
                 {{else if eq $statusClass "creating"}}
-                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-blue-400"></div>
+                <div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-blue-500 to-blue-400"></div>
                 {{else}}
-                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-zinc-500 to-zinc-400"></div>
+                <div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-zinc-500 to-zinc-400"></div>
                 {{end}}
 
                 <div class="flex items-start gap-4">
                     <!-- Status indicator with heartbeat -->
-                    <div class="flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center relative
-                        {{if eq $statusClass "running"}}bg-gradient-to-br from-green-500/20 to-emerald-500/20
-                        {{else if or (eq $statusClass "starting") (eq $statusClass "stopping") (eq $statusClass "restarting")}}bg-gradient-to-br from-yellow-500/20 to-yellow-400/20
-                        {{else if or (eq $statusClass "error") (eq $statusClass "unhealthy")}}bg-gradient-to-br from-red-500/20 to-red-400/20
-                        {{else if eq $statusClass "creating"}}bg-gradient-to-br from-blue-500/20 to-blue-400/20
-                        {{else}}bg-gradient-to-br from-zinc-500/20 to-zinc-400/20{{end}}">
+                    <div class="shrink-0 w-12 h-12 rounded-xl flex items-center justify-center relative
+                        {{if eq $statusClass "running"}}bg-linear-to-br from-green-500/20 to-emerald-500/20
+                        {{else if or (eq $statusClass "starting") (eq $statusClass "stopping") (eq $statusClass "restarting")}}bg-linear-to-br from-yellow-500/20 to-yellow-400/20
+                        {{else if or (eq $statusClass "error") (eq $statusClass "unhealthy")}}bg-linear-to-br from-red-500/20 to-red-400/20
+                        {{else if eq $statusClass "creating"}}bg-linear-to-br from-blue-500/20 to-blue-400/20
+                        {{else}}bg-linear-to-br from-zinc-500/20 to-zinc-400/20{{end}}">
                         <div class="absolute inset-0 rounded-xl blur-xl opacity-40
                             {{if eq $statusClass "running"}}bg-green-500
                             {{else if or (eq $statusClass "starting") (eq $statusClass "stopping") (eq $statusClass "restarting")}}bg-yellow-500
@@ -236,7 +236,7 @@
 
                     <!-- Server Favicon -->
                     {{if .Server.Favicon}}
-                    <div class="flex-shrink-0">
+                    <div class="shrink-0">
                         <img src="{{.Server.Favicon}}" alt="Server Icon" class="w-12 h-12 rounded-lg border border-border shadow-sm" style="image-rendering: pixelated;">
                     </div>
                     {{end}}
@@ -255,7 +255,7 @@
             <div class="px-4 py-4 border-b border-border">
                 <div class="flex items-start gap-3">
                     {{if .Modpack.LogoUrl}}
-                    <div class="flex-shrink-0">
+                    <div class="shrink-0">
                         <img src="{{.Modpack.LogoUrl}}" alt="{{.Modpack.Name}}" class="w-14 h-14 rounded-lg object-cover border border-border shadow-sm">
                     </div>
                     {{end}}
@@ -295,9 +295,9 @@
                                 {{if gt .Server.Tps 0.0}}{{printf "%.1f" .Server.Tps}} / 20{{else}}-{{end}}
                             </span>
                         </div>
-                        <div class="h-1.5 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-green-500 to-emerald-500 rounded-full transition-all duration-700 relative" style="width: {{if gt .Server.Tps 0.0}}{{printf "%.0f" (mul (div .Server.Tps 20.0) 100)}}{{else}}0{{end}}%">
-                                <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+                        <div class="h-1.5 bg-linear-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+                            <div class="h-full bg-linear-to-r from-green-500 to-emerald-500 rounded-full transition-all duration-700 relative" style="width: {{if gt .Server.Tps 0.0}}{{printf "%.0f" (mul (div .Server.Tps 20.0) 100)}}{{else}}0{{end}}%">
+                                <div class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"></div>
                             </div>
                         </div>
                     </div>
@@ -308,9 +308,9 @@
                             <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">CPU</span>
                             <span class="text-xs font-semibold font-mono text-blue-500">{{printf "%.1f" .Server.CpuPercent}}%</span>
                         </div>
-                        <div class="h-1.5 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-700 relative" style="width: {{if gt .Server.CpuPercent 100.0}}100{{else}}{{printf "%.0f" .Server.CpuPercent}}{{end}}%">
-                                <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+                        <div class="h-1.5 bg-linear-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+                            <div class="h-full bg-linear-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-700 relative" style="width: {{if gt .Server.CpuPercent 100.0}}100{{else}}{{printf "%.0f" .Server.CpuPercent}}{{end}}%">
+                                <div class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"></div>
                             </div>
                         </div>
                     </div>
@@ -321,9 +321,9 @@
                             <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">Memory</span>
                             <span class="text-xs font-semibold font-mono text-orange-500">{{.MemoryUsedMB}} / {{.Server.Memory}} MB</span>
                         </div>
-                        <div class="h-1.5 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-orange-500 to-yellow-500 rounded-full transition-all duration-700 relative" style="width: {{.MemoryPercent}}%">
-                                <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+                        <div class="h-1.5 bg-linear-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+                            <div class="h-full bg-linear-to-r from-orange-500 to-yellow-500 rounded-full transition-all duration-700 relative" style="width: {{.MemoryPercent}}%">
+                                <div class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"></div>
                             </div>
                         </div>
                     </div>
@@ -334,9 +334,9 @@
                             <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">Storage</span>
                             <span class="text-xs font-semibold font-mono text-purple-500">{{.DiskUsedFormatted}}</span>
                         </div>
-                        <div class="h-1.5 bg-gradient-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-700 relative" style="width: {{.DiskPercent}}%">
-                                <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+                        <div class="h-1.5 bg-linear-to-r from-muted/50 to-muted/30 rounded-full overflow-hidden">
+                            <div class="h-full bg-linear-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-700 relative" style="width: {{.DiskPercent}}%">
+                                <div class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"></div>
                             </div>
                         </div>
                     </div>
@@ -384,9 +384,9 @@
             {{else}}
             <!-- Loading State -->
             <div class="relative p-6 border-b border-border">
-                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-zinc-500 to-zinc-400"></div>
+                <div class="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-zinc-500 to-zinc-400"></div>
                 <div class="flex items-start gap-4">
-                    <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-zinc-500/20 to-zinc-400/20 flex items-center justify-center relative">
+                    <div class="shrink-0 w-12 h-12 rounded-xl bg-linear-to-br from-zinc-500/20 to-zinc-400/20 flex items-center justify-center relative">
                         <div class="absolute inset-0 rounded-xl bg-zinc-500/20 blur-xl"></div>
                         <div class="flex items-center gap-0.5 h-6 relative">
                             <div class="heartbeat-bar w-[3px] bg-zinc-500 rounded-sm h-1"></div>

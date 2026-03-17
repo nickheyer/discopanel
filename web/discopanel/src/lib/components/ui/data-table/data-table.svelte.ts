@@ -114,6 +114,7 @@ export function mergeObjects<Sources extends readonly MaybeThunk<any>[]>(
 		},
 
 		ownKeys(): (string | symbol)[] {
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- not reactive state, used in Proxy trap
 			const all = new Set<string | symbol>();
 			for (const s of sources) {
 				const obj = resolve(s);

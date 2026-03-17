@@ -5,13 +5,11 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
-	import { Textarea } from '$lib/components/ui/textarea';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Switch } from '$lib/components/ui/switch';
 	import * as Select from '$lib/components/ui/select';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import * as Accordion from '$lib/components/ui/accordion';
 	import { Loader2, Plus, Play, Pause, Trash2, Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw, Terminal, RotateCcw, Square, Power, FileText, History } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ScheduledTask, TaskExecution } from '$lib/proto/discopanel/v1/task_pb';
@@ -23,6 +21,7 @@
 	let loading = $state(true);
 	let tasks = $state<ScheduledTask[]>([]);
 	let initialized = $state(false);
+	// svelte-ignore state_referenced_locally
 	let previousServerId = $state(server.id);
 
 	// Dialog state
@@ -77,7 +76,7 @@
 			const request = create(ListTasksRequestSchema, { serverId: server.id });
 			const response = await rpcClient.task.listTasks(request);
 			tasks = response.tasks;
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to load tasks');
 		} finally {
 			loading = false;
@@ -173,8 +172,8 @@
 			showCreateDialog = false;
 			resetForm();
 			await loadTasks();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to save task');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to save task');
 		} finally {
 			creating = false;
 		}
@@ -187,7 +186,7 @@
 			await rpcClient.task.toggleTask(request);
 			toast.success(`Task ${newStatus === TaskStatus.ENABLED ? 'enabled' : 'disabled'}`);
 			await loadTasks();
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to toggle task');
 		}
 	}
@@ -198,8 +197,8 @@
 			await rpcClient.task.triggerTask(request);
 			toast.success('Task triggered successfully');
 			await loadTasks();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to trigger task');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to trigger task');
 		}
 	}
 
@@ -212,7 +211,7 @@
 			await rpcClient.task.deleteTask(request);
 			toast.success('Task deleted successfully');
 			await loadTasks();
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to delete task');
 		}
 	}
@@ -225,7 +224,7 @@
 			const request = create(ListTaskExecutionsRequestSchema, { taskId: task.id, limit: 50 });
 			const response = await rpcClient.task.listTaskExecutions(request);
 			taskHistory = response.executions;
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to load task history');
 		} finally {
 			historyLoading = false;
@@ -372,7 +371,7 @@
 					<Card class="hover:shadow-md transition-shadow">
 						<CardContent class="p-4">
 							<div class="flex items-start gap-4">
-								<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+								<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
 									<TaskIcon class="h-5 w-5 text-primary" />
 								</div>
 								<div class="flex-1 min-w-0">
@@ -402,7 +401,7 @@
 										{/if}
 									</div>
 								</div>
-								<div class="flex items-center gap-1 flex-shrink-0">
+								<div class="flex items-center gap-1 shrink-0">
 									<Button variant="ghost" size="icon" onclick={() => viewHistory(task)} title="View History">
 										<History class="h-4 w-4" />
 									</Button>

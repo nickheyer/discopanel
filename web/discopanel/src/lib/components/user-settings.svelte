@@ -79,7 +79,7 @@
 			]);
 			users = usersResponse.users;
 			availableRoles = rolesResponse.roles;
-		} catch (error: any) {
+		} catch (error: unknown) {
 			toast.error('Failed to load users');
 			console.error(error);
 		} finally {
@@ -91,7 +91,7 @@
 		try {
 			const resp = await rpcClient.role.listRoles({});
 			availableRoles = resp.roles;
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Failed to fetch roles:', error);
 		}
 	}
@@ -137,8 +137,8 @@
 				roles: []
 			};
 			await loadUsers();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to create user');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to create user');
 		}
 	}
 
@@ -158,8 +158,8 @@
 			showEditDialog = false;
 			editingUser = null;
 			await loadUsers();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to update user');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to update user');
 		}
 	}
 
@@ -174,8 +174,8 @@
 
 			toast.success('User deleted successfully');
 			await loadUsers();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to delete user');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to delete user');
 		}
 	}
 
@@ -202,8 +202,8 @@
 			}
 			showCreateInviteDialog = false;
 			newInviteForm = { description: '', roles: [], maxUses: null, pin: '', expiresValue: null, expiresUnit: 'hours' };
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to create invite');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to create invite');
 		} finally {
 			creatingInvite = false;
 		}
@@ -220,8 +220,8 @@
 			await rpcClient.auth.deleteInvite(create(DeleteInviteRequestSchema, { id }));
 			invites = invites.filter(i => i.id !== id);
 			toast.success('Invite revoked');
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to revoke invite');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to revoke invite');
 		}
 	}
 
@@ -330,7 +330,7 @@
 							</TableRow>
 						</TableHeader>
 						<TableBody>
-							{#each users as user}
+							{#each users as user (user.id)}
 								<TableRow>
 									<TableCell class="font-medium">{user.username}</TableCell>
 									<TableCell>{user.email || '-'}</TableCell>
@@ -339,7 +339,7 @@
 									</TableCell>
 									<TableCell>
 										<div class="flex flex-wrap gap-1">
-											{#each user.roles || [] as role}
+											{#each user.roles || [] as role (role)}
 												<Badge variant={getRoleBadgeVariant(role)}>
 													{role}
 												</Badge>
@@ -573,7 +573,7 @@
 								<Label>Roles</Label>
 							</div>
 							<div class="flex flex-wrap gap-2">
-								{#each availableRoles as role}
+								{#each availableRoles as role (role.id)}
 									<Button
 										size="sm"
 										variant={newUserForm.roles.includes(role.name) ? 'default' : 'outline'}
@@ -630,7 +630,7 @@
 								<div>
 									<p class="text-muted-foreground">Current roles</p>
 									<div class="flex flex-wrap gap-1 mt-1">
-										{#each editingUser.roles || [] as role}
+										{#each editingUser.roles || [] as role (role)}
 											<Badge variant={getRoleBadgeVariant(role)} class="text-[10px]">{role}</Badge>
 										{/each}
 										{#if !editingUser.roles?.length}
@@ -699,7 +699,7 @@
 									<Label>Roles</Label>
 								</div>
 								<div class="flex flex-wrap gap-2">
-									{#each availableRoles as role}
+									{#each availableRoles as role (role.id)}
 										<Button
 											size="sm"
 											variant={editUserForm.roles.includes(role.name) ? 'default' : 'outline'}
@@ -820,7 +820,7 @@
 							<Label>Roles</Label>
 							<p class="text-xs text-muted-foreground">Assigned on registration. If none selected, default roles are used.</p>
 							<div class="flex flex-wrap gap-2 mt-1">
-								{#each inviteRoleNames as role}
+								{#each inviteRoleNames as role (role)}
 									<Button
 										size="sm"
 										variant={newInviteForm.roles.includes(role) ? 'default' : 'outline'}

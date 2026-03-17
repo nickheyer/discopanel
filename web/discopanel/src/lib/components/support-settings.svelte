@@ -27,6 +27,7 @@
 		ChevronUp
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { serversStore } from '$lib/stores/servers';
@@ -44,7 +45,7 @@
 
 	// Server selection
 	let servers = $state<ServerType[]>([]);
-	let selectedServerIds = $state<Set<string>>(new Set());
+	let selectedServerIds = new SvelteSet<string>();
 	let serverSectionExpanded = $state(false);
 	let loadingServers = $state(true);
 
@@ -59,21 +60,22 @@
 	});
 
 	function toggleServer(serverId: string) {
-		const newSet = new Set(selectedServerIds);
-		if (newSet.has(serverId)) {
-			newSet.delete(serverId);
+		if (selectedServerIds.has(serverId)) {
+			selectedServerIds.delete(serverId);
 		} else {
-			newSet.add(serverId);
+			selectedServerIds.add(serverId);
 		}
-		selectedServerIds = newSet;
 	}
 
 	function selectAllServers() {
-		selectedServerIds = new Set(servers.map(s => s.id));
+		selectedServerIds.clear();
+		for (const s of servers) {
+			selectedServerIds.add(s.id);
+		}
 	}
 
 	function clearServerSelection() {
-		selectedServerIds = new Set();
+		selectedServerIds.clear();
 	}
 
 	async function generateBundle(upload: boolean = false) {
@@ -187,7 +189,7 @@
 	}
 </script>
 
-<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
+<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
 	<CardHeader class="relative pb-6">
 		<div class="flex items-center justify-between">
 			<div>
@@ -200,7 +202,7 @@
 	</CardHeader>
 	<CardContent class="flex flex-col space-y-4 w-full">
 		<!-- Support Bundle Info -->
-		<div class="w-full rounded-xl bg-gradient-to-br from-primary/5 via-primary/3 to-transparent border border-primary/20 p-6">
+		<div class="w-full rounded-xl bg-linear-to-br from-primary/5 via-primary/3 to-transparent border border-primary/20 p-6">
 			<div class="flex items-start gap-3 mb-4">
 				<div class="rounded-lg bg-primary/10 p-2.5">
 					<AlertCircle class="h-5 w-5 text-primary" />
@@ -216,7 +218,7 @@
 			<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 				<!-- Application Logs Card -->
 				<div class="group relative rounded-lg border border-border/50 bg-card/50 backdrop-blur-sm p-4  transition-all duration-200">
-					<div class="absolute inset-0 rounded-lg bg-gradient-to-br from-primary/5 to-transparent opacity-0"></div>
+					<div class="absolute inset-0 rounded-lg bg-linear-to-br from-primary/5 to-transparent opacity-0"></div>
 					<div class="relative space-y-2">
 						<div class="flex items-center gap-2">
 							<div class="rounded-md bg-primary/10 p-1.5">
@@ -232,7 +234,7 @@
 
 				<!-- Database Snapshot Card -->
 				<div class="group relative rounded-lg border border-border/50 bg-card/50 backdrop-blur-sm p-4 transition-all duration-200">
-					<div class="absolute inset-0 rounded-lg bg-gradient-to-br from-primary/5 to-transparent opacity-0"></div>
+					<div class="absolute inset-0 rounded-lg bg-linear-to-br from-primary/5 to-transparent opacity-0"></div>
 					<div class="relative space-y-2">
 						<div class="flex items-center gap-2">
 							<div class="rounded-md bg-primary/10 p-1.5">
@@ -248,7 +250,7 @@
 
 				<!-- System Information Card -->
 				<div class="group relative rounded-lg border border-border/50 bg-card/50 backdrop-blur-sm p-4  transition-all duration-200">
-					<div class="absolute inset-0 rounded-lg bg-gradient-to-br from-primary/5 to-transparent opacity-0"></div>
+					<div class="absolute inset-0 rounded-lg bg-linear-to-br from-primary/5 to-transparent opacity-0"></div>
 					<div class="relative space-y-2">
 						<div class="flex items-center gap-2">
 							<div class="rounded-md bg-primary/10 p-1.5">
@@ -457,7 +459,7 @@
 						class="w-full h-auto py-4 px-6 relative overflow-hidden group"
 						variant="outline"
 					>
-						<div class="absolute inset-0 bg-gradient-to-r from-primary/10 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+						<div class="absolute inset-0 bg-linear-to-r from-primary/10 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
 						<div class="relative flex items-center justify-center gap-3">
 							{#if generating && !uploading}
 								<Loader2 class="h-5 w-5 animate-spin" />
@@ -484,7 +486,7 @@
 						class="w-full h-auto py-4 px-6 relative overflow-hidden group"
 						variant="outline"
 					>
-						<div class="absolute inset-0 bg-gradient-to-r from-primary/10 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+						<div class="absolute inset-0 bg-linear-to-r from-primary/10 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
 						<div class="relative flex items-center justify-center gap-3">
 							{#if uploading}
 								<Loader2 class="h-5 w-5 animate-spin" />
@@ -553,7 +555,7 @@
 										onclick={copyReferenceId}
 										size="sm"
 										variant="outline"
-										class="flex-shrink-0"
+										class="shrink-0"
 									>
 										<Copy class="h-3 w-3" />
 									</Button>
@@ -589,7 +591,7 @@
 		<!-- Privacy Notice -->
 		<div class="rounded-lg border border-border/50 bg-muted/30 p-4">
 			<div class="flex gap-3">
-				<AlertCircle class="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+				<AlertCircle class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
 				<div class="space-y-1 text-sm text-muted-foreground">
 					<p class="font-medium">Privacy Notice</p>
 					<p class="text-xs leading-relaxed">

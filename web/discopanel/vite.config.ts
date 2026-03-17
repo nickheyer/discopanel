@@ -19,13 +19,13 @@ function getVersion() {
 			const version = readFileSync(versionFile, 'utf8').trim();
 			if (version) return version;
 		}
-	} catch {}
+	} catch { /* ignore */ }
 
 	// Derive version from git tags
 	try {
 		const version = execSync('git describe --tags --always').toString().trim();
 		if (version) return version;
-	} catch {}
+	} catch { /* ignore */ }
 
 	return 'dev'; // default
 }

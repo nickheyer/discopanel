@@ -92,8 +92,8 @@
 				sessionTimeoutHours = Math.round((response.config.sessionTimeout / 3600) * 100) / 100;
 			}
 			toast.success('Authentication settings updated');
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to update settings');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to update settings');
 		} finally {
 			saving = false;
 		}
@@ -111,11 +111,11 @@
 {:else if config}
 	<div class="grid gap-6 lg:grid-cols-2">
 		<!-- Card 1: Authentication Settings -->
-		<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+		<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
+			<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
 			<CardHeader class="relative pb-4">
 				<div class="flex items-center gap-3">
-					<div class="h-12 w-12 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+					<div class="h-12 w-12 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
 						<Shield class="h-6 w-6 text-primary" />
 					</div>
 					<div>
@@ -238,11 +238,11 @@
 		</Card>
 
 		<!-- Card 2: OIDC / Single Sign-On -->
-		<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-gradient-to-br from-card to-card/80">
-			<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+		<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
+			<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
 			<CardHeader class="relative pb-4">
 				<div class="flex items-center gap-3">
-					<div class="h-12 w-12 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+					<div class="h-12 w-12 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
 						<KeyRound class="h-6 w-6 text-primary" />
 					</div>
 					<div class="flex items-center gap-3">
@@ -289,7 +289,7 @@
 							<div class="p-3 rounded-lg border bg-card">
 								<Label class="text-xs text-muted-foreground">Scopes</Label>
 								<div class="flex flex-wrap gap-1.5 mt-1">
-									{#each config.oidcScopes as scope}
+									{#each config.oidcScopes as scope (scope)}
 										<Badge variant="secondary" class="text-xs">{scope}</Badge>
 									{/each}
 								</div>

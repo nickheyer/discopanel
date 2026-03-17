@@ -31,7 +31,7 @@
 					</BreadcrumbLink>
 				{/if}
 			</BreadcrumbItem>
-			{#each segments as segment, i}
+			{#each segments as segment, i (i)}
 				<BreadcrumbSeparator />
 				<BreadcrumbItem>
 					{#if i === segments.length - 1}

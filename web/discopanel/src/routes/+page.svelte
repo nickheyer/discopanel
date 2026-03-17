@@ -6,6 +6,7 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { formatBytes, getStringForEnum } from '$lib/utils';
+	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { 
 		Server, MemoryStick, Plus, LayoutDashboard, 
@@ -186,10 +187,10 @@
 		</div>
 	</div>
 {:else}
-	<div class="flex-1 space-y-6 h-full p-6 bg-gradient-to-br from-background via-background to-muted/5">
+	<div class="flex-1 space-y-6 h-full p-6 bg-linear-to-br from-background via-background to-muted/5">
 		<div class="flex items-center justify-between pb-4 border-b border-border/40">
 			<div class="flex items-center gap-4">
-				<div class="h-14 w-14 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg animate-in fade-in-50 duration-500">
+				<div class="h-14 w-14 rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg animate-in fade-in-50 duration-500">
 					<LayoutDashboard class="h-7 w-7 text-primary" />
 				</div>
 				<div class="space-y-1 animate-in slide-in-from-left-5 duration-500">
@@ -211,7 +212,7 @@
 			<Button 
 				href="/servers/new" 
 				size="default" 
-				class="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl transition-all"
+				class="bg-linear-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg hover:shadow-xl transition-all"
 			>
 				<Plus class="h-4 w-4 mr-2" />
 				New Server
@@ -221,10 +222,10 @@
 
 	<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 		<Card class="group relative overflow-hidden border-border/50 hover:border-primary/30 transition-all hover:shadow-lg animate-in fade-in-50 slide-in-from-bottom-2 duration-500">
-			<div class="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+			<div class="absolute inset-0 bg-linear-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<CardTitle class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Servers</CardTitle>
-				<div class="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+				<div class="h-10 w-10 rounded-xl bg-linear-to-br from-blue-500/20 to-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform">
 					<Server class="h-5 w-5 text-blue-500" />
 				</div>
 			</CardHeader>
@@ -251,10 +252,10 @@
 		</Card>
 
 		<Card class="group relative overflow-hidden border-border/50 hover:border-primary/30 transition-all hover:shadow-lg animate-in fade-in-50 slide-in-from-bottom-2 duration-500" style="animation-delay: 50ms">
-			<div class="absolute inset-0 bg-gradient-to-br from-green-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+			<div class="absolute inset-0 bg-linear-to-br from-green-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<CardTitle class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Active Players</CardTitle>
-				<div class="h-10 w-10 rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+				<div class="h-10 w-10 rounded-xl bg-linear-to-br from-green-500/20 to-green-600/10 flex items-center justify-center group-hover:scale-110 transition-transform">
 					<Users class="h-5 w-5 text-green-500" />
 				</div>
 			</CardHeader>
@@ -277,10 +278,10 @@
 		</Card>
 
 		<Card class="group relative overflow-hidden border-border/50 hover:border-primary/30 transition-all hover:shadow-lg animate-in fade-in-50 slide-in-from-bottom-2 duration-500" style="animation-delay: 100ms">
-			<div class="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+			<div class="absolute inset-0 bg-linear-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<CardTitle class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Memory Usage</CardTitle>
-				<div class="h-10 w-10 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+				<div class="h-10 w-10 rounded-xl bg-linear-to-br from-purple-500/20 to-purple-600/10 flex items-center justify-center group-hover:scale-110 transition-transform">
 					<MemoryStick class="h-5 w-5 text-purple-500" />
 				</div>
 			</CardHeader>
@@ -306,10 +307,10 @@
 		</Card>
 
 		<Card class="group relative overflow-hidden border-border/50 hover:border-primary/30 transition-all hover:shadow-lg animate-in fade-in-50 slide-in-from-bottom-2 duration-500" style="animation-delay: 150ms">
-			<div class="absolute inset-0 bg-gradient-to-br from-orange-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+			<div class="absolute inset-0 bg-linear-to-br from-orange-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<CardTitle class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Performance</CardTitle>
-				<div class="h-10 w-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-orange-600/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+				<div class="h-10 w-10 rounded-xl bg-linear-to-br from-orange-500/20 to-orange-600/10 flex items-center justify-center group-hover:scale-110 transition-transform">
 					<Gauge class="h-5 w-5 text-orange-500" />
 				</div>
 			</CardHeader>
@@ -343,7 +344,7 @@
 				{#if serversByStatus.warning.length > 0}
 					<span class="font-medium text-yellow-500">{serversByStatus.warning.length} server{serversByStatus.warning.length > 1 ? 's' : ''} running slow.</span>
 				{/if}
-				<a href="/servers" class="ml-2 text-primary hover:underline">View details →</a>
+				<a href={resolve('/servers')} class="ml-2 text-primary hover:underline">View details →</a>
 			</AlertDescription>
 		</Alert>
 	{/if}
@@ -478,7 +479,7 @@
 			<CardHeader>
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3">
-						<div class="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/10 flex items-center justify-center">
+						<div class="h-10 w-10 rounded-xl bg-linear-to-br from-blue-500/20 to-blue-600/10 flex items-center justify-center">
 							<HelpCircle class="h-5 w-5 text-blue-500" />
 						</div>
 						<div>
@@ -522,7 +523,7 @@
 		<Card class="hover:shadow-lg transition-all border-border/50 hover:border-primary/30 animate-in fade-in-50 slide-in-from-bottom-5 duration-500" style="animation-delay: 400ms">
 			<CardHeader>
 				<div class="flex items-center gap-3">
-					<div class="h-10 w-10 rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/10 flex items-center justify-center">
+					<div class="h-10 w-10 rounded-xl bg-linear-to-br from-green-500/20 to-green-600/10 flex items-center justify-center">
 						<Shield class="h-5 w-5 text-green-500" />
 					</div>
 					<div>
@@ -571,7 +572,7 @@
 		<Card class="hover:shadow-lg transition-all border-border/50 hover:border-primary/30 animate-in fade-in-50 slide-in-from-bottom-5 duration-500" style="animation-delay: 450ms">
 			<CardHeader>
 				<div class="flex items-center gap-3">
-					<div class="h-10 w-10 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/10 flex items-center justify-center">
+					<div class="h-10 w-10 rounded-xl bg-linear-to-br from-purple-500/20 to-purple-600/10 flex items-center justify-center">
 						<TrendingUp class="h-5 w-5 text-purple-500" />
 					</div>
 					<div>

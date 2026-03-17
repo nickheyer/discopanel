@@ -129,7 +129,7 @@
 				matrix[roleName] = rolePerms.permissions;
 			}
 			permissionMatrix = matrix;
-		} catch (error: any) {
+		} catch (error: unknown) {
 			toast.error('Failed to load roles');
 			console.error(error);
 		} finally {
@@ -155,8 +155,8 @@
 			showCreateDialog = false;
 			newRoleForm = { name: '', description: '', isDefault: false };
 			await loadRoles();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to create role');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to create role');
 		}
 	}
 
@@ -175,8 +175,8 @@
 
 			toast.success('Role deleted successfully');
 			await loadRoles();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to delete role');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to delete role');
 		}
 	}
 
@@ -245,8 +245,8 @@
 			showPermissionsDialog = false;
 			editingRole = null;
 			await loadRoles();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to update permissions');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to update permissions');
 		} finally {
 			savingPermissions = false;
 		}
@@ -340,7 +340,7 @@
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{#each roles as role}
+						{#each roles as role (role.id)}
 							<TableRow>
 								<TableCell class="font-medium">{role.name}</TableCell>
 								<TableCell class="text-muted-foreground">{role.description || '-'}</TableCell>
@@ -441,7 +441,7 @@
 
 <!-- Permissions Editor - Full-size Dialog with Sidebar -->
 <Dialog open={showPermissionsDialog} onOpenChange={(open) => showPermissionsDialog = open}>
-	<DialogContent class="!max-w-6xl !w-[95vw] !h-[85vh] !p-0 !gap-0 overflow-hidden flex flex-col" showCloseButton={false}>
+	<DialogContent class="max-w-6xl! w-[95vw]! h-[85vh]! p-0! gap-0! overflow-hidden flex flex-col" showCloseButton={false}>
 		<div class="flex h-full">
 			<!-- Sidebar -->
 			<div class="w-64 border-r bg-muted/30 flex flex-col">
@@ -462,7 +462,7 @@
 
 				<!-- Navigation -->
 				<nav class="flex-1 p-4 space-y-1">
-					{#each navItems as item}
+					{#each navItems as item (item.id)}
 						{@const Icon = item.icon}
 						<button
 							onclick={() => activeSection = item.id}
@@ -521,8 +521,8 @@
 							<Table>
 								<TableHeader>
 									<TableRow class="bg-muted/50">
-										<TableHead class="sticky left-0 bg-muted/50 z-10 w-[200px] border-r">Resource</TableHead>
-										{#each allActions as action}
+										<TableHead class="sticky left-0 bg-muted/50 z-10 w-50 border-r">Resource</TableHead>
+										{#each allActions as action (action)}
 											<TableHead class="text-center px-3">
 												<span class="capitalize text-xs font-medium">{action}</span>
 											</TableHead>
@@ -530,7 +530,7 @@
 									</TableRow>
 								</TableHeader>
 								<TableBody>
-									{#each resourceActions as ra}
+									{#each resourceActions as ra (ra.resource)}
 										{@const count = getResourcePermCount(ra.resource)}
 										{@const total = ra.actions.length}
 										<TableRow class="hover:bg-muted/30">
@@ -547,7 +547,7 @@
 													{/if}
 												</div>
 											</TableCell>
-											{#each allActions as action}
+											{#each allActions as action (action)}
 												{@const key = `${ra.resource}:${action}`}
 												{@const hasAction = ra.actions.includes(action)}
 												{@const checked = hasAction && (editingPermissions[key] || false)}
@@ -584,7 +584,7 @@
 							<div class="space-y-6">
 								<!-- Resource type picker -->
 								<div class="flex flex-wrap gap-2">
-									{#each scopeableResources as res}
+									{#each scopeableResources as res (res)}
 										{@const objectCount = availableObjects.filter(o => o.resource === res).length}
 										{@const source = scopeSourceMap[res]}
 										{@const isForeign = source && source !== res}
@@ -623,13 +623,13 @@
 											<Table>
 												<TableHeader>
 													<TableRow class="bg-muted/50">
-														<TableHead class="sticky left-0 bg-muted/50 z-10 w-[200px] border-r">
+														<TableHead class="sticky left-0 bg-muted/50 z-10 w-50 border-r">
 																<span class="capitalize">{formatResourceName(activeForeign ? activeSource : scopedResource)}</span>
 																{#if activeForeign}
 																	<div class="text-[10px] text-muted-foreground font-normal normal-case">scoping {formatResourceName(scopedResource)}</div>
 																{/if}
 															</TableHead>
-														{#each scopedResourceActions as action}
+														{#each scopedResourceActions as action (action)}
 															{@const coveredByGlobal = editingPermissions[`${scopedResource}:${action}`] || false}
 															<TableHead class="text-center px-3">
 																<span class="capitalize text-xs font-medium {coveredByGlobal ? 'opacity-50' : ''}">{action}</span>
@@ -641,12 +641,12 @@
 													</TableRow>
 												</TableHeader>
 												<TableBody>
-													{#each filteredObjects as obj}
+													{#each filteredObjects as obj (obj.id)}
 														<TableRow class="hover:bg-muted/30">
 															<TableCell class="sticky left-0 bg-background z-10 font-medium border-r">
 																<span class="text-sm">{obj.name}</span>
 															</TableCell>
-															{#each scopedResourceActions as action}
+															{#each scopedResourceActions as action (action)}
 																{@const coveredByGlobal = editingPermissions[`${scopedResource}:${action}`] || false}
 																{@const checked = isScopedChecked(scopedResource, action, obj.id)}
 																<TableCell class="text-center px-3">

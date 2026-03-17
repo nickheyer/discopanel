@@ -78,14 +78,14 @@
 	});
 </script>
 
-<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-gradient-to-br from-background to-muted/10">
+<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-linear-to-br from-background to-muted/10">
 	<div class="flex items-center justify-between pb-6 border-b-2 border-border/50">
 		<div class="flex items-center gap-4">
-			<div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+			<div class="h-16 w-16 rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
 				<Settings class="h-8 w-8 text-primary" />
 			</div>
 			<div class="space-y-1">
-				<h2 class="text-4xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Settings</h2>
+				<h2 class="text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Settings</h2>
 				<p class="text-base text-muted-foreground">Configure DiscoPanel and default server settings</p>
 			</div>
 		</div>

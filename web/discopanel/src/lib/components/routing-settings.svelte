@@ -55,7 +55,7 @@
 			const status = await rpcClient.proxy.getProxyStatus({});
 			proxyEnabled = status.enabled;
 			baseURL = status.baseUrl || '';
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to load proxy configuration');
 		}
 	}
@@ -73,7 +73,7 @@
 				}
 				newListener.port = nextPort;
 			}
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to load proxy listeners');
 		}
 	}
@@ -115,7 +115,7 @@
 			
 			toast.success('Proxy configuration saved');
 			await loadAll();
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to save proxy configuration');
 		} finally {
 			saving = false;
@@ -153,8 +153,8 @@
 			};
 			
 			await loadListeners();
-		} catch (error: any) {
-			toast.error(error.message || 'Failed to create listener');
+		} catch (error: unknown) {
+			toast.error(error instanceof Error ? error.message : 'Failed to create listener');
 		}
 	}
 
@@ -171,7 +171,7 @@
 			toast.success(`Listener "${listener.name}" updated`);
 			editingListener = null;
 			await loadListeners();
-		} catch (error) {
+		} catch (_e) {
 			toast.error('Failed to update listener');
 		}
 	}
@@ -191,8 +191,8 @@
 				await rpcClient.proxy.deleteProxyListener({ id: listener.id });
 				toast.success(`Listener "${listener.name}" deleted`);
 				await loadListeners();
-			} catch (error: any) {
-				toast.error(error.message || 'Failed to delete listener');
+			} catch (error: unknown) {
+				toast.error(error instanceof Error ? error.message : 'Failed to delete listener');
 			}
 		}
 	}
@@ -312,7 +312,7 @@
 				<!-- Existing Listeners -->
 				{#if listenersWithCount.length > 0}
 					<div class="space-y-3">
-						{#each listenersWithCount as lwc}
+						{#each listenersWithCount as lwc (lwc.listener?.id)}
 							{@const listener = lwc.listener}
 							{@const status = getListenerStatus(listener, lwc.serverCount)}
 							{@const StatusIcon = getStatusIcon(status)}
@@ -528,7 +528,7 @@
 				</CardHeader>
 				<CardContent>
 					<div class="space-y-2">
-						{#each activeRoutes as route}
+						{#each activeRoutes as route (route.serverId)}
 							<div class="flex items-center justify-between p-3 rounded-lg bg-muted/50">
 								<div class="flex items-center gap-3">
 									<Activity class="h-4 w-4 {route.active ? 'text-green-500' : 'text-gray-500'}" />

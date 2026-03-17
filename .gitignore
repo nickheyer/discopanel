@@ -432,3 +432,4 @@ FodyWeavers.xsd
 .vscode/settings.json
 tmp/
 .claude/
+dev/bug-analysis/

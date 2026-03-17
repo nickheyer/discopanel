@@ -1,8 +1,11 @@
-import { createClient, type Client, type Interceptor } from "@connectrpc/connect";
+import { createClient, type Client, type Interceptor, ConnectError, Code } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { authStore } from '$lib/stores/auth';
 import { toast } from 'svelte-sonner';
 import { loadingStore } from '$lib/stores/loading.svelte';
+
+// Rpc state
+let loggingOut = false;
 
 // SERVICES
 import { AuthService } from '$lib/proto/discopanel/v1/auth_pb';
@@ -50,6 +53,19 @@ const authInterceptor: Interceptor = (next) => async (req) => {
     return res;
   } catch (error) {
     const onLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login';
+
+    // Log out on expired/invalid session
+    if (error instanceof ConnectError && error.code === Code.Unauthenticated) {
+      if (!onLoginPage && !loggingOut) {
+        loggingOut = true;
+        authStore.logout().finally(() => {
+          loggingOut = false;
+        });
+      }
+      // Never toast auth errors — the auto-logout redirect handles them
+      throw error;
+    }
+
     if (!isSilent && !onLoginPage) {
       const message = error instanceof Error ? error.message : 'An error occurred';
       toast.error(message);

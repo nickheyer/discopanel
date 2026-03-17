@@ -1,5 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import { goto } from '$app/navigation';
+import { resolve } from '$app/paths';
 import { browser } from '$app/environment';
 import { create } from '@bufbuild/protobuf';
 import { rpcClient } from '$lib/api/rpc-client';
@@ -183,7 +184,7 @@ function createAuthStore() {
 			});
 
 			// Redirect to login
-			goto('/login');
+			goto(resolve('/login'));
 		},
 
 		async register(username: string, email: string, password: string, inviteCode?: string, invitePin?: string) {
@@ -280,20 +281,8 @@ function createAuthStore() {
 					}));
 					return false;
 				}
-			} catch (error) {
-				console.error('Session validation error:', error);
-				// Invalid token, clear it
-				if (browser) {
-					localStorage.removeItem('auth_token');
-				}
-				update(state => ({
-					...state,
-					user: null,
-					token: null,
-					permissions: [],
-					isAuthenticated: false,
-					isLoading: false,
-				}));
+			} catch {
+				update(state => ({ ...state, isLoading: false }));
 				return false;
 			}
 		},

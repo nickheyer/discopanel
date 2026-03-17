@@ -269,6 +269,26 @@ func main() {
 		}
 	}
 
+	// Clean expired sessions on startup, then periodically
+	if err := store.CleanExpiredSessions(ctx); err != nil {
+		log.Error("Failed to clean expired sessions on startup: %v", err)
+	}
+	stopSessionCleanup := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := store.CleanExpiredSessions(context.Background()); err != nil {
+					log.Error("Failed to clean expired sessions: %v", err)
+				}
+			case <-stopSessionCleanup:
+				return
+			}
+		}
+	}()
+
 	// Start container status monitor
 	stopMonitor := make(chan struct{})
 	go func() {
@@ -332,6 +352,7 @@ func main() {
 	<-quit
 
 	log.Info("Shutting down server...")
+	close(stopSessionCleanup)
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -3,6 +3,7 @@
 	import { ModeWatcher } from 'mode-watcher';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import { resolve as resolvePath } from '$app/paths';
 	import {
 		SidebarProvider,
 		SidebarInset,
@@ -72,28 +73,27 @@
 				loading = false;
 				if (authStatus.enabled) {
 					if (authStatus.firstUserSetup) {
-						goto('/login');
-						return;
+						goto(resolvePath('/login'));
+						return false;
 					}
 					const isValid = await authStore.validateSession();
 					if (!isValid) {
 						// If anonymous access is enabled, allow browsing without login
 						const state = get(authStore);
 						if (!state.anonymousAccessEnabled) {
-							goto('/login');
-							return;
+							goto(resolvePath('/login'));
+							return false;
 						}
 					}
 				}
-			}).then(() => {
-				// Fetch servers immediately after auth check
-				if (page.url.pathname !== '/login') {
-					// Start fetching without awaiting - reduces perceived load time
+				return true;
+			}).then((shouldFetch) => {
+				// Only fetch servers if auth succeeded (not redirecting to login)
+				if (shouldFetch && page.url.pathname !== '/login') {
 					serversStore.fetchServers(false).catch(err => {
 						console.error('Failed to fetch initial servers:', err);
 					});
 
-					// Start polling immediately, don't wait for first fetch to complete
 					if (!statusPollingInterval) {
 						statusPollingInterval = setInterval(() => {
 							if (page.url.pathname !== '/login') {
@@ -152,7 +152,7 @@
 								<SidebarMenuItem>
 									<SidebarMenuButton isActive={page.url.pathname === '/'}>
 										{#snippet child({ props })}
-											<a href="/" {...props}>
+											<a href={resolvePath('/')} {...props}>
 												<Home class="h-4 w-4" />
 												<span class="group-data-[collapsible=icon]:hidden">Dashboard</span>
 											</a>
@@ -162,7 +162,7 @@
 								<SidebarMenuItem>
 									<SidebarMenuButton isActive={page.url.pathname.startsWith('/servers')}>
 										{#snippet child({ props })}
-											<a href="/servers" {...props}>
+											<a href={resolvePath('/servers')} {...props}>
 												<Server class="h-4 w-4" />
 												<span class="group-data-[collapsible=icon]:hidden">Servers</span>
 												{#if runningCount > 0}
@@ -175,7 +175,7 @@
 								<SidebarMenuItem>
 									<SidebarMenuButton isActive={page.url.pathname.startsWith('/modpacks')}>
 										{#snippet child({ props })}
-											<a href="/modpacks" {...props}>
+											<a href={resolvePath('/modpacks')} {...props}>
 												<Package class="h-4 w-4" />
 												<span class="group-data-[collapsible=icon]:hidden">Modpacks</span>
 											</a>
@@ -186,7 +186,7 @@
 									<SidebarMenuItem>
 										<SidebarMenuButton isActive={page.url.pathname === '/settings'}>
 											{#snippet child({ props })}
-												<a href="/settings" {...props}>
+												<a href={resolvePath('/settings')} {...props}>
 													<Settings class="h-4 w-4" />
 													<span class="group-data-[collapsible=icon]:hidden">Settings</span>
 												</a>
@@ -197,7 +197,7 @@
 								<SidebarMenuItem>
 									<SidebarMenuButton isActive={page.url.pathname.startsWith('/docs/api')}>
 										{#snippet child({ props })}
-											<a href="/docs/api" {...props}>
+											<a href={resolvePath('/docs/api')} {...props}>
 												<FileText class="h-4 w-4" />
 												<span class="group-data-[collapsible=icon]:hidden">API</span>
 											</a>
@@ -219,7 +219,7 @@
 											<SidebarMenuItem>
 												<SidebarMenuButton isActive={page.url.pathname === `/servers/${server.id}`}>
 													{#snippet child({ props })}
-														<a href="/servers/{server.id}" {...props}>
+														<a href={resolvePath(`/servers/${server.id}`)} {...props}>
 															<div class="flex w-full items-center gap-2">
 																<div
 																	class="h-2 w-2 rounded-full {server.status === ServerStatus.RUNNING
@@ -277,7 +277,7 @@
 										</div>
 									</DropdownMenuLabel>
 									<DropdownMenuSeparator />
-									<DropdownMenuItem onclick={() => goto('/profile')}>
+									<DropdownMenuItem onclick={() => goto(resolvePath('/profile'))}>
 										<UserIcon class="mr-2 h-4 w-4" />
 										<span>Profile</span>
 									</DropdownMenuItem>
@@ -292,7 +292,7 @@
 					{:else if isAuthEnabled && $authStore.anonymousAccessEnabled && !user}
 						<Separator orientation="horizontal" />
 						<div class="py-2 w-full">
-							<Button variant="ghost" class="w-full justify-start" onclick={() => goto('/login')}>
+							<Button variant="ghost" class="w-full justify-start" onclick={() => goto(resolvePath('/login'))}>
 								<LogIn class="h-4 w-4" />
 								<span class="group-data-[collapsible=icon]:hidden">Login</span>
 							</Button>

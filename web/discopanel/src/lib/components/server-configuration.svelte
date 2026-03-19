@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
 	import { SvelteMap, SvelteSet, SvelteURL } from 'svelte/reactivity';
-	import { replaceState } from '$app/navigation';
-	import { resolve } from '$app/paths';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
@@ -35,14 +33,14 @@
 	let highlightedField = $state<string | null>(null);
 
 	// Track original and current values
-	let originalValues: Map<string, string | null> = new SvelteMap();
-	let currentValues: Map<string, string | null> = new SvelteMap();
-	let originalEnabled: Set<string> = new SvelteSet();
-	let currentEnabled: Set<string> = new SvelteSet();
-
+	let originalValues = $state<Map<string, string | null>>(new Map());
+	let currentValues = $state<Map<string, string | null>>(new Map());
+	let originalEnabled = $state<Set<string>>(new Set());
+	let currentEnabled = $state<Set<string>>(new Set());
+		
 	// Derived state
 	let isSaving = $derived(externalSaving || saving);
-	let isServerRunning = $derived(server?.status === ServerStatus.RUNNING);
+	let isServerRunning = $derived(!!server && server.status === ServerStatus.RUNNING);
 
 	// Get filtered categories (hide empty ones and filter system fields for global)
 	let filteredCategories = $derived.by(() => {
@@ -222,7 +220,7 @@
 
 			toast.success('Configuration saved');
 
-			if (isServerRunning) {
+			if (server && isServerRunning) {
 				toast.info('Restart the server for changes to take effect');
 			}
 		} catch (error) {
@@ -293,7 +291,7 @@
 		activeCategory = categoryId;
 		const url = new SvelteURL(window.location.href);
 		url.hash = categoryId;
-		replaceState(resolve(url.pathname + url.search + url.hash), {});
+		window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 	}
 
 	async function copyLinkToClipboard(anchor: string) {
@@ -302,8 +300,6 @@
 		const success = await copyToClipboard(url.toString());
 		if (success) {
 			toast.success('Link copied to clipboard');
-		} else {
-			toast.error('Failed to copy to clipboard');
 		}
 	}
 
@@ -581,7 +577,7 @@
 				</div>
 			</div>
 
-			{#if isServerRunning}
+			{#if server && isServerRunning}
 				<div class="p-4 bg-yellow-50 dark:bg-yellow-950 border-t border-yellow-200 dark:border-yellow-800">
 					<p class="text-sm text-yellow-800 dark:text-yellow-200">
 						Server must be stopped to modify configuration. Changes will take effect after restart.

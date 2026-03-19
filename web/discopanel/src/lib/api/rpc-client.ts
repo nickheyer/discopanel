@@ -1,5 +1,11 @@
-import { createClient, type Client, type Interceptor, ConnectError, Code } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
+import {
+	createClient,
+	type Client,
+	type Interceptor,
+	ConnectError,
+	Code
+} from '@connectrpc/connect';
+import { createConnectTransport } from '@connectrpc/connect-web';
 import { authStore } from '$lib/stores/auth';
 import { toast } from 'svelte-sonner';
 import { loadingStore } from '$lib/stores/loading.svelte';
@@ -30,93 +36,93 @@ export const silentCallOptions = { headers: new Headers({ [SILENT_HEADER]: 'true
 
 // Login auth interception
 const authInterceptor: Interceptor = (next) => async (req) => {
-  // Auth headers
-  const authHeaders = authStore.getHeaders();
-  Object.entries(authHeaders).forEach(([key, value]) => {
-    req.header.set(key, value as string);
-  });
+	// Auth headers
+	const authHeaders = authStore.getHeaders();
+	Object.entries(authHeaders).forEach(([key, value]) => {
+		req.header.set(key, value as string);
+	});
 
-  // Check for silence
-  const isSilent = req.header.get(SILENT_HEADER) === 'true';
+	// Check for silence
+	const isSilent = req.header.get(SILENT_HEADER) === 'true';
 
-  // Operation ID for loading tracking
-  const operationId = `rpc-${req.service.typeName}-${req.method.name}-${Date.now()}`;
+	// Operation ID for loading tracking
+	const operationId = `rpc-${req.service.typeName}-${req.method.name}-${Date.now()}`;
 
-  // Show loading indicator
-  const showLoading = !isSilent && !req.method.name.toLowerCase().includes('status');
-  if (showLoading) {
-    loadingStore.start(operationId);
-  }
+	// Show loading indicator
+	const showLoading = !isSilent && !req.method.name.toLowerCase().includes('status');
+	if (showLoading) {
+		loadingStore.start(operationId);
+	}
 
-  try {
-    const res = await next(req);
-    return res;
-  } catch (error) {
-    const onLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login';
+	try {
+		const res = await next(req);
+		return res;
+	} catch (error) {
+		const onLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login';
 
-    // Log out on expired/invalid session
-    if (error instanceof ConnectError && error.code === Code.Unauthenticated) {
-      if (!onLoginPage && !loggingOut) {
-        loggingOut = true;
-        authStore.logout().finally(() => {
-          loggingOut = false;
-        });
-      }
-      // Never toast auth errors — the auto-logout redirect handles them
-      throw error;
-    }
+		// Log out on expired/invalid session
+		if (error instanceof ConnectError && error.code === Code.Unauthenticated) {
+			if (!onLoginPage && !loggingOut) {
+				loggingOut = true;
+				authStore.logout().finally(() => {
+					loggingOut = false;
+				});
+			}
+			// Never toast auth errors — the auto-logout redirect handles them
+			throw error;
+		}
 
-    if (!isSilent && !onLoginPage) {
-      const message = error instanceof Error ? error.message : 'An error occurred';
-      toast.error(message);
-    }
-    throw error;
-  } finally {
-    if (showLoading) {
-      loadingStore.stop(operationId);
-    }
-  }
+		if (!isSilent && !onLoginPage) {
+			const message = error instanceof Error ? error.message : 'An error occurred';
+			toast.error(message);
+		}
+		throw error;
+	} finally {
+		if (showLoading) {
+			loadingStore.stop(operationId);
+		}
+	}
 };
 
 // Transport w/ auth
 const transport = createConnectTransport({
-  baseUrl: "",
-  interceptors: [authInterceptor]
+	baseUrl: '',
+	interceptors: [authInterceptor]
 });
 
 // Clients for each service
 export class RpcClient {
-  public readonly auth: Client<typeof AuthService>;
-  public readonly config: Client<typeof ConfigService>;
-  public readonly file: Client<typeof FileService>;
-  public readonly minecraft: Client<typeof MinecraftService>;
-  public readonly mod: Client<typeof ModService>;
-  public readonly modpack: Client<typeof ModpackService>;
-  public readonly proxy: Client<typeof ProxyService>;
-  public readonly server: Client<typeof ServerService>;
-  public readonly support: Client<typeof SupportService>;
-  public readonly task: Client<typeof TaskService>;
-  public readonly upload: Client<typeof UploadService>;
-  public readonly user: Client<typeof UserService>;
-  public readonly role: Client<typeof RoleService>;
-  public readonly module: Client<typeof ModuleService>;
+	public readonly auth: Client<typeof AuthService>;
+	public readonly config: Client<typeof ConfigService>;
+	public readonly file: Client<typeof FileService>;
+	public readonly minecraft: Client<typeof MinecraftService>;
+	public readonly mod: Client<typeof ModService>;
+	public readonly modpack: Client<typeof ModpackService>;
+	public readonly proxy: Client<typeof ProxyService>;
+	public readonly server: Client<typeof ServerService>;
+	public readonly support: Client<typeof SupportService>;
+	public readonly task: Client<typeof TaskService>;
+	public readonly upload: Client<typeof UploadService>;
+	public readonly user: Client<typeof UserService>;
+	public readonly role: Client<typeof RoleService>;
+	public readonly module: Client<typeof ModuleService>;
 
-  constructor() {
-    this.auth = createClient(AuthService, transport);
-    this.config = createClient(ConfigService, transport);
-    this.file = createClient(FileService, transport);
-    this.minecraft = createClient(MinecraftService, transport);
-    this.mod = createClient(ModService, transport);
-    this.modpack = createClient(ModpackService, transport);
-    this.proxy = createClient(ProxyService, transport);
-    this.server = createClient(ServerService, transport);
-    this.support = createClient(SupportService, transport);
-    this.task = createClient(TaskService, transport);
-    this.upload = createClient(UploadService, transport);
-    this.user = createClient(UserService, transport);
-    this.role = createClient(RoleService, transport);
-    this.module = createClient(ModuleService, transport);
-  }
+	constructor() {
+		this.auth = createClient(AuthService, transport);
+		this.config = createClient(ConfigService, transport);
+		this.file = createClient(FileService, transport);
+		this.minecraft = createClient(MinecraftService, transport);
+		this.mod = createClient(ModService, transport);
+		this.modpack = createClient(ModpackService, transport);
+		this.proxy = createClient(ProxyService, transport);
+		this.server = createClient(ServerService, transport);
+		this.support = createClient(SupportService, transport);
+		this.task = createClient(TaskService, transport);
+		this.upload = createClient(UploadService, transport);
+		this.user = createClient(UserService, transport);
+		this.role = createClient(RoleService, transport);
+		this.module = createClient(ModuleService, transport);
+	}
 }
 
 // singleton

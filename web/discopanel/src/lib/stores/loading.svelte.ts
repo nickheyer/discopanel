@@ -14,7 +14,7 @@ function createLoadingStore() {
 	return {
 		subscribe,
 		start(operationId?: string) {
-			update(state => {
+			update((state) => {
 				if (operationId) {
 					state.operations.add(operationId);
 				}
@@ -23,7 +23,7 @@ function createLoadingStore() {
 			});
 		},
 		stop(operationId?: string) {
-			update(state => {
+			update((state) => {
 				if (operationId) {
 					state.operations.delete(operationId);
 				}
@@ -33,13 +33,13 @@ function createLoadingStore() {
 		},
 		isLoading(operationId?: string): boolean {
 			let loading = false;
-			subscribe(state => {
+			subscribe((state) => {
 				loading = operationId ? state.operations.has(operationId) : state.global;
 			})();
 			return loading;
 		},
 		clear() {
-			update(state => {
+			update((state) => {
 				state.operations.clear();
 				state.global = false;
 				return state;

@@ -215,16 +215,15 @@ class WebSocketClient {
 				case WSMessageType.WS_MESSAGE_TYPE_LOGS:
 					if (msg.payload.case === 'logs') {
 						const logsMsg = msg.payload.value as LogsMessage;
-						this.logHandlers.forEach((handler) =>
-							handler(logsMsg.serverId, logsMsg.logs)
-						);
+						this.logHandlers.forEach((handler) => handler(logsMsg.serverId, logsMsg.logs));
 					}
 					break;
 
 				case WSMessageType.WS_MESSAGE_TYPE_LOG:
 					if (msg.payload.case === 'log') {
 						const logMsg = msg.payload.value as LogMessage;
-						if (logMsg.log) { // Buffer log entries for batched dispatch
+						if (logMsg.log) {
+							// Buffer log entries for batched dispatch
 							const buffer = this.logBuffer.get(logMsg.serverId) || [];
 							buffer.push(logMsg.log);
 							this.logBuffer.set(logMsg.serverId, buffer);
@@ -325,7 +324,10 @@ class WebSocketClient {
 	}
 
 	private sendPing(): void {
-		if (this.state.connectionState !== 'authenticated' && this.state.connectionState !== 'connected') {
+		if (
+			this.state.connectionState !== 'authenticated' &&
+			this.state.connectionState !== 'connected'
+		) {
 			return;
 		}
 

@@ -52,14 +52,14 @@ function createAuthStore() {
 		oidcEnabled: false,
 		firstUserSetup: false,
 		allowRegistration: false,
-		anonymousAccessEnabled: false,
+		anonymousAccessEnabled: false
 	});
 
 	// Load token from localStorage on init
 	if (browser) {
 		const token = localStorage.getItem('auth_token');
 		if (token) {
-			update(state => ({ ...state, token }));
+			update((state) => ({ ...state, token }));
 		}
 	}
 
@@ -72,45 +72,50 @@ function createAuthStore() {
 
 				const authEnabled = response.localAuthEnabled || response.oidcEnabled;
 
-				update(state => ({
+				update((state) => ({
 					...state,
 					localAuthEnabled: response.localAuthEnabled,
 					oidcEnabled: response.oidcEnabled,
 					firstUserSetup: response.firstUserSetup,
 					allowRegistration: response.allowRegistration,
-					anonymousAccessEnabled: response.anonymousAccessEnabled,
+					anonymousAccessEnabled: response.anonymousAccessEnabled
 				}));
 
 				// If auth is enabled and we have a token, validate it
 				let currentToken: string | null = null;
-				update(state => {
+				update((state) => {
 					currentToken = state.token;
 					return state;
 				});
 
 				if (!authEnabled) {
 					// Auth is disabled - backend grants full admin access, fetch permissions
-					await rpcClient.auth.getCurrentUser({}).then(r => update(state => ({
-						...state,
-						user: r.user || null,
-						permissions: r.permissions ?? [],
-						isLoading: false,
-					}))).catch(() => update(state => ({ ...state, isLoading: false })));
+					await rpcClient.auth
+						.getCurrentUser({})
+						.then((r) =>
+							update((state) => ({
+								...state,
+								user: r.user || null,
+								permissions: r.permissions ?? [],
+								isLoading: false
+							}))
+						)
+						.catch(() => update((state) => ({ ...state, isLoading: false })));
 				} else if (currentToken) {
 					await this.validateSession();
 				} else if (response.anonymousAccessEnabled) {
 					try {
 						const r = await rpcClient.auth.getCurrentUser({});
-						update(state => ({
+						update((state) => ({
 							...state,
 							permissions: r.permissions ?? [],
-							isLoading: false,
+							isLoading: false
 						}));
 					} catch {
-						update(state => ({ ...state, isLoading: false }));
+						update((state) => ({ ...state, isLoading: false }));
 					}
 				} else {
-					update(state => ({ ...state, isLoading: false }));
+					update((state) => ({ ...state, isLoading: false }));
 				}
 
 				return {
@@ -120,7 +125,7 @@ function createAuthStore() {
 				};
 			} catch (error) {
 				console.error('Failed to check auth status:', error);
-				update(state => ({ ...state, isLoading: false }));
+				update((state) => ({ ...state, isLoading: false }));
 				return { enabled: false, firstUserSetup: false, allowRegistration: false };
 			}
 		},
@@ -135,12 +140,12 @@ function createAuthStore() {
 					localStorage.setItem('auth_token', response.token);
 				}
 
-				update(state => ({
+				update((state) => ({
 					...state,
 					user: response.user || null,
 					token: response.token,
 					isAuthenticated: true,
-					isLoading: false,
+					isLoading: false
 				}));
 
 				// Fetch permissions after login
@@ -148,7 +153,7 @@ function createAuthStore() {
 
 				return response;
 			} catch (error) {
-				update(state => ({ ...state, isLoading: false }));
+				update((state) => ({ ...state, isLoading: false }));
 				throw error;
 			}
 		},
@@ -180,20 +185,26 @@ function createAuthStore() {
 				oidcEnabled: currentState.oidcEnabled,
 				firstUserSetup: currentState.firstUserSetup,
 				allowRegistration: currentState.allowRegistration,
-				anonymousAccessEnabled: currentState.anonymousAccessEnabled,
+				anonymousAccessEnabled: currentState.anonymousAccessEnabled
 			});
 
 			// Redirect to login
 			goto(resolve('/login'));
 		},
 
-		async register(username: string, email: string, password: string, inviteCode?: string, invitePin?: string) {
+		async register(
+			username: string,
+			email: string,
+			password: string,
+			inviteCode?: string,
+			invitePin?: string
+		) {
 			const request = create(RegisterRequestSchema, {
 				username,
 				email,
 				password,
 				inviteCode: inviteCode || undefined,
-				invitePin: invitePin || undefined,
+				invitePin: invitePin || undefined
 			});
 			await rpcClient.auth.register(request);
 
@@ -205,7 +216,7 @@ function createAuthStore() {
 			if (browser) {
 				localStorage.setItem('auth_token', token);
 			}
-			update(state => ({ ...state, token }));
+			update((state) => ({ ...state, token }));
 		},
 
 		async changePassword(oldPassword: string, newPassword: string) {
@@ -237,20 +248,20 @@ function createAuthStore() {
 				oidcEnabled: false,
 				firstUserSetup: true,
 				allowRegistration: false,
-				anonymousAccessEnabled: false,
+				anonymousAccessEnabled: false
 			});
 			return response;
 		},
 
 		async validateSession() {
 			let currentToken: string | null = null;
-			update(state => {
+			update((state) => {
 				currentToken = state.token;
 				return state;
 			});
 
 			if (!currentToken) {
-				update(state => ({ ...state, isLoading: false }));
+				update((state) => ({ ...state, isLoading: false }));
 				return false;
 			}
 
@@ -258,12 +269,12 @@ function createAuthStore() {
 				const response = await rpcClient.auth.getCurrentUser({});
 
 				if (response.user) {
-					update(state => ({
+					update((state) => ({
 						...state,
 						user: response.user || null,
 						permissions: response.permissions || [],
 						isAuthenticated: true,
-						isLoading: false,
+						isLoading: false
 					}));
 					return true;
 				} else {
@@ -271,18 +282,18 @@ function createAuthStore() {
 					if (browser) {
 						localStorage.removeItem('auth_token');
 					}
-					update(state => ({
+					update((state) => ({
 						...state,
 						user: null,
 						token: null,
 						permissions: [],
 						isAuthenticated: false,
-						isLoading: false,
+						isLoading: false
 					}));
 					return false;
 				}
 			} catch {
-				update(state => ({ ...state, isLoading: false }));
+				update((state) => ({ ...state, isLoading: false }));
 				return false;
 			}
 		},
@@ -304,38 +315,69 @@ function createAuthStore() {
 		hasPermission(resource: string, action: string, objectId?: string): boolean {
 			const state = get({ subscribe });
 			return checkPermission(state.permissions, resource, action, objectId);
-		},
+		}
 	};
 }
 
 export const authStore = createAuthStore();
 
 // Derived stores for convenience
-export const isAuthenticated = derived(authStore, $auth => $auth.isAuthenticated);
-export const currentUser = derived(authStore, $auth => $auth.user);
-export const userPermissions = derived(authStore, $auth => $auth.permissions);
-export const authEnabled = derived(authStore, $auth => $auth.localAuthEnabled || $auth.oidcEnabled);
+export const isAuthenticated = derived(authStore, ($auth) => $auth.isAuthenticated);
+export const currentUser = derived(authStore, ($auth) => $auth.user);
+export const userPermissions = derived(authStore, ($auth) => $auth.permissions);
+export const authEnabled = derived(
+	authStore,
+	($auth) => $auth.localAuthEnabled || $auth.oidcEnabled
+);
 
 // Permission-based derived stores
-export const canReadUsers = derived(authStore, $auth => checkPermission($auth.permissions, 'users', 'read'));
-export const canCreateUsers = derived(authStore, $auth => checkPermission($auth.permissions, 'users', 'create'));
-export const canUpdateUsers = derived(authStore, $auth => checkPermission($auth.permissions, 'users', 'update'));
-export const canDeleteUsers = derived(authStore, $auth => checkPermission($auth.permissions, 'users', 'delete'));
-export const canReadRoles = derived(authStore, $auth => checkPermission($auth.permissions, 'roles', 'read'));
-export const canCreateRoles = derived(authStore, $auth => checkPermission($auth.permissions, 'roles', 'create'));
-export const canUpdateRoles = derived(authStore, $auth => checkPermission($auth.permissions, 'roles', 'update'));
-export const canDeleteRoles = derived(authStore, $auth => checkPermission($auth.permissions, 'roles', 'delete'));
-export const canReadSettings = derived(authStore, $auth => checkPermission($auth.permissions, 'settings', 'read'));
-export const canUpdateSettings = derived(authStore, $auth => checkPermission($auth.permissions, 'settings', 'update'));
-export const canReadServers = derived(authStore, $auth => checkPermission($auth.permissions, 'servers', 'read'));
-export const canCreateServers = derived(authStore, $auth => checkPermission($auth.permissions, 'servers', 'create'));
-export const canReadModpacks = derived(authStore, $auth => checkPermission($auth.permissions, 'modpacks', 'read'));
+export const canReadUsers = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'users', 'read')
+);
+export const canCreateUsers = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'users', 'create')
+);
+export const canUpdateUsers = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'users', 'update')
+);
+export const canDeleteUsers = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'users', 'delete')
+);
+export const canReadRoles = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'roles', 'read')
+);
+export const canCreateRoles = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'roles', 'create')
+);
+export const canUpdateRoles = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'roles', 'update')
+);
+export const canDeleteRoles = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'roles', 'delete')
+);
+export const canReadSettings = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'settings', 'read')
+);
+export const canUpdateSettings = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'settings', 'update')
+);
+export const canReadServers = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'servers', 'read')
+);
+export const canCreateServers = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'servers', 'create')
+);
+export const canReadModpacks = derived(authStore, ($auth) =>
+	checkPermission($auth.permissions, 'modpacks', 'read')
+);
 
 // Check if user has any settings-adjacent permission (for sidebar visibility)
-export const canAccessSettings = derived(authStore, $auth =>
-	checkPermission($auth.permissions, 'settings', 'read') ||
-	checkPermission($auth.permissions, 'users', 'read') ||
-	checkPermission($auth.permissions, 'roles', 'read')
+export const canAccessSettings = derived(
+	authStore,
+	($auth) =>
+		checkPermission($auth.permissions, 'settings', 'read') ||
+		checkPermission($auth.permissions, 'users', 'read') ||
+		checkPermission($auth.permissions, 'roles', 'read')
 );
 
 export { checkPermission };

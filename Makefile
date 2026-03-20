@@ -42,6 +42,13 @@ dev-auth-%: clean
 	docker compose -f oidc/$*/docker-compose.yaml build --no-cache
 	docker compose -f oidc/$*/docker-compose.yaml up
 
+dev-docker: clean
+	docker compose down -v --remove-orphans
+	@docker run --rm -v /tmp:/tmp alpine rm -rf /tmp/discopanel
+	@echo "Building and running with base compose..."
+	docker compose build --no-cache
+	docker compose up
+
 dev-docs:
 	cd docs/discopanel && npm run dev
 	

@@ -6,7 +6,8 @@
 	import { DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import { Loader2, Folder, X } from '@lucide/svelte';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import { authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { FileInfo } from '$lib/proto/discopanel/v1/file_pb';
@@ -37,6 +38,11 @@
 	let uploadProgress = $state<UploadProgress | null>(null);
 	let currentUploadFilename = $state('');
 	let uploadAbortController = $state<AbortController | null>(null);
+
+	// --- Extraction state ---
+	let extracting = $state(false);
+	let extractionFilesExtracted = $state(0);
+	let extractionFilename = $state('');
 
 	// --- Tree state ---
 	let expandedDirs = $state<Set<string>>(new Set());
@@ -389,32 +395,34 @@
 	async function downloadFile(file: FileInfo) {
 		try {
 			if (file.isDir) {
-				// Download folder as zip
-				const response = await rpcClient.file.downloadArchive({
-					serverId: server.id,
-					paths: [file.path]
-				});
-				downloadBlob(new Uint8Array(response.content), response.filename);
+				await downloadArchive([file.path]);
 			} else {
-				const response = await rpcClient.file.getFile({
+				const response = await rpcClient.file.initFileDownload({
 					serverId: server.id,
 					path: file.path
 				});
-				downloadBlob(new Uint8Array(response.content), file.name);
+				triggerStreamDownload(response.sessionId, response.filename);
 			}
 		} catch {
 			toast.error('Failed to download');
 		}
 	}
 
-	function downloadBlob(data: Uint8Array, filename: string) {
-		const blob = new Blob([data as unknown as BlobPart]);
-		const url = URL.createObjectURL(blob);
+	async function downloadArchive(paths: string[]) {
+		const response = await rpcClient.file.downloadArchive({
+			serverId: server.id,
+			paths
+		});
+		triggerStreamDownload(response.sessionId, response.filename);
+	}
+
+	function triggerStreamDownload(sessionId: string, filename: string) {
+		const token = authStore.getToken();
+		const url = `/api/v1/download/${sessionId}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 		const a = document.createElement('a');
 		a.href = url;
 		a.download = filename;
 		a.click();
-		URL.revokeObjectURL(url);
 	}
 
 	async function deleteFile(file: FileInfo) {
@@ -523,11 +531,7 @@
 			}
 		}
 		try {
-			const response = await rpcClient.file.downloadArchive({
-				serverId: server.id,
-				paths
-			});
-			downloadBlob(new Uint8Array(response.content), response.filename);
+			await downloadArchive(paths);
 		} catch {
 			toast.error('Failed to download');
 		}
@@ -603,16 +607,45 @@
 
 	async function extractArchive(file?: FileInfo) {
 		const target = file || contextMenuFile || (selectedFiles.length === 1 ? selectedFiles[0] : null);
-		if (!target) return;
+		if (!target || extracting) return;
 		try {
-			await rpcClient.file.extractArchive({
+			extracting = true;
+			extractionFilename = target.name;
+			extractionFilesExtracted = 0;
+
+			const { operationId } = await rpcClient.file.extractArchive({
 				serverId: server.id,
 				path: target.path
 			});
-			toast.success('Archive extracted');
-			await loadFiles();
+
+			// Poll for progress
+			const poll = setInterval(async () => {
+				try {
+					const status = await rpcClient.file.getExtractionStatus(
+						{ operationId },
+						silentCallOptions
+					);
+					extractionFilesExtracted = status.filesExtracted;
+
+					if (status.state === 'completed') {
+						clearInterval(poll);
+						extracting = false;
+						toast.success(`Extracted ${status.filesExtracted} files`);
+						await loadFiles();
+					} else if (status.state === 'failed') {
+						clearInterval(poll);
+						extracting = false;
+						toast.error(status.error || 'Extraction failed');
+					}
+				} catch {
+					clearInterval(poll);
+					extracting = false;
+					toast.error('Lost connection to extraction');
+				}
+			}, 2000);
 		} catch (error) {
-			const msg = error instanceof Error ? error.message : 'Failed to extract';
+			extracting = false;
+			const msg = error instanceof Error ? error.message : 'Failed to start extraction';
 			toast.error(msg);
 		}
 	}
@@ -800,6 +833,21 @@
 			<p class="text-[10px] text-muted-foreground mt-0.5">
 				{formatBytes(uploadProgress.bytesUploaded)} / {formatBytes(uploadProgress.totalBytes)}
 			</p>
+		</div>
+	{/if}
+
+	<!-- Extraction progress -->
+	{#if extracting}
+		<div class="px-3 py-2 border-b">
+			<div class="flex items-center justify-between mb-1">
+				<span class="text-xs text-muted-foreground truncate">
+					Extracting: {extractionFilename}
+				</span>
+				<span class="text-xs text-muted-foreground">
+					{extractionFilesExtracted} files
+				</span>
+			</div>
+			<Progress value={100} class="h-1.5 animate-pulse" />
 		</div>
 	{/if}
 

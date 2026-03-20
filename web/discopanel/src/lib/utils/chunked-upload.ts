@@ -1,4 +1,5 @@
 import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+import { authStore } from '$lib/stores/auth';
 
 export interface UploadProgress {
 	sessionId: string;
@@ -27,8 +28,6 @@ export interface UploadStatus extends UploadProgress {
 	tempPath?: string;
 }
 
-// NOTE: Optional to init session, client can override server default up to max set by server
-const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
 const SESSION_STORAGE_KEY = 'chunked_upload_sessions';
 
 // Store session info in localStorage for resume capability
@@ -71,25 +70,24 @@ function removeSessionFromStorage(filename: string): void {
 }
 
 /**
- * Upload a file using chunked upload with resumability support
+ * Upload a file using streamed upload with resumability support
  */
 export async function uploadFile(
 	file: File,
 	options?: ChunkedUploadOptions
 ): Promise<UploadResult> {
-	const chunkSize = options?.chunkSize || DEFAULT_CHUNK_SIZE;
 	const onProgress = options?.onProgress;
 	const signal = options?.signal;
 
 	let sessionId = options?.sessionId;
-	let missingChunks: number[] = [];
+	let offset = 0;
 
 	// Check for existing session if not explicitly provided
 	if (!sessionId) {
 		sessionId = getSessionFromStorage(file.name, file.size) || undefined;
 	}
 
-	// If we have an existing session, check its status
+	// If we have an existing session, check its status for resume
 	if (sessionId) {
 		try {
 			const status = await getUploadStatus(sessionId);
@@ -97,10 +95,11 @@ export async function uploadFile(
 				removeSessionFromStorage(file.name);
 				return { sessionId, tempPath: status.tempPath || '' };
 			}
-			missingChunks = status.missingChunks;
+			offset = status.bytesUploaded;
 		} catch {
 			// Session expired or invalid, start fresh
 			sessionId = undefined;
+			offset = 0;
 		}
 	}
 
@@ -110,7 +109,7 @@ export async function uploadFile(
 			{
 				filename: file.name,
 				totalSize: BigInt(file.size),
-				chunkSize: chunkSize
+				chunkSize: 0 // Not used for streaming uploads
 			},
 			silentCallOptions
 		);
@@ -118,88 +117,98 @@ export async function uploadFile(
 		saveSessionToStorage(sessionId, file.name, file.size);
 	}
 
-	const totalChunks = Math.ceil(file.size / chunkSize);
-
-	// Determine which chunks to upload
-	const chunksToUpload =
-		missingChunks.length > 0 ? missingChunks : Array.from({ length: totalChunks }, (_, i) => i);
-
-	let chunksUploaded = totalChunks - chunksToUpload.length;
-	let bytesUploaded = chunksUploaded * chunkSize;
-	// Adjust for last chunk which might be smaller
-	if (chunksUploaded > 0 && chunksUploaded < totalChunks) {
-		bytesUploaded = Math.min(bytesUploaded, file.size);
-	}
-
 	// Report initial progress
 	if (onProgress) {
 		onProgress({
 			sessionId,
-			bytesUploaded,
+			bytesUploaded: offset,
 			totalBytes: file.size,
-			chunksUploaded,
-			totalChunks,
-			percentComplete: (bytesUploaded / file.size) * 100
+			chunksUploaded: 0,
+			totalChunks: 1,
+			percentComplete: file.size > 0 ? (offset / file.size) * 100 : 0
 		});
 	}
 
-	// Upload chunks
-	for (const chunkIndex of chunksToUpload) {
-		// Check for abort
-		if (signal?.aborted) {
-			throw new Error('Upload cancelled');
+	// Stream upload via single PUT request
+	const result = await streamUpload(sessionId, file, offset, onProgress, signal);
+
+	removeSessionFromStorage(file.name);
+	return result;
+}
+
+/**
+ * The actual streaming upload via XHR
+ */
+function streamUpload(
+	sessionId: string,
+	file: File,
+	offset: number,
+	onProgress?: (progress: UploadProgress) => void,
+	signal?: AbortSignal
+): Promise<UploadResult> {
+	return new Promise((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+		xhr.open('PUT', `/api/v1/upload/${sessionId}`);
+		xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+
+		// Auth headers
+		const headers = authStore.getHeaders();
+		for (const [key, value] of Object.entries(headers)) {
+			xhr.setRequestHeader(key, value as string);
 		}
 
-		const start = chunkIndex * chunkSize;
-		const end = Math.min(start + chunkSize, file.size);
-		const chunk = file.slice(start, end);
-		const chunkData = new Uint8Array(await chunk.arrayBuffer());
-
-		const response = await rpcClient.upload.uploadChunk(
-			{
-				sessionId,
-				chunkIndex,
-				data: chunkData
-			},
-			silentCallOptions
-		);
-
-		chunksUploaded++;
-		bytesUploaded = Number(response.bytesReceived);
-
-		// Report progress
-		if (onProgress) {
-			onProgress({
-				sessionId,
-				bytesUploaded,
-				totalBytes: file.size,
-				chunksUploaded: response.chunksReceived,
-				totalChunks,
-				percentComplete: (bytesUploaded / file.size) * 100
-			});
+		// Resume offset
+		if (offset > 0) {
+			xhr.setRequestHeader('X-Upload-Offset', String(offset));
 		}
 
-		// Check if completed
-		if (response.completed) {
-			removeSessionFromStorage(file.name);
-			return {
-				sessionId,
-				tempPath: response.tempPath
-			};
-		}
-	}
-
-	// Final status check
-	const finalStatus = await getUploadStatus(sessionId);
-	if (finalStatus.completed) {
-		removeSessionFromStorage(file.name);
-		return {
-			sessionId,
-			tempPath: finalStatus.tempPath || ''
+		// Progress tracking via XHR upload events
+		xhr.upload.onprogress = (e) => {
+			if (onProgress && e.lengthComputable) {
+				const bytesUploaded = offset + e.loaded;
+				onProgress({
+					sessionId,
+					bytesUploaded,
+					totalBytes: file.size,
+					chunksUploaded: 0,
+					totalChunks: 1,
+					percentComplete: file.size > 0 ? (bytesUploaded / file.size) * 100 : 0
+				});
+			}
 		};
-	}
 
-	throw new Error('Upload did not complete successfully');
+		xhr.onload = () => {
+			if (xhr.status >= 200 && xhr.status < 300) {
+				try {
+					const result = JSON.parse(xhr.responseText);
+					resolve({
+						sessionId,
+						tempPath: result.temp_path || ''
+					});
+				} catch {
+					reject(new Error('Invalid upload response'));
+				}
+			} else {
+				reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+			}
+		};
+
+		xhr.onerror = () => reject(new Error('Upload network error'));
+		xhr.onabort = () => reject(new Error('Upload cancelled'));
+
+		// Abort signal
+		if (signal) {
+			if (signal.aborted) {
+				xhr.abort();
+				return;
+			}
+			signal.addEventListener('abort', () => xhr.abort(), { once: true });
+		}
+
+		// Send the file blob
+		const blob = offset > 0 ? file.slice(offset) : file;
+		xhr.send(blob);
+	});
 }
 
 /**

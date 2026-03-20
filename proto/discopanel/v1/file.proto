@@ -30,6 +30,10 @@ service FileService {
   rpc CreateArchive(CreateArchiveRequest) returns (CreateArchiveResponse);
   // Download multiple files/folders as a zip
   rpc DownloadArchive(DownloadArchiveRequest) returns (DownloadArchiveResponse);
+  // Initiate a single-file download session (actual bytes served via GET /api/v1/download/{session_id})
+  rpc InitFileDownload(InitFileDownloadRequest) returns (InitFileDownloadResponse);
+  // Poll extraction progress
+  rpc GetExtractionStatus(GetExtractionStatusRequest) returns (GetExtractionStatusResponse);
 }
 
 // File metadata and tree
@@ -160,10 +164,11 @@ message DownloadArchiveRequest {
   repeated string paths = 2;
 }
 
-// Archive download result
+// Archive download session
 message DownloadArchiveResponse {
-  bytes content = 1;
+  string session_id = 1;
   string filename = 2;
+  int64 total_size = 3;
 }
 
 // File rename parameters
@@ -185,8 +190,32 @@ message ExtractArchiveRequest {
   string path = 2;
 }
 
-// Extraction result
+// Extraction started
 message ExtractArchiveResponse {
-  string message = 1;
+  string operation_id = 1;
+}
+
+// Extraction status poll
+message GetExtractionStatusRequest {
+  string operation_id = 1;
+}
+
+// Extraction progress
+message GetExtractionStatusResponse {
+  string state = 1;
   int32 files_extracted = 2;
+  string error = 3;
+}
+
+// Single file download session
+message InitFileDownloadRequest {
+  string server_id = 1;
+  string path = 2;
+}
+
+// Download session
+message InitFileDownloadResponse {
+  string session_id = 1;
+  string filename = 2;
+  int64 total_size = 3;
 }

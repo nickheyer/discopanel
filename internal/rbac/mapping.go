@@ -12,21 +12,21 @@ var PublicProcedures = map[string]bool{
 	"/discopanel.v1.AuthService/GetAuthStatus":   true,
 	"/discopanel.v1.AuthService/Login":           true,
 	"/discopanel.v1.AuthService/Register":        true,
-	"/discopanel.v1.AuthService/GetOIDCLoginURL":   true,
-	"/discopanel.v1.AuthService/ValidateInvite":    true,
-	"/discopanel.v1.AuthService/UseRecoveryKey":    true,
+	"/discopanel.v1.AuthService/GetOIDCLoginURL": true,
+	"/discopanel.v1.AuthService/ValidateInvite":  true,
+	"/discopanel.v1.AuthService/UseRecoveryKey":  true,
 }
 
 // AuthenticatedOnlyProcedures lists RPC procedures that require authentication
 // but no specific resource permission.
 var AuthenticatedOnlyProcedures = map[string]bool{
 	// AuthService - authenticated user operations
-	"/discopanel.v1.AuthService/GetCurrentUser":  true,
-	"/discopanel.v1.AuthService/Logout":          true,
-	"/discopanel.v1.AuthService/ChangePassword":  true,
-	"/discopanel.v1.AuthService/CreateAPIToken":  true,
-	"/discopanel.v1.AuthService/ListAPITokens":   true,
-	"/discopanel.v1.AuthService/DeleteAPIToken":  true,
+	"/discopanel.v1.AuthService/GetCurrentUser": true,
+	"/discopanel.v1.AuthService/Logout":         true,
+	"/discopanel.v1.AuthService/ChangePassword": true,
+	"/discopanel.v1.AuthService/CreateAPIToken": true,
+	"/discopanel.v1.AuthService/ListAPITokens":  true,
+	"/discopanel.v1.AuthService/DeleteAPIToken": true,
 
 	// MinecraftService - reference data, no resource ownership
 	"/discopanel.v1.MinecraftService/GetMinecraftVersions": true,
@@ -67,18 +67,20 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.ConfigService/UpdateGlobalSettings": {Resource: ResourceSettings, Action: ActionUpdate},
 
 	// ── FileService ────────────────────────────────────────────────────
-	"/discopanel.v1.FileService/ListFiles":        {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/GetFile":          {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/SaveUploadedFile": {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/UpdateFile":       {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/DeleteFile":       {Resource: ResourceFiles, Action: ActionDelete, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/RenameFile":       {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/ExtractArchive":   {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/CreateFolder":     {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/MoveFile":         {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/CopyFile":         {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/CreateArchive":    {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
-	"/discopanel.v1.FileService/DownloadArchive":  {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/ListFiles":           {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/GetFile":             {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/SaveUploadedFile":    {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/UpdateFile":          {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/DeleteFile":          {Resource: ResourceFiles, Action: ActionDelete, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/RenameFile":          {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/ExtractArchive":      {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/CreateFolder":        {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/MoveFile":            {Resource: ResourceFiles, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/CopyFile":            {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/CreateArchive":       {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/DownloadArchive":     {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/InitFileDownload":    {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	"/discopanel.v1.FileService/GetExtractionStatus": {Resource: ResourceFiles, Action: ActionRead},
 
 	// ── ModService ─────────────────────────────────────────────────────
 	"/discopanel.v1.ModService/ListMods":          {Resource: ResourceMods, Action: ActionRead, ObjectIDField: "server_id"},

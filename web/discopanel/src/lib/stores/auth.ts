@@ -307,6 +307,10 @@ function createAuthStore() {
 			return headers;
 		},
 
+		getToken(): string | null {
+			return get({ subscribe }).token;
+		},
+
 		hasRole(role: string): boolean {
 			const state = get({ subscribe });
 			return state.user?.roles?.includes(role) ?? false;

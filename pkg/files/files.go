@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 
 	"github.com/mholt/archives"
 )
@@ -101,32 +102,33 @@ func SanitizePathName(name string) string {
 	return safe
 }
 
-// Extracts archive file to destination
-func ExtractArchive(ctx context.Context, archivePath string, destPath string) error {
+// Extract archive to destPath
+func ExtractArchive(ctx context.Context, archivePath string, destPath string, counter *atomic.Int32) (int, error) {
 	archiveFile, err := os.Open(archivePath)
 	if err != nil {
-		return fmt.Errorf("failed to open archive file: %w", err)
+		return 0, fmt.Errorf("failed to open archive file: %w", err)
 	}
 	defer archiveFile.Close()
 
 	// Identify archive format
 	format, stream, err := archives.Identify(ctx, archivePath, archiveFile)
 	if err != nil {
-		return fmt.Errorf("failed to identify archive format: %w", err)
+		return 0, fmt.Errorf("failed to identify archive format: %w", err)
 	}
 
 	// Is format extractable?
 	extractor, ok := format.(archives.Extractor)
 	if !ok {
-		return fmt.Errorf("format does not support extraction")
+		return 0, fmt.Errorf("format does not support extraction")
 	}
 
 	// Make dest
 	if err := os.MkdirAll(destPath, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory: %w", err)
+		return 0, fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
 	// Extract and walk while recursively extracting
+	filesExtracted := 0
 	err = extractor.Extract(ctx, stream, func(ctx context.Context, f archives.FileInfo) error {
 		// Build path
 		targetPath := filepath.Join(destPath, f.NameInArchive)
@@ -169,14 +171,18 @@ func ExtractArchive(ctx context.Context, archivePath string, destPath string) er
 			os.Chmod(targetPath, f.Mode())
 		}
 
+		filesExtracted++
+		if counter != nil {
+			counter.Add(1)
+		}
 		return nil
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to extract archive: %w", err)
+		return filesExtracted, fmt.Errorf("failed to extract archive: %w", err)
 	}
 
-	return nil
+	return filesExtracted, nil
 }
 
 func IsTextFile(path string) bool {
@@ -220,6 +226,35 @@ func IsTextFile(path string) bool {
 	return true
 }
 
+// These get zip.Store (no compression) to avoid wasting CPU.
+var compressedExts = map[string]bool{
+	// Archives
+	".zip": true, ".gz": true, ".bz2": true, ".xz": true, ".7z": true,
+	".rar": true, ".lz": true, ".zst": true, ".lz4": true, ".br": true,
+	".tgz": true, ".tbz2": true, ".txz": true,
+	// Images
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true, ".avif": true,
+	// Audio
+	".mp3": true, ".aac": true, ".ogg": true, ".opus": true, ".flac": true, ".m4a": true,
+	// Video
+	".mp4": true, ".mkv": true, ".avi": true, ".webm": true, ".mov": true, ".flv": true, ".m4v": true,
+	// Java / packages (already zip-based)
+	".jar": true, ".war": true, ".ear": true, ".deb": true, ".rpm": true, ".whl": true,
+	// Game-specific
+	".mcworld": true, ".mcpack": true,
+	// Documents (zip-based internally)
+	".docx": true, ".xlsx": true, ".pptx": true,
+}
+
+// Get zip.Store for compressed, else zip.Deflate
+func zipMethod(name string) uint16 {
+	ext := strings.ToLower(filepath.Ext(name))
+	if compressedExts[ext] {
+		return zip.Store
+	}
+	return zip.Deflate
+}
+
 // CreateZipToWriter writes a zip archive of the given paths to the writer.
 // basePath is the root directory used to calculate relative paths in the archive.
 // Returns the number of files archived.
@@ -255,7 +290,7 @@ func CreateZipToWriter(paths []string, basePath string, w io.Writer) (int, error
 					return err
 				}
 				header.Name = rel
-				header.Method = zip.Deflate
+				header.Method = zipMethod(rel)
 				writer, err := zw.CreateHeader(header)
 				if err != nil {
 					return err
@@ -278,7 +313,7 @@ func CreateZipToWriter(paths []string, basePath string, w io.Writer) (int, error
 				return count, fmt.Errorf("failed to create header for %s: %w", p, err)
 			}
 			header.Name = p
-			header.Method = zip.Deflate
+			header.Method = zipMethod(p)
 			writer, err := zw.CreateHeader(header)
 			if err != nil {
 				return count, fmt.Errorf("failed to create zip entry for %s: %w", p, err)

@@ -270,6 +270,34 @@ func (m *Manager) IsAnyAuthEnabled() bool {
 	return m.config.Local.Enabled || m.config.OIDC.Enabled
 }
 
+// AuthenticateFromHeader validates the bearer token from an Authorization header value.
+// Handles session tokens, API tokens, no-auth bypass, and anonymous access.
+func (m *Manager) AuthenticateFromHeader(ctx context.Context, authHeader string) (*AuthenticatedUser, error) {
+	if !m.IsAnyAuthEnabled() {
+		return &AuthenticatedUser{
+			ID: "admin", Username: "admin", Roles: []string{"admin"}, Provider: "none",
+		}, nil
+	}
+
+	token := ""
+	if authHeader != "" {
+		token = strings.TrimPrefix(strings.TrimPrefix(authHeader, "Bearer "), "bearer ")
+	}
+
+	if token != "" {
+		if strings.HasPrefix(token, "dp_") {
+			return m.ValidateAPIToken(ctx, token)
+		}
+		return m.ValidateSession(ctx, token)
+	}
+
+	if m.IsAnonymousAccessEnabled() {
+		return m.AnonymousUser(), nil
+	}
+
+	return nil, ErrInvalidToken
+}
+
 func (m *Manager) IsLocalAuthEnabled() bool {
 	return m.config.Local.Enabled
 }

@@ -1,7 +1,6 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,11 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/pkg/download"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -24,22 +27,35 @@ import (
 // Compile-time check that FileService implements the interface
 var _ discopanelv1connect.FileServiceHandler = (*FileService)(nil)
 
+// extractionOp tracks an in-progress or completed extraction.
+type extractionOp struct {
+	State          string // "extracting", "completed", "failed"
+	FilesExtracted atomic.Int32
+	Error          string
+	CompletedAt    time.Time
+}
+
 // FileService implements the File service
 type FileService struct {
-	store         *storage.Store
-	docker        *docker.Client
-	log           *logger.Logger
-	uploadManager *upload.Manager
+	store           *storage.Store
+	docker          *docker.Client
+	log             *logger.Logger
+	uploadManager   *upload.Manager
+	downloadManager *download.Manager
+	extractions     sync.Map
 }
 
 // NewFileService creates a new file service
-func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, log *logger.Logger) *FileService {
-	return &FileService{
-		store:         store,
-		docker:        docker,
-		log:           log,
-		uploadManager: uploadManager,
+func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, downloadManager *download.Manager, log *logger.Logger) *FileService {
+	svc := &FileService{
+		store:           store,
+		docker:          docker,
+		log:             log,
+		uploadManager:   uploadManager,
+		downloadManager: downloadManager,
 	}
+	go svc.cleanupExtractions()
+	return svc
 }
 
 // ListFiles lists files in a directory
@@ -387,28 +403,58 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 
 	destPath := filepath.Join(archiveDir, folderName)
 
-	// Extract the archive
-	if err := files.ExtractArchive(ctx, fullArchivePath, destPath); err != nil {
-		s.log.Error("Failed to extract archive: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to extract archive: %w", err))
-	}
+	// Start async extraction
+	opID := uuid.New().String()
+	op := &extractionOp{State: "extracting"}
+	s.extractions.Store(opID, op)
 
-	// Count extracted files
-	filesExtracted := 0
-	err = filepath.Walk(destPath, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
-			filesExtracted++
+	go func() {
+		_, err := files.ExtractArchive(context.Background(), fullArchivePath, destPath, &op.FilesExtracted)
+		if err != nil {
+			op.Error = err.Error()
+			op.State = "failed"
+			s.log.Error("Extraction %s failed: %v", opID, err)
+		} else {
+			op.State = "completed"
+			s.log.Info("Extraction %s completed: %d files", opID, op.FilesExtracted.Load())
 		}
-		return nil
-	})
-	if err != nil {
-		s.log.Warn("Failed to count extracted files: %v", err)
-	}
+		op.CompletedAt = time.Now()
+	}()
 
 	return connect.NewResponse(&v1.ExtractArchiveResponse{
-		Message:        "Archive extracted successfully",
-		FilesExtracted: int32(filesExtracted),
+		OperationId: opID,
 	}), nil
+}
+
+// Get progress of extraction
+func (s *FileService) GetExtractionStatus(ctx context.Context, req *connect.Request[v1.GetExtractionStatusRequest]) (*connect.Response[v1.GetExtractionStatusResponse], error) {
+	val, ok := s.extractions.Load(req.Msg.OperationId)
+	if !ok {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("extraction operation not found"))
+	}
+	op := val.(*extractionOp)
+
+	return connect.NewResponse(&v1.GetExtractionStatusResponse{
+		State:          op.State,
+		FilesExtracted: op.FilesExtracted.Load(),
+		Error:          op.Error,
+	}), nil
+}
+
+// Rm finished extraction ops after 1 hour.
+func (s *FileService) cleanupExtractions() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		cutoff := time.Now().Add(-1 * time.Hour)
+		s.extractions.Range(func(key, value any) bool {
+			op := value.(*extractionOp)
+			if !op.CompletedAt.IsZero() && op.CompletedAt.Before(cutoff) {
+				s.extractions.Delete(key)
+			}
+			return true
+		})
+	}
 }
 
 // CreateFolder creates a new directory
@@ -591,7 +637,8 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 	}), nil
 }
 
-// DownloadArchive creates a zip in memory and returns the bytes
+// DownloadArchive creates a zip on disk and returns a download session.
+// The actual bytes are served via GET /api/v1/download/{session_id}.
 func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[v1.DownloadArchiveRequest]) (*connect.Response[v1.DownloadArchiveResponse], error) {
 	msg := req.Msg
 
@@ -611,22 +658,73 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 		}
 	}
 
-	var buf bytes.Buffer
-	_, err = files.CreateZipToWriter(msg.Paths, server.DataPath, &buf)
-	if err != nil {
-		s.log.Error("Failed to create download archive: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create archive"))
-	}
-
+	// Determine download filename
 	filename := "download.zip"
 	if len(msg.Paths) == 1 {
 		base := filepath.Base(msg.Paths[0])
 		filename = strings.TrimSuffix(base, filepath.Ext(base)) + ".zip"
 	}
 
+	// Create zip on disk in temp directory
+	tempPath := filepath.Join(s.downloadManager.TempDir(), fmt.Sprintf("download-%s.zip", time.Now().Format("20060102-150405.000")))
+	_, err = files.CreateZipArchive(msg.Paths, server.DataPath, tempPath)
+	if err != nil {
+		s.log.Error("Failed to create download archive: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create archive"))
+	}
+
+	// Stat to get final size
+	info, err := os.Stat(tempPath)
+	if err != nil {
+		os.Remove(tempPath)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stat archive"))
+	}
+
+	// Register download session (temp zip — delete after expiry)
+	session := s.downloadManager.InitSession(tempPath, filename, info.Size(), true)
+
 	return connect.NewResponse(&v1.DownloadArchiveResponse{
-		Content:  buf.Bytes(),
-		Filename: filename,
+		SessionId: session.ID,
+		Filename:  filename,
+		TotalSize: info.Size(),
+	}), nil
+}
+
+// Creates a download session for file
+// Bytes are served via GET /api/v1/download/{session_id}.
+func (s *FileService) InitFileDownload(ctx context.Context, req *connect.Request[v1.InitFileDownloadRequest]) (*connect.Response[v1.InitFileDownloadResponse], error) {
+	msg := req.Msg
+
+	server, err := s.store.GetServer(ctx, msg.ServerId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
+	}
+
+	fullPath := filepath.Join(server.DataPath, msg.Path)
+	if !strings.HasPrefix(fullPath, server.DataPath) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("file not found"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to access file"))
+	}
+
+	if info.IsDir() {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path is a directory, use DownloadArchive instead"))
+	}
+
+	// Point session at file
+	filename := filepath.Base(msg.Path)
+	session := s.downloadManager.InitSession(fullPath, filename, info.Size(), false)
+
+	return connect.NewResponse(&v1.InitFileDownloadResponse{
+		SessionId: session.ID,
+		Filename:  filename,
+		TotalSize: info.Size(),
 	}), nil
 }
 

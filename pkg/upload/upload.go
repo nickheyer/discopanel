@@ -3,6 +3,7 @@ package upload
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -196,6 +197,70 @@ func (m *Manager) WriteChunk(sessionID string, chunkIndex int32, data []byte) (c
 	}
 
 	return session.Completed, nil
+}
+
+// Writes data from a reader to the session file starting at the given offset
+func (m *Manager) WriteStream(sessionID string, r io.Reader, offset int64) (bytesWritten int64, completed bool, err error) {
+	session, err := m.GetSession(sessionID)
+	if err != nil {
+		return 0, false, err
+	}
+
+	// Validate state under lock
+	session.mu.Lock()
+	if session.Completed {
+		session.mu.Unlock()
+		return 0, true, ErrSessionCompleted
+	}
+	file := session.file
+	if file == nil {
+		session.mu.Unlock()
+		return 0, false, errors.New("session file not open")
+	}
+	session.mu.Unlock()
+
+	buf := make([]byte, 256*1024) // 256KB read buffer
+	pos := offset
+
+	for {
+		n, readErr := r.Read(buf)
+		if n > 0 {
+			_, writeErr := file.WriteAt(buf[:n], pos)
+			if writeErr != nil {
+				return pos - offset, false, fmt.Errorf("failed to write: %w", writeErr)
+			}
+			pos += int64(n)
+
+			// Update progress under lock (brief hold)
+			session.mu.Lock()
+			session.BytesReceived = pos
+			session.mu.Unlock()
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return pos - offset, false, readErr
+		}
+	}
+
+	// Check completion under lock
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	if session.BytesReceived >= session.TotalSize && !session.Completed {
+		session.Completed = true
+		if err := session.file.Sync(); err != nil {
+			m.log.Error("Failed to sync file for session %s: %v", sessionID, err)
+		}
+		if err := session.file.Close(); err != nil {
+			m.log.Error("Failed to close file for session %s: %v", sessionID, err)
+		}
+		session.file = nil
+		m.log.Info("Upload session completed (stream): %s", sessionID)
+	}
+
+	return pos - offset, session.Completed, nil
 }
 
 // GetMissingChunks returns the list of chunk indices that haven't been received

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -22,6 +21,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/rpc/services"
 	"github.com/nickheyer/discopanel/internal/scheduler"
 	"github.com/nickheyer/discopanel/internal/ws"
+	"github.com/nickheyer/discopanel/pkg/download"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	"github.com/nickheyer/discopanel/pkg/upload"
@@ -48,6 +48,7 @@ type Server struct {
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	uploadManager    *upload.Manager
+	downloadManager  *download.Manager
 	wsHub            *ws.Hub
 }
 
@@ -85,6 +86,9 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
 	uploadManager := upload.NewManager(cfg.Storage.TempDir, uploadTTL, cfg.Upload.MaxUploadSize, log)
 
+	// Initialize download manager
+	downloadManager := download.NewManager(cfg.Storage.TempDir, uploadTTL, log)
+
 	// Initialize WebSocket hub
 	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, docker, log)
 	go wsHub.Run()
@@ -103,6 +107,7 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
 		uploadManager:    uploadManager,
+		downloadManager:  downloadManager,
 		wsHub:            wsHub,
 	}
 
@@ -160,6 +165,12 @@ func (s *Server) setupHandler() {
 		mux.HandleFunc("/api/v1/auth/oidc/callback", s.oidcHandler.HandleCallback)
 	}
 
+	// Streaming file upload endpoint
+	mux.Handle("/api/v1/upload/", handlers.NewUploadStreamHandler(s.uploadManager, s.authManager, s.enforcer, s.log))
+
+	// Streaming file download endpoint
+	mux.Handle("/api/v1/download/", handlers.NewDownloadStreamHandler(s.downloadManager, s.authManager, s.enforcer, s.log))
+
 	// Serve dynamic OpenAPI spec
 	mux.HandleFunc("/api/v1/openapi.yaml", handlers.NewOpenAPIHandler(s.log, s.authManager.IsAnyAuthEnabled))
 
@@ -175,7 +186,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.log)
-	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.log)
+	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
@@ -261,44 +272,11 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 				return next(ctx, req)
 			}
 
-			// If no auth providers are enabled, bypass auth entirely - grant full admin access
-			if !s.authManager.IsAnyAuthEnabled() {
-				superUser := &auth.AuthenticatedUser{
-					ID:       "admin",
-					Username: "admin",
-					Roles:    []string{"admin"},
-					Provider: "none",
-				}
-				ctx = auth.WithUser(ctx, superUser)
-				return next(ctx, req)
-			}
-
-			// Extract token from Authorization header
-			token := ""
-			if authHeader := req.Header().Get("Authorization"); authHeader != "" {
-				token = strings.TrimPrefix(strings.TrimPrefix(authHeader, "Bearer "), "bearer ")
-			}
-
-			var user *auth.AuthenticatedUser
-
-			if token != "" {
-				var err error
-				if strings.HasPrefix(token, "dp_") {
-					// API token authentication
-					user, err = s.authManager.ValidateAPIToken(ctx, token)
-				} else {
-					// Session/JWT authentication
-					user, err = s.authManager.ValidateSession(ctx, token)
-				}
-				if err != nil {
-					s.log.Debug("Auth: Token validation failed for %s: %v", procedure, err)
-					return nil, connect.NewError(connect.CodeUnauthenticated, err)
-				}
-			} else if s.authManager.IsAnonymousAccessEnabled() {
-				// Anonymous access
-				user = s.authManager.AnonymousUser()
-			} else {
-				return nil, connect.NewError(connect.CodeUnauthenticated, auth.ErrInvalidToken)
+			// Authenticate via shared auth logic
+			user, err := s.authManager.AuthenticateFromHeader(ctx, req.Header().Get("Authorization"))
+			if err != nil {
+				s.log.Debug("Auth: Token validation failed for %s: %v", procedure, err)
+				return nil, connect.NewError(connect.CodeUnauthenticated, err)
 			}
 
 			// Set user in context
@@ -342,6 +320,7 @@ var pollingProcedures = []string{
 	"/discopanel.v1.SupportService/GetApplicationLogs",
 	"/discopanel.v1.UploadService/UploadChunk",
 	"/discopanel.v1.UploadService/GetUploadStatus",
+	"/discopanel.v1.FileService/GetExtractionStatus",
 }
 
 // Checks if a procedure is a polling endpoint or high-frequency endpoint

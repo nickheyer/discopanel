@@ -4,11 +4,30 @@ description: The main configuration page for your server.
 ---
 
 # Config
-Here you will find the majority of the availible configuration options available for your server.
+Here you will find the majority of the available configuration options available for your server.
 
 <details>
   <summary>JVM Config</summary>
-  To be added
+
+    | Field | Details |  Example |
+    |:---:|:---:|:---:|
+    |    User ID    | The linux user id to run as, for file permissions  | 1000 |
+    |   Group ID | The linux group id to run as, for file permissions | 1000 |
+    | Memory | (Unknown, Field is locked) |
+    | Initial Memory | (Unknown, Field is locked) |
+    | Maximum Memory | (Unknown, Field is locked) |
+    | Timezone | The timezone used | UTC |
+    | Enable Rolling Logs | Use the rolling Logs strategy | false |
+    | Enable JMX Logging | Used to monitor the server from an external application | false |
+    | JMX Host | The IP/host Running docker for JMX |
+    | Use AIKAR Flags | Use Aikar's optimized JVM flags for GC tuning | false |
+    | Use MeowIce's JVM flags | Use MeowIce's JVM flags optimized for Java 17+ | false |
+    | Enable MeowIce's flags | Enable MeowIce's flags for GraalVM | false |
+    | General JVM options | (Unknown, Link page to options) |
+    | JVM XX Options | JVM -XX options | (Unknown, Link page to options) |
+    | JVM DD Options | Comma separated list of system properties as name=value pairs | (Unknown, Link page to options) |
+    | Log timestamp | Include timestamp with each log | false |
+
 </details>
 <details>
   <summary>Server Settings</summary>

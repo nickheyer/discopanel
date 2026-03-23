@@ -22,6 +22,18 @@ export default defineConfig({
 						{ label: 'Proxmox LXC', slug: 'getting-started/proxmox' },
 						{ label: 'Prebuilt Binaries', slug: 'getting-started/prebuilt-binaries' },
 						{ label: 'Building from Source', slug: 'getting-started/build-from-source' },
+						{ label: 'Creating Your First Server' , slug: 'getting-started/create server' },
+					],
+				},
+				{
+					label: "Managing Your Minecraft Server",
+					items: [
+						{ label: 'Overview', slug: 'managing-your-server/overview' },
+						{ label: 'Console', slug: 'managing-your-server/console' },
+						{ label: 'Config', slug: 'managing-your-server/config' },
+						{ label: 'Modules', slug: 'managing-your-server/modules' },
+						{ label: 'Files', slug: 'managing-your-server/files' },
+						{ label: 'Tasks', slug: 'managing-your-server/tasks' },
 					],
 				},
 				{ label: 'Configuration', slug: 'configuration' },

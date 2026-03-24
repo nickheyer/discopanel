@@ -34,6 +34,7 @@ export default defineConfig({
 						{ label: 'Modules', slug: 'managing-your-server/modules' },
 						{ label: 'Files', slug: 'managing-your-server/files' },
 						{ label: 'Tasks', slug: 'managing-your-server/tasks' },
+						{ label: 'Routing', slug: 'managing-your-server/routing' },
 					],
 				},
 				{ label: 'Configuration', slug: 'configuration' },

@@ -9,29 +9,55 @@ Here you will find the majority of the available configuration options available
 <details>
   <summary>JVM Config</summary>
 
-    | Field | Details |  Example |
-    |:---:|:---:|:---:|
-    |    User ID    | The linux user id to run as, for file permissions  | 1000 |
-    |   Group ID | The linux group id to run as, for file permissions | 1000 |
-    | Memory | (Unknown, Field is locked) |
-    | Initial Memory | (Unknown, Field is locked) |
-    | Maximum Memory | (Unknown, Field is locked) |
-    | Timezone | The timezone used | UTC |
-    | Enable Rolling Logs | Use the rolling Logs strategy | false |
-    | Enable JMX Logging | Used to monitor the server from an external application | false |
-    | JMX Host | The IP/host Running docker for JMX |
-    | Use AIKAR Flags | Use Aikar's optimized JVM flags for GC tuning | false |
-    | Use MeowIce's JVM flags | Use MeowIce's JVM flags optimized for Java 17+ | false |
-    | Enable MeowIce's flags | Enable MeowIce's flags for GraalVM | false |
-    | General JVM options | (Unknown, Link page to options) |
-    | JVM XX Options | JVM -XX options | (Unknown, Link page to options) |
-    | JVM DD Options | Comma separated list of system properties as name=value pairs | (Unknown, Link page to options) |
-    | Log timestamp | Include timestamp with each log | false |
+    | Field | Details | Editable | Example |
+    |:---:|:---:|:---:|:---:|
+    | User ID | The linux user id to run as, for file permissions  | 1000 |
+    | Group ID | The linux group id to run as, for file permissions | 1000 |
+    | Memory | (Unknown, Field is locked) | no |
+    | Initial Memory | (Unknown, Field is locked) | no |
+    | Maximum Memory | (Unknown, Field is locked) | no |
+    | Timezone | The timezone used | yes | UTC |
+    | Enable Rolling Logs | Use the rolling Logs strategy | yes | false |
+    | Enable JMX Logging | Used to monitor the server from an external application | yes | false |
+    | JMX Host | The IP/host Running docker for JMX | yes |
+    | Use AIKAR Flags | Use Aikar's optimized JVM flags for GC tuning | yes | false |
+    | Use MeowIce's JVM flags | Use MeowIce's JVM flags optimized for Java 17+ | yes | false |
+    | Enable MeowIce's flags | Enable MeowIce's flags for GraalVM | yes | false |
+    | General JVM options | (Unknown, Link page to options) | yes |
+    | JVM XX Options | JVM -XX options | yes | (Unknown, Link page to options) |
+    | JVM DD Options | Comma separated list of system properties as name=value pairs | yes | (Unknown, Link page to options) |
+    | Log timestamp | Include timestamp with each log | yes | false |
 
 </details>
 <details>
   <summary>Server Settings</summary>
-  To be added
+
+    | Field | Details | Editable | Example |
+    |:---:|:---:|:---:|:---:|
+    | Server Type | The software the server is running. Configured in the overview tab | no |
+    | Custom Server Jar | The URL of container path to a custom JAR file for the server | yes |
+    | Custom jar execution | Custom jar execution command | yes | -cp classpath MainClass or -jar file.jar |
+    | Accept EULA | Forced to true (required to start the server | no |
+    | Minecraft Version | Configured in the overview tab | no |
+    | MOTD (Message of the day) | The text shown below the server name in the multiplayer tab of a client | yes | The greatest Server |
+    | Server Icon | The URL or path to the server icon | yes | /icons/fun |
+    | Override Icon | Override the existing icon file | yes | true |
+    | Server Name | What your server is called | yes | Hypixel |
+    | Server Port |  (Unknown, Field is locked) | no | 25565 |
+    | Escape unicode in server.properties | Used to prevent server.properties recognising them as paths/otherwise | yes | true |
+    | Bug report link | The link used to report bugs | yes | google.com |
+    | Execute directly | Enable docker attach with color and interactive capabilities | yes | true |
+    | Stop Server announce Delay | Delay in seconds after shutdown announcement to shutdown | yes | true |
+    | Proxy URL | HTTP/HTTPS proxy URL | yes | (unknown) |
+    | Enable console | Console setting for older Spigot versions | yes | true |
+    | Enable GUI | GUI interface setting for older servers | yes | false |
+    | Stop Duration | Seconds to wait for graceful shutdown | yes | 60 |
+    | Setup Only | Used to only create the minecraft files without starting the server | yes | false |
+    | Use Flare Flags | Enable JVM flags for Flare profiling suite | yes | false |
+    | use SIMD Flags | Support for optimized SIMD operations | yes | false |
+    | Custom server properties | Extra newline delimited name=value pairs to be added to "server.properties" | yes | port=6666 |
+
+
 </details>
 <details>
   <summary>Game Settings</summary>

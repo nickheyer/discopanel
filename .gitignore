@@ -433,3 +433,14 @@ FodyWeavers.xsd
 tmp/
 .claude/
 dev/bug-analysis/
+
+
+
+# Files from IDEA editor
+/.idea/.gitignore
+/.idea/discopanel.iml
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/prettier.xml
+/.idea/inspectionProfiles/Project_Default.xml
+/.idea/vcs.xml

@@ -71,6 +71,7 @@ type DockerConfig struct {
 	Version      string `mapstructure:"version" json:"version"`
 	NetworkName  string `mapstructure:"network_name" json:"network_name"`
 	RegistryURL  string `mapstructure:"registry_url" json:"registry_url"`
+	DNS          string `mapstructure:"dns" json:"dns"`
 }
 
 type StorageConfig struct {
@@ -197,6 +198,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.version", "")
 	v.SetDefault("docker.network_name", "discopanel-network")
 	v.SetDefault("docker.registry_url", "")
+	v.SetDefault("docker.dns", "")
 
 	// Storage defaults
 	dataDir, err := filepath.Abs("./data")

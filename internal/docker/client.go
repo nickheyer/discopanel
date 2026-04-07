@@ -179,6 +179,7 @@ type ClientConfig struct {
 	APIVersion  string
 	NetworkName string
 	RegistryURL string
+	DNS         string
 }
 
 type ContainerLogStreamer interface {
@@ -350,6 +351,11 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 	if overrides.GetNetworkMode() != "" {
 		hostConfig.NetworkMode = container.NetworkMode(overrides.GetNetworkMode())
 	}
+
+	// Apply DNS override
+	if len(overrides.GetDns()) > 0 {
+		hostConfig.DNS = overrides.GetDns()
+	}
 }
 
 func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerConfig) (string, error) {
@@ -461,6 +467,11 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 			Type:   "json-file",
 			Config: map[string]string{"max-size": "10m", "max-file": "3"},
 		},
+	}
+
+	// Apply global DNS from config
+	if c.config.DNS != "" {
+		hostConfig.DNS = []string{c.config.DNS}
 	}
 
 	// Apply docker overrides

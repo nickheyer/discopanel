@@ -39,6 +39,7 @@
 		if (overrides.capAdd && overrides.capAdd.length > 0) count++;
 		if (overrides.capDrop && overrides.capDrop.length > 0) count++;
 		if (overrides.devices && overrides.devices.length > 0) count++;
+		if (overrides.dns && overrides.dns.length > 0) count++;
 		return count;
 	});
 
@@ -102,6 +103,7 @@
 		if (overrides.cpuLimit) updates.cpuLimit = overrides.cpuLimit;
 		if (overrides.restartPolicy) updates.restartPolicy = overrides.restartPolicy;
 		if (overrides.entrypoint && overrides.entrypoint.length > 0) updates.entrypoint = [...overrides.entrypoint];
+		if (overrides.dns && overrides.dns.length > 0) updates.dns = [...overrides.dns];
 
 		// Update the specific field
 		if (value === undefined || value === null ||
@@ -477,6 +479,29 @@
 								class="h-8 text-xs"
 							/>
 						</div>
+					</div>
+
+					<!-- DNS Servers -->
+					<div class="space-y-2">
+						<Label for="dns-servers" class="text-sm">DNS Servers</Label>
+						<Input
+							id="dns-servers"
+							type="text"
+							placeholder="e.g., 8.8.8.8, 1.1.1.1"
+							value={overrides?.dns?.join(', ') || ''}
+							onchange={(e) => {
+								const value = e.currentTarget.value;
+								if (!value) {
+									updateOverride('dns', undefined);
+								} else {
+									const servers = value.split(',').map(s => s.trim()).filter(s => s);
+									updateOverride('dns', servers.length > 0 ? servers : undefined);
+								}
+							}}
+							disabled={disabled}
+							class="h-8 text-xs"
+						/>
+						<p class="text-xs text-muted-foreground">Comma-separated DNS server addresses</p>
 					</div>
 
 					<!-- Security Options -->

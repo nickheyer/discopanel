@@ -142,6 +142,7 @@ message DockerOverrides {
   string working_dir = 17; // Working directory inside container
   repeated string entrypoint = 18; // Override default entrypoint
   repeated string command = 19; // Override default command
+  repeated string dns = 20; // Custom DNS servers
 }
 
 // TCP proxy listener endpoint

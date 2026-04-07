@@ -433,3 +433,5 @@ FodyWeavers.xsd
 tmp/
 .claude/
 dev/bug-analysis/
+.direnv/
+result

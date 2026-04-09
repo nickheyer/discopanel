@@ -90,9 +90,6 @@
 		// Create a new instance with updated values
 		const updates = create(DockerOverridesSchema, {});
 
-		// Create a mutable reference to updates for easier manipulation
-		const mutableUpdates = updates as Record<string, unknown>;
-
 		// Copy existing values
 		if (overrides.environment && Object.keys(overrides.environment).length > 0) updates.environment = { ...overrides.environment };
 		if (overrides.volumes && overrides.volumes.length > 0) updates.volumes = [...overrides.volumes];
@@ -117,11 +114,14 @@
 		    (typeof value === 'bigint' && value === 0n)) {
 			
 			// Only delete field when its not an array or object, set arrays and objects to empty
-			const currentValue = updates[key];
-			if (Array.isArray(currentValue)) {
-				mutableUpdates[key as string] = [];
-			} else if (currentValue !== null && typeof currentValue === 'object') {
-				mutableUpdates[key as string] = {};
+			if (key == 'environment') {
+				updates.environment = {};
+			} else if (key == 'volumes') {
+				updates.volumes = [];
+			} else if (key == 'entrypoint') {
+				updates.entrypoint = [];
+			} else if (key == 'dns') {
+				updates.dns = [];
 			} else {
 				delete updates[key];
 			}

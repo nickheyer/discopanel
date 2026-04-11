@@ -861,6 +861,13 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 
 	// Handle docker overrides update
 	if msg.DockerOverrides != nil {
+		// Check that labels do not start with "discopanel."
+		for key := range msg.DockerOverrides.Labels {
+			if strings.HasPrefix(key, "discopanel.") {
+				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("docker label keys cannot start with 'discopanel.', namespace reserved for internal management"))
+			}
+		}
+
 		server.DockerOverrides = msg.DockerOverrides
 		needsRecreation = true
 	}

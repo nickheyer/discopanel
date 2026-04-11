@@ -10,6 +10,7 @@
 	import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/discopanel/v1/common_pb';
 	import { create } from '@bufbuild/protobuf';
 	import { Badge } from '$lib/components/ui/badge';
+	import { toast } from 'svelte-sonner';
 
 	interface Props {
 		overrides?: DockerOverrides;
@@ -24,6 +25,7 @@
 	let jsonText = $state('');
 	let jsonError = $state('');
 	let envVarCounter = $state(0); // Counter for unique env var keys
+	let labelCounter = $state(0); // Counter for unique label keys
 
 	// Count active overrides for badge
 	let activeCount = $derived(() => {
@@ -40,6 +42,7 @@
 		if (overrides.capDrop && overrides.capDrop.length > 0) count++;
 		if (overrides.devices && overrides.devices.length > 0) count++;
 		if (overrides.dns && overrides.dns.length > 0) count++;
+		if (overrides.labels && Object.keys(overrides.labels).length > 0) count++;
 		return count;
 	});
 
@@ -104,6 +107,7 @@
 		if (overrides.restartPolicy) updates.restartPolicy = overrides.restartPolicy;
 		if (overrides.entrypoint && overrides.entrypoint.length > 0) updates.entrypoint = [...overrides.entrypoint];
 		if (overrides.dns && overrides.dns.length > 0) updates.dns = [...overrides.dns];
+		if (overrides.labels && Object.keys(overrides.labels).length > 0) updates.labels = { ...overrides.labels };
 
 		// Update the specific field
 		if (value === undefined || value === null ||
@@ -203,6 +207,49 @@
 			});
 			updateOverride('volumes', volumes);
 		}
+	}
+
+	// Labels (stored as map object)
+	function addLabel() {
+		const labelMap = { ...(overrides?.labels || {}) };
+		// Generate unique key name
+		let newKey = `LABEL_${labelCounter}`;
+		while (newKey in labelMap) {
+			labelCounter++;
+			newKey = `LABEL_${labelCounter}`;
+		}
+		labelCounter++;
+		labelMap[newKey] = '';
+		updateOverride('labels', labelMap);
+	}
+
+	function updateLabel(oldKey: string, newKey: string, value: string) {
+		const labelMap = { ...(overrides?.labels || {}) };
+
+		// If label key is DiscoKey show warning
+		if(newKey.startsWith('discopanel.') && oldKey !== newKey) {
+			toast.error('This namespace is reserved for system use.');
+		}
+
+		// If key changed, remove old key
+		if (oldKey !== newKey) {
+			delete labelMap[oldKey];
+		}
+
+		// Add new key/value if key is present
+		if (newKey) {
+			labelMap[newKey] = value;
+		}
+
+		const hasKeys = Object.keys(labelMap).length > 0;
+		updateOverride('labels', hasKeys ? labelMap : undefined);
+	}
+
+	function removeLabel(key: string) {
+		const labelMap = { ...(overrides?.labels || {}) };
+		delete labelMap[key];
+		const hasKeys = Object.keys(labelMap).length > 0;
+		updateOverride('labels', hasKeys ? labelMap : undefined);
 	}
 </script>
 
@@ -532,6 +579,7 @@
 							class="h-8 text-xs"
 						/>
 					</div>
+
 					<!-- Entrypoint -->
 					<div class="space-y-2">
 						<Label for="entrypoint" class="text-sm">Entrypoint</Label>
@@ -553,6 +601,61 @@
 							class="h-8 text-xs"
 						/>
 						<p class="text-xs text-muted-foreground">Comma-separated arguments</p>
+					</div>
+					
+					<!-- Labels -->
+					<div class="space-y-3">
+						<div class="flex items-center justify-between">
+							<Label class="text-sm font-medium">Labels</Label>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onclick={addLabel}
+								disabled={disabled}
+								class="h-7 text-xs gap-1"
+							>
+								<Plus class="h-3 w-3" />
+								Add Label
+							</Button>
+						</div>
+						{#if overrides?.labels && Object.keys(overrides.labels).length > 0}
+							<div class="rounded-lg border bg-muted/20 p-3">
+								<div class="space-y-2">
+									{#each Object.entries(overrides.labels) as [key, value] (key)}
+										<div class="flex items-center gap-2">
+											<Input
+												value={key}
+												onchange={(e) => updateLabel(key, e.currentTarget.value, value)}
+												placeholder="LABEL_NAME"
+												disabled={disabled}
+												class="h-8 font-mono text-xs flex-1"
+											/>
+											<span class="text-muted-foreground text-xs">=</span>
+											<Input
+												value={value}
+												oninput={(e) => updateLabel(key, key, e.currentTarget.value)}
+												placeholder="value"
+												disabled={disabled}
+												class="h-8 font-mono text-xs flex-1"
+											/>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												onclick={() => removeLabel(key)}
+												disabled={disabled}
+												class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+											>
+												<X class="h-3 w-3" />
+											</Button>
+										</div>
+									{/each}
+								</div>
+							</div>
+						{:else}
+							<div class="text-xs text-muted-foreground italic">No labels configured</div>
+						{/if}
 					</div>
 				</CardContent>
 			{/if}

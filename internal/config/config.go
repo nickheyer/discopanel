@@ -309,6 +309,13 @@ func validateConfig(cfg *Config) error {
 		}
 	}
 
+	// Validate custom Docker labels do not use reserved namespace 'discopanel.'
+	for k := range cfg.Docker.Labels {
+		if strings.HasPrefix(k, "discopanel.") {
+			return fmt.Errorf("custom docker labels cannot begin with 'discopanel.', namespace reserved for internal management, invalid key: %s", k)
+		}
+	}
+
 	return nil
 }
 

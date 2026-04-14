@@ -112,7 +112,20 @@
 		    (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) ||
 		    (typeof value === 'number' && value === 0) ||
 		    (typeof value === 'bigint' && value === 0n)) {
-			delete updates[key];
+			
+			// Only delete field when its not an array or object, set arrays and objects to empty
+			if (key == 'environment') {
+				updates.environment = {};
+			} else if (key == 'volumes') {
+				updates.volumes = [];
+			} else if (key == 'entrypoint') {
+				updates.entrypoint = [];
+			} else if (key == 'dns') {
+				updates.dns = [];
+			} else {
+				delete updates[key];
+			}
+			
 		} else {
 			updates[key] = value;
 		}

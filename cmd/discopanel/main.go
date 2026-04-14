@@ -72,6 +72,7 @@ func main() {
 		NetworkName: cfg.Docker.NetworkName,
 		RegistryURL: cfg.Docker.RegistryURL,
 		DNS:         cfg.Docker.DNS,
+		Labels:      cfg.Docker.Labels,
 	})
 	if err != nil {
 		log.Fatal("Failed to initialize Docker client: %v", err)

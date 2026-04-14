@@ -180,6 +180,7 @@ type ClientConfig struct {
 	NetworkName string
 	RegistryURL string
 	DNS         string
+	Labels      map[string]string
 }
 
 type ContainerLogStreamer interface {
@@ -472,6 +473,11 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	// Apply global DNS from config
 	if c.config.DNS != "" {
 		hostConfig.DNS = []string{c.config.DNS}
+	}
+
+	// Apply global labels from config
+	if c.config.Labels != nil {
+		maps.Copy(config.Labels, c.config.Labels)
 	}
 
 	// Apply docker overrides

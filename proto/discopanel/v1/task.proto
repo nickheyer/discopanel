@@ -43,6 +43,7 @@ enum TaskType {
   TASK_TYPE_START = 4;     // Start the server
   TASK_TYPE_STOP = 5;      // Stop the server
   TASK_TYPE_SCRIPT = 6;    // Run a custom script
+  TASK_TYPE_WEBHOOK = 7;   // Send an HTTP webhook
 }
 
 // Task status enumeration
@@ -59,6 +60,15 @@ enum ScheduleType {
   SCHEDULE_TYPE_CRON = 1;     // Cron expression
   SCHEDULE_TYPE_INTERVAL = 2; // Fixed interval
   SCHEDULE_TYPE_ONCE = 3;     // Run once at specific time
+  SCHEDULE_TYPE_EVENT = 4;    // Triggered by a server event (see TaskEventTrigger)
+}
+
+// Event trigger enumeration. Only meaningful when ScheduleType == SCHEDULE_TYPE_EVENT.
+enum TaskEventTrigger {
+  TASK_EVENT_TRIGGER_UNSPECIFIED = 0;
+  TASK_EVENT_TRIGGER_SERVER_START = 1;
+  TASK_EVENT_TRIGGER_SERVER_STOP = 2;
+  TASK_EVENT_TRIGGER_SERVER_RESTART = 3;
 }
 
 // Execution status enumeration
@@ -103,6 +113,9 @@ message ScheduledTask {
 
   google.protobuf.Timestamp created_at = 20;
   google.protobuf.Timestamp updated_at = 21;
+
+  // Events that trigger this task. Only used when schedule == SCHEDULE_TYPE_EVENT.
+  repeated TaskEventTrigger event_triggers = 22;
 }
 
 // Task execution record
@@ -139,6 +152,18 @@ message ScriptTaskConfig {
   repeated string args = 2; // Script arguments
 }
 
+// Configuration for webhook tasks. Stored serialized as JSON in ScheduledTask.config.
+message WebhookTaskConfig {
+  string url = 1;                        // Webhook destination URL
+  string secret = 2;                     // Optional HMAC signing secret
+  string format = 3;                     // "generic", "discord", "slack", "teams", "ntfy"
+  string payload_template = 4;           // Optional Go text/template; falls back to format preset when empty
+  map<string, string> headers = 5;       // Custom request headers
+  int32 max_retries = 6;                 // Retries on delivery failure (default 3)
+  int32 retry_delay_ms = 7;              // Initial retry delay in ms (default 1000)
+  int32 timeout_ms = 8;                  // HTTP timeout in ms (default 5000)
+}
+
 // List tasks request
 message ListTasksRequest {
   string server_id = 1;
@@ -147,6 +172,8 @@ message ListTasksRequest {
 // List of scheduled tasks
 message ListTasksResponse {
   repeated ScheduledTask tasks = 1;
+  // Built-in webhook payload template presets keyed by name (e.g. "generic", "discord", "slack", "teams", "ntfy").
+  map<string, string> webhook_template_presets = 2;
 }
 
 // Get task request
@@ -181,6 +208,9 @@ message CreateTaskRequest {
   int32 retry_count = 12;
   int32 retry_delay = 13;
   bool require_online = 14;
+
+  // Event triggers (only used when schedule == SCHEDULE_TYPE_EVENT)
+  repeated TaskEventTrigger event_triggers = 15;
 }
 
 // Newly created task
@@ -210,6 +240,10 @@ message UpdateTaskRequest {
   optional int32 retry_count = 12;
   optional int32 retry_delay = 13;
   optional bool require_online = 14;
+
+  // Event triggers (only used when schedule == SCHEDULE_TYPE_EVENT)
+  repeated TaskEventTrigger event_triggers = 15;
+  bool clear_event_triggers = 16;  // If true, clear event_triggers before applying new ones
 }
 
 // Updated task details

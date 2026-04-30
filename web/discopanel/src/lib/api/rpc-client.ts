@@ -19,7 +19,6 @@ import { UploadService } from '$lib/proto/discopanel/v1/upload_pb';
 import { UserService } from '$lib/proto/discopanel/v1/user_pb';
 import { RoleService } from '$lib/proto/discopanel/v1/role_pb';
 import { ModuleService } from '$lib/proto/discopanel/v1/module_pb';
-import { WebhookService } from '$lib/proto/discopanel/v1/webhook_pb';
 
 // Header to mark requests as silent / no loader
 const SILENT_HEADER = 'X-Silent-Request';
@@ -85,7 +84,6 @@ export class RpcClient {
   public readonly user: Client<typeof UserService>;
   public readonly role: Client<typeof RoleService>;
   public readonly module: Client<typeof ModuleService>;
-  public readonly webhook: Client<typeof WebhookService>;
 
   constructor() {
     this.auth = createClient(AuthService, transport);
@@ -102,7 +100,6 @@ export class RpcClient {
     this.user = createClient(UserService, transport);
     this.role = createClient(RoleService, transport);
     this.module = createClient(ModuleService, transport);
-    this.webhook = createClient(WebhookService, transport);
   }
 }
 

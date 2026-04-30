@@ -11,32 +11,37 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
-	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
+// EventBus dispatches server lifecycle events to registered listeners
+// (e.g. event-triggered scheduled tasks). The scheduler implements this.
+type EventBus interface {
+	OnEvent(ctx context.Context, serverID string, eventTrigger storage.TaskEventTrigger)
+}
+
 // Manager handles the lifecycle of modules
 type Manager struct {
-	store          *storage.Store
-	docker         *docker.Client
-	config         *config.Config
-	proxyManager   *proxy.Manager
-	logger         *logger.Logger
-	logStreamer    *logger.LogStreamer
-	webhookManager *webhook.Manager
-	mu             sync.Mutex
-	running        bool
+	store        *storage.Store
+	docker       *docker.Client
+	config       *config.Config
+	proxyManager *proxy.Manager
+	logger       *logger.Logger
+	logStreamer  *logger.LogStreamer
+	eventBus     EventBus
+	mu           sync.Mutex
+	running      bool
 }
 
 // NewManager creates a new module manager
-func NewManager(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, webhookMgr *webhook.Manager, log *logger.Logger) *Manager {
+func NewManager(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, eventBus EventBus, log *logger.Logger) *Manager {
 	return &Manager{
-		store:          store,
-		docker:         docker,
-		config:         cfg,
-		proxyManager:   proxyManager,
-		logger:         log,
-		webhookManager: webhookMgr,
+		store:        store,
+		docker:       docker,
+		config:       cfg,
+		proxyManager: proxyManager,
+		logger:       log,
+		eventBus:     eventBus,
 	}
 }
 
@@ -537,8 +542,10 @@ func (m *Manager) OnServerStart(ctx context.Context, serverID string) error {
 		}
 	}
 
-	// Dispatch webhook for server start
-	m.dispatchWebhook(ctx, serverID, storage.WebhookEventServerStart, nil)
+	// Fire server start event
+	if m.eventBus != nil {
+		m.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStart)
+	}
 
 	return nil
 }
@@ -560,32 +567,18 @@ func (m *Manager) OnServerStop(ctx context.Context, serverID string) error {
 		}
 	}
 
-	// Dispatch webhook for server stop
-	m.dispatchWebhook(ctx, serverID, storage.WebhookEventServerStop, nil)
+	// Fire server stop event
+	if m.eventBus != nil {
+		m.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStop)
+	}
 
 	return nil
 }
 
-// OnServerRestart dispatches webhook for server restart
+// OnServerRestart fires the server restart event for event-triggered tasks.
 func (m *Manager) OnServerRestart(ctx context.Context, serverID string) {
-	m.dispatchWebhook(ctx, serverID, storage.WebhookEventServerRestart, nil)
-}
-
-// dispatchWebhook sends a webhook event
-func (m *Manager) dispatchWebhook(ctx context.Context, serverID string, eventType storage.WebhookEventType, data map[string]interface{}) {
-	if m.webhookManager == nil {
-		return
-	}
-
-	server, err := m.store.GetServer(ctx, serverID)
-	if err != nil {
-		m.logger.Error("Failed to get server for webhook dispatch: %v", err)
-		return
-	}
-
-	payload := webhook.BuildPayload(string(eventType), server, nil, data)
-	if err := m.webhookManager.Dispatch(ctx, serverID, eventType, payload); err != nil {
-		m.logger.Error("Failed to dispatch webhook: %v", err)
+	if m.eventBus != nil {
+		m.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerRestart)
 	}
 }
 

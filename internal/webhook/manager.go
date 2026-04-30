@@ -1,3 +1,6 @@
+// Package webhook builds, signs, and delivers HTTP webhooks for server events.
+// It exposes payload building, template rendering, and a synchronous Deliver
+// function. Concurrency and retry orchestration live in the scheduler.
 package webhook
 
 import (
@@ -11,147 +14,54 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
 	"github.com/google/uuid"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
-// Manager handles webhook dispatching and delivery
-type Manager struct {
-	store      *storage.Store
-	log        *logger.Logger
-	httpClient *http.Client
-	workQueue  chan *deliveryJob
-	wg         sync.WaitGroup
-	workers    int
-	stopCh     chan struct{}
-	running    bool
-	mu         sync.RWMutex
+// Config controls a single webhook delivery. The scheduler builds this from
+// the JSON config blob stored on a webhook task.
+type Config struct {
+	URL             string            `json:"url"`
+	Secret          string            `json:"secret"`
+	Format          string            `json:"format"`
+	PayloadTemplate string            `json:"payload_template"`
+	Headers         map[string]string `json:"headers"`
+	MaxRetries      int               `json:"max_retries"`
+	RetryDelayMs    int               `json:"retry_delay_ms"`
+	TimeoutMs       int               `json:"timeout_ms"`
 }
 
-// NewManager creates a new webhook manager
-func NewManager(store *storage.Store, log *logger.Logger, workers int) *Manager {
-	if workers <= 0 {
-		workers = 5
-	}
-	return &Manager{
-		store:      store,
-		log:        log,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		workQueue:  make(chan *deliveryJob, 1000),
-		workers:    workers,
-		stopCh:     make(chan struct{}),
-	}
+// Format names recognised when no custom payload template is set.
+const (
+	FormatGeneric = "generic"
+	FormatDiscord = "discord"
+	FormatSlack   = "slack"
+	FormatTeams   = "teams"
+	FormatNtfy    = "ntfy"
+)
+
+// Result describes a single delivery attempt outcome.
+type Result struct {
+	Success      bool
+	ResponseCode int
+	ResponseBody string
+	ErrorMessage string
+	DurationMs   int64
+	Attempts     int
 }
 
-// Start begins the webhook worker pool
-func (m *Manager) Start() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.running {
-		return
-	}
-
-	m.stopCh = make(chan struct{})
-	for i := 0; i < m.workers; i++ {
-		m.wg.Add(1)
-		go m.worker(i)
-	}
-	m.running = true
-	m.log.Info("Webhook manager started with %d workers", m.workers)
-}
-
-// Stop gracefully shuts down the manager
-func (m *Manager) Stop() {
-	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
-		return
-	}
-	m.running = false
-	m.mu.Unlock()
-
-	close(m.stopCh)
-	m.wg.Wait()
-	m.log.Info("Webhook manager stopped")
-}
-
-// Dispatch queues webhooks for delivery based on an event
-func (m *Manager) Dispatch(ctx context.Context, serverID string, eventType storage.WebhookEventType, payload *Payload) error {
-	m.mu.RLock()
-	running := m.running
-	m.mu.RUnlock()
-
-	if !running {
-		return fmt.Errorf("webhook manager not running")
-	}
-
-	webhooks, err := m.store.GetWebhooksForEvent(ctx, serverID, eventType)
-	if err != nil {
-		return fmt.Errorf("failed to get webhooks: %w", err)
-	}
-
-	for _, webhook := range webhooks {
-		if !webhook.Enabled {
-			continue
-		}
-
-		job := &deliveryJob{
-			webhook:   webhook,
-			eventType: eventType,
-			serverID:  serverID,
-			payload:   payload,
-			attempt:   1,
-		}
-
-		select {
-		case m.workQueue <- job:
-		default:
-			m.log.Warn("Webhook queue full, dropping delivery for webhook %s", webhook.ID)
-		}
-	}
-
-	return nil
-}
-
-// TestWebhook sends a test payload to a webhook and returns the result
-func (m *Manager) TestWebhook(ctx context.Context, webhook *storage.Webhook, server *storage.Server) *TestResult {
-	payload := &Payload{
-		Event:     "test",
-		Timestamp: time.Now().UTC(),
-		Server: &ServerPayload{
-			ID:         server.ID,
-			Name:       server.Name,
-			Status:     string(server.Status),
-			MCVersion:  server.MCVersion,
-			ModLoader:  string(server.ModLoader),
-			Players:    server.PlayersOnline,
-			MaxPlayers: server.MaxPlayers,
-			Port:       server.Port,
-		},
-		Data: map[string]interface{}{
-			"message": "This is a test webhook delivery from DiscoPanel",
-		},
-	}
-
-	return m.deliverSync(webhook, payload)
-}
-
-// Payload represents the standard webhook payload
+// Payload is the canonical event data fed into payload templates.
 type Payload struct {
-	Event     string                 `json:"event"`
-	Timestamp time.Time              `json:"timestamp"`
-	Server    *ServerPayload         `json:"server,omitempty"`
-	Player    *PlayerPayload         `json:"player,omitempty"`
-	Data      map[string]interface{} `json:"data,omitempty"`
+	Event     string         `json:"event"`
+	Timestamp time.Time      `json:"timestamp"`
+	Server    *ServerPayload `json:"server,omitempty"`
+	Data      map[string]any `json:"data,omitempty"`
 }
 
-// ServerPayload represents server information in the webhook payload
+// ServerPayload is the server snapshot embedded in a webhook payload.
 type ServerPayload struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -163,128 +73,85 @@ type ServerPayload struct {
 	Port       int    `json:"port"`
 }
 
-// PlayerPayload represents player information in the webhook payload
-type PlayerPayload struct {
-	Name string `json:"name"`
-	UUID string `json:"uuid,omitempty"`
-}
-
-// TestResult represents the result of a test webhook delivery
-type TestResult struct {
-	Success      bool
-	ResponseCode int
-	ResponseBody string
-	ErrorMessage string
-	DurationMs   int64
-}
-
-// deliveryJob represents a job in the work queue
-type deliveryJob struct {
-	webhook   *storage.Webhook
-	eventType storage.WebhookEventType
-	serverID  string
-	payload   *Payload
-	attempt   int
-}
-
-// worker processes delivery jobs from the queue
-func (m *Manager) worker(id int) {
-	defer m.wg.Done()
-
-	for {
-		select {
-		case <-m.stopCh:
-			return
-		case job := <-m.workQueue:
-			m.deliver(job)
-		}
-	}
-}
-
-// deliver makes the HTTP request and handles retries
-func (m *Manager) deliver(job *deliveryJob) {
-	result := m.deliverSync(job.webhook, job.payload)
-
-	if !result.Success {
-		m.log.Error("Webhook delivery failed for %s (attempt %d): %s", job.webhook.Name, job.attempt, result.ErrorMessage)
-
-		// Retry if attempts remaining
-		if job.attempt < job.webhook.MaxRetries {
-			job.attempt++
-			delay := time.Duration(job.webhook.RetryDelayMs) * time.Millisecond * time.Duration(1<<(job.attempt-1)) // Exponential backoff
-
-			time.AfterFunc(delay, func() {
-				select {
-				case m.workQueue <- job:
-				default:
-					m.log.Warn("Retry queue full for webhook %s", job.webhook.ID)
-				}
-			})
-		}
-	}
-}
-
-// deliverSync performs a synchronous delivery and returns the result
-func (m *Manager) deliverSync(webhook *storage.Webhook, payload *Payload) *TestResult {
+// Deliver renders the payload, signs it, POSTs it, and retries on failure
+// using exponential backoff. The returned Result reflects the final attempt.
+func Deliver(ctx context.Context, cfg Config, payload *Payload) Result {
 	start := time.Now()
-	result := &TestResult{}
-
-	var payloadBytes []byte
-	var err error
-
-	// If a custom payload template is set, render it
-	if webhook.PayloadTemplate != "" {
-		payloadBytes, err = renderTemplate(webhook.PayloadTemplate, payload)
-	} else if webhook.Format == storage.WebhookFormatDiscord {
-		// Fallback: use built-in Discord format for webhooks without a template
-		payloadBytes, err = renderTemplate(DefaultDiscordTemplate, payload)
+	maxAttempts := cfg.MaxRetries
+	if maxAttempts < 1 {
+		maxAttempts = 1
 	} else {
-		// Fallback: use built-in generic JSON format
-		payloadBytes, err = json.Marshal(payload)
+		maxAttempts++ // initial attempt + retries
+	}
+	retryBaseMs := cfg.RetryDelayMs
+	if retryBaseMs <= 0 {
+		retryBaseMs = 1000
 	}
 
+	var last Result
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		last = deliverOnce(ctx, cfg, payload)
+		last.Attempts = attempt
+		if last.Success {
+			break
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		// Exponential backoff: base * 2^(attempt-1)
+		delay := time.Duration(retryBaseMs) * time.Millisecond * time.Duration(1<<(attempt-1))
+		select {
+		case <-ctx.Done():
+			last.ErrorMessage = ctx.Err().Error()
+			last.DurationMs = time.Since(start).Milliseconds()
+			return last
+		case <-time.After(delay):
+		}
+	}
+	last.DurationMs = time.Since(start).Milliseconds()
+	return last
+}
+
+func deliverOnce(ctx context.Context, cfg Config, payload *Payload) Result {
+	start := time.Now()
+	result := Result{}
+
+	body, err := renderBody(cfg, payload)
 	if err != nil {
-		result.ErrorMessage = fmt.Sprintf("template render error: %v", err)
+		result.ErrorMessage = err.Error()
 		result.DurationMs = time.Since(start).Milliseconds()
 		return result
 	}
 
-	// Create request with timeout
-	timeout := time.Duration(webhook.TimeoutMs) * time.Millisecond
+	timeout := time.Duration(cfg.TimeoutMs) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", webhook.URL, bytes.NewReader(payloadBytes))
+	req, err := http.NewRequestWithContext(reqCtx, "POST", cfg.URL, bytes.NewReader(body))
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("request error: %v", err)
 		result.DurationMs = time.Since(start).Milliseconds()
 		return result
 	}
 
-	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "DiscoPanel-Webhook/1.0")
-	req.Header.Set("X-DiscoPanel-Event", string(payload.Event))
+	req.Header.Set("X-DiscoPanel-Event", payload.Event)
 	req.Header.Set("X-DiscoPanel-Delivery", uuid.New().String())
 
-	// Add HMAC signature if secret is configured
-	if webhook.Secret != "" {
-		signature := m.signPayload(payloadBytes, webhook.Secret)
-		req.Header.Set("X-DiscoPanel-Signature", "sha256="+signature)
+	if cfg.Secret != "" {
+		req.Header.Set("X-DiscoPanel-Signature", "sha256="+sign(body, cfg.Secret))
 	}
-
-	// Add custom headers
-	for k, v := range webhook.Headers {
+	for k, v := range cfg.Headers {
 		req.Header.Set(k, v)
 	}
 
-	// Make request
-	resp, err := m.httpClient.Do(req)
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
 	result.DurationMs = time.Since(start).Milliseconds()
-
 	if err != nil {
 		result.ErrorMessage = err.Error()
 		return result
@@ -292,25 +159,56 @@ func (m *Manager) deliverSync(webhook *storage.Webhook, payload *Payload) *TestR
 	defer resp.Body.Close()
 
 	result.ResponseCode = resp.StatusCode
-
-	// Read response body (limited to 4KB)
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	result.ResponseBody = string(bodyBytes)
-
-	// Check success (2xx status codes)
 	result.Success = resp.StatusCode >= 200 && resp.StatusCode < 300
-
 	if !result.Success {
 		result.ErrorMessage = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, result.ResponseBody)
 	}
-
 	return result
 }
 
-// signPayload creates HMAC-SHA256 signature
-func (m *Manager) signPayload(payload []byte, secret string) string {
+func renderBody(cfg Config, payload *Payload) ([]byte, error) {
+	if cfg.PayloadTemplate != "" {
+		return renderTemplate(cfg.PayloadTemplate, payload)
+	}
+	// Pick a format. In order: explicit non-generic format → URL-based
+	// auto-detection → generic JSON marshal. Auto-detection covers the
+	// common case where a webhook config was saved with format="generic"
+	// but the URL is clearly a Discord/Slack/Teams/ntfy endpoint.
+	format := cfg.Format
+	if format == "" || format == FormatGeneric {
+		if detected := detectFormatFromURL(cfg.URL); detected != "" {
+			format = detected
+		}
+	}
+	if tmpl, ok := TemplatePresets()[format]; ok && format != FormatGeneric {
+		return renderTemplate(tmpl, payload)
+	}
+	return json.Marshal(payload)
+}
+
+// detectFormatFromURL guesses a payload format from the destination URL.
+// Returns "" when nothing recognisable matches.
+func detectFormatFromURL(url string) string {
+	switch {
+	case strings.Contains(url, "discord.com/api/webhooks"),
+		strings.Contains(url, "discordapp.com/api/webhooks"):
+		return FormatDiscord
+	case strings.Contains(url, "hooks.slack.com"):
+		return FormatSlack
+	case strings.Contains(url, ".webhook.office.com"),
+		strings.Contains(url, "outlook.office.com/webhook"):
+		return FormatTeams
+	case strings.Contains(url, "ntfy.sh"):
+		return FormatNtfy
+	}
+	return ""
+}
+
+func sign(body []byte, secret string) string {
 	h := hmac.New(sha256.New, []byte(secret))
-	h.Write(payload)
+	h.Write(body)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -423,20 +321,19 @@ const DefaultNtfyTemplate = `{
   "priority": 3
 }`
 
-// TemplatePresets returns all built-in template presets
+// TemplatePresets returns all built-in template presets keyed by format name.
 func TemplatePresets() map[string]string {
 	return map[string]string{
-		"generic": DefaultGenericTemplate,
-		"discord": DefaultDiscordTemplate,
-		"slack":   DefaultSlackTemplate,
-		"teams":   DefaultTeamsTemplate,
-		"ntfy":    DefaultNtfyTemplate,
+		FormatGeneric: DefaultGenericTemplate,
+		FormatDiscord: DefaultDiscordTemplate,
+		FormatSlack:   DefaultSlackTemplate,
+		FormatTeams:   DefaultTeamsTemplate,
+		FormatNtfy:    DefaultNtfyTemplate,
 	}
 }
 
-// templateData builds a flat map of variables available to payload templates
-func templateData(p *Payload) map[string]interface{} {
-	// Event title and color mappings
+// templateData builds a flat map of variables available to payload templates.
+func templateData(p *Payload) map[string]any {
 	titles := map[string]string{
 		"test":           "Webhook Test",
 		"server_start":   "Server Started",
@@ -459,13 +356,12 @@ func templateData(p *Payload) map[string]interface{} {
 		color = 0x5865F2
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"event":     p.Event,
 		"timestamp": p.Timestamp.Format(time.RFC3339),
 		"title":     title,
 		"color":     color,
 	}
-
 	if p.Server != nil {
 		data["server_id"] = p.Server.ID
 		data["server_name"] = p.Server.Name
@@ -485,90 +381,65 @@ func templateData(p *Payload) map[string]interface{} {
 		data["server_max_players"] = 0
 		data["server_port"] = 0
 	}
-
-	// Merge any extra data
 	for k, v := range p.Data {
 		data[k] = v
 	}
-
 	return data
 }
 
-// renderTemplate renders a Go text/template with payload data and returns JSON bytes
 func renderTemplate(tmplStr string, p *Payload) ([]byte, error) {
 	tmpl, err := template.New("payload").Parse(tmplStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid template: %w", err)
 	}
-
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, templateData(p)); err != nil {
 		return nil, fmt.Errorf("template execution failed: %w", err)
 	}
-
-	// Validate that the output is valid JSON
-	result := buf.Bytes()
-	if !json.Valid(result) {
+	out := buf.Bytes()
+	if !json.Valid(out) {
 		return nil, fmt.Errorf("template produced invalid JSON")
 	}
-
-	return result, nil
+	return out, nil
 }
 
-// ValidateTemplate checks that a template string is parseable and produces valid JSON with test data
+// ValidateTemplate verifies a template string parses and produces valid JSON when rendered with sample data.
 func ValidateTemplate(tmplStr string) error {
 	if strings.TrimSpace(tmplStr) == "" {
 		return nil
 	}
-
-	testPayload := &Payload{
+	sample := &Payload{
 		Event:     "test",
 		Timestamp: time.Now().UTC(),
 		Server: &ServerPayload{
-			ID:         "test-id",
-			Name:       "Test Server",
-			Status:     "running",
-			MCVersion:  "1.21",
-			ModLoader:  "vanilla",
-			Players:    0,
-			MaxPlayers: 20,
-			Port:       25565,
+			ID: "test-id", Name: "Test Server", Status: "running",
+			MCVersion: "1.21", ModLoader: "vanilla",
+			Players: 0, MaxPlayers: 20, Port: 25565,
 		},
 	}
-
-	_, err := renderTemplate(tmplStr, testPayload)
+	_, err := renderTemplate(tmplStr, sample)
 	return err
 }
 
-// BuildServerPayload creates a server payload from a Server model
-func BuildServerPayload(server *storage.Server) *ServerPayload {
-	return &ServerPayload{
-		ID:         server.ID,
-		Name:       server.Name,
-		Status:     string(server.Status),
-		MCVersion:  server.MCVersion,
-		ModLoader:  string(server.ModLoader),
-		Players:    server.PlayersOnline,
-		MaxPlayers: server.MaxPlayers,
-		Port:       server.Port,
+// BuildPayload assembles a Payload for the given event and server.
+func BuildPayload(event string, server *storage.Server, data map[string]any) *Payload {
+	var sp *ServerPayload
+	if server != nil {
+		sp = &ServerPayload{
+			ID:         server.ID,
+			Name:       server.Name,
+			Status:     string(server.Status),
+			MCVersion:  server.MCVersion,
+			ModLoader:  string(server.ModLoader),
+			Players:    server.PlayersOnline,
+			MaxPlayers: server.MaxPlayers,
+			Port:       server.Port,
+		}
 	}
-}
-
-// BuildPayload creates a full webhook payload
-func BuildPayload(event string, server *storage.Server, player *PlayerPayload, data map[string]interface{}) *Payload {
-	payload := &Payload{
+	return &Payload{
 		Event:     event,
 		Timestamp: time.Now().UTC(),
+		Server:    sp,
 		Data:      data,
 	}
-
-	if server != nil {
-		payload.Server = BuildServerPayload(server)
-	}
-
-	if player != nil {
-		payload.Player = player
-	}
-
-	return payload
 }

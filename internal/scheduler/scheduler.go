@@ -12,6 +12,7 @@ import (
 
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -34,6 +35,11 @@ type Scheduler struct {
 
 	// Cron parser
 	cronParser cron.Parser
+
+	// Tracks which event triggered each currently-running event-driven task,
+	// so webhook payloads can report the actual event name.
+	activeEvents  map[string]storage.TaskEventTrigger
+	activeEventMu sync.RWMutex
 
 	// Stats
 	lastCheck time.Time
@@ -66,6 +72,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, log *logger.Logge
 		checkInterval:     cfg.CheckInterval,
 		stopChan:          make(chan struct{}),
 		runningExecutions: make(map[string]context.CancelFunc),
+		activeEvents:      make(map[string]storage.TaskEventTrigger),
 		cronParser:        cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
 	}
 }
@@ -216,6 +223,38 @@ func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*storage.Ta
 	return execution, err
 }
 
+// OnEvent dispatches all enabled event-triggered tasks subscribed to eventTrigger
+// for the given server. Each matching task runs in its own goroutine.
+func (s *Scheduler) OnEvent(ctx context.Context, serverID string, eventTrigger storage.TaskEventTrigger) {
+	tasks, err := s.store.ListEventTriggeredTasks(ctx, serverID, eventTrigger)
+	if err != nil {
+		s.log.Error("Failed to list event-triggered tasks for %s: %v", eventTrigger, err)
+		return
+	}
+	for _, task := range tasks {
+		s.wg.Add(1)
+		go func(t *storage.ScheduledTask) {
+			defer s.wg.Done()
+			s.executeTaskForEvent(t, eventTrigger)
+		}(task)
+	}
+}
+
+// executeTaskForEvent runs a task as a result of an event firing.
+// The event name is passed to webhook executors so the rendered payload
+// reflects which event triggered the delivery.
+func (s *Scheduler) executeTaskForEvent(task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) {
+	s.activeEventMu.Lock()
+	s.activeEvents[task.ID] = eventTrigger
+	s.activeEventMu.Unlock()
+	defer func() {
+		s.activeEventMu.Lock()
+		delete(s.activeEvents, task.ID)
+		s.activeEventMu.Unlock()
+	}()
+	s.executeTask(task, "event")
+}
+
 // executeTask runs a single task
 func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*storage.TaskExecution, error) {
 	ctx := context.Background()
@@ -227,8 +266,10 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*s
 		return nil, err
 	}
 
-	// Check if server is online (if required)
-	if task.RequireOnline && server.Status != storage.StatusRunning {
+	// Check if server is online (if required). Webhook tasks always fire —
+	// they notify, they don't operate on the server, and most useful events
+	// (server_stop, server_restart) happen while the server is not running.
+	if task.RequireOnline && task.TaskType != storage.TaskTypeWebhook && server.Status != storage.StatusRunning {
 		s.log.Debug("Task %s: skipped (server offline)", task.Name)
 
 		// Create skipped execution record
@@ -302,6 +343,8 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*s
 		output, execErr = s.executeBackupTask(execCtx, server, task)
 	case storage.TaskTypeScript:
 		output, execErr = s.executeScriptTask(execCtx, server, task)
+	case storage.TaskTypeWebhook:
+		output, execErr = s.executeWebhookTask(execCtx, server, task)
 	default:
 		execErr = fmt.Errorf("unknown task type: %s", task.TaskType)
 	}
@@ -374,6 +417,9 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
 	case storage.ScheduleTypeOnce:
 		// Once tasks don't repeat, disable after execution
 		task.Status = storage.TaskStatusDisabled
+		nextRun = nil
+	case storage.ScheduleTypeEvent:
+		// Event-triggered tasks have no time-based next run.
 		nextRun = nil
 	}
 
@@ -553,6 +599,10 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 		}
 		return task.RunAt, nil
 
+	case storage.ScheduleTypeEvent:
+		// No scheduled time; execution is triggered via OnEvent.
+		return nil, nil
+
 	default:
 		return nil, fmt.Errorf("unknown schedule type: %s", task.Schedule)
 	}
@@ -562,4 +612,43 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 func (s *Scheduler) ValidateCronExpr(expr string) error {
 	_, err := s.cronParser.Parse(expr)
 	return err
+}
+
+func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+	var cfg webhook.Config
+	if task.Config != "" {
+		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
+			return "", fmt.Errorf("invalid webhook config: %w", err)
+		}
+	}
+	if cfg.URL == "" {
+		return "", fmt.Errorf("webhook URL is required")
+	}
+
+	// Determine which event drove this run. For event-triggered runs the
+	// scheduler stashes the active trigger keyed by task ID; otherwise fall
+	// back to the first subscribed trigger or "manual".
+	s.activeEventMu.RLock()
+	activeTrigger, hasActive := s.activeEvents[task.ID]
+	s.activeEventMu.RUnlock()
+	var event string
+	switch {
+	case hasActive:
+		event = string(activeTrigger)
+	case len(task.EventTriggers) > 0:
+		event = string(task.EventTriggers[0])
+	default:
+		event = "manual"
+	}
+	payload := webhook.BuildPayload(event, server, nil)
+
+	result := webhook.Deliver(ctx, cfg, payload)
+	output := fmt.Sprintf("HTTP %d in %dms (attempt %d)", result.ResponseCode, result.DurationMs, result.Attempts)
+	if result.ResponseBody != "" {
+		output += "\n" + result.ResponseBody
+	}
+	if result.Success {
+		return output, nil
+	}
+	return output, fmt.Errorf("%s", result.ErrorMessage)
 }

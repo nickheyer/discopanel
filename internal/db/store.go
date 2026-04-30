@@ -1412,60 +1412,25 @@ func (s *Store) ListModulesFollowingServerLifecycle(ctx context.Context, serverI
 	return modules, err
 }
 
-// Webhook operations
-func (s *Store) CreateWebhook(ctx context.Context, webhook *Webhook) error {
-	if webhook.ID == "" {
-		webhook.ID = uuid.New().String()
-	}
-	return s.db.WithContext(ctx).Create(webhook).Error
-}
-
-func (s *Store) GetWebhook(ctx context.Context, id string) (*Webhook, error) {
-	var webhook Webhook
-	err := s.db.WithContext(ctx).First(&webhook, "id = ?", id).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("webhook not found")
-		}
-		return nil, err
-	}
-	return &webhook, nil
-}
-
-func (s *Store) ListWebhooksByServer(ctx context.Context, serverID string) ([]*Webhook, error) {
-	var webhooks []*Webhook
-	err := s.db.WithContext(ctx).Where("server_id = ?", serverID).Order("created_at DESC").Find(&webhooks).Error
-	return webhooks, err
-}
-
-func (s *Store) UpdateWebhook(ctx context.Context, webhook *Webhook) error {
-	return s.db.WithContext(ctx).Save(webhook).Error
-}
-
-func (s *Store) DeleteWebhook(ctx context.Context, id string) error {
-	return s.db.WithContext(ctx).Delete(&Webhook{}, "id = ?", id).Error
-}
-
-// GetWebhooksForEvent returns all enabled webhooks for a server that are subscribed to the given event type
-func (s *Store) GetWebhooksForEvent(ctx context.Context, serverID string, eventType WebhookEventType) ([]*Webhook, error) {
-	var webhooks []*Webhook
+// ListEventTriggeredTasks returns all enabled tasks subscribed to the given event for a server.
+// EventTriggers is stored as a JSON array, so we filter in Go.
+func (s *Store) ListEventTriggeredTasks(ctx context.Context, serverID string, eventTrigger TaskEventTrigger) ([]*ScheduledTask, error) {
+	var tasks []*ScheduledTask
 	err := s.db.WithContext(ctx).
-		Where("server_id = ? AND enabled = ?", serverID, true).
-		Find(&webhooks).Error
+		Where("server_id = ? AND status = ? AND schedule = ?",
+			serverID, TaskStatusEnabled, ScheduleTypeEvent).
+		Find(&tasks).Error
 	if err != nil {
 		return nil, err
 	}
-
-	// Filter by event type (Events is a JSON array stored in DB)
-	var matching []*Webhook
-	for _, w := range webhooks {
-		for _, e := range w.Events {
-			if e == string(eventType) {
-				matching = append(matching, w)
+	matching := make([]*ScheduledTask, 0, len(tasks))
+	for _, t := range tasks {
+		for _, e := range t.EventTriggers {
+			if e == eventTrigger {
+				matching = append(matching, t)
 				break
 			}
 		}
 	}
-
 	return matching, nil
 }

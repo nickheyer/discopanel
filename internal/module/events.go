@@ -9,28 +9,27 @@ import (
 	"github.com/nickheyer/discopanel/internal/alias"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // EventDispatcher handles server events and triggers module hooks
 type EventDispatcher struct {
-	manager        *Manager
-	store          *storage.Store
-	docker         *docker.Client
-	logger         *logger.Logger
-	webhookManager *webhook.Manager
+	manager  *Manager
+	store    *storage.Store
+	docker   *docker.Client
+	logger   *logger.Logger
+	eventBus EventBus
 }
 
 // NewEventDispatcher creates a new event dispatcher
-func NewEventDispatcher(manager *Manager, store *storage.Store, docker *docker.Client, webhookMgr *webhook.Manager, log *logger.Logger) *EventDispatcher {
+func NewEventDispatcher(manager *Manager, store *storage.Store, docker *docker.Client, eventBus EventBus, log *logger.Logger) *EventDispatcher {
 	return &EventDispatcher{
-		manager:        manager,
-		store:          store,
-		docker:         docker,
-		logger:         log,
-		webhookManager: webhookMgr,
+		manager:  manager,
+		store:    store,
+		docker:   docker,
+		logger:   log,
+		eventBus: eventBus,
 	}
 }
 
@@ -150,39 +149,42 @@ func (d *EventDispatcher) sendRCON(ctx context.Context, serverID string, command
 
 // Helper methods for common event triggers
 
-// OnServerStart triggers MODULE_EVENT_TYPE_SERVER_START for all modules and webhooks
+// OnServerStart triggers MODULE_EVENT_TYPE_SERVER_START for modules and event-triggered tasks
 func (d *EventDispatcher) OnServerStart(ctx context.Context, serverID string) {
 	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_SERVER_START)
-	d.dispatchWebhook(ctx, serverID, storage.WebhookEventServerStart, nil)
+	if d.eventBus != nil {
+		d.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStart)
+	}
 }
 
-// OnServerStop triggers MODULE_EVENT_TYPE_SERVER_STOP for all modules and webhooks
+// OnServerStop triggers MODULE_EVENT_TYPE_SERVER_STOP for modules and event-triggered tasks
 func (d *EventDispatcher) OnServerStop(ctx context.Context, serverID string) {
 	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_SERVER_STOP)
-	d.dispatchWebhook(ctx, serverID, storage.WebhookEventServerStop, nil)
+	if d.eventBus != nil {
+		d.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStop)
+	}
 }
 
-// OnServerRestart triggers webhooks for server restart
+// OnServerRestart fires event-triggered tasks subscribed to server restart.
 func (d *EventDispatcher) OnServerRestart(ctx context.Context, serverID string) {
-	d.dispatchWebhook(ctx, serverID, storage.WebhookEventServerRestart, nil)
+	if d.eventBus != nil {
+		d.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerRestart)
+	}
 }
 
-// dispatchWebhook sends a webhook event
-func (d *EventDispatcher) dispatchWebhook(ctx context.Context, serverID string, eventType storage.WebhookEventType, data map[string]interface{}) {
-	if d.webhookManager == nil {
-		return
-	}
+// OnServerHealthy triggers MODULE_EVENT_TYPE_SERVER_HEALTHY for all modules
+func (d *EventDispatcher) OnServerHealthy(ctx context.Context, serverID string) {
+	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_SERVER_HEALTHY)
+}
 
-	server, err := d.store.GetServer(ctx, serverID)
-	if err != nil {
-		d.logger.Error("Failed to get server for webhook dispatch: %v", err)
-		return
-	}
+// OnPlayerJoin triggers MODULE_EVENT_TYPE_PLAYER_JOIN for all modules
+func (d *EventDispatcher) OnPlayerJoin(ctx context.Context, serverID string) {
+	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_PLAYER_JOIN)
+}
 
-	payload := webhook.BuildPayload(string(eventType), server, nil, data)
-	if err := d.webhookManager.Dispatch(ctx, serverID, eventType, payload); err != nil {
-		d.logger.Error("Failed to dispatch webhook: %v", err)
-	}
+// OnPlayerLeave triggers MODULE_EVENT_TYPE_PLAYER_LEAVE for all modules
+func (d *EventDispatcher) OnPlayerLeave(ctx context.Context, serverID string) {
+	d.OnServerEvent(ctx, serverID, v1.ModuleEventType_MODULE_EVENT_TYPE_PLAYER_LEAVE)
 }
 
 // evaluateCondition evaluates a simple condition expression using the alias system

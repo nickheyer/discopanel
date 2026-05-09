@@ -802,7 +802,7 @@
 					<ServerModules {server} active={activeTab === 'modules'} />
 				</TabsContent>
 
-				<TabsContent value="files" class="h-full">
+				<TabsContent value="files" class="h-full overflow-y-auto">
 					<ServerFiles {server} active={activeTab === 'files'} />
 				</TabsContent>
 

@@ -434,7 +434,7 @@
 										class="h-12"
 									/>
 									<p class="text-sm text-muted-foreground">
-										Lucide icon name from <a href="https://lucide.dev" target="_blank" class="underline">lucide.dev</a>
+										Lucide icon name from <a href="https://lucide.dev" target="_blank" rel="noopener noreferrer" class="underline">lucide.dev</a>
 									</p>
 								</div>
 							</div>

@@ -549,7 +549,7 @@
 					<div class="flex items-center justify-between mt-4 gap-2">
 						<div class="flex items-center gap-2">
 							{#if modpack.websiteUrl}
-								<a href={resolve(modpack.websiteUrl)} target="_blank" rel="noopener noreferrer">
+								<a href={modpack.websiteUrl} target="_blank" rel="noopener noreferrer">
 									<Button variant="outline" size="sm">
 										<ExternalLink class="h-3 w-3 mr-1" />
 										View

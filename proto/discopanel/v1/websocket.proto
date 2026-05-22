@@ -75,6 +75,7 @@ message UnsubscribeMessage {
 message CommandMessage {
   string server_id = 1;
   string command = 2;
+  optional bool silent = 3;
 }
 
 // Auth success

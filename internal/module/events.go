@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/alias"
+	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -18,15 +19,17 @@ type EventDispatcher struct {
 	manager *Manager
 	store   *storage.Store
 	docker  *docker.Client
+	sender  *command.Sender
 	logger  *logger.Logger
 }
 
 // NewEventDispatcher creates a new event dispatcher
-func NewEventDispatcher(manager *Manager, store *storage.Store, docker *docker.Client, log *logger.Logger) *EventDispatcher {
+func NewEventDispatcher(manager *Manager, store *storage.Store, docker *docker.Client, sender *command.Sender, log *logger.Logger) *EventDispatcher {
 	return &EventDispatcher{
 		manager: manager,
 		store:   store,
 		docker:  docker,
+		sender:  sender,
 		logger:  log,
 	}
 }
@@ -140,8 +143,8 @@ func (d *EventDispatcher) sendRCON(ctx context.Context, serverID string, command
 		return nil
 	}
 
-	// Use ExecCommand which runs rcon-cli inside the server container
-	_, err = d.docker.ExecCommand(ctx, server.ContainerID, command)
+	// send command
+	_, err = d.sender.SendCommand(ctx, server.ID, command)
 	return err
 }
 

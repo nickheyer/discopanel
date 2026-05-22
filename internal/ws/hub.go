@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/nickheyer/discopanel/internal/auth"
+	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/rbac"
@@ -39,6 +40,7 @@ type Hub struct {
 	store       *storage.Store
 	docker      *docker.Client
 	log         *logger.Logger
+	sender      *command.Sender
 
 	upgrader websocket.Upgrader
 
@@ -67,7 +69,7 @@ type Client struct {
 }
 
 // NewHub creates a new WebSocket hub
-func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer *rbac.Enforcer, store *storage.Store, docker *docker.Client, log *logger.Logger) *Hub {
+func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer *rbac.Enforcer, store *storage.Store, docker *docker.Client, sender *command.Sender, log *logger.Logger) *Hub {
 	return &Hub{
 		logStreamer: logStreamer,
 		authManager: authManager,
@@ -75,6 +77,7 @@ func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer
 		store:       store,
 		docker:      docker,
 		log:         log,
+		sender:      sender,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins (CORS handled elsewhere)
@@ -377,6 +380,11 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 		return
 	}
 
+	silent := false
+	if msg.Silent != nil {
+		silent = *msg.Silent
+	}
+
 	// Check command permission
 	if c.hub.enforcer != nil && c.user != nil {
 		allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionCommand, msg.ServerId)
@@ -405,16 +413,17 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 		return
 	}
 
-	// Add command to log stream
+	// Add command to log stream if not silent
 	commandTime := time.Now()
-	c.hub.logStreamer.AddCommandEntry(server.ContainerID, msg.Command, commandTime)
+	if !silent {
+		c.hub.logStreamer.AddCommandEntry(server.ContainerID, msg.Command, commandTime)
+	}
 
-	// Execute command
-	output, err := c.hub.docker.ExecCommand(ctx, server.ContainerID, msg.Command)
+	output, err := c.hub.sender.SendCommand(ctx, server.ID, msg.Command)
 	success := err == nil
 
-	// Add output to log stream
-	if output != "" || !success {
+	// Add output to log stream if not silent
+	if !silent && (output != "" || !success) {
 		c.hub.logStreamer.AddCommandOutput(server.ContainerID, output, success, commandTime)
 	}
 

@@ -10,7 +10,7 @@
 	import AliasHelper from '$lib/components/ui/AliasHelper.svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import { ModuleEventType, ModuleEventAction } from '$lib/proto/discopanel/v1/module_pb';
+	import { ModuleEventType, ModuleEventAction, type ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
 	import {
 		Loader2, Plus, Trash2, Package, X,
 		FileText, Container, Network, Variable, HardDrive, Wrench, Heart, Info
@@ -18,7 +18,9 @@
 
 	interface Props {
 		open: boolean;
-		onCreated: () => void;
+		mode?: 'create' | 'edit';
+		template?: ModuleTemplate;
+		onSuccess: () => void;
 	}
 
 	interface EnvVar {
@@ -56,9 +58,9 @@
 
 	type ConfigSection = 'basic' | 'docker' | 'ports' | 'environment' | 'volumes' | 'advanced';
 
-	let { open = $bindable(), onCreated }: Props = $props();
+	let { open = $bindable(), mode = 'create', template, onSuccess }: Props = $props();
 
-	let creating = $state(false);
+	let submitting = $state(false);
 	let activeSection = $state<ConfigSection>('basic');
 
 	// Form state
@@ -219,10 +221,63 @@
 	}
 
 	$effect(() => {
-		if (!open) {
+		if (open) {
+			if (mode === 'edit' && template) {
+				loadTemplateData(template);
+			} else if (mode === 'create') {
+				resetForm();
+			}
+		} else {
 			resetForm();
 		}
 	});
+
+	function loadTemplateData(t: ModuleTemplate) {
+		name = t.name;
+		description = t.description;
+		dockerImage = t.dockerImage;
+		healthCheckPath = t.healthCheckPath;
+		healthCheckPort = t.healthCheckPort;
+		requiresServer = t.requiresServer;
+		supportsProxy = t.supportsProxy;
+		icon = t.icon;
+		category = t.category;
+		documentation = t.documentation;
+		defaultUid = t.defaultUid;
+		defaultGid = t.defaultGid;
+		defaultInitCommand = t.defaultInitCommand;
+		defaultInitCommandDelay = t.defaultInitCommandDelay;
+		defaultRestartAfterInit = t.defaultRestartAfterInit;
+
+		try {
+			const envObj = JSON.parse(t.defaultEnv || '{}');
+			envVars = Object.entries(envObj).map(([key, value]) => ({ key, value: String(value) }));
+		} catch { envVars = []; }
+
+		try {
+			volumes = JSON.parse(t.defaultVolumes || '[]');
+		} catch { volumes = []; }
+
+		ports = t.ports.map(p => ({
+			name: p.name,
+			containerPort: p.containerPort,
+			hostPort: p.hostPort,
+			protocol: p.protocol,
+			proxyEnabled: p.proxyEnabled
+		}));
+
+		suggestedDependencies = t.suggestedDependencies.join(', ');
+		defaultHooks = t.defaultHooks.map(h => ({
+			event: h.event,
+			action: h.action,
+			command: h.command,
+			delaySeconds: h.delaySeconds,
+			condition: h.condition
+		}));
+
+		metadata = Object.entries(t.metadata || {}).map(([key, value]) => ({ key, value }));
+		activeSection = 'basic';
+	}
 
 	function resetForm() {
 		name = '';
@@ -249,12 +304,12 @@
 		activeSection = 'basic';
 	}
 
-	async function handleCreate() {
+	async function handleSubmit() {
 		if (!name.trim() || !dockerImage.trim()) return;
 
-		creating = true;
+		submitting = true;
 		try {
-			await rpcClient.module.createModuleTemplate({
+			const payload = {
 				name: name.trim(),
 				description: description.trim(),
 				dockerImage: dockerImage.trim(),
@@ -295,14 +350,22 @@
 				defaultInitCommand,
 				defaultInitCommandDelay,
 				defaultRestartAfterInit
-			});
-			toast.success(`Template "${name}" created`);
+			};
+
+			if (mode === 'edit' && template) {
+				await rpcClient.module.updateModuleTemplate({ id: template.id, ...payload });
+				toast.success(`Template "${name}" updated`);
+			} else {
+				await rpcClient.module.createModuleTemplate(payload);
+				toast.success(`Template "${name}" created`);
+			}
+			
 			open = false;
-			onCreated();
+			onSuccess();
 		} catch (error) {
-			toast.error(`Failed to create template: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(`Failed to ${mode} template: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		} finally {
-			creating = false;
+			submitting = false;
 		}
 	}
 </script>
@@ -320,7 +383,7 @@
 						</div>
 						<div class="flex-1 min-w-0">
 							<h3 class="font-semibold truncate">
-								{name || 'New Template'}
+								{name || (mode === 'create' ? 'New Template' : 'Edit Template')}
 							</h3>
 							<p class="text-sm text-muted-foreground">Custom template</p>
 						</div>
@@ -1060,24 +1123,21 @@
 				</div>
 
 				<!-- Footer -->
-				<div class="flex items-center justify-end gap-3 px-8 py-5 border-t bg-muted/30">
-					<Button variant="outline" onclick={() => (open = false)} class="h-11 px-6">
-						Cancel
-					</Button>
-					<Button
-						onclick={handleCreate}
-						disabled={creating || !name.trim() || !dockerImage.trim()}
-						class="h-11 px-8 gap-2"
-					>
-						{#if creating}
-							<Loader2 class="h-4 w-4 animate-spin" />
-							Creating...
-						{:else}
-							<Package class="h-4 w-4" />
-							Create Template
-						{/if}
-					</Button>
-				</div>
+				<div class="p-4 border-t bg-muted/20 flex justify-between items-center">
+				<Button variant="ghost" onclick={() => (open = false)}>Cancel</Button>
+				<Button
+					onclick={handleSubmit}
+					disabled={!name.trim() || !dockerImage.trim() || submitting}
+					class="min-w-[120px]"
+				>
+					{#if submitting}
+						<Loader2 class="h-4 w-4 animate-spin mr-2" />
+						{mode === 'create' ? 'Creating...' : 'Saving...'}
+					{:else}
+						{mode === 'create' ? 'Create Template' : 'Save Changes'}
+					{/if}
+				</Button>
+			</div>
 			</div>
 		</div>
 	</DialogContent>

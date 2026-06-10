@@ -28,6 +28,7 @@
 		templates?: ModuleTemplate[];
 		module?: Module;
 		onSuccess: () => void;
+		onTemplateDeleted?: () => void;
 	}
 
 	interface EnvVar { key: string; value: string; }
@@ -36,7 +37,7 @@
 
 	type ConfigSection = 'general' | 'ports' | 'environment' | 'volumes' | 'advanced';
 
-	let { open = $bindable(), mode, server, templates, module, onSuccess }: Props = $props();
+	let { open = $bindable(), mode, server, templates, module, onSuccess, onTemplateDeleted }: Props = $props();
 
 	let step = $state<'select' | 'configure'>('select');
 	let selectedTemplate = $state<ModuleTemplate | null>(null);
@@ -350,6 +351,21 @@
 		step = 'configure';
 	}
 
+	async function handleDeleteTemplate(template: ModuleTemplate) {
+		const confirmed = confirm(`Are you sure you want to delete template "${template.name}"?\n\nThis cannot be undone.`);
+		if (!confirmed) return;
+
+		try {
+			await rpcClient.module.deleteModuleTemplate({ id: template.id });
+			toast.success(`Template "${template.name}" deleted`);
+			if (onTemplateDeleted) {
+				onTemplateDeleted();
+			}
+		} catch (error) {
+			toast.error(`Failed to delete template: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
 	let warnings = $state<string[]>([]);
 	let warningResolve: ((proceed: boolean) => void) | null = null;
 
@@ -543,7 +559,7 @@
 
 				<!-- Content -->
 				<div class="flex-1 overflow-y-auto p-8">
-					<ModuleTemplateMenu {templates} onSelect={selectTemplate} />
+					<ModuleTemplateMenu {templates} onSelect={selectTemplate} onDelete={handleDeleteTemplate} />
 				</div>
 			</div>
 		{:else}

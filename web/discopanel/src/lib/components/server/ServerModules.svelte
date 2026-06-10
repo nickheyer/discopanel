@@ -513,6 +513,7 @@
 	{server}
 	{templates}
 	onSuccess={handleModuleCreated}
+	onTemplateDeleted={loadTemplates}
 />
 
 {#if selectedModule}

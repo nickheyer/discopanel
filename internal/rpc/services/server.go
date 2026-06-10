@@ -16,6 +16,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -37,6 +38,7 @@ var _ discopanelv1connect.ServerServiceHandler = (*ServerService)(nil)
 type ServerService struct {
 	store            *storage.Store
 	docker           *docker.Client
+	sender           *command.Sender
 	config           *config.Config
 	proxy            *proxy.Manager
 	log              *logger.Logger
@@ -46,10 +48,11 @@ type ServerService struct {
 }
 
 // NewServerService creates a new server service
-func NewServerService(store *storage.Store, docker *docker.Client, config *config.Config, proxy *proxy.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, moduleManager *module.Manager, log *logger.Logger) *ServerService {
+func NewServerService(store *storage.Store, docker *docker.Client, sender *command.Sender, config *config.Config, proxy *proxy.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, moduleManager *module.Manager, log *logger.Logger) *ServerService {
 	return &ServerService{
 		store:            store,
 		docker:           docker,
+		sender:           sender,
 		config:           config,
 		proxy:            proxy,
 		log:              log,
@@ -1325,6 +1328,12 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 // SendCommand sends a command to a server
 func (s *ServerService) SendCommand(ctx context.Context, req *connect.Request[v1.SendCommandRequest]) (*connect.Response[v1.SendCommandResponse], error) {
 	server, err := s.store.GetServer(ctx, req.Msg.Id)
+
+	silent := false
+	if req.Msg.Silent != nil {
+		silent = *req.Msg.Silent
+	}
+
 	if err != nil {
 		s.log.Error("Failed to get server: %v", err)
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
@@ -1346,16 +1355,16 @@ func (s *ServerService) SendCommand(ctx context.Context, req *connect.Request[v1
 
 	// Add command to log stream if available
 	commandTime := time.Now()
-	if s.logStreamer != nil {
+	if !silent && s.logStreamer != nil {
 		s.logStreamer.AddCommandEntry(server.ContainerID, req.Msg.Command, commandTime)
 	}
 
-	// Execute command in container
-	output, err := s.docker.ExecCommand(ctx, server.ContainerID, req.Msg.Command)
+	// Send command
+	output, err := s.sender.SendCommand(ctx, server.ID, req.Msg.Command)
 	success := err == nil
 
 	// Add command output to log stream if available
-	if s.logStreamer != nil && (output != "" || !success) {
+	if !silent && s.logStreamer != nil && (output != "" || !success) {
 		s.logStreamer.AddCommandOutput(server.ContainerID, output, success, commandTime)
 	}
 

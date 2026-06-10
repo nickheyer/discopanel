@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 
+	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -19,6 +20,7 @@ import (
 type Scheduler struct {
 	store         *storage.Store
 	docker        *docker.Client
+	sender        *command.Sender
 	log           *logger.Logger
 	checkInterval time.Duration
 
@@ -53,7 +55,7 @@ func DefaultConfig() Config {
 }
 
 // NewScheduler creates a new task scheduler
-func NewScheduler(store *storage.Store, docker *docker.Client, log *logger.Logger, config ...Config) *Scheduler {
+func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, log *logger.Logger, config ...Config) *Scheduler {
 	cfg := DefaultConfig()
 	if len(config) > 0 {
 		cfg = config[0]
@@ -62,6 +64,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, log *logger.Logge
 	return &Scheduler{
 		store:             store,
 		docker:            docker,
+		sender:            sender,
 		log:               log,
 		checkInterval:     cfg.CheckInterval,
 		stopChan:          make(chan struct{}),
@@ -403,7 +406,7 @@ func (s *Scheduler) executeCommandTask(ctx context.Context, server *storage.Serv
 		return "", fmt.Errorf("server has no container")
 	}
 
-	output, err := s.docker.ExecCommand(ctx, server.ContainerID, config.Command)
+	output, err := s.sender.SendCommand(ctx, server.ID, config.Command)
 	return output, err
 }
 

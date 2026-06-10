@@ -208,6 +208,7 @@ message RecreateServerResponse {
 message SendCommandRequest {
   string id = 1;
   string command = 2;
+  optional bool silent = 3;
 }
 
 // Command execution result

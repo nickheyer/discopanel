@@ -446,8 +446,8 @@ func (c *Collector) collectSLPData() {
 		// SLP ping w/ server version for protocol
 		slpCtx, slpCancel := context.WithTimeout(ctx, c.collectorConfig.SLPTimeout)
 		port := server.Port
-		if port == 0 {
-			port = 25565
+		if server.ProxyHostname != "" || port == 0 {
+			port = docker.DefaultMinecraftPort // Proxy listens on default port (inside container)
 		}
 		result, err := slpClient.Ping(slpCtx, containerIP, port, server.MCVersion)
 		slpCancel()

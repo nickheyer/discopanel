@@ -799,7 +799,7 @@ func getDockerImage(loader models.ModLoader, mcVersion string) string {
 	return "itzg/minecraft-server:" + GetOptimalDockerTag(mcVersion, loader, false)
 }
 
-// EnsureNetwork creates the Docker network if it doesn't exist
+// Creates the Docker network if it doesn't exist - attaches itself to that network when applicable
 func (c *Client) EnsureNetwork() error {
 	ctx := context.Background()
 
@@ -810,30 +810,68 @@ func (c *Client) EnsureNetwork() error {
 	}
 
 	// Check if network already exists
+	exists := false
 	for _, net := range networks {
 		if net.Name == c.config.NetworkName {
-			return nil // Network already exists
+			exists = true
+			break
 		}
 	}
 
-	// Create network - let Docker allocate subnet from its configured default-address-pools
-	createOpts := network.CreateOptions{
-		Driver: "bridge",
-		Labels: map[string]string{
-			"discopanel.managed": "true",
-		},
+	if !exists {
+		// Create network - let Docker allocate subnet from its configured default-address-pools
+		createOpts := network.CreateOptions{
+			Driver: "bridge",
+			Labels: map[string]string{
+				"discopanel.managed": "true",
+			},
+		}
+
+		if _, err = c.docker.NetworkCreate(ctx, c.config.NetworkName, createOpts); err != nil {
+			return fmt.Errorf("failed to create network: %w", err)
+		}
 	}
 
-	_, err = c.docker.NetworkCreate(ctx, c.config.NetworkName, createOpts)
-
-	if err != nil {
-		return fmt.Errorf("failed to create network: %w", err)
-	}
-
+	c.attachSelfToNetwork(ctx)
 	return nil
 }
 
-// buildEnvFromConfig builds Docker environment variables from ServerConfig struct
+// Connects discopanel to its own bridge network if running as container
+// NOTE: Only really needed for bridge mode though
+func (c *Client) attachSelfToNetwork(ctx context.Context) {
+	if _, err := os.Stat("/.dockerenv"); err != nil {
+		return
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		return
+	}
+
+	// Docker sets the container hostname to its short ID by default
+	info, err := c.docker.ContainerInspect(ctx, hostname)
+	if err != nil {
+		c.log.Debug("Could not inspect own container %s: %v", hostname, err)
+		return
+	}
+
+	if info.HostConfig != nil && info.HostConfig.NetworkMode.IsHost() {
+		return
+	}
+
+	if _, ok := info.NetworkSettings.Networks[c.config.NetworkName]; ok {
+		return
+	}
+
+	if err := c.docker.NetworkConnect(ctx, c.config.NetworkName, info.ID, nil); err != nil {
+		c.log.Error("Failed to attach DiscoPanel container to network %s: %v", c.config.NetworkName, err)
+		return
+	}
+
+	c.log.Info("Attached DiscoPanel container to network %s", c.config.NetworkName)
+}
+
+// Builds Docker environment variables from ServerConfig struct
 func buildEnvFromConfig(config *models.ServerConfig) []string {
 	env := []string{
 		"DUMP_SERVER_PROPERTIES=true",

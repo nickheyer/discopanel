@@ -1,0 +1,107 @@
+package command
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/nickheyer/discopanel/internal/config"
+	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/proxy"
+	rcon "github.com/nickheyer/discopanel/internal/rcon"
+)
+
+type DockerExecutor interface {
+	ExecCommand(ctx context.Context, containerID string, command string) (string, error)
+}
+
+type Sender struct {
+	store  *storage.Store
+	config *config.Config
+	docker DockerExecutor
+}
+
+func NewSender(store *storage.Store, cfg *config.Config, docker DockerExecutor) *Sender {
+	return &Sender{
+		store:  store,
+		config: cfg,
+		docker: docker,
+	}
+}
+
+func (s *Sender) SendCommand(ctx context.Context, serverID string, command string) (string, error) {
+	server, err := s.store.GetServer(ctx, serverID)
+
+	if err != nil {
+		return "", fmt.Errorf("server container not found")
+	}
+	if server.ContainerID == "" {
+		return "", fmt.Errorf("server container not found")
+	}
+
+	// old docker exec command
+	dockerExec := func(cause error) (string, error) {
+		output, err := s.docker.ExecCommand(ctx, server.ContainerID, command)
+		if err != nil {
+			return "", fmt.Errorf("rcon path failed: %w; fallback exec failed: %v", cause, err)
+		}
+		return output, nil
+	}
+
+	serverCfg, err := s.store.GetServerConfig(ctx, serverID)
+	if err != nil {
+		return dockerExec(fmt.Errorf("failed to load server config: %w", err))
+	}
+
+	if serverCfg.EnableRCON != nil && *serverCfg.EnableRCON == false {
+		return dockerExec(fmt.Errorf("rcon is disabled for this server"))
+	}
+
+	var rconPort int
+	if v, ok := s.config.Minecraft.GlobalConfig["rconPort"]; ok && v != nil {
+		switch t := v.(type) {
+		case int:
+			rconPort = t
+		case int64:
+			rconPort = int(t)
+		case float64:
+			rconPort = int(t)
+		case string:
+			if p, err := strconv.Atoi(t); err == nil {
+				rconPort = p
+			}
+		}
+	}
+	if serverCfg.RCONPort != nil {
+		rconPort = *serverCfg.RCONPort
+	}
+
+	var rconPassword string
+	if v, ok := s.config.Minecraft.GlobalConfig["rconPassword"]; ok && v != nil {
+		if p, ok := v.(string); ok {
+			rconPassword = p
+		} else {
+			rconPassword = fmt.Sprint(v)
+		}
+	}
+	if serverCfg.RCONPassword != nil {
+		rconPassword = *serverCfg.RCONPassword
+	}
+
+	ip, err := proxy.GetContainerIP(server.ContainerID, s.config.Docker.NetworkName)
+	if err != nil {
+		return dockerExec(fmt.Errorf("failed to resolve container ip: %w", err))
+	}
+
+	// run comamand in dedicated context with timeout
+	rconCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	output, err := rcon.SendCommand(rconCtx, ip, rconPort, rconPassword, command)
+
+	if err != nil {
+		return dockerExec(fmt.Errorf("rcon command failed: %w", err))
+	}
+
+	return output, nil
+}

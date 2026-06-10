@@ -58,6 +58,23 @@ func FindWorldDir(dataDir string) (string, error) {
 	return worldDir, nil
 }
 
+// Returns the server's world directory along with any sibling world dirs
+func FindWorldDirs(dataDir string) ([]string, error) {
+	worldDir, err := FindWorldDir(dataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	dirs := []string{worldDir}
+	for _, suffix := range []string{"_nether", "_the_end"} {
+		dimDir := worldDir + suffix
+		if info, err := os.Stat(dimDir); err == nil && info.IsDir() {
+			dirs = append(dirs, dimDir)
+		}
+	}
+	return dirs, nil
+}
+
 // calculateDirSize calculates the total size of a directory in bytes, including all nested files.
 func CalculateDirSize(dirPath string) (int64, error) {
 	var totalSize int64
@@ -257,10 +274,18 @@ func zipMethod(name string) uint16 {
 
 // CreateZipToWriter writes a zip archive of the given paths to the writer.
 // basePath is the root directory used to calculate relative paths in the archive.
+// When compress is false all entries are stored uncompressed.
 // Returns the number of files archived.
-func CreateZipToWriter(paths []string, basePath string, w io.Writer) (int, error) {
+func CreateZipToWriter(paths []string, basePath string, w io.Writer, compress bool) (int, error) {
 	zw := zip.NewWriter(w)
 	defer zw.Close()
+
+	method := func(name string) uint16 {
+		if !compress {
+			return zip.Store
+		}
+		return zipMethod(name)
+	}
 
 	count := 0
 	for _, p := range paths {
@@ -290,7 +315,7 @@ func CreateZipToWriter(paths []string, basePath string, w io.Writer) (int, error
 					return err
 				}
 				header.Name = rel
-				header.Method = zipMethod(rel)
+				header.Method = method(rel)
 				writer, err := zw.CreateHeader(header)
 				if err != nil {
 					return err
@@ -313,7 +338,7 @@ func CreateZipToWriter(paths []string, basePath string, w io.Writer) (int, error
 				return count, fmt.Errorf("failed to create header for %s: %w", p, err)
 			}
 			header.Name = p
-			header.Method = zipMethod(p)
+			header.Method = method(p)
 			writer, err := zw.CreateHeader(header)
 			if err != nil {
 				return count, fmt.Errorf("failed to create zip entry for %s: %w", p, err)
@@ -334,14 +359,14 @@ func CreateZipToWriter(paths []string, basePath string, w io.Writer) (int, error
 }
 
 // CreateZipArchive creates a zip archive file on disk from the given paths.
-func CreateZipArchive(paths []string, basePath string, destPath string) (int, error) {
+func CreateZipArchive(paths []string, basePath string, destPath string, compress bool) (int, error) {
 	f, err := os.Create(destPath)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create archive file: %w", err)
 	}
 	defer f.Close()
 
-	count, err := CreateZipToWriter(paths, basePath, f)
+	count, err := CreateZipToWriter(paths, basePath, f, compress)
 	if err != nil {
 		os.Remove(destPath)
 		return 0, err

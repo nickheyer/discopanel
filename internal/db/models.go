@@ -33,11 +33,14 @@ const (
 	ModLoaderQuilt  ModLoader = "quilt"
 
 	// Bukkit-based
-	ModLoaderBukkit     ModLoader = "bukkit"
-	ModLoaderSpigot     ModLoader = "spigot"
+	ModLoaderBukkit ModLoader = "bukkit"
+	ModLoaderSpigot ModLoader = "spigot"
+
+	// Paper-based
 	ModLoaderPaper      ModLoader = "paper"
 	ModLoaderPurpur     ModLoader = "purpur"
 	ModLoaderPufferfish ModLoader = "pufferfish"
+	ModLoaderFolia      ModLoader = "folia"
 
 	// Hybrids (Forge + Bukkit)
 	ModLoaderMagma           ModLoader = "magma"

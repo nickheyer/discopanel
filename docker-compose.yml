@@ -9,6 +9,9 @@ services:
 
     # Option 2 (MORE COMPLICATED, ONLY USE IF YOU NEEDED): Use bridge mode with port mapping (default)
     #
+    # NOTE: In bridge mode, DiscoPanel automatically attaches itself to the managed Docker network
+    #       (discopanel-network) at startup so it can reach the minecraft server containers it creates.
+    #
     # NOTE: Only specify minecraft server ports (25565 ... etc) for proxied minecraft servers using a hostname. 
     #       Discopanel will automatically expose ports needed on the managed minecraft server instances. In other
     #       words, only the discopanel web port is needed + proxy port(s).

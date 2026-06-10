@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -65,6 +66,7 @@ func DefaultConfig() CollectorConfig {
 type Collector struct {
 	store  *storage.Store
 	docker *docker.Client
+	sender *command.Sender
 	config *config.Config
 	log    *logger.Logger
 
@@ -79,7 +81,7 @@ type Collector struct {
 }
 
 // Creates a new metrics collector
-func NewCollector(store *storage.Store, docker *docker.Client, cfg *config.Config, log *logger.Logger, collectorCfg ...CollectorConfig) *Collector {
+func NewCollector(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, log *logger.Logger, collectorCfg ...CollectorConfig) *Collector {
 	cc := DefaultConfig()
 	if len(collectorCfg) > 0 {
 		cc = collectorCfg[0]
@@ -88,6 +90,7 @@ func NewCollector(store *storage.Store, docker *docker.Client, cfg *config.Confi
 	return &Collector{
 		store:           store,
 		docker:          docker,
+		sender:          sender,
 		config:          cfg,
 		log:             log,
 		metrics:         make(map[string]*ServerMetrics),
@@ -282,7 +285,7 @@ func (c *Collector) collectRCONData() {
 
 		// Get player count from RCON
 		if !slpHasPlayerData {
-			output, err := c.docker.ExecCommand(ctx, server.ContainerID, "list")
+			output, err := c.sender.SendCommand(ctx, server.ID, "list")
 			if err == nil && output != "" {
 				count, _ := minecraft.ParsePlayerListFromOutput(output)
 				c.updateMetrics(server.ID, func(m *ServerMetrics) {
@@ -299,7 +302,7 @@ func (c *Collector) collectRCONData() {
 				if cmd == "" {
 					continue
 				}
-				output, err := c.docker.ExecCommand(ctx, server.ContainerID, cmd)
+				output, err := c.sender.SendCommand(ctx, server.ID, cmd)
 				if err == nil && output != "" {
 					tps := minecraft.ParseTPSFromOutput(output)
 					if tps > 0 {
@@ -343,15 +346,19 @@ func (c *Collector) collectDiskUsage() {
 			continue
 		}
 
-		// Calculate world directory size
-		worldPath, err := files.FindWorldDir(server.DataPath)
+		// Calculate world directory size, including dimension worlds
+		worldPaths, err := files.FindWorldDirs(server.DataPath)
 		if err != nil {
 			continue
 		}
 
-		totalWorldSize, err := files.CalculateDirSize(worldPath)
-		if err != nil {
-			continue
+		var totalWorldSize int64
+		for _, worldPath := range worldPaths {
+			size, err := files.CalculateDirSize(worldPath)
+			if err != nil {
+				continue
+			}
+			totalWorldSize += size
 		}
 
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {
@@ -443,8 +450,8 @@ func (c *Collector) collectSLPData() {
 		// SLP ping w/ server version for protocol
 		slpCtx, slpCancel := context.WithTimeout(ctx, c.collectorConfig.SLPTimeout)
 		port := server.Port
-		if port == 0 {
-			port = 25565
+		if server.ProxyHostname != "" || port == 0 {
+			port = docker.DefaultMinecraftPort // Proxy listens on default port (inside container)
 		}
 		result, err := slpClient.Ping(slpCtx, containerIP, port, server.MCVersion)
 		slpCancel()

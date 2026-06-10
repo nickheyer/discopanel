@@ -100,12 +100,14 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
 		}
+
+	// Paper-based
 	case models.ModLoaderPaper:
 		return ModLoaderInfo{
 			Name:            string(loader),
 			DisplayName:     "Paper",
 			Description:     "Performance-optimized fork of Spigot",
-			Category:        "Bukkit",
+			Category:        "Paper",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
@@ -115,7 +117,7 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 			Name:            string(loader),
 			DisplayName:     "Purpur",
 			Description:     "Fork of Paper with additional gameplay features",
-			Category:        "Bukkit",
+			Category:        "Paper",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
@@ -125,7 +127,17 @@ func GetModLoaderInfo(loader models.ModLoader) ModLoaderInfo {
 			Name:            string(loader),
 			DisplayName:     "Pufferfish",
 			Description:     "Performance-focused fork of Paper",
-			Category:        "Bukkit",
+			Category:        "Paper",
+			ModsDirectory:   "plugins",
+			ConfigDirectory: "plugins",
+			FileExtensions:  []string{".jar"},
+		}
+	case models.ModLoaderFolia:
+		return ModLoaderInfo{
+			Name:            string(loader),
+			DisplayName:     "Pufferfish",
+			Description:     "Performance-focused fork of Paper",
+			Category:        "Paper",
 			ModsDirectory:   "plugins",
 			ConfigDirectory: "plugins",
 			FileExtensions:  []string{".jar"},
@@ -369,9 +381,12 @@ func GetAllModLoaders() []ModLoaderInfo {
 		// Bukkit-based
 		models.ModLoaderBukkit,
 		models.ModLoaderSpigot,
+
+		// Paper-based
 		models.ModLoaderPaper,
 		models.ModLoaderPurpur,
 		models.ModLoaderPufferfish,
+		models.ModLoaderFolia,
 
 		// Hybrids (Forge + Bukkit)
 		models.ModLoaderMagma,

@@ -2,15 +2,16 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import DynamicIcon from '$lib/components/ui/DynamicIcon.svelte';
-	import { Package, ChevronRight } from '@lucide/svelte';
-	import type { ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
+	import { Package, ChevronRight, Trash2 } from '@lucide/svelte';
+	import { ModuleTemplateType, type ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
 
 	interface Props {
 		templates?: ModuleTemplate[];
 		onSelect: (template: ModuleTemplate) => void;
+		onDelete?: (template: ModuleTemplate) => void;
 	}
 
-	let { templates, onSelect }: Props = $props();
+	let { templates, onSelect, onDelete }: Props = $props();
 
 	let selectedCategory = $state<string | null>(null);
 
@@ -55,8 +56,11 @@
 
 <div class="space-y-3">
 	{#each filteredTemplates as template (template.name)}
-		<button
-			class="w-full flex items-center gap-5 p-5 rounded-xl border bg-card text-left hover:bg-muted/50 hover:border-primary/50 transition-all group"
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_interactive_supports_focus -->
+		<div
+			class="w-full flex items-center gap-5 p-5 rounded-xl border bg-card text-left hover:bg-muted/50 hover:border-primary/50 transition-all group cursor-pointer"
+			role="button"
 			onclick={() => onSelect(template)}
 		>
 			<div class="h-14 w-14 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
@@ -73,8 +77,24 @@
 					{template.description || 'No description provided'}
 				</p>
 			</div>
-			<ChevronRight class="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-		</button>
+			
+			<div class="flex items-center gap-2 shrink-0">
+				{#if template.type === ModuleTemplateType.CUSTOM && onDelete}
+					<Button
+						variant="ghost"
+						size="icon"
+						class="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+						onclick={(e) => {
+							e.stopPropagation();
+							onDelete?.(template);
+						}}
+					>
+						<Trash2 class="h-5 w-5" />
+					</Button>
+				{/if}
+				<ChevronRight class="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+			</div>
+		</div>
 	{/each}
 </div>
 

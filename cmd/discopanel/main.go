@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -158,8 +159,11 @@ func main() {
 	}
 	defer proxyManager.Stop()
 
+	// Initialize command sender
+	sender := command.NewSender(store, cfg, dockerClient)
+
 	// Initialize task scheduler
-	taskScheduler := scheduler.NewScheduler(store, dockerClient, log, scheduler.Config{
+	taskScheduler := scheduler.NewScheduler(store, dockerClient, sender, cfg, log, scheduler.Config{
 		CheckInterval: time.Duration(cfg.Docker.SyncInterval) * time.Second, // Use same interval as container status monitor
 	})
 
@@ -170,7 +174,7 @@ func main() {
 	defer taskScheduler.Stop()
 
 	// Initialize metrics collector
-	metricsCollector := metrics.NewCollector(store, dockerClient, cfg, log)
+	metricsCollector := metrics.NewCollector(store, dockerClient, sender, cfg, log)
 	if err := metricsCollector.Start(); err != nil {
 		log.Error("Failed to start metrics collector: %v", err)
 	}
@@ -189,7 +193,7 @@ func main() {
 	defer moduleManager.Stop()
 
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, log)
+	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, log)
 
 	// Print recovery key
 	if key := rpcServer.RecoveryKey(); key != "" {

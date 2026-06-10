@@ -127,10 +127,12 @@ message CommandTaskConfig {
 
 // Configuration for backup tasks
 message BackupTaskConfig {
-  string backup_name = 1;    // Name pattern for backup
-  repeated string paths = 2; // Paths to include (empty = full backup)
-  bool compress = 3;         // Whether to compress
-  int32 retention_days = 4;  // Days to keep backup (0 = forever)
+  string backup_name = 1;    // Name pattern for backup (empty = task name)
+  repeated string paths = 2; // Paths to include, relative to the server directory (empty = world directory)
+  bool compress = 3;         // Whether to compress archive contents
+  int32 retention_days = 4;  // Days to keep backups (0 = forever)
+  int32 max_backups = 5;     // Maximum number of backups to keep (0 = unlimited, takes precedence over min_backups)
+  int32 min_backups = 6;     // Never let retention_days expiry reduce the backup count below this
 }
 
 // Configuration for script execution tasks

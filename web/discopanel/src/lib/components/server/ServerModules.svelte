@@ -513,6 +513,7 @@
 	{server}
 	{templates}
 	onSuccess={handleModuleCreated}
+	onTemplateDeleted={loadTemplates}
 />
 
 {#if selectedModule}
@@ -531,5 +532,5 @@
 
 <ModuleTemplateCreateDialog
 	bind:open={templateCreateDialogOpen}
-	onCreated={handleTemplateCreated}
+	onSuccess={handleTemplateCreated}
 />

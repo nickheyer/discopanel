@@ -30,21 +30,6 @@
 	let { server, onUpdate }: Props = $props();
 
 	let saving = $state(false);
-	let isDirty = $derived(
-		formData.name !== server.name ||
-		formData.description !== (server.description || '') ||
-		formData.port !== server.port ||
-		formData.maxPlayers !== server.maxPlayers ||
-		formData.memory !== server.memory ||
-		formData.modLoader !== enumToString(ModLoader, server.modLoader) ||
-		formData.mcVersion !== server.mcVersion ||
-		formData.dockerImage !== server.dockerImage ||
-		formData.detached !== server.detached ||
-		formData.autoStart !== server.autoStart ||
-		formData.tpsCommand !== (server.tpsCommand || '') ||
-		safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
-		safeToString($state.snapshot(formData.dockerOverrides)) !== safeToString(server.dockerOverrides)
-	);
 
   function safeToString(data?: unknown): string | undefined {
     if (!data) return undefined;
@@ -75,6 +60,22 @@
 			additionalPorts: server.additionalPorts || [],
 			dockerOverrides: server.dockerOverrides
 		})
+	);
+
+	let isDirty = $derived(
+		formData.name !== server.name ||
+		formData.description !== (server.description || '') ||
+		formData.port !== server.port ||
+		formData.maxPlayers !== server.maxPlayers ||
+		formData.memory !== server.memory ||
+		formData.modLoader !== enumToString(ModLoader, server.modLoader) ||
+		formData.mcVersion !== server.mcVersion ||
+		formData.dockerImage !== server.dockerImage ||
+		formData.detached !== server.detached ||
+		formData.autoStart !== server.autoStart ||
+		formData.tpsCommand !== (server.tpsCommand || '') ||
+		safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
+		safeToString($state.snapshot(formData.dockerOverrides)) !== safeToString(server.dockerOverrides)
 	);
 
 

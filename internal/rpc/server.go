@@ -10,6 +10,7 @@ import (
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
 	"github.com/nickheyer/discopanel/internal/auth"
+	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -36,6 +37,7 @@ import (
 type Server struct {
 	store            *storage.Store
 	docker           *docker.Client
+	sender           *command.Sender
 	config           *config.Config
 	log              *logger.Logger
 	handler          http.Handler
@@ -53,7 +55,7 @@ type Server struct {
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, moduleManager *module.Manager, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, moduleManager *module.Manager, log *logger.Logger) *Server {
 	// Initialize RBAC enforcer
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
@@ -90,12 +92,13 @@ func NewServer(store *storage.Store, docker *docker.Client, cfg *config.Config, 
 	downloadManager := download.NewManager(cfg.Storage.TempDir, uploadTTL, log)
 
 	// Initialize WebSocket hub
-	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, docker, log)
+	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, docker, sender, log)
 	go wsHub.Run()
 
 	s := &Server{
 		store:            store,
 		docker:           docker,
+		sender:           sender,
 		config:           cfg,
 		log:              log,
 		proxyManager:     proxyManager,
@@ -191,7 +194,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)

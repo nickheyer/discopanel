@@ -38,7 +38,7 @@
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
-	import { Server, Home, Settings, Package, User as UserIcon, LogOut, LogIn, FileText, Sun, Moon } from '@lucide/svelte';
+	import { Server, Home, Settings, Package, User as UserIcon, LogOut, LogIn, FileText, Sun, Moon, Puzzle } from '@lucide/svelte';
 	import { toggleMode, mode } from 'mode-watcher';
 	import { ServerStatus, type User } from '$lib/proto/discopanel/v1/common_pb';
 
@@ -182,6 +182,18 @@
 										{/snippet}
 									</SidebarMenuButton>
 								</SidebarMenuItem>
+								{#if showSettingsNav}
+									<SidebarMenuItem>
+										<SidebarMenuButton isActive={page.url.pathname.startsWith('/modules')}>
+											{#snippet child({ props })}
+												<a href={resolvePath('/modules')} {...props}>
+													<Puzzle class="h-4 w-4" />
+													<span class="group-data-[collapsible=icon]:hidden">Modules</span>
+												</a>
+											{/snippet}
+										</SidebarMenuButton>
+									</SidebarMenuItem>
+								{/if}
 								{#if showSettingsNav}
 									<SidebarMenuItem>
 										<SidebarMenuButton isActive={page.url.pathname === '/settings'}>

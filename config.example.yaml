@@ -33,8 +33,13 @@ docker:
   network_name: "discopanel-network"
   registry_url: ""
   sync_interval: 5  # Seconds between docker state sync
-  labels: '{ }' # confgure custom docker labels every container gets, for example: {"your.label.key": "your_label_value", "other.label.key": "other_label_value"} .
- 
+  # Can be configure like labels: {"your.label.key": "your_label_value", "other.label.key": "other_label_value"}
+  # or
+  # labels:
+  #   your.label.key: "your_label_value"
+  #   other.label.key: "other_label_value"
+  labels: '{ }'
+
 # Storage configuration
 storage:
   data_dir: "./data"

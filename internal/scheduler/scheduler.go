@@ -11,6 +11,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/nickheyer/discopanel/internal/command"
+	appconfig "github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -21,6 +22,7 @@ type Scheduler struct {
 	store         *storage.Store
 	docker        *docker.Client
 	sender        *command.Sender
+	appConfig     *appconfig.Config
 	log           *logger.Logger
 	checkInterval time.Duration
 
@@ -55,7 +57,7 @@ func DefaultConfig() Config {
 }
 
 // NewScheduler creates a new task scheduler
-func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, log *logger.Logger, config ...Config) *Scheduler {
+func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, appCfg *appconfig.Config, log *logger.Logger, config ...Config) *Scheduler {
 	cfg := DefaultConfig()
 	if len(config) > 0 {
 		cfg = config[0]
@@ -65,6 +67,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 		store:             store,
 		docker:            docker,
 		sender:            sender,
+		appConfig:         appCfg,
 		log:               log,
 		checkInterval:     cfg.CheckInterval,
 		stopChan:          make(chan struct{}),
@@ -288,25 +291,30 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*s
 
 	s.log.Info("Task %s: executing on server %s (trigger: %s)", task.Name, server.Name, trigger)
 
-	// Execute the task based on type
+	// Execute the task based on type, retrying on failure if configured
 	var output string
 	var execErr error
 
-	switch task.TaskType {
-	case storage.TaskTypeCommand:
-		output, execErr = s.executeCommandTask(execCtx, server, task)
-	case storage.TaskTypeRestart:
-		output, execErr = s.executeRestartTask(execCtx, server, task)
-	case storage.TaskTypeStart:
-		output, execErr = s.executeStartTask(execCtx, server, task)
-	case storage.TaskTypeStop:
-		output, execErr = s.executeStopTask(execCtx, server, task)
-	case storage.TaskTypeBackup:
-		output, execErr = s.executeBackupTask(execCtx, server, task)
-	case storage.TaskTypeScript:
-		output, execErr = s.executeScriptTask(execCtx, server, task)
-	default:
-		execErr = fmt.Errorf("unknown task type: %s", task.TaskType)
+	for attempt := 0; ; attempt++ {
+		output, execErr = s.runTaskType(execCtx, server, task)
+		if execErr == nil || attempt >= task.RetryCount || execCtx.Err() != nil {
+			break
+		}
+
+		retryDelay := time.Duration(task.RetryDelay) * time.Second
+		if retryDelay <= 0 {
+			retryDelay = time.Minute
+		}
+		s.log.Warn("Task %s: attempt %d failed, retrying in %v: %v", task.Name, attempt+1, retryDelay, execErr)
+
+		select {
+		case <-execCtx.Done():
+		case <-time.After(retryDelay):
+		}
+		if execCtx.Err() != nil {
+			break
+		}
+		execution.RetryNum = attempt + 1
 	}
 
 	// Update execution record
@@ -338,6 +346,26 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*s
 	s.updateNextRun(task)
 
 	return execution, execErr
+}
+
+// runTaskType dispatches a single execution attempt to the type-specific executor
+func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+	switch task.TaskType {
+	case storage.TaskTypeCommand:
+		return s.executeCommandTask(ctx, server, task)
+	case storage.TaskTypeRestart:
+		return s.executeRestartTask(ctx, server, task)
+	case storage.TaskTypeStart:
+		return s.executeStartTask(ctx, server, task)
+	case storage.TaskTypeStop:
+		return s.executeStopTask(ctx, server, task)
+	case storage.TaskTypeBackup:
+		return s.executeBackupTask(ctx, server, task)
+	case storage.TaskTypeScript:
+		return s.executeScriptTask(ctx, server, task)
+	default:
+		return "", fmt.Errorf("unknown task type: %s", task.TaskType)
+	}
 }
 
 // CancelExecution cancels a running execution
@@ -485,20 +513,6 @@ func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server,
 	s.store.UpdateServer(ctx, server)
 
 	return "server stopped successfully", nil
-}
-
-// BackupTaskConfig represents configuration for backup tasks
-type BackupTaskConfig struct {
-	BackupName    string   `json:"backup_name"`
-	Paths         []string `json:"paths"`
-	Compress      bool     `json:"compress"`
-	RetentionDays int      `json:"retention_days"`
-}
-
-func (s *Scheduler) executeBackupTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
-	// Backup functionality will be implemented when the backup system is added
-	// For now, return a placeholder indicating this is ready for backup implementation
-	return "", fmt.Errorf("backup task type not yet implemented")
 }
 
 // ScriptTaskConfig represents configuration for script tasks

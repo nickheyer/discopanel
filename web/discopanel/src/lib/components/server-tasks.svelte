@@ -10,11 +10,12 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import * as Select from '$lib/components/ui/select';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { Loader2, Plus, Play, Pause, Trash2, Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw, Terminal, RotateCcw, Square, Power, FileText, History } from '@lucide/svelte';
+	import { Loader2, Plus, Play, Pause, Trash2, Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw, Terminal, RotateCcw, Square, Power, FileText, History, Archive, Wrench, X, Pencil } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ScheduledTask, TaskExecution } from '$lib/proto/discopanel/v1/task_pb';
 	import { TaskType, TaskStatus, ScheduleType, ExecutionStatus, CreateTaskRequestSchema, UpdateTaskRequestSchema, ToggleTaskRequestSchema, TriggerTaskRequestSchema, DeleteTaskRequestSchema, ListTasksRequestSchema, ListTaskExecutionsRequestSchema } from '$lib/proto/discopanel/v1/task_pb';
 	import { create } from '@bufbuild/protobuf';
+	import { timestampFromDate } from '@bufbuild/protobuf/wkt';
 
 	let { server, active }: { server: Server, active?: boolean } = $props();
 
@@ -25,12 +26,14 @@
 	let previousServerId = $state(server.id);
 
 	// Dialog state
+	type DialogSection = 'general' | 'schedule' | 'advanced';
 	let showCreateDialog = $state(false);
 	let showHistoryDialog = $state(false);
 	let selectedTask = $state<ScheduledTask | null>(null);
 	let taskHistory = $state<TaskExecution[]>([]);
 	let historyLoading = $state(false);
 	let creating = $state(false);
+	let activeSection = $state<DialogSection>('general');
 
 	// Form state
 	let taskName = $state('');
@@ -42,8 +45,29 @@
 	let runAt = $state('');
 	let timezone = $state('UTC');
 	let timeout = $state(300);
+	let retryCount = $state(0);
+	let retryDelay = $state(60);
 	let requireOnline = $state(true);
-	let taskConfig = $state('');
+
+	// Type-specific config state
+	let command = $state('');
+	let scriptPath = $state('');
+	let scriptArgs = $state('');
+	let backupName = $state('');
+	let backupPaths = $state('');
+	let backupCompress = $state(true);
+	let backupRetentionDays = $state(7);
+	let backupMinBackups = $state(3);
+	let backupMaxBackups = $state(0);
+
+	const dialogSections: { id: DialogSection; label: string; icon: typeof FileText; title: string; description: string }[] = [
+		{ id: 'general', label: 'General', icon: FileText, title: 'General', description: 'Task name, type, and configuration' },
+		{ id: 'schedule', label: 'Schedule', icon: Clock, title: 'Schedule', description: 'When and how often the task runs' },
+		{ id: 'advanced', label: 'Advanced', icon: Wrench, title: 'Advanced', description: 'Timeouts, retries, and execution conditions' }
+	];
+
+	const currentSection = $derived(dialogSections.find((s) => s.id === activeSection) ?? dialogSections[0]);
+	const DialogTaskIcon = $derived(getTaskTypeIcon(taskType));
 
 	onMount(() => {
 		if (server && !initialized) {
@@ -93,8 +117,19 @@
 		runAt = '';
 		timezone = 'UTC';
 		timeout = 300;
+		retryCount = 0;
+		retryDelay = 60;
 		requireOnline = true;
-		taskConfig = '';
+		command = '';
+		scriptPath = '';
+		scriptArgs = '';
+		backupName = '';
+		backupPaths = '';
+		backupCompress = true;
+		backupRetentionDays = 7;
+		backupMinBackups = 3;
+		backupMaxBackups = 0;
+		activeSection = 'general';
 		selectedTask = null;
 	}
 
@@ -104,6 +139,7 @@
 	}
 
 	function openEditDialog(task: ScheduledTask) {
+		resetForm();
 		selectedTask = task;
 		taskName = task.name;
 		taskDescription = task.description;
@@ -116,9 +152,51 @@
 		}
 		timezone = task.timezone || 'UTC';
 		timeout = task.timeout;
+		retryCount = task.retryCount;
+		retryDelay = task.retryDelay;
 		requireOnline = task.requireOnline;
-		taskConfig = task.config;
+
+		let parsed: Record<string, unknown> = {};
+		try { parsed = JSON.parse(task.config || '{}'); } catch { parsed = {}; }
+		command = typeof parsed.command === 'string' ? parsed.command : '';
+		scriptPath = typeof parsed.script_path === 'string' ? parsed.script_path : '';
+		scriptArgs = Array.isArray(parsed.args) ? parsed.args.join(' ') : '';
+		backupName = typeof parsed.backup_name === 'string' ? parsed.backup_name : '';
+		backupPaths = Array.isArray(parsed.paths) ? parsed.paths.join(', ') : '';
+		backupCompress = typeof parsed.compress === 'boolean' ? parsed.compress : true;
+		backupRetentionDays = typeof parsed.retention_days === 'number' ? parsed.retention_days : 0;
+		backupMinBackups = typeof parsed.min_backups === 'number' ? parsed.min_backups : 0;
+		backupMaxBackups = typeof parsed.max_backups === 'number' ? parsed.max_backups : 0;
+
 		showCreateDialog = true;
+	}
+
+	function closeDialog() {
+		showCreateDialog = false;
+		resetForm();
+	}
+
+	function buildTaskConfig(): string {
+		switch (taskType) {
+			case TaskType.COMMAND:
+				return JSON.stringify({ command: command.trim() });
+			case TaskType.SCRIPT:
+				return JSON.stringify({
+					script_path: scriptPath.trim(),
+					args: scriptArgs.split(' ').map((a) => a.trim()).filter(Boolean)
+				});
+			case TaskType.BACKUP:
+				return JSON.stringify({
+					backup_name: backupName.trim(),
+					paths: backupPaths.split(',').map((p) => p.trim()).filter(Boolean),
+					compress: backupCompress,
+					retention_days: backupRetentionDays,
+					min_backups: backupMinBackups,
+					max_backups: backupMaxBackups
+				});
+			default:
+				return '';
+		}
 	}
 
 	async function saveTask() {
@@ -126,13 +204,24 @@
 			toast.error('Task name is required');
 			return;
 		}
+		if (taskType === TaskType.COMMAND && !command.trim()) {
+			toast.error('A command is required for command tasks');
+			return;
+		}
+		if (taskType === TaskType.SCRIPT && !scriptPath.trim()) {
+			toast.error('A script path is required for script tasks');
+			return;
+		}
+		if (scheduleType === ScheduleType.CRON && !cronExpr.trim()) {
+			toast.error('A cron expression is required');
+			return;
+		}
 
 		creating = true;
 		try {
-			let config = taskConfig;
-			if (!config && taskType === TaskType.COMMAND) {
-				config = JSON.stringify({ command: '' });
-			}
+			const config = buildTaskConfig();
+
+			const runAtTimestamp = scheduleType === ScheduleType.ONCE && runAt ? timestampFromDate(new Date(runAt)) : undefined;
 
 			if (selectedTask) {
 				// Update existing task
@@ -144,9 +233,12 @@
 					schedule: scheduleType,
 					cronExpr: scheduleType === ScheduleType.CRON ? cronExpr : undefined,
 					intervalSecs: scheduleType === ScheduleType.INTERVAL ? intervalSecs : undefined,
+					runAt: runAtTimestamp,
 					timezone: timezone,
 					config: config,
 					timeout: timeout,
+					retryCount: retryCount,
+					retryDelay: retryDelay,
 					requireOnline: requireOnline,
 				});
 				await rpcClient.task.updateTask(request);
@@ -161,9 +253,12 @@
 					schedule: scheduleType,
 					cronExpr: scheduleType === ScheduleType.CRON ? cronExpr : undefined,
 					intervalSecs: scheduleType === ScheduleType.INTERVAL ? intervalSecs : 0,
+					runAt: runAtTimestamp,
 					timezone: timezone,
 					config: config,
 					timeout: timeout,
+					retryCount: retryCount,
+					retryDelay: retryDelay,
 					requireOnline: requireOnline,
 				});
 				await rpcClient.task.createTask(request);
@@ -246,7 +341,7 @@
 	function getTaskTypeIcon(type: TaskType) {
 		switch (type) {
 			case TaskType.COMMAND: return Terminal;
-			case TaskType.BACKUP: return FileText;
+			case TaskType.BACKUP: return Archive;
 			case TaskType.RESTART: return RotateCcw;
 			case TaskType.START: return Power;
 			case TaskType.STOP: return Square;
@@ -422,7 +517,7 @@
 										{/if}
 									</Button>
 									<Button variant="ghost" size="icon" onclick={() => openEditDialog(task)} title="Edit">
-										<Clock class="h-4 w-4" />
+										<Pencil class="h-4 w-4" />
 									</Button>
 									<Button variant="ghost" size="icon" class="text-destructive hover:text-destructive" onclick={() => deleteTask(task)} title="Delete">
 										<Trash2 class="h-4 w-4" />
@@ -438,144 +533,229 @@
 
 	<!-- Create/Edit Dialog -->
 	<Dialog.Root bind:open={showCreateDialog}>
-		<Dialog.Content class="max-w-lg max-h-[90vh] overflow-y-auto">
-			<Dialog.Header>
-				<Dialog.Title>{selectedTask ? 'Edit Task' : 'Create New Task'}</Dialog.Title>
-				<Dialog.Description>
-					{selectedTask ? 'Update the scheduled task configuration' : 'Configure a new scheduled task for your server'}
-				</Dialog.Description>
-			</Dialog.Header>
+		<Dialog.Content class="max-w-4xl! w-[95vw]! h-[80vh]! p-0! gap-0! overflow-hidden flex flex-col" showCloseButton={false}>
+			<div class="flex h-full">
+				<!-- Sidebar -->
+				<div class="w-56 border-r bg-muted/30 flex flex-col shrink-0">
+					<div class="p-6 border-b">
+						<div class="flex items-center gap-3">
+							<div class="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+								<DialogTaskIcon class="h-6 w-6 text-primary" />
+							</div>
+							<div class="flex-1 min-w-0">
+								<h3 class="font-semibold truncate">{taskName || (selectedTask ? 'Edit Task' : 'New Task')}</h3>
+								<p class="text-sm text-muted-foreground truncate">{getTaskTypeLabel(taskType)}</p>
+							</div>
+						</div>
+					</div>
 
-			<div class="space-y-4 py-4">
-				<div class="space-y-2">
-					<Label for="taskName">Task Name</Label>
-					<Input id="taskName" bind:value={taskName} placeholder="Daily Backup" />
+					<nav class="flex-1 p-4 space-y-1">
+						{#each dialogSections as section (section.id)}
+							{@const SectionIcon = section.icon}
+							<button
+								onclick={() => (activeSection = section.id)}
+								class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors {activeSection === section.id
+									? 'bg-primary text-primary-foreground'
+									: 'hover:bg-muted text-muted-foreground hover:text-foreground'}"
+							>
+								<SectionIcon class="h-5 w-5" />
+								<span class="font-medium">{section.label}</span>
+							</button>
+						{/each}
+					</nav>
 				</div>
 
-				<div class="space-y-2">
-					<Label for="taskDescription">Description (optional)</Label>
-					<Input id="taskDescription" bind:value={taskDescription} placeholder="Runs every day at midnight" />
-				</div>
+				<!-- Main Content -->
+				<div class="flex-1 flex flex-col min-w-0">
+					<!-- Content Header -->
+					<div class="flex items-center justify-between px-8 py-6 border-b bg-muted/30">
+						<div>
+							<h2 class="text-2xl font-semibold tracking-tight">{currentSection.title}</h2>
+							<p class="text-muted-foreground mt-1">{currentSection.description}</p>
+						</div>
+						<Button variant="ghost" size="icon" onclick={closeDialog} class="h-10 w-10">
+							<X class="h-5 w-5" />
+						</Button>
+					</div>
 
-				<div class="space-y-2">
-					<Label>Task Type</Label>
-					<Select.Root type="single" name="taskType" value={taskType.toString()} onValueChange={(v) => { if (v) taskType = parseInt(v) as TaskType; }}>
-						<Select.Trigger class="w-full">
-							{getTaskTypeLabel(taskType)}
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item value={TaskType.COMMAND.toString()} label="Command">Command</Select.Item>
-							<Select.Item value={TaskType.RESTART.toString()} label="Restart Server">Restart Server</Select.Item>
-							<Select.Item value={TaskType.START.toString()} label="Start Server">Start Server</Select.Item>
-							<Select.Item value={TaskType.STOP.toString()} label="Stop Server">Stop Server</Select.Item>
-							<Select.Item value={TaskType.SCRIPT.toString()} label="Script">Script</Select.Item>
-							<Select.Item value={TaskType.BACKUP.toString()} label="Backup (Coming Soon)" disabled>Backup (Coming Soon)</Select.Item>
-						</Select.Content>
-					</Select.Root>
-				</div>
+					<!-- Scrollable Content -->
+					<div class="flex-1 overflow-y-auto p-8">
+						<div class="max-w-2xl space-y-6">
+							{#if activeSection === 'general'}
+								<div class="space-y-3">
+									<Label for="taskName">Task Name *</Label>
+									<Input id="taskName" bind:value={taskName} placeholder="Daily Backup" class="h-11" />
+								</div>
 
-				{#if taskType === TaskType.COMMAND}
-					<div class="space-y-2">
-						<Label for="command">RCON Command</Label>
-						<Input
-							id="command"
-							value={(() => { try { return JSON.parse(taskConfig || '{}').command || ''; } catch { return ''; } })()}
-							oninput={(e) => taskConfig = JSON.stringify({ command: e.currentTarget.value })}
-							placeholder="say Hello World!"
-						/>
-						<p class="text-xs text-muted-foreground">The command to execute via RCON</p>
-					</div>
-				{:else if taskType === TaskType.SCRIPT}
-					<div class="space-y-2">
-						<Label for="scriptPath">Script Path or Executable</Label>
-						<Input
-							id="scriptPath"
-							value={(() => { try { return JSON.parse(taskConfig || '{}').script_path || ''; } catch { return ''; } })()}
-							oninput={(e) => {
-								const current = (() => { try { return JSON.parse(taskConfig || '{}'); } catch { return {}; } })();
-								taskConfig = JSON.stringify({ ...current, script_path: e.currentTarget.value });
-							}}
-							placeholder="/data/scripts/backup.sh"
-						/>
-						<p class="text-xs text-muted-foreground">Path to the script/executable inside the container</p>
-					</div>
-					<div class="space-y-2">
-						<Label for="scriptArgs">Arguments (optional)</Label>
-						<Input
-							id="scriptArgs"
-							value={(() => { try { return (JSON.parse(taskConfig || '{}').args || []).join(' '); } catch { return ''; } })()}
-							oninput={(e) => {
-								const current = (() => { try { return JSON.parse(taskConfig || '{}'); } catch { return {}; } })();
-								const args = e.currentTarget.value.split(' ').filter((a: string) => a.trim());
-								taskConfig = JSON.stringify({ ...current, args });
-							}}
-							placeholder="--verbose --output /data/backups"
-						/>
-						<p class="text-xs text-muted-foreground">Space-separated arguments to pass to the script/executable</p>
-					</div>
-				{/if}
+								<div class="space-y-3">
+									<Label for="taskDescription">Description</Label>
+									<Input id="taskDescription" bind:value={taskDescription} placeholder="Runs every day at midnight" class="h-11" />
+								</div>
 
-				<div class="space-y-2">
-					<Label>Schedule Type</Label>
-					<Select.Root type="single" name="scheduleType" value={scheduleType.toString()} onValueChange={(v) => { if (v) scheduleType = parseInt(v) as ScheduleType; }}>
-						<Select.Trigger class="w-full">
-							{scheduleType === ScheduleType.CRON ? 'Cron Expression' : scheduleType === ScheduleType.INTERVAL ? 'Fixed Interval' : 'Run Once'}
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item value={ScheduleType.CRON.toString()} label="Cron Expression">Cron Expression</Select.Item>
-							<Select.Item value={ScheduleType.INTERVAL.toString()} label="Fixed Interval">Fixed Interval</Select.Item>
-							<Select.Item value={ScheduleType.ONCE.toString()} label="Run Once">Run Once</Select.Item>
-						</Select.Content>
-					</Select.Root>
-				</div>
+								<div class="space-y-3">
+									<Label>Task Type</Label>
+									<Select.Root type="single" name="taskType" value={taskType.toString()} onValueChange={(v) => { if (v) taskType = parseInt(v) as TaskType; }}>
+										<Select.Trigger class="w-full h-11!">
+											{getTaskTypeLabel(taskType)}
+										</Select.Trigger>
+										<Select.Content>
+											<Select.Item value={TaskType.COMMAND.toString()} label="Command">Command</Select.Item>
+											<Select.Item value={TaskType.BACKUP.toString()} label="Backup">Backup</Select.Item>
+											<Select.Item value={TaskType.RESTART.toString()} label="Restart Server">Restart Server</Select.Item>
+											<Select.Item value={TaskType.START.toString()} label="Start Server">Start Server</Select.Item>
+											<Select.Item value={TaskType.STOP.toString()} label="Stop Server">Stop Server</Select.Item>
+											<Select.Item value={TaskType.SCRIPT.toString()} label="Script">Script</Select.Item>
+										</Select.Content>
+									</Select.Root>
+								</div>
 
-				{#if scheduleType === ScheduleType.CRON}
-					<div class="space-y-2">
-						<Label for="cronExpr">Cron Expression</Label>
-						<Input id="cronExpr" bind:value={cronExpr} placeholder="0 0 * * *" />
-						<p class="text-xs text-muted-foreground">
-							Format: minute hour day month weekday (e.g., "0 0 * * *" for daily at midnight)
-						</p>
-					</div>
-				{:else if scheduleType === ScheduleType.INTERVAL}
-					<div class="space-y-2">
-						<Label for="intervalSecs">Interval (seconds)</Label>
-						<Input id="intervalSecs" type="number" bind:value={intervalSecs} min={60} />
-						<p class="text-xs text-muted-foreground">
-							Minimum 60 seconds. Current: {formatInterval(intervalSecs)}
-						</p>
-					</div>
-				{:else if scheduleType === ScheduleType.ONCE}
-					<div class="space-y-2">
-						<Label for="runAt">Run At</Label>
-						<Input id="runAt" type="datetime-local" bind:value={runAt} />
-					</div>
-				{/if}
+								{#if taskType === TaskType.COMMAND}
+									<div class="space-y-3">
+										<Label for="command">RCON Command *</Label>
+										<Input id="command" bind:value={command} placeholder="say Hello World!" class="h-11 font-mono" />
+										<p class="text-sm text-muted-foreground">The command to execute via RCON</p>
+									</div>
+								{:else if taskType === TaskType.SCRIPT}
+									<div class="space-y-3">
+										<Label for="scriptPath">Script Path or Executable *</Label>
+										<Input id="scriptPath" bind:value={scriptPath} placeholder="/data/scripts/cleanup.sh" class="h-11 font-mono" />
+										<p class="text-sm text-muted-foreground">Path to the script/executable inside the container</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="scriptArgs">Arguments</Label>
+										<Input id="scriptArgs" bind:value={scriptArgs} placeholder="--verbose --level 2" class="h-11 font-mono" />
+										<p class="text-sm text-muted-foreground">Space-separated arguments to pass to the script/executable</p>
+									</div>
+								{:else if taskType === TaskType.BACKUP}
+									<div class="space-y-3">
+										<Label for="backupName">Backup Name</Label>
+										<Input id="backupName" bind:value={backupName} placeholder={taskName || 'Daily Backup'} class="h-11" />
+										<p class="text-sm text-muted-foreground">Used as the archive filename prefix. Defaults to the task name.</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="backupPaths">Paths to Include</Label>
+										<Input id="backupPaths" bind:value={backupPaths} placeholder="world, world_nether, world_the_end" class="h-11 font-mono" />
+										<p class="text-sm text-muted-foreground">
+											Comma-separated paths relative to the server directory. Leave empty to back up the world directory.
+										</p>
+									</div>
+									<label class="flex items-start gap-4 p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+										<Switch bind:checked={backupCompress} class="mt-0.5" />
+										<div class="space-y-1">
+											<span class="font-medium">Compress Archive</span>
+											<p class="text-sm text-muted-foreground">
+												Smaller backups at the cost of more CPU while archiving
+											</p>
+										</div>
+									</label>
+									<div class="grid grid-cols-3 gap-6">
+										<div class="space-y-3">
+											<Label for="retentionDays">Retention (days)</Label>
+											<Input id="retentionDays" type="number" bind:value={backupRetentionDays} min={0} class="h-11" />
+											<p class="text-sm text-muted-foreground">Delete backups older than this. 0 = keep forever</p>
+										</div>
+										<div class="space-y-3">
+											<Label for="minBackups">Min Backups</Label>
+											<Input id="minBackups" type="number" bind:value={backupMinBackups} min={0} disabled={backupRetentionDays <= 0} class="h-11" />
+											<p class="text-sm text-muted-foreground">Never expire by age below this many, even past retention</p>
+										</div>
+										<div class="space-y-3">
+											<Label for="maxBackups">Max Backups</Label>
+											<Input id="maxBackups" type="number" bind:value={backupMaxBackups} min={0} class="h-11" />
+											<p class="text-sm text-muted-foreground">Hard cap, oldest deleted first. 0 = unlimited</p>
+										</div>
+									</div>
+									<p class="text-sm text-muted-foreground">
+										World saving is automatically paused and flushed while the backup runs, then re-enabled.
+									</p>
+								{:else}
+									<div class="p-4 border rounded-lg border-dashed text-sm text-muted-foreground">
+										No additional configuration required for this task type.
+									</div>
+								{/if}
+							{:else if activeSection === 'schedule'}
+								<div class="space-y-3">
+									<Label>Schedule Type</Label>
+									<Select.Root type="single" name="scheduleType" value={scheduleType.toString()} onValueChange={(v) => { if (v) scheduleType = parseInt(v) as ScheduleType; }}>
+										<Select.Trigger class="w-full h-11!">
+											{scheduleType === ScheduleType.CRON ? 'Cron Expression' : scheduleType === ScheduleType.INTERVAL ? 'Fixed Interval' : 'Run Once'}
+										</Select.Trigger>
+										<Select.Content>
+											<Select.Item value={ScheduleType.CRON.toString()} label="Cron Expression">Cron Expression</Select.Item>
+											<Select.Item value={ScheduleType.INTERVAL.toString()} label="Fixed Interval">Fixed Interval</Select.Item>
+											<Select.Item value={ScheduleType.ONCE.toString()} label="Run Once">Run Once</Select.Item>
+										</Select.Content>
+									</Select.Root>
+								</div>
 
-				<div class="space-y-2">
-					<Label for="timeout">Timeout (seconds)</Label>
-					<Input id="timeout" type="number" bind:value={timeout} min={10} max={3600} />
-					<p class="text-xs text-muted-foreground">Maximum execution time before task is cancelled</p>
-				</div>
+								{#if scheduleType === ScheduleType.CRON}
+									<div class="space-y-3">
+										<Label for="cronExpr">Cron Expression *</Label>
+										<Input id="cronExpr" bind:value={cronExpr} placeholder="0 0 * * *" class="h-11 font-mono" />
+										<p class="text-sm text-muted-foreground">
+											Format: minute hour day month weekday (e.g., "0 0 * * *" for daily at midnight)
+										</p>
+									</div>
+								{:else if scheduleType === ScheduleType.INTERVAL}
+									<div class="space-y-3">
+										<Label for="intervalSecs">Interval (seconds)</Label>
+										<Input id="intervalSecs" type="number" bind:value={intervalSecs} min={60} class="h-11" />
+										<p class="text-sm text-muted-foreground">
+											Minimum 60 seconds. Current: every {formatInterval(intervalSecs)}
+										</p>
+									</div>
+								{:else if scheduleType === ScheduleType.ONCE}
+									<div class="space-y-3">
+										<Label for="runAt">Run At</Label>
+										<Input id="runAt" type="datetime-local" bind:value={runAt} class="h-11" />
+										<p class="text-sm text-muted-foreground">The task runs once at this time, then is disabled</p>
+									</div>
+								{/if}
+							{:else if activeSection === 'advanced'}
+								<div class="space-y-3">
+									<Label for="timeout">Timeout (seconds)</Label>
+									<Input id="timeout" type="number" bind:value={timeout} min={10} max={3600} class="h-11" />
+									<p class="text-sm text-muted-foreground">Maximum execution time before the task is cancelled</p>
+								</div>
 
-				<div class="flex items-center justify-between">
-					<div>
-						<Label for="requireOnline">Require Server Online</Label>
-						<p class="text-xs text-muted-foreground">Skip task if server is offline</p>
+								<div class="grid grid-cols-2 gap-6">
+									<div class="space-y-3">
+										<Label for="retryCount">Retry Count</Label>
+										<Input id="retryCount" type="number" bind:value={retryCount} min={0} max={10} class="h-11" />
+										<p class="text-sm text-muted-foreground">Times to retry on failure. 0 = no retries</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="retryDelay">Retry Delay (seconds)</Label>
+										<Input id="retryDelay" type="number" bind:value={retryDelay} min={1} class="h-11" />
+										<p class="text-sm text-muted-foreground">Wait between retry attempts</p>
+									</div>
+								</div>
+
+								<label class="flex items-start gap-4 p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+									<Switch bind:checked={requireOnline} class="mt-0.5" />
+									<div class="space-y-1">
+										<span class="font-medium">Require Server Online</span>
+										<p class="text-sm text-muted-foreground">Skip this task when the server is offline</p>
+									</div>
+								</label>
+							{/if}
+						</div>
 					</div>
-					<Switch id="requireOnline" bind:checked={requireOnline} />
+
+					<!-- Footer -->
+					<div class="p-4 border-t bg-muted/20 flex justify-between items-center">
+						<Button variant="ghost" onclick={closeDialog}>Cancel</Button>
+						<Button onclick={saveTask} disabled={!taskName.trim() || creating} class="min-w-[120px]">
+							{#if creating}
+								<Loader2 class="h-4 w-4 animate-spin mr-2" />
+								{selectedTask ? 'Saving...' : 'Creating...'}
+							{:else}
+								{selectedTask ? 'Save Changes' : 'Create Task'}
+							{/if}
+						</Button>
+					</div>
 				</div>
 			</div>
-
-			<Dialog.Footer>
-				<Button variant="outline" onclick={() => { showCreateDialog = false; resetForm(); }}>Cancel</Button>
-				<Button onclick={saveTask} disabled={creating}>
-					{#if creating}
-						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
-					{/if}
-					{selectedTask ? 'Save Changes' : 'Create Task'}
-				</Button>
-			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>
 

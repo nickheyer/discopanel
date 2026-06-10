@@ -623,7 +623,7 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid destination path"))
 	}
 
-	count, err := files.CreateZipArchive(msg.Paths, server.DataPath, destFull)
+	count, err := files.CreateZipArchive(msg.Paths, server.DataPath, destFull, true)
 	if err != nil {
 		s.log.Error("Failed to create archive: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create archive"))
@@ -667,7 +667,7 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 
 	// Create zip on disk in temp directory
 	tempPath := filepath.Join(s.downloadManager.TempDir(), fmt.Sprintf("download-%s.zip", time.Now().Format("20060102-150405.000")))
-	_, err = files.CreateZipArchive(msg.Paths, server.DataPath, tempPath)
+	_, err = files.CreateZipArchive(msg.Paths, server.DataPath, tempPath, true)
 	if err != nil {
 		s.log.Error("Failed to create download archive: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create archive"))

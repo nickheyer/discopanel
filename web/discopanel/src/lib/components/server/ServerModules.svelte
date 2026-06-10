@@ -532,5 +532,5 @@
 
 <ModuleTemplateCreateDialog
 	bind:open={templateCreateDialogOpen}
-	onCreated={handleTemplateCreated}
+	onSuccess={handleTemplateCreated}
 />

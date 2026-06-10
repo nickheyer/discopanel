@@ -346,15 +346,19 @@ func (c *Collector) collectDiskUsage() {
 			continue
 		}
 
-		// Calculate world directory size
-		worldPath, err := files.FindWorldDir(server.DataPath)
+		// Calculate world directory size, including dimension worlds
+		worldPaths, err := files.FindWorldDirs(server.DataPath)
 		if err != nil {
 			continue
 		}
 
-		totalWorldSize, err := files.CalculateDirSize(worldPath)
-		if err != nil {
-			continue
+		var totalWorldSize int64
+		for _, worldPath := range worldPaths {
+			size, err := files.CalculateDirSize(worldPath)
+			if err != nil {
+				continue
+			}
+			totalWorldSize += size
 		}
 
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {

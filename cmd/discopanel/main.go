@@ -163,7 +163,7 @@ func main() {
 	sender := command.NewSender(store, cfg, dockerClient)
 
 	// Initialize task scheduler
-	taskScheduler := scheduler.NewScheduler(store, dockerClient, sender, log, scheduler.Config{
+	taskScheduler := scheduler.NewScheduler(store, dockerClient, sender, cfg, log, scheduler.Config{
 		CheckInterval: time.Duration(cfg.Docker.SyncInterval) * time.Second, // Use same interval as container status monitor
 	})
 

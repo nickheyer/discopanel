@@ -141,6 +141,8 @@ func dbModLoaderToProto(loader storage.ModLoader) v1.ModLoader {
 		return v1.ModLoader_MOD_LOADER_QUILT
 	case storage.ModLoaderPaper:
 		return v1.ModLoader_MOD_LOADER_PAPER
+	case storage.ModLoaderFolia:
+		return v1.ModLoader_MOD_LOADER_FOLIA
 	case storage.ModLoaderSpigot:
 		return v1.ModLoader_MOD_LOADER_SPIGOT
 	case storage.ModLoaderBukkit:
@@ -179,6 +181,8 @@ func protoModLoaderToDB(loader v1.ModLoader) storage.ModLoader {
 		return storage.ModLoaderQuilt
 	case v1.ModLoader_MOD_LOADER_PAPER:
 		return storage.ModLoaderPaper
+	case v1.ModLoader_MOD_LOADER_FOLIA:
+		return storage.ModLoaderFolia
 	case v1.ModLoader_MOD_LOADER_SPIGOT:
 		return storage.ModLoaderSpigot
 	case v1.ModLoader_MOD_LOADER_BUKKIT:

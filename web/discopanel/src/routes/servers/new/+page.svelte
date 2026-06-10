@@ -70,7 +70,8 @@
 
 	onMount(async () => {
 		try {
-			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners] = await Promise.all([
+			// Settle independently - otherwise perm rejection fails all
+			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners] = await Promise.allSettled([
 				rpcClient.minecraft.getMinecraftVersions({}),
 				rpcClient.minecraft.getModLoaders({}),
 				rpcClient.minecraft.getDockerImages({}),
@@ -79,34 +80,60 @@
 				rpcClient.proxy.getProxyListeners({})
 			]);
 
-			minecraftVersions = versionsData.versions.map(v => v.id);
-			latestVersion = versionsData.latest;
-			modLoaders = loadersData.modloaders;
-			dockerImages = imagesData.images;
-			proxyEnabled = proxyStatus.enabled;
-			proxyBaseURL = proxyStatus.baseUrl || '';
-			proxyListeners = listeners.listeners
-				.map(l => l.listener)
-				.filter((l): l is ProxyListener => l !== undefined && l.enabled);
-
-			// Set default listener if available
-			const defaultListener = proxyListeners.find(l => l?.isDefault);
-			if (defaultListener) {
-				formData.proxyListenerId = defaultListener.id;
-			} else if (proxyListeners.length > 0) {
-				formData.proxyListenerId = proxyListeners[0]?.id || '';
+			if (versionsData.status === 'fulfilled') {
+				minecraftVersions = versionsData.value.versions.map(v => v.id);
+				latestVersion = versionsData.value.latest;
+			} else {
+				throw versionsData.reason;
 			}
-			
-			// Set the default port to the next available port
-			formData.port = portData.port;
-			usedPorts = Object.fromEntries(
-				portData.usedPorts?.map(p => [p.port, p.inUse]) || []
-			);
+			if (loadersData.status === 'fulfilled') {
+				modLoaders = loadersData.value.modloaders;
+			} else {
+				throw loadersData.reason;
+			}
+			if (imagesData.status === 'fulfilled') {
+				dockerImages = imagesData.value.images;
+			} else {
+				throw imagesData.reason;
+			}
+
+			if (proxyStatus.status === 'fulfilled') {
+				proxyEnabled = proxyStatus.value.enabled;
+				proxyBaseURL = proxyStatus.value.baseUrl || '';
+			} else {
+				console.error('Failed to load proxy status:', proxyStatus.reason);
+			}
+
+			if (listeners.status === 'fulfilled') {
+				proxyListeners = listeners.value.listeners
+					.map(l => l.listener)
+					.filter((l): l is ProxyListener => l !== undefined && l.enabled);
+
+				// Set default listener if available
+				const defaultListener = proxyListeners.find(l => l?.isDefault);
+				if (defaultListener) {
+					formData.proxyListenerId = defaultListener.id;
+				} else if (proxyListeners.length > 0) {
+					formData.proxyListenerId = proxyListeners[0]?.id || '';
+				}
+			} else {
+				console.error('Failed to load proxy listeners:', listeners.reason);
+			}
+
+			if (portData.status === 'fulfilled') {
+				// Set the default port to the next available port
+				formData.port = portData.value.port;
+				usedPorts = Object.fromEntries(
+					portData.value.usedPorts?.map(p => [p.port, p.inUse]) || []
+				);
+			} else {
+				console.error('Failed to load next available port:', portData.reason);
+			}
 
 			if (!formData.mcVersion && latestVersion) {
 				formData.mcVersion = latestVersion;
 			}
-			
+
 			// Load favorite modpacks
 			await loadFavoriteModpacks();
 			

@@ -28,6 +28,7 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
+						{ label: 'Server Backups', slug: 'guides/backups' },
 						{
 							label: 'OIDC',
 							items: [

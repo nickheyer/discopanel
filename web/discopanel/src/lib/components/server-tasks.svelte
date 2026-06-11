@@ -243,7 +243,6 @@
 	function resetForm() {
 		taskName = '';
 		taskDescription = '';
-		taskType = TaskType.COMMAND;
 		scheduleType = ScheduleType.CRON;
 		cronExpr = '';
 		intervalSecs = 3600;
@@ -279,6 +278,7 @@
 
 	function openCreateDialog() {
 		resetForm();
+		taskType = TaskType.COMMAND;
 		showCreateDialog = true;
 	}
 
@@ -814,8 +814,11 @@
 
 	<!-- Create/Edit Dialog -->
 	<Dialog.Root bind:open={showCreateDialog}>
-		{#if taskType === TaskType.WEBHOOK}
-		<Dialog.Content class="sm:max-w-[1060px]">
+		<Dialog.Content
+			class={taskType === TaskType.WEBHOOK ? 'sm:max-w-[1060px]' : 'max-w-4xl! w-[95vw]! h-[80vh]! p-0! gap-0! overflow-hidden flex flex-col'}
+			showCloseButton={taskType === TaskType.WEBHOOK}
+		>
+			{#if taskType === TaskType.WEBHOOK}
 			<Dialog.Header>
 				<Dialog.Title>{selectedTask ? 'Edit Task' : 'Create New Task'}</Dialog.Title>
 				<Dialog.Description>
@@ -1023,9 +1026,7 @@
 					{selectedTask ? 'Save Changes' : 'Create Task'}
 				</Button>
 			</Dialog.Footer>
-		</Dialog.Content>
-		{:else}
-		<Dialog.Content class="max-w-4xl! w-[95vw]! h-[80vh]! p-0! gap-0! overflow-hidden flex flex-col" showCloseButton={false}>
+			{:else}
 			<div class="flex h-full">
 				<!-- Sidebar -->
 				<div class="w-56 border-r bg-muted/30 flex flex-col shrink-0">
@@ -1248,8 +1249,8 @@
 					</div>
 				</div>
 			</div>
+			{/if}
 		</Dialog.Content>
-		{/if}
 	</Dialog.Root>
 
 	<!-- History Dialog -->

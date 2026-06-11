@@ -1411,3 +1411,26 @@ func (s *Store) ListModulesFollowingServerLifecycle(ctx context.Context, serverI
 	err := s.db.WithContext(ctx).Where("server_id = ? AND follow_server_lifecycle = ?", serverID, true).Find(&modules).Error
 	return modules, err
 }
+
+// ListEventTriggeredTasks returns all enabled tasks subscribed to the given event for a server.
+// EventTriggers is stored as a JSON array, so we filter in Go.
+func (s *Store) ListEventTriggeredTasks(ctx context.Context, serverID string, eventTrigger TaskEventTrigger) ([]*ScheduledTask, error) {
+	var tasks []*ScheduledTask
+	err := s.db.WithContext(ctx).
+		Where("server_id = ? AND status = ? AND schedule = ?",
+			serverID, TaskStatusEnabled, ScheduleTypeEvent).
+		Find(&tasks).Error
+	if err != nil {
+		return nil, err
+	}
+	matching := make([]*ScheduledTask, 0, len(tasks))
+	for _, t := range tasks {
+		for _, e := range t.EventTriggers {
+			if e == eventTrigger {
+				matching = append(matching, t)
+				break
+			}
+		}
+	}
+	return matching, nil
+}

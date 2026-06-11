@@ -478,6 +478,7 @@ const (
 	TaskTypeStart   TaskType = "start"   // Start the server
 	TaskTypeStop    TaskType = "stop"    // Stop the server
 	TaskTypeScript  TaskType = "script"  // Run a custom script
+	TaskTypeWebhook TaskType = "webhook" // Send an HTTP webhook
 )
 
 // TaskStatus defines the status of a scheduled task
@@ -496,6 +497,16 @@ const (
 	ScheduleTypeCron     ScheduleType = "cron"     // Cron expression (e.g., "0 * * * *")
 	ScheduleTypeInterval ScheduleType = "interval" // Fixed interval in seconds
 	ScheduleTypeOnce     ScheduleType = "once"     // Run once at specific time
+	ScheduleTypeEvent    ScheduleType = "event"    // Triggered by a server event
+)
+
+// TaskEventTrigger defines which server event fires a SCHEDULE_TYPE_EVENT task
+type TaskEventTrigger string
+
+const (
+	TaskEventServerStart   TaskEventTrigger = "server_start"
+	TaskEventServerStop    TaskEventTrigger = "server_stop"
+	TaskEventServerRestart TaskEventTrigger = "server_restart"
 )
 
 // ScheduledTask represents a scheduled task for a server
@@ -509,12 +520,13 @@ type ScheduledTask struct {
 	Schedule    ScheduleType `json:"schedule" gorm:"not null"`
 
 	// Schedule configuration
-	CronExpr     string     `json:"cron_expr" gorm:"column:cron_expr"`         // For cron schedule type
-	IntervalSecs int        `json:"interval_secs" gorm:"column:interval_secs"` // For interval schedule type
-	RunAt        *time.Time `json:"run_at" gorm:"column:run_at"`               // For once schedule type
-	NextRun      *time.Time `json:"next_run" gorm:"index;column:next_run"`     // Computed next run time
-	LastRun      *time.Time `json:"last_run" gorm:"column:last_run"`           // Last execution time
-	Timezone     string     `json:"timezone" gorm:"default:UTC"`               // Timezone for schedule
+	CronExpr      string             `json:"cron_expr" gorm:"column:cron_expr"`                              // For cron schedule type
+	IntervalSecs  int                `json:"interval_secs" gorm:"column:interval_secs"`                      // For interval schedule type
+	RunAt         *time.Time         `json:"run_at" gorm:"column:run_at"`                                    // For once schedule type
+	EventTriggers []TaskEventTrigger `json:"event_triggers" gorm:"column:event_triggers;serializer:json"`    // For event schedule type
+	NextRun       *time.Time         `json:"next_run" gorm:"index;column:next_run"`                          // Computed next run time
+	LastRun       *time.Time         `json:"last_run" gorm:"column:last_run"`                                // Last execution time
+	Timezone      string             `json:"timezone" gorm:"default:UTC"`                                    // Timezone for schedule
 
 	// Task-specific configuration (JSON)
 	Config string `json:"config" gorm:"type:text"` // JSON config based on task type
@@ -707,3 +719,4 @@ type Module struct {
 	MemoryUsage float64 `json:"memory_usage" gorm:"-"`
 	CPUPercent  float64 `json:"cpu_percent" gorm:"-"`
 }
+

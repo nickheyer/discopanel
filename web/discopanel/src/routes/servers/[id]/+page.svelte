@@ -760,7 +760,7 @@
 		<Tabs value="overview" class="flex-1 flex flex-col min-h-0 gap-4" onValueChange={(value) => {
 			activeTab = value
 		}}>
-			<div class="shrink-0 w-full overflow-x-auto">
+			<div class="flex-shrink-0 w-full overflow-x-auto">
 				<TabsList class="inline-flex w-full min-w-max sm:grid sm:grid-cols-8 h-12 sm:h-14 p-1 bg-muted/50 backdrop-blur-sm">
 					<TabsTrigger value="overview" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Overview</TabsTrigger>
 					<TabsTrigger value="console" class="data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-foreground font-medium text-xs sm:text-sm whitespace-nowrap px-3 sm:px-4">Console</TabsTrigger>

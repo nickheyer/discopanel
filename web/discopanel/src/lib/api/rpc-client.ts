@@ -92,37 +92,37 @@ const transport = createConnectTransport({
 
 // Clients for each service
 export class RpcClient {
-	public readonly auth: Client<typeof AuthService>;
-	public readonly config: Client<typeof ConfigService>;
-	public readonly file: Client<typeof FileService>;
-	public readonly minecraft: Client<typeof MinecraftService>;
-	public readonly mod: Client<typeof ModService>;
-	public readonly modpack: Client<typeof ModpackService>;
-	public readonly proxy: Client<typeof ProxyService>;
-	public readonly server: Client<typeof ServerService>;
-	public readonly support: Client<typeof SupportService>;
-	public readonly task: Client<typeof TaskService>;
-	public readonly upload: Client<typeof UploadService>;
-	public readonly user: Client<typeof UserService>;
-	public readonly role: Client<typeof RoleService>;
-	public readonly module: Client<typeof ModuleService>;
+  public readonly auth: Client<typeof AuthService>;
+  public readonly config: Client<typeof ConfigService>;
+  public readonly file: Client<typeof FileService>;
+  public readonly minecraft: Client<typeof MinecraftService>;
+  public readonly mod: Client<typeof ModService>;
+  public readonly modpack: Client<typeof ModpackService>;
+  public readonly proxy: Client<typeof ProxyService>;
+  public readonly server: Client<typeof ServerService>;
+  public readonly support: Client<typeof SupportService>;
+  public readonly task: Client<typeof TaskService>;
+  public readonly upload: Client<typeof UploadService>;
+  public readonly user: Client<typeof UserService>;
+  public readonly role: Client<typeof RoleService>;
+  public readonly module: Client<typeof ModuleService>;
 
-	constructor() {
-		this.auth = createClient(AuthService, transport);
-		this.config = createClient(ConfigService, transport);
-		this.file = createClient(FileService, transport);
-		this.minecraft = createClient(MinecraftService, transport);
-		this.mod = createClient(ModService, transport);
-		this.modpack = createClient(ModpackService, transport);
-		this.proxy = createClient(ProxyService, transport);
-		this.server = createClient(ServerService, transport);
-		this.support = createClient(SupportService, transport);
-		this.task = createClient(TaskService, transport);
-		this.upload = createClient(UploadService, transport);
-		this.user = createClient(UserService, transport);
-		this.role = createClient(RoleService, transport);
-		this.module = createClient(ModuleService, transport);
-	}
+  constructor() {
+    this.auth = createClient(AuthService, transport);
+    this.config = createClient(ConfigService, transport);
+    this.file = createClient(FileService, transport);
+    this.minecraft = createClient(MinecraftService, transport);
+    this.mod = createClient(ModService, transport);
+    this.modpack = createClient(ModpackService, transport);
+    this.proxy = createClient(ProxyService, transport);
+    this.server = createClient(ServerService, transport);
+    this.support = createClient(SupportService, transport);
+    this.task = createClient(TaskService, transport);
+    this.upload = createClient(UploadService, transport);
+    this.user = createClient(UserService, transport);
+    this.role = createClient(RoleService, transport);
+    this.module = createClient(ModuleService, transport);
+  }
 }
 
 // singleton

@@ -14,6 +14,12 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
+// EventBus dispatches server lifecycle events to registered listeners
+// (e.g. event-triggered scheduled tasks). The scheduler implements this.
+type EventBus interface {
+	OnEvent(ctx context.Context, serverID string, eventTrigger storage.TaskEventTrigger)
+}
+
 // Manager handles the lifecycle of modules
 type Manager struct {
 	store        *storage.Store
@@ -22,18 +28,20 @@ type Manager struct {
 	proxyManager *proxy.Manager
 	logger       *logger.Logger
 	logStreamer  *logger.LogStreamer
+	eventBus     EventBus
 	mu           sync.Mutex
 	running      bool
 }
 
 // NewManager creates a new module manager
-func NewManager(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, log *logger.Logger) *Manager {
+func NewManager(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, eventBus EventBus, log *logger.Logger) *Manager {
 	return &Manager{
 		store:        store,
 		docker:       docker,
 		config:       cfg,
 		proxyManager: proxyManager,
 		logger:       log,
+		eventBus:     eventBus,
 	}
 }
 
@@ -580,6 +588,11 @@ func (m *Manager) OnServerStart(ctx context.Context, serverID string) error {
 		}
 	}
 
+	// Fire server start event
+	if m.eventBus != nil {
+		m.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStart)
+	}
+
 	return nil
 }
 
@@ -600,7 +613,19 @@ func (m *Manager) OnServerStop(ctx context.Context, serverID string) error {
 		}
 	}
 
+	// Fire server stop event
+	if m.eventBus != nil {
+		m.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStop)
+	}
+
 	return nil
+}
+
+// OnServerRestart fires the server restart event for event-triggered tasks.
+func (m *Manager) OnServerRestart(ctx context.Context, serverID string) {
+	if m.eventBus != nil {
+		m.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerRestart)
+	}
 }
 
 // GetModuleStatus returns current status from Docker

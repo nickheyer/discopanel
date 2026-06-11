@@ -11,8 +11,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Select from '$lib/components/ui/select';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import * as Collapsible from '$lib/components/ui/collapsible';
-	import { Loader2, Plus, Play, Pause, Trash2, Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw, Terminal, RotateCcw, Square, Power, FileText, History, Archive, Wrench, X, Pencil, Webhook as WebhookIcon, Zap, ChevronDown, Copy } from '@lucide/svelte';
+	import { Loader2, Plus, Play, Pause, Trash2, Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw, Terminal, RotateCcw, Square, Power, FileText, History, Archive, Wrench, X, Pencil, Webhook as WebhookIcon, Zap, Copy } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ScheduledTask, TaskExecution } from '$lib/proto/discopanel/v1/task_pb';
 	import { TaskType, TaskStatus, ScheduleType, ExecutionStatus, TaskEventTrigger, CreateTaskRequestSchema, UpdateTaskRequestSchema, ToggleTaskRequestSchema, TriggerTaskRequestSchema, DeleteTaskRequestSchema, ListTasksRequestSchema, ListTaskExecutionsRequestSchema } from '$lib/proto/discopanel/v1/task_pb';
@@ -33,7 +32,7 @@
 	let previousServerId = $state(server.id);
 
 	// Dialog state
-	type DialogSection = 'general' | 'schedule' | 'advanced';
+	type DialogSection = 'general' | 'payload' | 'schedule' | 'advanced';
 	let showCreateDialog = $state(false);
 	let showHistoryDialog = $state(false);
 	let selectedTask = $state<ScheduledTask | null>(null);
@@ -67,14 +66,24 @@
 	let backupMinBackups = $state(3);
 	let backupMaxBackups = $state(0);
 
-	const dialogSections: { id: DialogSection; label: string; icon: typeof FileText; title: string; description: string }[] = [
+	const dialogSections = $derived<{ id: DialogSection; label: string; icon: typeof FileText; title: string; description: string }[]>([
 		{ id: 'general', label: 'General', icon: FileText, title: 'General', description: 'Task name, type, and configuration' },
+		...(taskType === TaskType.WEBHOOK
+			? [{ id: 'payload' as DialogSection, label: 'Payload', icon: WebhookIcon, title: 'Payload', description: 'Customize the request body sent to the webhook' }]
+			: []),
 		{ id: 'schedule', label: 'Schedule', icon: Clock, title: 'Schedule', description: 'When and how often the task runs' },
 		{ id: 'advanced', label: 'Advanced', icon: Wrench, title: 'Advanced', description: 'Timeouts, retries, and execution conditions' }
-	];
+	]);
 
 	const currentSection = $derived(dialogSections.find((s) => s.id === activeSection) ?? dialogSections[0]);
 	const DialogTaskIcon = $derived(getTaskTypeIcon(taskType));
+
+	// Keep the active section valid when the available sections change (e.g. switching task type)
+	$effect(() => {
+		if (!dialogSections.some((s) => s.id === activeSection)) {
+			activeSection = 'general';
+		}
+	});
 
 	let taskConfig = $state('');
 	let eventTriggers = $state<TaskEventTrigger[]>([TaskEventTrigger.SERVER_START]);
@@ -87,7 +96,6 @@
 	let webhookMaxRetries = $state(3);
 	let webhookRetryDelayMs = $state(1000);
 	let webhookTimeoutMs = $state(5000);
-	let showWebhookAdvanced = $state(false);
 	let originalWebhookHasSecret = $state(false); // for placeholder display when editing
 
 	// Webhook template presets fetched from backend
@@ -147,7 +155,7 @@
 		if (showCreateDialog && taskType === TaskType.WEBHOOK && editorContainer && !editorView) {
 			createEditor();
 		}
-		if ((!showCreateDialog || taskType !== TaskType.WEBHOOK) && editorView) {
+		if (editorView && (!showCreateDialog || taskType !== TaskType.WEBHOOK || !editorContainer)) {
 			destroyEditor();
 		}
 	});
@@ -271,7 +279,6 @@
 		webhookMaxRetries = 3;
 		webhookRetryDelayMs = 1000;
 		webhookTimeoutMs = 5000;
-		showWebhookAdvanced = false;
 		originalWebhookHasSecret = false;
 		selectedTask = null;
 	}
@@ -814,219 +821,7 @@
 
 	<!-- Create/Edit Dialog -->
 	<Dialog.Root bind:open={showCreateDialog}>
-		<Dialog.Content
-			class={taskType === TaskType.WEBHOOK ? 'sm:max-w-[1060px]' : 'max-w-4xl! w-[95vw]! h-[80vh]! p-0! gap-0! overflow-hidden flex flex-col'}
-			showCloseButton={taskType === TaskType.WEBHOOK}
-		>
-			{#if taskType === TaskType.WEBHOOK}
-			<Dialog.Header>
-				<Dialog.Title>{selectedTask ? 'Edit Task' : 'Create New Task'}</Dialog.Title>
-				<Dialog.Description>
-					{selectedTask ? 'Update the task configuration' : 'Configure a scheduled or event-triggered task for your server'}
-				</Dialog.Description>
-			</Dialog.Header>
-
-				<!-- Two-column webhook layout -->
-				<div class="flex gap-6 py-4">
-					<!-- Left: Configuration -->
-					<div class="flex-1 space-y-4 min-w-0">
-						<div class="space-y-2">
-							<Label for="taskName">Name</Label>
-							<Input id="taskName" bind:value={taskName} placeholder="My Webhook" />
-						</div>
-
-						<div class="space-y-2">
-							<Label for="taskDescription">Description (optional)</Label>
-							<Input id="taskDescription" bind:value={taskDescription} placeholder="Notify Discord on server start" />
-						</div>
-
-						<div class="space-y-2">
-							<Label>Task Type</Label>
-							<Select.Root type="single" name="taskType" value={taskType.toString()} onValueChange={(v) => { if (v) taskType = parseInt(v) as TaskType; }}>
-								<Select.Trigger class="w-full">{getTaskTypeLabel(taskType)}</Select.Trigger>
-								<Select.Content>
-									<Select.Item value={TaskType.COMMAND.toString()} label="Command">Command</Select.Item>
-									<Select.Item value={TaskType.RESTART.toString()} label="Restart Server">Restart Server</Select.Item>
-									<Select.Item value={TaskType.START.toString()} label="Start Server">Start Server</Select.Item>
-									<Select.Item value={TaskType.STOP.toString()} label="Stop Server">Stop Server</Select.Item>
-									<Select.Item value={TaskType.SCRIPT.toString()} label="Script">Script</Select.Item>
-									<Select.Item value={TaskType.WEBHOOK.toString()} label="Webhook">Webhook</Select.Item>
-									<Select.Item value={TaskType.BACKUP.toString()} label="Backup">Backup</Select.Item>
-								</Select.Content>
-							</Select.Root>
-						</div>
-
-						<div class="space-y-2">
-							<Label for="url">URL</Label>
-							<Input id="url" bind:value={webhookUrl} placeholder={isDiscordUrl(webhookUrl) ? 'https://discord.com/api/webhooks/...' : 'https://example.com/webhook'} />
-						</div>
-
-						<div class="space-y-2">
-							<Label>Trigger</Label>
-							<Select.Root type="single" name="scheduleType" value={scheduleType.toString()} onValueChange={(v) => { if (v) scheduleType = parseInt(v) as ScheduleType; }}>
-								<Select.Trigger class="w-full">{getScheduleTypeLabel(scheduleType)}</Select.Trigger>
-								<Select.Content>
-									<Select.Item value={ScheduleType.EVENT.toString()} label="On Event">On Event</Select.Item>
-									<Select.Item value={ScheduleType.CRON.toString()} label="Cron Expression">Cron Expression</Select.Item>
-									<Select.Item value={ScheduleType.INTERVAL.toString()} label="Fixed Interval">Fixed Interval</Select.Item>
-									<Select.Item value={ScheduleType.ONCE.toString()} label="Run Once">Run Once</Select.Item>
-								</Select.Content>
-							</Select.Root>
-						</div>
-
-						{#if scheduleType === ScheduleType.EVENT}
-							<div class="space-y-2">
-								<Label>Events</Label>
-								<div class="grid grid-cols-1 gap-2 p-3 rounded-lg border border-border/50 bg-muted/20">
-									{#each [
-										{ trigger: TaskEventTrigger.SERVER_START, label: 'Server Start', description: 'When the server starts' },
-										{ trigger: TaskEventTrigger.SERVER_STOP, label: 'Server Stop', description: 'When the server stops' },
-										{ trigger: TaskEventTrigger.SERVER_RESTART, label: 'Server Restart', description: 'When the server restarts' },
-									] as { trigger, label, description }}
-										<label class="flex items-center gap-2 cursor-pointer hover:bg-muted/40 p-2 rounded">
-											<Checkbox
-												checked={eventTriggers.includes(trigger)}
-												onCheckedChange={() => toggleEventTrigger(trigger)}
-											/>
-											<div>
-												<span class="text-sm font-medium">{label}</span>
-												<p class="text-xs text-muted-foreground">{description}</p>
-											</div>
-										</label>
-									{/each}
-								</div>
-							</div>
-						{:else if scheduleType === ScheduleType.CRON}
-							<div class="space-y-2">
-								<Label for="cronExpr">Cron Expression</Label>
-								<Input id="cronExpr" bind:value={cronExpr} placeholder="0 0 * * *" />
-								<p class="text-xs text-muted-foreground">Format: minute hour day month weekday</p>
-							</div>
-						{:else if scheduleType === ScheduleType.INTERVAL}
-							<div class="space-y-2">
-								<Label for="intervalSecs">Interval (seconds)</Label>
-								<Input id="intervalSecs" type="number" bind:value={intervalSecs} min={60} />
-								<p class="text-xs text-muted-foreground">Minimum 60 seconds. Current: {formatInterval(intervalSecs)}</p>
-							</div>
-						{:else if scheduleType === ScheduleType.ONCE}
-							<div class="space-y-2">
-								<Label for="runAt">Run At</Label>
-								<Input id="runAt" type="datetime-local" bind:value={runAt} />
-							</div>
-						{/if}
-
-						<!-- Advanced webhook settings -->
-						<Collapsible.Root bind:open={showWebhookAdvanced}>
-							<Collapsible.Trigger class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full py-2">
-								<ChevronDown class="h-4 w-4 transition-transform {showWebhookAdvanced ? 'rotate-180' : ''}" />
-								Advanced Settings
-							</Collapsible.Trigger>
-							<Collapsible.Content>
-								<div class="space-y-4 pt-2">
-									<div class="space-y-2">
-										<Label for="secret">Secret (optional)</Label>
-										<Input id="secret" type="password" bind:value={webhookSecret} placeholder={originalWebhookHasSecret ? '(unchanged)' : 'HMAC signing secret'} />
-										<p class="text-xs text-muted-foreground">Used to sign the webhook payload with HMAC-SHA256</p>
-									</div>
-									<div class="grid grid-cols-3 gap-4">
-										<div class="space-y-2">
-											<Label for="maxRetries">Max Retries</Label>
-											<Input id="maxRetries" type="number" bind:value={webhookMaxRetries} min={0} max={10} />
-										</div>
-										<div class="space-y-2">
-											<Label for="retryDelay">Retry Delay (ms)</Label>
-											<Input id="retryDelay" type="number" bind:value={webhookRetryDelayMs} min={100} max={60000} />
-										</div>
-										<div class="space-y-2">
-											<Label for="webhookTimeout">Timeout (ms)</Label>
-											<Input id="webhookTimeout" type="number" bind:value={webhookTimeoutMs} min={1000} max={30000} />
-										</div>
-									</div>
-								</div>
-							</Collapsible.Content>
-						</Collapsible.Root>
-					</div>
-
-					<!-- Right: Payload Template -->
-					<div class="w-[520px] shrink-0 flex flex-col gap-3 border-l border-border/50 pl-6">
-						<div class="flex items-center justify-between">
-							<div>
-								<Label class="text-sm">Customize Payload</Label>
-								<p class="text-xs text-muted-foreground mt-0.5">
-									{#if customizePayload}
-										Using custom payload template
-									{:else}
-										Using default {presetLabels[getDefaultPresetKey(webhookUrl)] || 'Generic'} preset
-									{/if}
-								</p>
-							</div>
-							<Switch
-								checked={customizePayload}
-								onCheckedChange={(checked) => {
-									customizePayload = checked;
-									if (checked && !payloadTemplate) {
-										payloadTemplate = getDefaultTemplate(webhookUrl);
-									}
-								}}
-							/>
-						</div>
-
-						<div class={!customizePayload ? 'opacity-40 pointer-events-none' : ''}>
-							<p class="text-xs font-medium text-muted-foreground mb-1.5">Presets</p>
-							<div class="flex flex-wrap gap-1">
-								{#each Object.keys(presetLabels) as key}
-									{#if webhookTemplatePresets[key]}
-										<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => applyPreset(key)}>
-											{presetLabels[key]}
-										</Button>
-									{/if}
-								{/each}
-							</div>
-						</div>
-
-						<div
-							bind:this={editorContainer}
-							class="h-[300px] rounded-md border border-border/50 overflow-hidden {!customizePayload ? 'opacity-50 pointer-events-none' : ''}"
-						></div>
-
-						<div class={!customizePayload ? 'opacity-40' : ''}>
-							<p class="text-xs font-medium text-muted-foreground mb-1">Available variables</p>
-							<div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-muted-foreground font-mono p-2 rounded border border-border/50 bg-muted/20">
-								{#each [
-									['{{.event}}', 'Event name'],
-									['{{.timestamp}}', 'ISO 8601 timestamp'],
-									['{{.title}}', 'Event title'],
-									['{{.color}}', 'Color (int, for Discord)'],
-									['{{.server_id}}', 'Server ID'],
-									['{{.server_name}}', 'Server name'],
-									['{{.server_status}}', 'Server status'],
-									['{{.server_mc_version}}', 'MC version'],
-									['{{.server_mod_loader}}', 'Mod loader'],
-									['{{.server_players}}', 'Player count'],
-									['{{.server_max_players}}', 'Max players'],
-									['{{.server_port}}', 'Server port'],
-								] as [variable, description]}
-									<button
-										class="text-left hover:text-foreground transition-colors cursor-pointer"
-										title="Copy {variable}"
-										onclick={() => { navigator.clipboard.writeText(variable); toast.success(`Copied ${variable}`); }}
-									>{variable}</button>
-									<span class="font-sans">{description}</span>
-								{/each}
-							</div>
-						</div>
-					</div>
-				</div>
-			<Dialog.Footer>
-				<Button variant="outline" onclick={() => { showCreateDialog = false; resetForm(); }}>Cancel</Button>
-				<Button onclick={saveTask} disabled={creating}>
-					{#if creating}
-						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
-					{/if}
-					{selectedTask ? 'Save Changes' : 'Create Task'}
-				</Button>
-			</Dialog.Footer>
-			{:else}
+		<Dialog.Content class="max-w-4xl! w-[95vw]! h-[80vh]! p-0! gap-0! overflow-hidden flex flex-col" showCloseButton={false}>
 			<div class="flex h-full">
 				<!-- Sidebar -->
 				<div class="w-56 border-r bg-muted/30 flex flex-col shrink-0">
@@ -1098,6 +893,7 @@
 											<Select.Item value={TaskType.START.toString()} label="Start Server">Start Server</Select.Item>
 											<Select.Item value={TaskType.STOP.toString()} label="Stop Server">Stop Server</Select.Item>
 											<Select.Item value={TaskType.SCRIPT.toString()} label="Script">Script</Select.Item>
+											<Select.Item value={TaskType.WEBHOOK.toString()} label="Webhook">Webhook</Select.Item>
 										</Select.Content>
 									</Select.Root>
 								</div>
@@ -1161,19 +957,95 @@
 									<p class="text-sm text-muted-foreground">
 										World saving is automatically paused and flushed while the backup runs, then re-enabled.
 									</p>
+								{:else if taskType === TaskType.WEBHOOK}
+									<div class="space-y-3">
+										<Label for="url">Webhook URL *</Label>
+										<Input id="url" bind:value={webhookUrl} placeholder={isDiscordUrl(webhookUrl) ? 'https://discord.com/api/webhooks/...' : 'https://example.com/webhook'} class="h-11 font-mono" />
+										<p class="text-sm text-muted-foreground">
+											The endpoint the request is sent to. Discord/Slack/Teams/ntfy URLs are auto-detected for the default payload preset.
+										</p>
+									</div>
 								{:else}
 									<div class="p-4 border rounded-lg border-dashed text-sm text-muted-foreground">
 										No additional configuration required for this task type.
 									</div>
 								{/if}
+							{:else if activeSection === 'payload' && taskType === TaskType.WEBHOOK}
+								<div class="flex items-center justify-between">
+									<div>
+										<Label class="text-base">Customize Payload</Label>
+										<p class="text-sm text-muted-foreground mt-0.5">
+											{#if customizePayload}
+												Using a custom payload template
+											{:else}
+												Using the default {presetLabels[getDefaultPresetKey(webhookUrl)] || 'Generic'} preset
+											{/if}
+										</p>
+									</div>
+									<Switch
+										checked={customizePayload}
+										onCheckedChange={(checked) => {
+											customizePayload = checked;
+											if (checked && !payloadTemplate) {
+												payloadTemplate = getDefaultTemplate(webhookUrl);
+											}
+										}}
+									/>
+								</div>
+
+								<div class={!customizePayload ? 'opacity-40 pointer-events-none' : ''}>
+									<p class="text-sm font-medium text-muted-foreground mb-1.5">Presets</p>
+									<div class="flex flex-wrap gap-1">
+										{#each Object.keys(presetLabels) as key}
+											{#if webhookTemplatePresets[key]}
+												<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => applyPreset(key)}>
+													{presetLabels[key]}
+												</Button>
+											{/if}
+										{/each}
+									</div>
+								</div>
+
+								<div
+									bind:this={editorContainer}
+									class="h-[340px] rounded-md border border-border/50 overflow-hidden {!customizePayload ? 'opacity-50 pointer-events-none' : ''}"
+								></div>
+
+								<div class={!customizePayload ? 'opacity-40' : ''}>
+									<p class="text-sm font-medium text-muted-foreground mb-1">Available variables</p>
+									<div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-muted-foreground font-mono p-2 rounded border border-border/50 bg-muted/20">
+										{#each [
+											['{{.event}}', 'Event name'],
+											['{{.timestamp}}', 'ISO 8601 timestamp'],
+											['{{.title}}', 'Event title'],
+											['{{.color}}', 'Color (int, for Discord)'],
+											['{{.server_id}}', 'Server ID'],
+											['{{.server_name}}', 'Server name'],
+											['{{.server_status}}', 'Server status'],
+											['{{.server_mc_version}}', 'MC version'],
+											['{{.server_mod_loader}}', 'Mod loader'],
+											['{{.server_players}}', 'Player count'],
+											['{{.server_max_players}}', 'Max players'],
+											['{{.server_port}}', 'Server port'],
+										] as [variable, description]}
+											<button
+												class="text-left hover:text-foreground transition-colors cursor-pointer"
+												title="Copy {variable}"
+												onclick={() => { navigator.clipboard.writeText(variable); toast.success(`Copied ${variable}`); }}
+											>{variable}</button>
+											<span class="font-sans">{description}</span>
+										{/each}
+									</div>
+								</div>
 							{:else if activeSection === 'schedule'}
 								<div class="space-y-3">
 									<Label>Schedule Type</Label>
 									<Select.Root type="single" name="scheduleType" value={scheduleType.toString()} onValueChange={(v) => { if (v) scheduleType = parseInt(v) as ScheduleType; }}>
 										<Select.Trigger class="w-full h-11!">
-											{scheduleType === ScheduleType.CRON ? 'Cron Expression' : scheduleType === ScheduleType.INTERVAL ? 'Fixed Interval' : 'Run Once'}
+											{getScheduleTypeLabel(scheduleType)}
 										</Select.Trigger>
 										<Select.Content>
+											<Select.Item value={ScheduleType.EVENT.toString()} label="On Event">On Event</Select.Item>
 											<Select.Item value={ScheduleType.CRON.toString()} label="Cron Expression">Cron Expression</Select.Item>
 											<Select.Item value={ScheduleType.INTERVAL.toString()} label="Fixed Interval">Fixed Interval</Select.Item>
 											<Select.Item value={ScheduleType.ONCE.toString()} label="Run Once">Run Once</Select.Item>
@@ -1203,8 +1075,56 @@
 										<Input id="runAt" type="datetime-local" bind:value={runAt} class="h-11" />
 										<p class="text-sm text-muted-foreground">The task runs once at this time, then is disabled</p>
 									</div>
+								{:else if scheduleType === ScheduleType.EVENT}
+									<div class="space-y-3">
+										<Label>Events *</Label>
+										<div class="grid grid-cols-1 gap-2 p-3 rounded-lg border border-border/50 bg-muted/20">
+											{#each [
+												{ trigger: TaskEventTrigger.SERVER_START, label: 'Server Start', description: 'When the server starts' },
+												{ trigger: TaskEventTrigger.SERVER_STOP, label: 'Server Stop', description: 'When the server stops' },
+												{ trigger: TaskEventTrigger.SERVER_RESTART, label: 'Server Restart', description: 'When the server restarts' },
+											] as { trigger, label, description }}
+												<label class="flex items-center gap-3 cursor-pointer hover:bg-muted/40 p-2 rounded">
+													<Checkbox
+														checked={eventTriggers.includes(trigger)}
+														onCheckedChange={() => toggleEventTrigger(trigger)}
+													/>
+													<div>
+														<span class="text-sm font-medium">{label}</span>
+														<p class="text-xs text-muted-foreground">{description}</p>
+													</div>
+												</label>
+											{/each}
+										</div>
+										<p class="text-sm text-muted-foreground">The task runs whenever any selected event fires.</p>
+									</div>
 								{/if}
 							{:else if activeSection === 'advanced'}
+								{#if taskType === TaskType.WEBHOOK}
+								<div class="space-y-3">
+									<Label for="secret">Secret (optional)</Label>
+									<Input id="secret" type="password" bind:value={webhookSecret} placeholder={originalWebhookHasSecret ? '(unchanged)' : 'HMAC signing secret'} class="h-11" />
+									<p class="text-sm text-muted-foreground">Signs the payload with HMAC-SHA256 so the receiver can verify it.</p>
+								</div>
+
+								<div class="grid grid-cols-3 gap-6">
+									<div class="space-y-3">
+										<Label for="maxRetries">Max Retries</Label>
+										<Input id="maxRetries" type="number" bind:value={webhookMaxRetries} min={0} max={10} class="h-11" />
+										<p class="text-sm text-muted-foreground">Delivery attempts before giving up</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="retryDelayMs">Retry Delay (ms)</Label>
+										<Input id="retryDelayMs" type="number" bind:value={webhookRetryDelayMs} min={100} max={60000} class="h-11" />
+										<p class="text-sm text-muted-foreground">Wait between delivery attempts</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="webhookTimeout">Timeout (ms)</Label>
+										<Input id="webhookTimeout" type="number" bind:value={webhookTimeoutMs} min={1000} max={30000} class="h-11" />
+										<p class="text-sm text-muted-foreground">Per-attempt request timeout</p>
+									</div>
+								</div>
+								{:else}
 								<div class="space-y-3">
 									<Label for="timeout">Timeout (seconds)</Label>
 									<Input id="timeout" type="number" bind:value={timeout} min={10} max={3600} class="h-11" />
@@ -1231,6 +1151,7 @@
 										<p class="text-sm text-muted-foreground">Skip this task when the server is offline</p>
 									</div>
 								</label>
+								{/if}
 							{/if}
 						</div>
 					</div>
@@ -1249,7 +1170,6 @@
 					</div>
 				</div>
 			</div>
-			{/if}
 		</Dialog.Content>
 	</Dialog.Root>
 

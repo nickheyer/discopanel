@@ -8,6 +8,7 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/config"
 	"github.com/nickheyer/discopanel/internal/indexers"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/utils"
 )
 
@@ -188,14 +189,10 @@ func (f *FuegoIndexer) convertFile(file File, modpackID string) indexers.Modpack
 		releaseType = "alpha"
 	}
 
-	// Extract primary mod loader
+	// Extract primary mod loader w/ best effort score matching
 	modLoader := ""
-	for _, gv := range file.GameVersions {
-		loader := strings.ToLower(gv)
-		if loader == "forge" || loader == "fabric" || loader == "quilt" || loader == "neoforge" {
-			modLoader = loader
-			break
-		}
+	if loader, ok := minecraft.DetectModpackLoader(file.GameVersions...); ok {
+		modLoader = string(loader)
 	}
 
 	serverPackID := ""

@@ -8,6 +8,7 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/config"
 	"github.com/nickheyer/discopanel/internal/indexers"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 )
 
 func init() {
@@ -114,9 +115,8 @@ func (m *ModrinthIndexer) convertSearchProject(project Project) indexers.Modpack
 	// Extract mod loaders from categories (Modrinth puts loaders in categories)
 	modLoaders := []string{}
 	for _, cat := range project.Categories {
-		lower := strings.ToLower(cat)
-		if lower == "forge" || lower == "fabric" || lower == "quilt" || lower == "neoforge" {
-			modLoaders = append(modLoaders, lower)
+		if loader, ok := minecraft.DetectModpackLoader(cat); ok {
+			modLoaders = append(modLoaders, string(loader))
 		}
 	}
 
@@ -162,9 +162,8 @@ func (m *ModrinthIndexer) convertProject(project ProjectDetails) indexers.Modpac
 	// Use display categories (non-loader categories)
 	categories := []string{}
 	for _, cat := range project.Categories {
-		lower := strings.ToLower(cat)
 		// Skip loader categories
-		if lower != "forge" && lower != "fabric" && lower != "quilt" && lower != "neoforge" {
+		if _, isLoader := minecraft.DetectModpackLoader(cat); !isLoader {
 			categories = append(categories, cat)
 		}
 	}

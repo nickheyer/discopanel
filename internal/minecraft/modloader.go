@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/strmatch"
 )
 
 // ModLoaderInfo contains information about a specific mod loader
@@ -421,4 +422,43 @@ func GetAllModLoaders() []ModLoaderInfo {
 	}
 
 	return infos
+}
+
+// Fuzzy weights for mod loader matches
+const (
+	modLoaderMatchThreshold     = 0.5
+	modpackLoaderMatchThreshold = 0.6
+)
+
+// Might need expansion as indexers expose more mod loaders but I think this is it
+var modpackLoaderNames = []string{
+	string(models.ModLoaderForge),
+	string(models.ModLoaderNeoForge),
+	string(models.ModLoaderFabric),
+	string(models.ModLoaderQuilt),
+}
+
+func MatchModLoader(input string) (models.ModLoader, bool) {
+	info, score, ok := strmatch.BestFunc(input, GetAllModLoaders(), func(i ModLoaderInfo) string {
+		return i.Name
+	})
+	if !ok || score < modLoaderMatchThreshold {
+		return "", false
+	}
+	return models.ModLoader(info.Name), true
+}
+
+// Inspects candidate strings for modloader identification
+func DetectModpackLoader(candidates ...string) (models.ModLoader, bool) {
+	best := ""
+	bestScore := 0.0
+	for _, c := range candidates {
+		if m, ok := strmatch.Best(c, modpackLoaderNames); ok && m.Score > bestScore {
+			best, bestScore = m.Value, m.Score
+		}
+	}
+	if best == "" || bestScore < modpackLoaderMatchThreshold {
+		return "", false
+	}
+	return models.ModLoader(best), true
 }

@@ -576,16 +576,15 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 	modpackID = uuid.New().String()
 
 	// Determine mod loader from manifest
-	allLoaders := minecraft.GetAllModLoaders()
 	var modLoader storage.ModLoader
-
+	loaderID := ""
 	for _, ml := range manifest.Minecraft.ModLoaders {
-		for _, iml := range allLoaders {
-			if strings.Contains(ml.ID, iml.Name) {
-				modLoader = storage.ModLoader(iml.Name)
-				break
-			}
+		if loaderID == "" || ml.Primary {
+			loaderID = ml.ID
 		}
+	}
+	if matched, ok := minecraft.MatchModLoader(loaderID); ok {
+		modLoader = matched
 	}
 
 	if modLoader == "" {

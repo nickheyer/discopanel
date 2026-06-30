@@ -158,12 +158,11 @@ message ScriptTaskConfig {
 message WebhookTaskConfig {
   string url = 1;                        // Webhook destination URL
   string secret = 2;                     // Optional HMAC signing secret
-  string format = 3;                     // "generic", "discord", "slack", "teams", "ntfy"
-  string payload_template = 4;           // Optional Go text/template; falls back to format preset when empty
-  map<string, string> headers = 5;       // Custom request headers
-  int32 max_retries = 6;                 // Retries on delivery failure (default 3)
-  int32 retry_delay_ms = 7;              // Initial retry delay in ms (default 1000)
-  int32 timeout_ms = 8;                  // HTTP timeout in ms (default 5000)
+  string payload_template = 3;           // Go text/template rendered into the request body; falls back to a generic JSON payload when empty
+  map<string, string> headers = 4;       // Custom request headers
+  int32 max_retries = 5;                 // Retries on delivery failure (default 3)
+  int32 retry_delay_ms = 6;              // Initial retry delay in ms (default 1000)
+  int32 timeout_ms = 7;                  // HTTP timeout in ms (default 5000)
 }
 
 // List tasks request
@@ -174,8 +173,6 @@ message ListTasksRequest {
 // List of scheduled tasks
 message ListTasksResponse {
   repeated ScheduledTask tasks = 1;
-  // Built-in webhook payload template presets keyed by name (e.g. "generic", "discord", "slack", "teams", "ntfy").
-  map<string, string> webhook_template_presets = 2;
 }
 
 // Get task request

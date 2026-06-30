@@ -290,8 +290,7 @@ func (s *TaskService) ListTasks(ctx context.Context, req *connect.Request[v1.Lis
 	}
 
 	return connect.NewResponse(&v1.ListTasksResponse{
-		Tasks:                  protoTasks,
-		WebhookTemplatePresets: webhook.TemplatePresets(),
+		Tasks: protoTasks,
 	}), nil
 }
 

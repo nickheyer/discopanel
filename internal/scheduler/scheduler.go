@@ -40,11 +40,6 @@ type Scheduler struct {
 	// Cron parser
 	cronParser cron.Parser
 
-	// Tracks which event triggered each currently-running event-driven task,
-	// so webhook payloads can report the actual event name.
-	activeEvents  map[string]storage.TaskEventTrigger
-	activeEventMu sync.RWMutex
-
 	// Stats
 	lastCheck time.Time
 	nextCheck time.Time
@@ -78,7 +73,6 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 		checkInterval:     cfg.CheckInterval,
 		stopChan:          make(chan struct{}),
 		runningExecutions: make(map[string]context.CancelFunc),
-		activeEvents:      make(map[string]storage.TaskEventTrigger),
 		cronParser:        cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
 	}
 }
@@ -213,7 +207,7 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		s.wg.Add(1)
 		go func(t *storage.ScheduledTask) {
 			defer s.wg.Done()
-			s.executeTask(t, "scheduled")
+			s.executeTask(t, "scheduled", "")
 		}(task)
 	}
 }
@@ -225,7 +219,7 @@ func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*storage.Ta
 		return nil, err
 	}
 
-	execution, err := s.executeTask(task, "manual")
+	execution, err := s.executeTask(task, "manual", "")
 	return execution, err
 }
 
@@ -246,23 +240,16 @@ func (s *Scheduler) OnEvent(ctx context.Context, serverID string, eventTrigger s
 	}
 }
 
-// executeTaskForEvent runs a task as a result of an event firing.
-// The event name is passed to webhook executors so the rendered payload
+// executeTaskForEvent runs a task as a result of an event firing. The event
+// trigger is threaded through to webhook executors so the rendered payload
 // reflects which event triggered the delivery.
 func (s *Scheduler) executeTaskForEvent(task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) {
-	s.activeEventMu.Lock()
-	s.activeEvents[task.ID] = eventTrigger
-	s.activeEventMu.Unlock()
-	defer func() {
-		s.activeEventMu.Lock()
-		delete(s.activeEvents, task.ID)
-		s.activeEventMu.Unlock()
-	}()
-	s.executeTask(task, "event")
+	s.executeTask(task, "event", eventTrigger)
 }
 
-// executeTask runs a single task
-func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*storage.TaskExecution, error) {
+// executeTask runs a single task. eventTrigger names the event that drove an
+// event-triggered run (empty for scheduled/manual runs).
+func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eventTrigger storage.TaskEventTrigger) (*storage.TaskExecution, error) {
 	ctx := context.Background()
 
 	// Check if server exists
@@ -337,7 +324,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*s
 	var execErr error
 
 	for attempt := 0; ; attempt++ {
-		output, execErr = s.runTaskType(execCtx, server, task)
+		output, execErr = s.runTaskType(execCtx, server, task, eventTrigger)
 		if execErr == nil || attempt >= task.RetryCount || execCtx.Err() != nil {
 			break
 		}
@@ -390,7 +377,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*s
 }
 
 // runTaskType dispatches a single execution attempt to the type-specific executor
-func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) (string, error) {
 	switch task.TaskType {
 	case storage.TaskTypeCommand:
 		return s.executeCommandTask(ctx, server, task)
@@ -405,7 +392,7 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 	case storage.TaskTypeScript:
 		return s.executeScriptTask(ctx, server, task)
 	case storage.TaskTypeWebhook:
-		return s.executeWebhookTask(ctx, server, task)
+		return s.executeWebhookTask(ctx, server, task, eventTrigger)
 	default:
 		return "", fmt.Errorf("unknown task type: %s", task.TaskType)
 	}
@@ -631,7 +618,7 @@ func (s *Scheduler) ValidateCronExpr(expr string) error {
 	return err
 }
 
-func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) (string, error) {
 	var cfg webhook.Config
 	if task.Config != "" {
 		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
@@ -642,16 +629,13 @@ func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Serv
 		return "", fmt.Errorf("webhook URL is required")
 	}
 
-	// Determine which event drove this run. For event-triggered runs the
-	// scheduler stashes the active trigger keyed by task ID; otherwise fall
-	// back to the first subscribed trigger or "manual".
-	s.activeEventMu.RLock()
-	activeTrigger, hasActive := s.activeEvents[task.ID]
-	s.activeEventMu.RUnlock()
+	// Determine which event drove this run. Event-triggered runs pass the
+	// firing trigger directly; otherwise fall back to the first subscribed
+	// trigger or "manual".
 	var event string
 	switch {
-	case hasActive:
-		event = string(activeTrigger)
+	case eventTrigger != "":
+		event = string(eventTrigger)
 	case len(task.EventTriggers) > 0:
 		event = string(task.EventTriggers[0])
 	default:

@@ -26,22 +26,12 @@ import (
 type Config struct {
 	URL             string            `json:"url"`
 	Secret          string            `json:"secret"`
-	Format          string            `json:"format"`
 	PayloadTemplate string            `json:"payload_template"`
 	Headers         map[string]string `json:"headers"`
 	MaxRetries      int               `json:"max_retries"`
 	RetryDelayMs    int               `json:"retry_delay_ms"`
 	TimeoutMs       int               `json:"timeout_ms"`
 }
-
-// Format names recognised when no custom payload template is set.
-const (
-	FormatGeneric = "generic"
-	FormatDiscord = "discord"
-	FormatSlack   = "slack"
-	FormatTeams   = "teams"
-	FormatNtfy    = "ntfy"
-)
 
 // Result describes a single delivery attempt outcome.
 type Result struct {
@@ -172,164 +162,16 @@ func renderBody(cfg Config, payload *Payload) ([]byte, error) {
 	if cfg.PayloadTemplate != "" {
 		return renderTemplate(cfg.PayloadTemplate, payload)
 	}
-	// Pick a format. In order: explicit non-generic format → URL-based
-	// auto-detection → generic JSON marshal. Auto-detection covers the
-	// common case where a webhook config was saved with format="generic"
-	// but the URL is clearly a Discord/Slack/Teams/ntfy endpoint.
-	format := cfg.Format
-	if format == "" || format == FormatGeneric {
-		if detected := detectFormatFromURL(cfg.URL); detected != "" {
-			format = detected
-		}
-	}
-	if tmpl, ok := TemplatePresets()[format]; ok && format != FormatGeneric {
-		return renderTemplate(tmpl, payload)
-	}
+	// No custom template: emit the canonical payload as generic JSON. The
+	// service-specific presets (Discord/Slack/Teams/ntfy) live in the UI and
+	// are sent as payload_template, so there is nothing to look up here.
 	return json.Marshal(payload)
-}
-
-// detectFormatFromURL guesses a payload format from the destination URL.
-// Returns "" when nothing recognisable matches.
-func detectFormatFromURL(url string) string {
-	switch {
-	case strings.Contains(url, "discord.com/api/webhooks"),
-		strings.Contains(url, "discordapp.com/api/webhooks"):
-		return FormatDiscord
-	case strings.Contains(url, "hooks.slack.com"):
-		return FormatSlack
-	case strings.Contains(url, ".webhook.office.com"),
-		strings.Contains(url, "outlook.office.com/webhook"):
-		return FormatTeams
-	case strings.Contains(url, "ntfy.sh"):
-		return FormatNtfy
-	}
-	return ""
 }
 
 func sign(body []byte, secret string) string {
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write(body)
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-// DefaultGenericTemplate is the built-in generic JSON template
-const DefaultGenericTemplate = `{
-  "event": "{{.event}}",
-  "timestamp": "{{.timestamp}}",
-  "server": {
-    "id": "{{.server_id}}",
-    "name": "{{.server_name}}",
-    "status": "{{.server_status}}",
-    "mc_version": "{{.server_mc_version}}",
-    "mod_loader": "{{.server_mod_loader}}",
-    "players_online": {{.server_players}},
-    "max_players": {{.server_max_players}},
-    "port": {{.server_port}}
-  }
-}`
-
-// DefaultDiscordTemplate is the built-in Discord embed template
-const DefaultDiscordTemplate = `{
-  "embeds": [{
-    "title": "{{.title}}",
-    "description": "**{{.server_name}}** - {{.server_status}}",
-    "color": {{.color}},
-    "timestamp": "{{.timestamp}}",
-    "fields": [
-      {"name": "Version", "value": "{{.server_mc_version}}", "inline": true},
-      {"name": "Players", "value": "{{.server_players}}/{{.server_max_players}}", "inline": true},
-      {"name": "Mod Loader", "value": "{{.server_mod_loader}}", "inline": true}
-    ],
-    "footer": {"text": "DiscoPanel"}
-  }]
-}`
-
-// DefaultSlackTemplate is the built-in Slack Block Kit template
-const DefaultSlackTemplate = `{
-  "blocks": [
-    {
-      "type": "header",
-      "text": {"type": "plain_text", "text": "{{.title}}"}
-    },
-    {
-      "type": "section",
-      "text": {"type": "mrkdwn", "text": "*{{.server_name}}* — {{.server_status}}"}
-    },
-    {
-      "type": "section",
-      "fields": [
-        {"type": "mrkdwn", "text": "*Version:*\n{{.server_mc_version}}"},
-        {"type": "mrkdwn", "text": "*Players:*\n{{.server_players}}/{{.server_max_players}}"},
-        {"type": "mrkdwn", "text": "*Mod Loader:*\n{{.server_mod_loader}}"},
-        {"type": "mrkdwn", "text": "*Port:*\n{{.server_port}}"}
-      ]
-    },
-    {
-      "type": "context",
-      "elements": [{"type": "mrkdwn", "text": "DiscoPanel • {{.timestamp}}"}]
-    }
-  ]
-}`
-
-// DefaultTeamsTemplate is the built-in Microsoft Teams Adaptive Card template
-const DefaultTeamsTemplate = `{
-  "type": "message",
-  "attachments": [{
-    "contentType": "application/vnd.microsoft.card.adaptive",
-    "content": {
-      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-      "type": "AdaptiveCard",
-      "version": "1.4",
-      "body": [
-        {
-          "type": "TextBlock",
-          "size": "medium",
-          "weight": "bolder",
-          "text": "{{.title}}"
-        },
-        {
-          "type": "TextBlock",
-          "text": "**{{.server_name}}** — {{.server_status}}",
-          "wrap": true
-        },
-        {
-          "type": "FactSet",
-          "facts": [
-            {"title": "Version", "value": "{{.server_mc_version}}"},
-            {"title": "Players", "value": "{{.server_players}}/{{.server_max_players}}"},
-            {"title": "Mod Loader", "value": "{{.server_mod_loader}}"},
-            {"title": "Port", "value": "{{.server_port}}"}
-          ]
-        },
-        {
-          "type": "TextBlock",
-          "text": "DiscoPanel • {{.timestamp}}",
-          "size": "small",
-          "isSubtle": true
-        }
-      ]
-    }
-  }]
-}`
-
-// DefaultNtfyTemplate is the built-in ntfy.sh template
-const DefaultNtfyTemplate = `{
-  "topic": "discopanel",
-  "title": "{{.title}}",
-  "message": "{{.server_name}} — {{.server_status}}",
-  "tags": ["video_game"],
-  "priority": 3
-}`
-
-// TemplatePresets returns all built-in template presets keyed by format name.
-func TemplatePresets() map[string]string {
-	return map[string]string{
-		FormatGeneric: DefaultGenericTemplate,
-		FormatDiscord: DefaultDiscordTemplate,
-		FormatSlack:   DefaultSlackTemplate,
-		FormatTeams:   DefaultTeamsTemplate,
-		FormatNtfy:    DefaultNtfyTemplate,
-	}
 }
 
 // templateData builds a flat map of variables available to payload templates.

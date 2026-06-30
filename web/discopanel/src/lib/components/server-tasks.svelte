@@ -98,8 +98,110 @@
 	let webhookTimeoutMs = $state(5000);
 	let originalWebhookHasSecret = $state(false); // for placeholder display when editing
 
-	// Webhook template presets fetched from backend
-	let webhookTemplatePresets = $state<Record<string, string>>({});
+	// Built-in webhook payload presets. These are static, so they live in the
+	// UI rather than being fetched over RPC. When a webhook isn't customized,
+	// the resolved preset is sent to the backend as payload_template.
+	const webhookTemplatePresets: Record<string, string> = {
+		generic: `{
+  "event": "{{.event}}",
+  "timestamp": "{{.timestamp}}",
+  "server": {
+    "id": "{{.server_id}}",
+    "name": "{{.server_name}}",
+    "status": "{{.server_status}}",
+    "mc_version": "{{.server_mc_version}}",
+    "mod_loader": "{{.server_mod_loader}}",
+    "players_online": {{.server_players}},
+    "max_players": {{.server_max_players}},
+    "port": {{.server_port}}
+  }
+}`,
+		discord: `{
+  "embeds": [{
+    "title": "{{.title}}",
+    "description": "**{{.server_name}}** - {{.server_status}}",
+    "color": {{.color}},
+    "timestamp": "{{.timestamp}}",
+    "fields": [
+      {"name": "Version", "value": "{{.server_mc_version}}", "inline": true},
+      {"name": "Players", "value": "{{.server_players}}/{{.server_max_players}}", "inline": true},
+      {"name": "Mod Loader", "value": "{{.server_mod_loader}}", "inline": true}
+    ],
+    "footer": {"text": "DiscoPanel"}
+  }]
+}`,
+		slack: `{
+  "blocks": [
+    {
+      "type": "header",
+      "text": {"type": "plain_text", "text": "{{.title}}"}
+    },
+    {
+      "type": "section",
+      "text": {"type": "mrkdwn", "text": "*{{.server_name}}* — {{.server_status}}"}
+    },
+    {
+      "type": "section",
+      "fields": [
+        {"type": "mrkdwn", "text": "*Version:*\n{{.server_mc_version}}"},
+        {"type": "mrkdwn", "text": "*Players:*\n{{.server_players}}/{{.server_max_players}}"},
+        {"type": "mrkdwn", "text": "*Mod Loader:*\n{{.server_mod_loader}}"},
+        {"type": "mrkdwn", "text": "*Port:*\n{{.server_port}}"}
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [{"type": "mrkdwn", "text": "DiscoPanel • {{.timestamp}}"}]
+    }
+  ]
+}`,
+		teams: `{
+  "type": "message",
+  "attachments": [{
+    "contentType": "application/vnd.microsoft.card.adaptive",
+    "content": {
+      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+      "type": "AdaptiveCard",
+      "version": "1.4",
+      "body": [
+        {
+          "type": "TextBlock",
+          "size": "medium",
+          "weight": "bolder",
+          "text": "{{.title}}"
+        },
+        {
+          "type": "TextBlock",
+          "text": "**{{.server_name}}** — {{.server_status}}",
+          "wrap": true
+        },
+        {
+          "type": "FactSet",
+          "facts": [
+            {"title": "Version", "value": "{{.server_mc_version}}"},
+            {"title": "Players", "value": "{{.server_players}}/{{.server_max_players}}"},
+            {"title": "Mod Loader", "value": "{{.server_mod_loader}}"},
+            {"title": "Port", "value": "{{.server_port}}"}
+          ]
+        },
+        {
+          "type": "TextBlock",
+          "text": "DiscoPanel • {{.timestamp}}",
+          "size": "small",
+          "isSubtle": true
+        }
+      ]
+    }
+  }]
+}`,
+		ntfy: `{
+  "topic": "discopanel",
+  "title": "{{.title}}",
+  "message": "{{.server_name}} — {{.server_status}}",
+  "tags": ["video_game"],
+  "priority": 3
+}`,
+	};
 
 	// CodeMirror editor for payload template
 	let editorContainer = $state<HTMLDivElement>();
@@ -119,7 +221,11 @@
 	}
 
 	function getDefaultPresetKey(url: string): string {
-		return isDiscordUrl(url) ? 'discord' : 'generic';
+		if (isDiscordUrl(url)) return 'discord';
+		if (url.includes('hooks.slack.com')) return 'slack';
+		if (url.includes('.webhook.office.com') || url.includes('outlook.office.com/webhook')) return 'teams';
+		if (url.includes('ntfy.sh')) return 'ntfy';
+		return 'generic';
 	}
 
 	function getDefaultTemplate(url: string): string {
@@ -238,9 +344,6 @@
 			const request = create(ListTasksRequestSchema, { serverId: server.id });
 			const response = await rpcClient.task.listTasks(request);
 			tasks = response.tasks;
-			if (response.webhookTemplatePresets) {
-				webhookTemplatePresets = { ...response.webhookTemplatePresets };
-			}
 		} catch (_e) {
 			toast.error('Failed to load tasks');
 		} finally {
@@ -339,7 +442,8 @@
 				webhookSecret = '';
 				originalWebhookHasSecret = !!cfg.secret;
 				payloadTemplate = cfg.payload_template || '';
-				customizePayload = !!cfg.payload_template;
+				// A stored template that matches the URL's default preset counts as "not customized".
+				customizePayload = !!payloadTemplate && payloadTemplate.trim() !== getDefaultTemplate(webhookUrl).trim();
 				webhookMaxRetries = cfg.max_retries ?? 3;
 				webhookRetryDelayMs = cfg.retry_delay_ms ?? 1000;
 				webhookTimeoutMs = cfg.timeout_ms ?? 5000;
@@ -380,12 +484,11 @@
 	}
 
 	function buildWebhookConfig(): string {
-		// Format is only consulted by the backend when no custom template is set;
-		// derive it from the URL so the right preset (Discord/Slack/Teams/ntfy/generic) fires.
+		// The backend just renders payload_template, so always send a concrete
+		// template: the user's custom one, or the preset resolved from the URL.
 		const cfg: Record<string, any> = {
 			url: webhookUrl,
-			format: getDefaultPresetKey(webhookUrl),
-			payload_template: customizePayload ? payloadTemplate : '',
+			payload_template: customizePayload ? payloadTemplate : getDefaultTemplate(webhookUrl),
 			max_retries: webhookMaxRetries,
 			retry_delay_ms: webhookRetryDelayMs,
 			timeout_ms: webhookTimeoutMs,

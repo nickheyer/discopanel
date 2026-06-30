@@ -392,15 +392,6 @@
 		showCreateDialog = true;
 	}
 
-	function openCreateWebhookDialog() {
-		resetForm();
-		taskType = TaskType.WEBHOOK;
-		scheduleType = ScheduleType.EVENT;
-		requireOnline = false;
-		timeout = 60;
-		showCreateDialog = true;
-	}
-
 	function openEditDialog(task: ScheduledTask) {
 		resetForm();
 		selectedTask = task;
@@ -796,10 +787,6 @@
 					<RefreshCw class="h-4 w-4 mr-2" />
 					Refresh
 				</Button>
-				<Button variant="outline" size="sm" onclick={openCreateWebhookDialog}>
-					<WebhookIcon class="h-4 w-4 mr-2" />
-					New Webhook
-				</Button>
 				<Button size="sm" onclick={openCreateDialog}>
 					<Plus class="h-4 w-4 mr-2" />
 					New Task
@@ -818,10 +805,6 @@
 							<p class="text-sm text-muted-foreground">Create a scheduled task or a webhook to react to server events.</p>
 						</div>
 						<div class="flex gap-2 justify-center">
-							<Button variant="outline" onclick={openCreateWebhookDialog}>
-								<WebhookIcon class="h-4 w-4 mr-2" />
-								New Webhook
-							</Button>
 							<Button onclick={openCreateDialog}>
 								<Plus class="h-4 w-4 mr-2" />
 								New Task

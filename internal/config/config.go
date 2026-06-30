@@ -157,6 +157,9 @@ func Load(configPath string) (*Config, error) {
 		// Config file not found; use defaults and environment
 	}
 
+	// Flatten nested maps like docker.labels into map[string]string
+	flattenMapSetting(v, "docker.labels")
+
 	// Unmarshal config with a decode hook that handles JSON strings from env
 	var cfg Config
 	if err := v.Unmarshal(&cfg, func(dc *mapstructure.DecoderConfig) {
@@ -330,5 +333,38 @@ func jsonStringToMapHook() mapstructure.DecodeHookFuncType {
 			return data, nil
 		}
 		return m, nil
+	}
+}
+
+// flattenMapSetting flattens a nested viper setting into a flat map[string]string.
+// For example, docker.labels.com.example.enable: true becomes {"com.example.enable": "true"}.
+func flattenMapSetting(v *viper.Viper, key string) {
+	val := v.Get(key)
+	if val == nil {
+		return
+	}
+
+	m, ok := val.(map[string]any)
+	if !ok {
+		return
+	}
+
+	flat := make(map[string]string)
+	flattenMap(m, "", flat)
+	v.Set(key, flat)
+}
+
+func flattenMap(src map[string]any, prefix string, dst map[string]string) {
+	for k, v := range src {
+		key := k
+		if prefix != "" {
+			key = prefix + "." + k
+		}
+		switch val := v.(type) {
+		case map[string]any:
+			flattenMap(val, key, dst)
+		default:
+			dst[key] = fmt.Sprintf("%v", val)
+		}
 	}
 }

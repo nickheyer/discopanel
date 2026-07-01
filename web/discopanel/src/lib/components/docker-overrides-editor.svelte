@@ -628,7 +628,7 @@
 						<Input
 							id="entrypoint"
 							type="text"
-							placeholder="/bin/sh, -c, echo "hello""
+							placeholder={'/bin/sh, -c, echo "hello"'}
 							value={overrides?.entrypoint?.join(', ') || ''}
 							onchange={(e) => {
 								const value = e.currentTarget.value;

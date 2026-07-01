@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '$lib/components/ui/breadcrumb';
+	import {
+		Breadcrumb,
+		BreadcrumbItem,
+		BreadcrumbLink,
+		BreadcrumbList,
+		BreadcrumbPage,
+		BreadcrumbSeparator
+	} from '$lib/components/ui/breadcrumb';
 	import { FolderRoot } from '@lucide/svelte';
 
 	interface Props {
@@ -15,7 +22,7 @@
 	});
 </script>
 
-<div class="flex items-center px-3 py-1 border-b text-xs bg-muted/10">
+<div class="flex items-center border-b bg-muted/10 px-3 py-1 text-xs">
 	<Breadcrumb>
 		<BreadcrumbList>
 			<BreadcrumbItem>
@@ -25,7 +32,10 @@
 						Root
 					</BreadcrumbPage>
 				{:else}
-					<BreadcrumbLink class="flex items-center gap-1 text-xs cursor-pointer" onclick={() => onNavigate('')}>
+					<BreadcrumbLink
+						class="flex cursor-pointer items-center gap-1 text-xs"
+						onclick={() => onNavigate('')}
+					>
 						<FolderRoot class="h-3 w-3" />
 						Root
 					</BreadcrumbLink>
@@ -38,7 +48,7 @@
 						<BreadcrumbPage class="text-xs">{segment}</BreadcrumbPage>
 					{:else}
 						<BreadcrumbLink
-							class="text-xs cursor-pointer"
+							class="cursor-pointer text-xs"
 							onclick={() => onNavigate(segments.slice(0, i + 1).join('/'))}
 						>
 							{segment}

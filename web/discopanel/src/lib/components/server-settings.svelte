@@ -9,13 +9,21 @@
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
-  import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import * as _ from 'lodash-es';
 	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { UpdateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
-	import type { GetMinecraftVersionsResponse, GetModLoadersResponse, GetDockerImagesResponse } from '$lib/proto/discopanel/v1/minecraft_pb';
-	import { GetMinecraftVersionsRequestSchema, GetModLoadersRequestSchema, GetDockerImagesRequestSchema } from '$lib/proto/discopanel/v1/minecraft_pb';
+	import type {
+		GetMinecraftVersionsResponse,
+		GetModLoadersResponse,
+		GetDockerImagesResponse
+	} from '$lib/proto/discopanel/v1/minecraft_pb';
+	import {
+		GetMinecraftVersionsRequestSchema,
+		GetModLoadersRequestSchema,
+		GetDockerImagesRequestSchema
+	} from '$lib/proto/discopanel/v1/minecraft_pb';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import { getUniqueDockerImages } from '$lib/utils';
@@ -31,15 +39,17 @@
 
 	let saving = $state(false);
 
-  function safeToString(data?: unknown): string | undefined {
-    if (!data) return undefined;
-    try {
-      return JSON.stringify(data, (_, value) => typeof value === 'bigint' ? value.toString() : value);
-    } catch (e) {
-      console.error('Failed to parse dockerOverrides:', e);
-      return undefined;
-    }
-  }
+	function safeToString(data?: unknown): string | undefined {
+		if (!data) return undefined;
+		try {
+			return JSON.stringify(data, (_, value) =>
+				typeof value === 'bigint' ? value.toString() : value
+			);
+		} catch (e) {
+			console.error('Failed to parse dockerOverrides:', e);
+			return undefined;
+		}
+	}
 
 	let formData = $state<UpdateServerRequest>(
 		create(UpdateServerRequestSchema, {
@@ -64,20 +74,20 @@
 
 	let isDirty = $derived(
 		formData.name !== server.name ||
-		formData.description !== (server.description || '') ||
-		formData.port !== server.port ||
-		formData.maxPlayers !== server.maxPlayers ||
-		formData.memory !== server.memory ||
-		formData.modLoader !== enumToString(ModLoader, server.modLoader) ||
-		formData.mcVersion !== server.mcVersion ||
-		formData.dockerImage !== server.dockerImage ||
-		formData.detached !== server.detached ||
-		formData.autoStart !== server.autoStart ||
-		formData.tpsCommand !== (server.tpsCommand || '') ||
-		safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
-		safeToString($state.snapshot(formData.dockerOverrides)) !== safeToString(server.dockerOverrides)
+			formData.description !== (server.description || '') ||
+			formData.port !== server.port ||
+			formData.maxPlayers !== server.maxPlayers ||
+			formData.memory !== server.memory ||
+			formData.modLoader !== enumToString(ModLoader, server.modLoader) ||
+			formData.mcVersion !== server.mcVersion ||
+			formData.dockerImage !== server.dockerImage ||
+			formData.detached !== server.detached ||
+			formData.autoStart !== server.autoStart ||
+			formData.tpsCommand !== (server.tpsCommand || '') ||
+			safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
+			safeToString($state.snapshot(formData.dockerOverrides)) !==
+				safeToString(server.dockerOverrides)
 	);
-
 
 	// Available options
 	let minecraftVersions = $state<GetMinecraftVersionsResponse | null>(null);
@@ -90,7 +100,6 @@
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
-
 
 			// Reset form data to match new server
 			formData = create(UpdateServerRequestSchema, {
@@ -144,7 +153,7 @@
 	function handleMemoryInput(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const value = Number(input.value);
-		
+
 		// Prevent negative values
 		if (value < 0) {
 			input.value = '512';
@@ -155,7 +164,7 @@
 	function handleMaxPlayersInput(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const value = Number(input.value);
-		
+
 		// Prevent negative values and zero
 		if (value <= 0) {
 			input.value = '1';
@@ -184,13 +193,12 @@
 		// Backend has SupportedVersions field but it's not populated or sent via proto
 		return modLoaders?.modloaders || [];
 	}
-
 </script>
 
-<div class="space-y-6 p-4 overflow-y-auto h-full">
+<div class="h-full space-y-6 overflow-y-auto p-4">
 	{#if server.status !== ServerStatus.STOPPED}
 		<Alert class="border-warning/50 bg-warning/10">
-			<AlertCircle class="h-4 w-4 text-warning" />
+			<AlertCircle class="text-warning h-4 w-4" />
 			<AlertDescription class="text-sm">
 				Server must be stopped to modify these settings. Changes will take effect after restart.
 			</AlertDescription>
@@ -200,12 +208,7 @@
 	<div class="grid gap-6 md:grid-cols-2">
 		<div class="space-y-2">
 			<Label for="name" class="text-sm font-medium">Server Name</Label>
-			<Input
-				id="name"
-				bind:value={formData.name}
-				placeholder="My Server"
-				class="h-10"
-			/>
+			<Input id="name" bind:value={formData.name} placeholder="My Server" class="h-10" />
 		</div>
 
 		<div class="space-y-2">
@@ -270,7 +273,7 @@
 				type="single"
 				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
 				value={formData.mcVersion}
-				onValueChange={(value: string | undefined) => formData.mcVersion = value || ''}
+				onValueChange={(value: string | undefined) => (formData.mcVersion = value || '')}
 			>
 				<SelectTrigger id="mc_version" class="h-10">
 					<span>{formData.mcVersion || 'Select a version'}</span>
@@ -291,10 +294,14 @@
 				type="single"
 				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
 				value={formData.modLoader}
-				onValueChange={(value: string) => formData.modLoader = value}
+				onValueChange={(value: string) => (formData.modLoader = value)}
 			>
 				<SelectTrigger id="mod_loader" class="h-10">
-					<span>{modLoaders?.modloaders?.find(l => l.name === formData.modLoader)?.displayName || _.startCase(formData.modLoader) || 'Select a mod loader'}</span>
+					<span
+						>{modLoaders?.modloaders?.find((l) => l.name === formData.modLoader)?.displayName ||
+							_.startCase(formData.modLoader) ||
+							'Select a mod loader'}</span
+					>
 				</SelectTrigger>
 				<SelectContent>
 					{#if formData.mcVersion}
@@ -309,12 +316,14 @@
 		</div>
 
 		<div class="space-y-2">
-			<Label for="docker_image" class="text-sm font-medium">Docker Image <span class="text-muted-foreground text-xs">(Advanced)</span></Label>
+			<Label for="docker_image" class="text-sm font-medium"
+				>Docker Image <span class="text-xs text-muted-foreground">(Advanced)</span></Label
+			>
 			<Select
 				type="single"
 				disabled={loadingOptions || server.status !== ServerStatus.STOPPED}
 				value={formData.dockerImage}
-				onValueChange={(value: string | undefined) => formData.dockerImage = value || ''}
+				onValueChange={(value: string | undefined) => (formData.dockerImage = value || '')}
 			>
 				<SelectTrigger id="docker_image" class="h-10">
 					<span>{formData.dockerImage || 'Select Docker image'}</span>
@@ -330,7 +339,9 @@
 		</div>
 
 		<div class="space-y-2">
-			<Label for="tps_command" class="text-sm font-medium">TPS Command <span class="text-muted-foreground text-xs">(Optional)</span></Label>
+			<Label for="tps_command" class="text-sm font-medium"
+				>TPS Command <span class="text-xs text-muted-foreground">(Optional)</span></Label
+			>
 			<Input
 				id="tps_command"
 				placeholder="Polling TPS command"
@@ -338,16 +349,17 @@
 				class="h-10"
 			/>
 			<p class="text-xs text-muted-foreground">
-				Override the TPS monitoring command (empty to disable). Use " ?? " to specify fallback commands (e.g., "forge tps ?? neoforge tps ?? tps")
+				Override the TPS monitoring command (empty to disable). Use " ?? " to specify fallback
+				commands (e.g., "forge tps ?? neoforge tps ?? tps")
 			</p>
 		</div>
 
 		<div class="space-y-4">
 			<h4 class="text-sm font-semibold">Lifecycle Management</h4>
-			
-			<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+
+			<div class="flex items-center justify-between rounded-lg bg-muted/50 p-4">
 				<div class="space-y-0.5">
-					<Label for="detached" class="text-sm font-medium cursor-pointer">Detached Mode</Label>
+					<Label for="detached" class="cursor-pointer text-sm font-medium">Detached Mode</Label>
 					<p class="text-xs text-muted-foreground">
 						Server continues running when DiscoPanel stops (not available for proxied servers)
 					</p>
@@ -358,7 +370,7 @@
 					disabled={server.proxyHostname !== ''}
 					onCheckedChange={(checked) => {
 						if (checked && server.proxyHostname !== '') {
-							toast.error("Cannot detach proxied servers");
+							toast.error('Cannot detach proxied servers');
 							formData.detached = false;
 							return;
 						}
@@ -371,11 +383,13 @@
 				/>
 			</div>
 
-			<div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+			<div class="flex items-center justify-between rounded-lg bg-muted/50 p-4">
 				<div class="space-y-0.5">
-					<Label for="auto_start" class="text-sm font-medium cursor-pointer">Auto Start</Label>
+					<Label for="auto_start" class="cursor-pointer text-sm font-medium">Auto Start</Label>
 					<p class="text-xs text-muted-foreground">
-						Automatically start when DiscoPanel starts{formData.detached ? ' (disabled for detached servers)' : ''}
+						Automatically start when DiscoPanel starts{formData.detached
+							? ' (disabled for detached servers)'
+							: ''}
 					</p>
 				</div>
 				<Switch
@@ -384,7 +398,7 @@
 					disabled={formData.detached}
 					onCheckedChange={(checked) => {
 						if (formData.detached) {
-							toast.error("Cannot enable auto-start for detached servers");
+							toast.error('Cannot enable auto-start for detached servers');
 							formData.autoStart = false;
 							return;
 						}
@@ -401,29 +415,24 @@
 		<AdditionalPortsEditor
 			bind:ports={formData.additionalPorts}
 			disabled={saving}
-			onchange={(ports) => formData.additionalPorts = ports}
+			onchange={(ports) => (formData.additionalPorts = ports)}
 		/>
 
 		<DockerOverridesEditor
 			bind:overrides={formData.dockerOverrides}
 			disabled={saving}
-			onchange={(overrides) => formData.dockerOverrides = overrides}
+			onchange={(overrides) => (formData.dockerOverrides = overrides)}
 		/>
 	</div>
 
 	<Separator class="my-4" />
 
 	<div class="flex justify-end pt-2">
-		<Button 
-			onclick={handleSave} 
-			disabled={!isDirty || saving}
-			size="sm"
-			class="min-w-[120px]"
-		>
+		<Button onclick={handleSave} disabled={!isDirty || saving} size="sm" class="min-w-[120px]">
 			{#if saving}
-				<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+				<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 			{:else}
-				<Save class="h-4 w-4 mr-2" />
+				<Save class="mr-2 h-4 w-4" />
 			{/if}
 			Save Changes
 		</Button>

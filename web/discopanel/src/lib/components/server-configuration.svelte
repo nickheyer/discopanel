@@ -37,7 +37,7 @@
 	let currentValues = $state<Map<string, string | null>>(new Map());
 	let originalEnabled = $state<Set<string>>(new Set());
 	let currentEnabled = $state<Set<string>>(new Set());
-		
+
 	// Derived state
 	let isSaving = $derived(externalSaving || saving);
 	let isServerRunning = $derived(!!server && server.status === ServerStatus.RUNNING);
@@ -45,23 +45,21 @@
 	// Get filtered categories (hide empty ones and filter system fields for global)
 	let filteredCategories = $derived.by(() => {
 		return categories
-			.map(cat => ({
+			.map((cat) => ({
 				...cat,
-				properties: !server
-					? cat.properties.filter(p => !p.system)
-					: cat.properties
+				properties: !server ? cat.properties.filter((p) => !p.system) : cat.properties
 			}))
-			.filter(cat => cat.properties.length > 0);
+			.filter((cat) => cat.properties.length > 0);
 	});
 
 	// Get current category's properties
 	let currentCategoryProps = $derived.by(() => {
-		const cat = filteredCategories.find(c => getCategoryId(c.name) === activeCategory);
+		const cat = filteredCategories.find((c) => getCategoryId(c.name) === activeCategory);
 		return cat?.properties ?? [];
 	});
 
 	let currentCategoryName = $derived.by(() => {
-		const cat = filteredCategories.find(c => getCategoryId(c.name) === activeCategory);
+		const cat = filteredCategories.find((c) => getCategoryId(c.name) === activeCategory);
 		return cat?.name ?? '';
 	});
 
@@ -262,9 +260,12 @@
 
 	function getDefaultForType(type: string): string {
 		switch (type) {
-			case 'number': return '0';
-			case 'checkbox': return 'false';
-			default: return '';
+			case 'number':
+				return '0';
+			case 'checkbox':
+				return 'false';
+			default:
+				return '';
 		}
 	}
 
@@ -308,14 +309,14 @@
 		if (!hash) return;
 
 		setTimeout(() => {
-			const matchingCategory = filteredCategories.find(c => getCategoryId(c.name) === hash);
+			const matchingCategory = filteredCategories.find((c) => getCategoryId(c.name) === hash);
 			if (matchingCategory) {
 				activeCategory = hash;
 				return;
 			}
 
 			for (const cat of filteredCategories) {
-				const matchingProp = cat.properties.find(p => p.key === hash);
+				const matchingProp = cat.properties.find((p) => p.key === hash);
 				if (matchingProp) {
 					activeCategory = getCategoryId(cat.name);
 					setTimeout(() => {
@@ -342,14 +343,14 @@
 	}
 </script>
 
-<Card class="h-full flex flex-col pb-0 gap-0">
-	<CardHeader class="shrink-0 border-b pb-0 mb-0">
-		<div class="flex flex-col sm:flex-row sm:items-center justify-between">
+<Card class="flex h-full flex-col gap-0 pb-0">
+	<CardHeader class="mb-0 shrink-0 border-b pb-0">
+		<div class="flex flex-col justify-between sm:flex-row sm:items-center">
 			<div>
 				<CardTitle>
 					{!server ? 'Default Server Configuration' : 'Server Configuration'}
 				</CardTitle>
-				<p class="text-sm text-muted-foreground mt-1">
+				<p class="mt-1 text-sm text-muted-foreground">
 					{!server
 						? 'Configure default values for new servers'
 						: 'Configure Minecraft server environment variables'}
@@ -357,7 +358,7 @@
 			</div>
 			<div class="flex items-center gap-3">
 				{#if hasChanges}
-					<span class="text-sm text-muted-foreground whitespace-nowrap">
+					<span class="text-sm whitespace-nowrap text-muted-foreground">
 						{modifiedFields.size} unsaved {modifiedFields.size === 1 ? 'change' : 'changes'}
 					</span>
 				{/if}
@@ -367,7 +368,7 @@
 					onclick={handleReset}
 					disabled={loading || isServerRunning || !hasChanges}
 				>
-					<RefreshCw class="h-4 w-4 mr-2" />
+					<RefreshCw class="mr-2 h-4 w-4" />
 					Reset
 				</Button>
 				<Button
@@ -376,9 +377,9 @@
 					disabled={loading || isSaving || isServerRunning || !hasChanges}
 				>
 					{#if isSaving}
-						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 					{:else}
-						<Save class="h-4 w-4 mr-2" />
+						<Save class="mr-2 h-4 w-4" />
 					{/if}
 					Save
 				</Button>
@@ -386,36 +387,38 @@
 		</div>
 	</CardHeader>
 
-	<CardContent class="flex-1 overflow-hidden p-0 my-0">
+	<CardContent class="my-0 flex-1 overflow-hidden p-0">
 		{#if loading}
 			<div class="flex items-center justify-center py-12">
 				<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 			</div>
 		{:else if filteredCategories.length === 0}
 			<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
-				<p class="text-lg mb-2">No configuration found</p>
+				<p class="mb-2 text-lg">No configuration found</p>
 				<p class="text-sm">Unable to load server configuration</p>
 			</div>
 		{:else}
 			<div class="flex h-full">
 				<!-- Category Sidebar -->
-				<div class="w-48 shrink-0 border-r bg-muted/20 overflow-y-auto">
-					<nav class="p-2 space-y-1">
+				<div class="w-48 shrink-0 overflow-y-auto border-r bg-muted/20">
+					<nav class="space-y-1 p-2">
 						{#each filteredCategories as category (category.name)}
 							{@const categoryId = getCategoryId(category.name)}
 							{@const isActive = activeCategory === categoryId}
 							{@const modCount = modifiedCountByCategory.get(categoryId) ?? 0}
 							<button
-								class="w-full flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors text-left
+								class="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors
 									{isActive
-										? 'bg-primary text-primary-foreground'
-										: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+									? 'bg-primary text-primary-foreground'
+									: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
 								onclick={() => selectCategory(categoryId)}
 							>
 								<span class="truncate">{category.name}</span>
 								{#if modCount > 0}
-									<span class="ml-2 inline-flex items-center justify-center h-5 min-w-5 px-1.5 text-xs font-medium rounded-full
-										{isActive ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-orange-500 text-white'}">
+									<span
+										class="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium
+										{isActive ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-orange-500 text-white'}"
+									>
 										{modCount}
 									</span>
 								{/if}
@@ -425,9 +428,9 @@
 				</div>
 
 				<!-- Fields Panel -->
-				<div class="flex-1 flex flex-col min-w-0">
+				<div class="flex min-w-0 flex-1 flex-col">
 					<!-- Category Header -->
-					<div class="shrink-0 px-4 py-3 border-b bg-muted/10">
+					<div class="shrink-0 border-b bg-muted/10 px-4 py-3">
 						<h3 class="font-semibold">{currentCategoryName}</h3>
 						<p class="text-xs text-muted-foreground">{currentCategoryProps.length} fields</p>
 					</div>
@@ -444,46 +447,51 @@
 								<div
 									id={prop.key}
 									data-field="true"
-									class="group p-4 rounded-lg border transition-all duration-300
+									class="group rounded-lg border p-4 transition-all duration-300
 										{isHighlighted ? 'ring-2 ring-primary ring-offset-2' : ''}
 										{isModified ? 'border-orange-500/50 bg-orange-500/5' : 'bg-card'}
 										{!isEnabled ? 'bg-muted/30' : ''}"
 								>
 									<!-- Field Header -->
-									<div class="flex items-start justify-between gap-2 mb-3">
-										<div class="flex-1 min-w-0">
-											<div class="flex items-center gap-2 flex-wrap mb-1">
-												<Label for={prop.key} class="font-medium text-sm {!isEnabled ? 'text-muted-foreground' : ''}">
+									<div class="mb-3 flex items-start justify-between gap-2">
+										<div class="min-w-0 flex-1">
+											<div class="mb-1 flex flex-wrap items-center gap-2">
+												<Label
+													for={prop.key}
+													class="text-sm font-medium {!isEnabled ? 'text-muted-foreground' : ''}"
+												>
 													{prop.label}
 												</Label>
 												{#if prop.required}
-													<span class="text-xs text-red-500 font-medium">required</span>
+													<span class="text-xs font-medium text-red-500">required</span>
 												{/if}
 												{#if prop.system}
-													<span class="text-xs text-blue-500 font-medium">system</span>
+													<span class="text-xs font-medium text-blue-500">system</span>
 												{/if}
 												{#if isModified}
-													<span class="text-xs text-orange-500 font-medium">modified</span>
+													<span class="text-xs font-medium text-orange-500">modified</span>
 												{/if}
 												{#if !isEnabled}
 													<span class="text-xs text-muted-foreground">(unset)</span>
 												{/if}
 											</div>
 											{#if prop.envVar}
-												<code class="text-xs text-muted-foreground font-mono">{prop.envVar}</code>
+												<code class="font-mono text-xs text-muted-foreground">{prop.envVar}</code>
 											{/if}
 											{#if prop.description}
-												<p class="text-xs text-muted-foreground mt-1">{prop.description}</p>
+												<p class="mt-1 text-xs text-muted-foreground">{prop.description}</p>
 											{/if}
 										</div>
 										<div class="flex items-center gap-1">
 											<!-- Set/Unset Toggle -->
 											<button
-												class="p-1 rounded transition-colors
-													{canToggle ? 'hover:bg-muted cursor-pointer' : 'opacity-50 cursor-not-allowed'}"
+												class="rounded p-1 transition-colors
+													{canToggle ? 'cursor-pointer hover:bg-muted' : 'cursor-not-allowed opacity-50'}"
 												onclick={() => canToggle && toggleFieldEnabled(prop.key, !isEnabled, prop)}
 												disabled={!canToggle}
-												title={isEnabled ? 'Click to unset (use default)' : 'Click to set a custom value'}
+												title={isEnabled
+													? 'Click to unset (use default)'
+													: 'Click to set a custom value'}
 											>
 												{#if isEnabled}
 													<CircleDot class="h-4 w-4 text-green-500" />
@@ -566,8 +574,8 @@
 									{/if}
 
 									{#if prop.defaultValue !== undefined && prop.defaultValue !== ''}
-										<p class="text-xs text-muted-foreground mt-2">
-											Default: <code class="bg-muted px-1 py-0.5 rounded">{prop.defaultValue}</code>
+										<p class="mt-2 text-xs text-muted-foreground">
+											Default: <code class="rounded bg-muted px-1 py-0.5">{prop.defaultValue}</code>
 										</p>
 									{/if}
 								</div>
@@ -578,7 +586,9 @@
 			</div>
 
 			{#if server && isServerRunning}
-				<div class="p-4 bg-yellow-50 dark:bg-yellow-950 border-t border-yellow-200 dark:border-yellow-800">
+				<div
+					class="border-t border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-950"
+				>
 					<p class="text-sm text-yellow-800 dark:text-yellow-200">
 						Server must be stopped to modify configuration. Changes will take effect after restart.
 					</p>

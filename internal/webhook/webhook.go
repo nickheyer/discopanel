@@ -1,6 +1,3 @@
-// Package webhook builds, signs, and delivers HTTP webhooks for server events.
-// It exposes payload building, template rendering, and a synchronous Deliver
-// function. Concurrency and retry orchestration live in the scheduler.
 package webhook
 
 import (
@@ -21,8 +18,10 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 )
 
-// Config controls a single webhook delivery. The scheduler builds this from
-// the JSON config blob stored on a webhook task.
+// Builds, signs, and delivers HTTP webhooks for server events
+// NOTE: Concurrency is a scheduler concern, this is sync!
+
+// Controls a single webhook delivery - built from json config blob on webhook task
 type Config struct {
 	URL             string            `json:"url"`
 	Secret          string            `json:"secret"`
@@ -33,7 +32,7 @@ type Config struct {
 	TimeoutMs       int               `json:"timeout_ms"`
 }
 
-// Result describes a single delivery attempt outcome.
+// A single delivery attempt outcome
 type Result struct {
 	Success      bool
 	ResponseCode int
@@ -43,7 +42,7 @@ type Result struct {
 	Attempts     int
 }
 
-// Payload is the canonical event data fed into payload templates.
+// Canonical event data fed into payload templates
 type Payload struct {
 	Event     string         `json:"event"`
 	Timestamp time.Time      `json:"timestamp"`
@@ -51,7 +50,7 @@ type Payload struct {
 	Data      map[string]any `json:"data,omitempty"`
 }
 
-// ServerPayload is the server snapshot embedded in a webhook payload.
+// Server snapshot embedded in a webhook payload
 type ServerPayload struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -63,8 +62,7 @@ type ServerPayload struct {
 	Port       int    `json:"port"`
 }
 
-// Deliver renders the payload, signs it, POSTs it, and retries on failure
-// using exponential backoff. The returned Result reflects the final attempt.
+// Renders the payload, signs it, POSTs it, and retries on failure - returned res reflects final attempt made
 func Deliver(ctx context.Context, cfg Config, payload *Payload) Result {
 	start := time.Now()
 	maxAttempts := cfg.MaxRetries
@@ -162,9 +160,6 @@ func renderBody(cfg Config, payload *Payload) ([]byte, error) {
 	if cfg.PayloadTemplate != "" {
 		return renderTemplate(cfg.PayloadTemplate, payload)
 	}
-	// No custom template: emit the canonical payload as generic JSON. The
-	// service-specific presets (Discord/Slack/Teams/ntfy) live in the UI and
-	// are sent as payload_template, so there is nothing to look up here.
 	return json.Marshal(payload)
 }
 
@@ -174,7 +169,8 @@ func sign(body []byte, secret string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// templateData builds a flat map of variables available to payload templates.
+// Builds a flat map of variables available to payload templates
+// TODO: Use the alias package!!!
 func templateData(p *Payload) map[string]any {
 	titles := map[string]string{
 		"test":           "Webhook Test",
@@ -203,6 +199,7 @@ func templateData(p *Payload) map[string]any {
 		"timestamp": p.Timestamp.Format(time.RFC3339),
 		"title":     title,
 		"color":     color,
+		"player":    "",
 	}
 	if p.Server != nil {
 		data["server_id"] = p.Server.ID
@@ -245,7 +242,7 @@ func renderTemplate(tmplStr string, p *Payload) ([]byte, error) {
 	return out, nil
 }
 
-// ValidateTemplate verifies a template string parses and produces valid JSON when rendered with sample data.
+// Verifies a template string parses and produces valid JSON when rendered with sample data
 func ValidateTemplate(tmplStr string) error {
 	if strings.TrimSpace(tmplStr) == "" {
 		return nil
@@ -263,7 +260,7 @@ func ValidateTemplate(tmplStr string) error {
 	return err
 }
 
-// BuildPayload assembles a Payload for the given event and server.
+// Assembles a Payload for the given event and server
 func BuildPayload(event string, server *storage.Server, data map[string]any) *Payload {
 	var sp *ServerPayload
 	if server != nil {

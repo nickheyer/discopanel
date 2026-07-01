@@ -28,18 +28,18 @@ func NewTTLCache[K comparable, V any]() *TTLCache[K, V] {
 func (c *TTLCache[K, V]) Get(key K) (V, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	var zero V
 	item, exists := c.items[key]
 	if !exists {
 		return zero, false
 	}
-	
+
 	// Check if expired
 	if time.Now().After(item.ExpiresAt) {
 		return zero, false
 	}
-	
+
 	return item.Value, true
 }
 
@@ -47,7 +47,7 @@ func (c *TTLCache[K, V]) Get(key K) (V, bool) {
 func (c *TTLCache[K, V]) Set(key K, value V, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	c.items[key] = &CacheItem[V]{
 		Value:     value,
 		ExpiresAt: time.Now().Add(ttl),
@@ -58,7 +58,7 @@ func (c *TTLCache[K, V]) Set(key K, value V, ttl time.Duration) {
 func (c *TTLCache[K, V]) Delete(key K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	delete(c.items, key)
 }
 
@@ -66,7 +66,7 @@ func (c *TTLCache[K, V]) Delete(key K) {
 func (c *TTLCache[K, V]) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	c.items = make(map[K]*CacheItem[V])
 }
 
@@ -74,7 +74,7 @@ func (c *TTLCache[K, V]) Clear() {
 func (c *TTLCache[K, V]) CleanExpired() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	now := time.Now()
 	for key, item := range c.items {
 		if now.After(item.ExpiresAt) {

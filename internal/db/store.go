@@ -9,6 +9,7 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/google/uuid"
 	"github.com/nickheyer/discopanel/internal/config"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -1414,7 +1415,7 @@ func (s *Store) ListModulesFollowingServerLifecycle(ctx context.Context, serverI
 
 // ListEventTriggeredTasks returns all enabled tasks subscribed to the given event for a server.
 // EventTriggers is stored as a JSON array, so we filter in Go.
-func (s *Store) ListEventTriggeredTasks(ctx context.Context, serverID string, eventTrigger TaskEventTrigger) ([]*ScheduledTask, error) {
+func (s *Store) ListEventTriggeredTasks(ctx context.Context, serverID string, eventType v1.TriggeredEventType) ([]*ScheduledTask, error) {
 	var tasks []*ScheduledTask
 	err := s.db.WithContext(ctx).
 		Where("server_id = ? AND status = ? AND schedule = ?",
@@ -1426,7 +1427,7 @@ func (s *Store) ListEventTriggeredTasks(ctx context.Context, serverID string, ev
 	matching := make([]*ScheduledTask, 0, len(tasks))
 	for _, t := range tasks {
 		for _, e := range t.EventTriggers {
-			if e == eventTrigger {
+			if e == eventType {
 				matching = append(matching, t)
 				break
 			}

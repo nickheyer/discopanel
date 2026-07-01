@@ -6,7 +6,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, Globe, Save, Copy, AlertCircle, CheckCircle2, XCircle } from '@lucide/svelte';
 	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
@@ -14,7 +20,11 @@
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import type { GetServerRoutingResponse, ProxyRoute } from '$lib/proto/discopanel/v1/proxy_pb';
 
-	let { server, active, router: routingInfo = $bindable(null) }: { server: Server, active?: boolean, router?: GetServerRoutingResponse | null } = $props();
+	let {
+		server,
+		active,
+		router: routingInfo = $bindable(null)
+	}: { server: Server; active?: boolean; router?: GetServerRoutingResponse | null } = $props();
 
 	let loading = $state(true);
 	let saving = $state(false);
@@ -32,7 +42,7 @@
 			loadRoutingInfo();
 			loadAllRoutes();
 		}
-	})
+	});
 
 	// Reset state when server changes
 	$effect(() => {
@@ -89,16 +99,17 @@
 		}
 
 		// Basic hostname validation
-		const hostnameRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+		const hostnameRegex =
+			/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
 		if (!hostnameRegex.test(value)) {
 			hostnameError = 'Invalid hostname format';
 			return false;
 		}
 
 		// Check for conflicts
-		const conflict = allRoutes.find(route =>
-			route.hostname.toLowerCase() === value.toLowerCase() &&
-			route.serverId !== server.id
+		const conflict = allRoutes.find(
+			(route) =>
+				route.hostname.toLowerCase() === value.toLowerCase() && route.serverId !== server.id
 		);
 		if (conflict) {
 			hostnameError = 'Hostname already in use by another server';
@@ -164,7 +175,8 @@
 	<Alert>
 		<AlertCircle class="h-4 w-4" />
 		<AlertDescription>
-			Proxy routing is not enabled. Enable it in your configuration file to use custom hostnames for your servers.
+			Proxy routing is not enabled. Enable it in your configuration file to use custom hostnames for
+			your servers.
 		</AlertDescription>
 	</Alert>
 {:else}
@@ -176,9 +188,7 @@
 					<Globe class="h-5 w-5" />
 					Current Routing Status
 				</CardTitle>
-				<CardDescription>
-					How players can connect to your server
-				</CardDescription>
+				<CardDescription>How players can connect to your server</CardDescription>
 			</CardHeader>
 			<CardContent class="space-y-4">
 				{#if routingInfo.currentRoute || routingInfo.proxyHostname}
@@ -213,10 +223,10 @@
 					</div>
 				{/if}
 
-				<div class="p-4 bg-muted rounded-lg">
+				<div class="rounded-lg bg-muted p-4">
 					<div class="flex items-center justify-between">
 						<div>
-							<p class="text-sm font-medium mb-1">Connection Address</p>
+							<p class="mb-1 text-sm font-medium">Connection Address</p>
 							<p class="font-mono text-lg">{getConnectionString()}</p>
 						</div>
 						<Button
@@ -266,9 +276,11 @@
 				{#if routingInfo.baseUrl}
 					<Alert>
 						<AlertDescription>
-							<p class="font-medium mb-1">DNS Configuration Required</p>
+							<p class="mb-1 font-medium">DNS Configuration Required</p>
 							<p class="text-sm">
-								Make sure to add a DNS record pointing <code class="font-mono">{getFullHostname()}</code> to your server's IP address.
+								Make sure to add a DNS record pointing <code class="font-mono"
+									>{getFullHostname()}</code
+								> to your server's IP address.
 							</p>
 						</AlertDescription>
 					</Alert>
@@ -277,19 +289,19 @@
 				<div class="flex justify-end gap-2">
 					<Button
 						variant="outline"
-						onclick={() => { hostname = originalHostname; hostnameError = ''; }}
+						onclick={() => {
+							hostname = originalHostname;
+							hostnameError = '';
+						}}
 						disabled={!hasChanges || saving}
 					>
 						Cancel
 					</Button>
-					<Button
-						onclick={saveRouting}
-						disabled={!hasChanges || saving || !!hostnameError}
-					>
+					<Button onclick={saveRouting} disabled={!hasChanges || saving || !!hostnameError}>
 						{#if saving}
-							<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 						{:else}
-							<Save class="h-4 w-4 mr-2" />
+							<Save class="mr-2 h-4 w-4" />
 						{/if}
 						Save Changes
 					</Button>
@@ -302,18 +314,18 @@
 			<Card>
 				<CardHeader>
 					<CardTitle>Active Routes</CardTitle>
-					<CardDescription>
-						Other servers currently using proxy routing
-					</CardDescription>
+					<CardDescription>Other servers currently using proxy routing</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<div class="space-y-2">
 						{#each allRoutes as route (route.serverId)}
-							<div class="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+							<div class="flex items-center justify-between rounded-lg bg-muted/50 p-3">
 								<div>
 									<p class="font-mono text-sm">{route.hostname}</p>
 									<p class="text-xs text-muted-foreground">
-										{route.serverId === server.id ? '(This server)' : `Server: ${route.serverId.slice(0, 8)}...`}
+										{route.serverId === server.id
+											? '(This server)'
+											: `Server: ${route.serverId.slice(0, 8)}...`}
 									</p>
 								</div>
 								{#if route.active}

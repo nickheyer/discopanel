@@ -17,7 +17,7 @@
 	let showSearch = $state(false);
 </script>
 
-<div class="flex items-center justify-between px-3 py-1.5 border-b bg-muted/30">
+<div class="flex items-center justify-between border-b bg-muted/30 px-3 py-1.5">
 	<div class="flex items-center gap-0.5">
 		<Button size="icon" variant="ghost" class="h-7 w-7" onclick={onNewFile} title="New File">
 			<FilePlus class="h-3.5 w-3.5" />
@@ -39,12 +39,26 @@
 					oninput={(e) => onFilterChange((e.target as HTMLInputElement).value)}
 					autofocus
 				/>
-				<Button size="icon" variant="ghost" class="h-7 w-7" onclick={() => { showSearch = false; onFilterChange(''); }}>
+				<Button
+					size="icon"
+					variant="ghost"
+					class="h-7 w-7"
+					onclick={() => {
+						showSearch = false;
+						onFilterChange('');
+					}}
+				>
 					<X class="h-3.5 w-3.5" />
 				</Button>
 			</div>
 		{:else}
-			<Button size="icon" variant="ghost" class="h-7 w-7" onclick={() => showSearch = true} title="Filter">
+			<Button
+				size="icon"
+				variant="ghost"
+				class="h-7 w-7"
+				onclick={() => (showSearch = true)}
+				title="Filter"
+			>
 				<Search class="h-3.5 w-3.5" />
 			</Button>
 		{/if}

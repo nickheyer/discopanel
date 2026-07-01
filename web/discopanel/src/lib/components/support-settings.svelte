@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Input } from '$lib/components/ui/input';
@@ -112,11 +118,11 @@
 					issueDescription = '';
 					stepsToReproduce = '';
 					toast.success('Support bundle uploaded successfully!', {
-						description: 'Save your reference ID for support requests.',
+						description: 'Save your reference ID for support requests.'
 					});
 				} else {
 					toast.error('Failed to upload support bundle', {
-						description: response.message || 'Unknown error occurred',
+						description: response.message || 'Unknown error occurred'
 					});
 				}
 			} else {
@@ -130,11 +136,11 @@
 				if (response.bundleId) {
 					bundlePath = response.bundleId;
 					toast.success('Support bundle generated!', {
-						description: 'Click the download button to save the bundle.',
+						description: 'Click the download button to save the bundle.'
 					});
 				} else {
 					toast.error('Failed to generate support bundle', {
-						description: response.message,
+						description: response.message
 					});
 				}
 			}
@@ -142,7 +148,7 @@
 			const message = error instanceof Error ? error.message : 'Unknown error occurred';
 			const action = upload ? 'upload' : 'generate';
 			toast.error(`Failed to ${action} support bundle`, {
-				description: message,
+				description: message
 			});
 		} finally {
 			generating = false;
@@ -158,9 +164,7 @@
 				bundleId: bundlePath
 			});
 			// Create download link
-			const blob = new Blob([
-				new Uint8Array(response.content)
-			], { type: response.mimeType });
+			const blob = new Blob([new Uint8Array(response.content)], { type: response.mimeType });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
@@ -173,7 +177,7 @@
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error occurred';
 			toast.error('Failed to download support bundle', {
-				description: message,
+				description: message
 			});
 		}
 	}
@@ -189,76 +193,92 @@
 	}
 </script>
 
-<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
+<Card
+	class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
+>
 	<CardHeader class="relative pb-6">
 		<div class="flex items-center justify-between">
 			<div>
 				<CardTitle class="text-2xl font-semibold">Support Tools</CardTitle>
-				<CardDescription class="text-base mt-2">
+				<CardDescription class="mt-2 text-base">
 					Generate and upload support bundles to help troubleshoot issues with DiscoPanel.
 				</CardDescription>
 			</div>
 		</div>
 	</CardHeader>
-	<CardContent class="flex flex-col space-y-4 w-full">
+	<CardContent class="flex w-full flex-col space-y-4">
 		<!-- Support Bundle Info -->
-		<div class="w-full rounded-xl bg-linear-to-br from-primary/5 via-primary/3 to-transparent border border-primary/20 p-6">
-			<div class="flex items-start gap-3 mb-4">
+		<div
+			class="w-full rounded-xl border border-primary/20 bg-linear-to-br from-primary/5 via-primary/3 to-transparent p-6"
+		>
+			<div class="mb-4 flex items-start gap-3">
 				<div class="rounded-lg bg-primary/10 p-2.5">
 					<AlertCircle class="h-5 w-5 text-primary" />
 				</div>
 				<div>
-					<h3 class="font-semibold text-base">What's included in your support bundle?</h3>
-					<p class="text-sm text-muted-foreground mt-1">
+					<h3 class="text-base font-semibold">What's included in your support bundle?</h3>
+					<p class="mt-1 text-sm text-muted-foreground">
 						We collect essential diagnostic data to help resolve issues quickly
 					</p>
 				</div>
 			</div>
 
-			<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+			<div class="grid grid-cols-1 gap-4 md:grid-cols-3">
 				<!-- Application Logs Card -->
-				<div class="group relative rounded-lg border border-border/50 bg-card/50 backdrop-blur-sm p-4  transition-all duration-200">
-					<div class="absolute inset-0 rounded-lg bg-linear-to-br from-primary/5 to-transparent opacity-0"></div>
+				<div
+					class="group relative rounded-lg border border-border/50 bg-card/50 p-4 backdrop-blur-sm transition-all duration-200"
+				>
+					<div
+						class="absolute inset-0 rounded-lg bg-linear-to-br from-primary/5 to-transparent opacity-0"
+					></div>
 					<div class="relative space-y-2">
 						<div class="flex items-center gap-2">
 							<div class="rounded-md bg-primary/10 p-1.5">
 								<ScrollText class="h-4 w-4 text-primary" />
 							</div>
-							<h4 class="font-semibold text-sm">Application Logs</h4>
+							<h4 class="text-sm font-semibold">Application Logs</h4>
 						</div>
-						<p class="text-xs text-muted-foreground leading-relaxed">
+						<p class="text-xs leading-relaxed text-muted-foreground">
 							Recent log entries and error messages to track down issues
 						</p>
 					</div>
 				</div>
 
 				<!-- Database Snapshot Card -->
-				<div class="group relative rounded-lg border border-border/50 bg-card/50 backdrop-blur-sm p-4 transition-all duration-200">
-					<div class="absolute inset-0 rounded-lg bg-linear-to-br from-primary/5 to-transparent opacity-0"></div>
+				<div
+					class="group relative rounded-lg border border-border/50 bg-card/50 p-4 backdrop-blur-sm transition-all duration-200"
+				>
+					<div
+						class="absolute inset-0 rounded-lg bg-linear-to-br from-primary/5 to-transparent opacity-0"
+					></div>
 					<div class="relative space-y-2">
 						<div class="flex items-center gap-2">
 							<div class="rounded-md bg-primary/10 p-1.5">
 								<Database class="h-4 w-4 text-primary" />
 							</div>
-							<h4 class="font-semibold text-sm">Database Snapshot</h4>
+							<h4 class="text-sm font-semibold">Database Snapshot</h4>
 						</div>
-						<p class="text-xs text-muted-foreground leading-relaxed">
+						<p class="text-xs leading-relaxed text-muted-foreground">
 							Current configuration and server data for analysis
 						</p>
 					</div>
 				</div>
 
 				<!-- System Information Card -->
-				<div class="group relative rounded-lg border border-border/50 bg-card/50 backdrop-blur-sm p-4  transition-all duration-200">
-					<div class="absolute inset-0 rounded-lg bg-linear-to-br from-primary/5 to-transparent opacity-0"></div>
+				<div
+					class="group relative rounded-lg border border-border/50 bg-card/50 p-4 backdrop-blur-sm transition-all duration-200"
+				>
+					<div
+						class="absolute inset-0 rounded-lg bg-linear-to-br from-primary/5 to-transparent opacity-0"
+					></div>
 					<div class="relative space-y-2">
 						<div class="flex items-center gap-2">
 							<div class="rounded-md bg-primary/10 p-1.5">
 								<FileArchive class="h-4 w-4 text-primary" />
 							</div>
-							<h4 class="font-semibold text-sm">System Information</h4>
+							<h4 class="text-sm font-semibold">System Information</h4>
 						</div>
-						<p class="text-xs text-muted-foreground leading-relaxed">
+						<p class="text-xs leading-relaxed text-muted-foreground">
 							Version and environment details for compatibility checks
 						</p>
 					</div>
@@ -270,16 +290,16 @@
 		<div class="w-full rounded-xl border border-border/50 bg-muted/20 p-6">
 			<button
 				type="button"
-				class="w-full flex items-center justify-between cursor-pointer"
-				onclick={() => serverSectionExpanded = !serverSectionExpanded}
+				class="flex w-full cursor-pointer items-center justify-between"
+				onclick={() => (serverSectionExpanded = !serverSectionExpanded)}
 			>
 				<div class="flex items-start gap-3">
 					<div class="rounded-lg bg-primary/10 p-2.5">
 						<Server class="h-5 w-5 text-primary" />
 					</div>
 					<div class="text-left">
-						<h3 class="font-semibold text-base">Server Selection</h3>
-						<p class="text-sm text-muted-foreground mt-1">
+						<h3 class="text-base font-semibold">Server Selection</h3>
+						<p class="mt-1 text-sm text-muted-foreground">
 							{#if selectedServerIds.size === 0}
 								Include all servers (default)
 							{:else}
@@ -298,14 +318,14 @@
 			</button>
 
 			{#if serverSectionExpanded}
-				<div class="mt-4 pt-4 border-t border-border/50">
+				<div class="mt-4 border-t border-border/50 pt-4">
 					{#if loadingServers}
 						<div class="flex items-center justify-center py-4">
 							<Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
 							<span class="ml-2 text-sm text-muted-foreground">Loading servers...</span>
 						</div>
 					{:else if servers.length === 0}
-						<p class="text-sm text-muted-foreground text-center py-4">
+						<p class="py-4 text-center text-sm text-muted-foreground">
 							No servers found. All available data will be included.
 						</p>
 					{:else}
@@ -315,12 +335,7 @@
 									Select specific servers to include their logs and configurations
 								</p>
 								<div class="flex gap-2">
-									<Button
-										variant="ghost"
-										size="sm"
-										class="h-7 text-xs"
-										onclick={selectAllServers}
-									>
+									<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={selectAllServers}>
 										Select All
 									</Button>
 									<Button
@@ -334,11 +349,15 @@
 									</Button>
 								</div>
 							</div>
-							<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+							<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
 								{#each servers as server (server.id)}
 									<button
 										type="button"
-										class="flex items-center gap-3 p-3 rounded-lg border border-border/50 bg-card/50 hover:bg-card/80 transition-colors cursor-pointer text-left {selectedServerIds.has(server.id) ? 'border-primary/50 bg-primary/5' : ''}"
+										class="flex cursor-pointer items-center gap-3 rounded-lg border border-border/50 bg-card/50 p-3 text-left transition-colors hover:bg-card/80 {selectedServerIds.has(
+											server.id
+										)
+											? 'border-primary/50 bg-primary/5'
+											: ''}"
 										onclick={() => toggleServer(server.id)}
 									>
 										<Checkbox
@@ -346,8 +365,8 @@
 											class="pointer-events-none"
 										/>
 										<div class="min-w-0 flex-1">
-											<p class="text-sm font-medium truncate">{server.name}</p>
-											<p class="text-xs text-muted-foreground truncate">
+											<p class="truncate text-sm font-medium">{server.name}</p>
+											<p class="truncate text-xs text-muted-foreground">
 												{server.mcVersion || 'Unknown version'}
 											</p>
 										</div>
@@ -362,22 +381,22 @@
 
 		<!-- User Contact & Issue Information -->
 		<div class="w-full rounded-xl border border-border/50 bg-muted/20 p-6">
-			<div class="flex items-start gap-3 mb-4">
+			<div class="mb-4 flex items-start gap-3">
 				<div class="rounded-lg bg-primary/10 p-2.5">
 					<MessageSquare class="h-5 w-5 text-primary" />
 				</div>
 				<div>
-					<h3 class="font-semibold text-base">Contact & Issue Details</h3>
-					<p class="text-sm text-muted-foreground mt-1">
+					<h3 class="text-base font-semibold">Contact & Issue Details</h3>
+					<p class="mt-1 text-sm text-muted-foreground">
 						Optional information to help us respond to your support request
 					</p>
 				</div>
 			</div>
 
-			<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+			<div class="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
 				<!-- Discord Username -->
 				<div class="space-y-2">
-					<Label for="discord" class="text-sm font-medium flex items-center gap-2">
+					<Label for="discord" class="flex items-center gap-2 text-sm font-medium">
 						<User class="h-3.5 w-3.5" />
 						Discord Username
 					</Label>
@@ -392,7 +411,7 @@
 
 				<!-- Email -->
 				<div class="space-y-2">
-					<Label for="email" class="text-sm font-medium flex items-center gap-2">
+					<Label for="email" class="flex items-center gap-2 text-sm font-medium">
 						<Mail class="h-3.5 w-3.5" />
 						Email
 					</Label>
@@ -407,7 +426,7 @@
 
 				<!-- GitHub Username -->
 				<div class="space-y-2">
-					<Label for="github" class="text-sm font-medium flex items-center gap-2">
+					<Label for="github" class="flex items-center gap-2 text-sm font-medium">
 						<Github class="h-3.5 w-3.5" />
 						GitHub Username
 					</Label>
@@ -421,7 +440,7 @@
 				</div>
 			</div>
 
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+			<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 				<!-- Issue Description -->
 				<div class="space-y-2">
 					<Label for="description" class="text-sm font-medium">Issue Description</Label>
@@ -450,16 +469,18 @@
 
 		<!-- Action Buttons -->
 		<div class="space-y-4">
-			<div class="flex flex-col sm:flex-row gap-3">
+			<div class="flex flex-col gap-3 sm:flex-row">
 				<!-- Generate for Download -->
 				<div class="flex-1">
 					<Button
 						onclick={() => generateBundle(false)}
 						disabled={generating || uploading}
-						class="w-full h-auto py-4 px-6 relative overflow-hidden group"
+						class="group relative h-auto w-full overflow-hidden px-6 py-4"
 						variant="outline"
 					>
-						<div class="absolute inset-0 bg-linear-to-r from-primary/10 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+						<div
+							class="absolute inset-0 bg-linear-to-r from-primary/10 to-primary/5 opacity-0 transition-opacity group-hover:opacity-100"
+						></div>
 						<div class="relative flex items-center justify-center gap-3">
 							{#if generating && !uploading}
 								<Loader2 class="h-5 w-5 animate-spin" />
@@ -471,7 +492,9 @@
 								<Download class="h-5 w-5" />
 								<div class="text-left">
 									<div class="font-semibold">Generate and download</div>
-									<div class="text-xs text-muted-foreground">Create a local copy of support data</div>
+									<div class="text-xs text-muted-foreground">
+										Create a local copy of support data
+									</div>
 								</div>
 							{/if}
 						</div>
@@ -483,10 +506,12 @@
 					<Button
 						onclick={() => generateBundle(true)}
 						disabled={generating || uploading}
-						class="w-full h-auto py-4 px-6 relative overflow-hidden group"
+						class="group relative h-auto w-full overflow-hidden px-6 py-4"
 						variant="outline"
 					>
-						<div class="absolute inset-0 bg-linear-to-r from-primary/10 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+						<div
+							class="absolute inset-0 bg-linear-to-r from-primary/10 to-primary/5 opacity-0 transition-opacity group-hover:opacity-100"
+						></div>
 						<div class="relative flex items-center justify-center gap-3">
 							{#if uploading}
 								<Loader2 class="h-5 w-5 animate-spin" />
@@ -515,7 +540,7 @@
 							<AlertDescription class="font-medium text-green-900 dark:text-green-100">
 								Support bundle ready for download
 							</AlertDescription>
-							<AlertDescription class="text-xs text-muted-foreground mt-1">
+							<AlertDescription class="mt-1 text-xs text-muted-foreground">
 								Bundle will be deleted after download
 							</AlertDescription>
 						</div>
@@ -525,7 +550,7 @@
 							variant="outline"
 							class="ml-4 border-green-500/50 hover:bg-green-500/10"
 						>
-							<Download class="h-4 w-4 mr-2" />
+							<Download class="mr-2 h-4 w-4" />
 							Download Now
 						</Button>
 					</div>
@@ -543,20 +568,17 @@
 							</div>
 
 							<!-- Reference ID Display -->
-							<div class="bg-background/50 rounded-lg p-3 space-y-2">
-								<div class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+							<div class="space-y-2 rounded-lg bg-background/50 p-3">
+								<div class="text-xs font-medium tracking-wide text-muted-foreground uppercase">
 									Reference ID
 								</div>
 								<div class="flex items-center gap-2">
-									<code class="flex-1 font-mono text-sm bg-background px-3 py-2 rounded border border-border">
+									<code
+										class="flex-1 rounded border border-border bg-background px-3 py-2 font-mono text-sm"
+									>
 										{referenceId}
 									</code>
-									<Button
-										onclick={copyReferenceId}
-										size="sm"
-										variant="outline"
-										class="shrink-0"
-									>
+									<Button onclick={copyReferenceId} size="sm" variant="outline" class="shrink-0">
 										<Copy class="h-3 w-3" />
 									</Button>
 								</div>
@@ -564,14 +586,14 @@
 
 							<div class="space-y-2 text-sm text-muted-foreground">
 								<p class="font-medium">Please include this reference ID when:</p>
-								<ul class="list-disc list-inside space-y-1 ml-2">
+								<ul class="ml-2 list-inside list-disc space-y-1">
 									<li>Requesting help in our Discord server</li>
 									<li>Creating an issue on GitHub</li>
 									<li>Contacting support directly</li>
 								</ul>
 							</div>
 
-							<div class="pt-2 border-t border-border/50">
+							<div class="border-t border-border/50 pt-2">
 								<a
 									href="https://discopanel.app"
 									target="_blank"
@@ -591,13 +613,13 @@
 		<!-- Privacy Notice -->
 		<div class="rounded-lg border border-border/50 bg-muted/30 p-4">
 			<div class="flex gap-3">
-				<AlertCircle class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+				<AlertCircle class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 				<div class="space-y-1 text-sm text-muted-foreground">
 					<p class="font-medium">Privacy Notice</p>
 					<p class="text-xs leading-relaxed">
-						Support bundles contain server configurations, logs, and database information.
-						While we take privacy seriously and handle your data securely, please review the
-						bundle contents before uploading if you have sensitive information.
+						Support bundles contain server configurations, logs, and database information. While we
+						take privacy seriously and handle your data securely, please review the bundle contents
+						before uploading if you have sensitive information.
 					</p>
 				</div>
 			</div>

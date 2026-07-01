@@ -14,8 +14,11 @@ import (
 	appconfig "github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/events"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // Scheduler manages scheduled tasks for all servers
@@ -24,6 +27,7 @@ type Scheduler struct {
 	docker        *docker.Client
 	sender        *command.Sender
 	appConfig     *appconfig.Config
+	metrics       *metrics.Collector
 	log           *logger.Logger
 	checkInterval time.Duration
 
@@ -58,7 +62,7 @@ func DefaultConfig() Config {
 }
 
 // NewScheduler creates a new task scheduler
-func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, appCfg *appconfig.Config, log *logger.Logger, config ...Config) *Scheduler {
+func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, appCfg *appconfig.Config, metricsCollector *metrics.Collector, log *logger.Logger, config ...Config) *Scheduler {
 	cfg := DefaultConfig()
 	if len(config) > 0 {
 		cfg = config[0]
@@ -69,6 +73,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 		docker:            docker,
 		sender:            sender,
 		appConfig:         appCfg,
+		metrics:           metricsCollector,
 		log:               log,
 		checkInterval:     cfg.CheckInterval,
 		stopChan:          make(chan struct{}),
@@ -207,7 +212,7 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		s.wg.Add(1)
 		go func(t *storage.ScheduledTask) {
 			defer s.wg.Done()
-			s.executeTask(t, "scheduled", "")
+			s.executeTask(t, "scheduled", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
 		}(task)
 	}
 }
@@ -219,37 +224,36 @@ func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*storage.Ta
 		return nil, err
 	}
 
-	execution, err := s.executeTask(task, "manual", "")
+	execution, err := s.executeTask(task, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
 	return execution, err
 }
 
-// OnEvent dispatches all enabled event-triggered tasks subscribed to eventTrigger
-// for the given server. Each matching task runs in its own goroutine.
-func (s *Scheduler) OnEvent(ctx context.Context, serverID string, eventTrigger storage.TaskEventTrigger) {
-	tasks, err := s.store.ListEventTriggeredTasks(ctx, serverID, eventTrigger)
+// Schedulers subscription to the central event bus
+func (s *Scheduler) HandleServerEvent(ctx context.Context, event events.Event) {
+	tasks, err := s.store.ListEventTriggeredTasks(ctx, event.ServerID, event.Type)
 	if err != nil {
-		s.log.Error("Failed to list event-triggered tasks for %s: %v", eventTrigger, err)
+		s.log.Error("Failed to list event-triggered tasks for %s: %v", event.Type, err)
 		return
 	}
 	for _, task := range tasks {
 		s.wg.Add(1)
 		go func(t *storage.ScheduledTask) {
 			defer s.wg.Done()
-			s.executeTaskForEvent(t, eventTrigger)
+			s.executeTaskForEvent(t, event.Type, event.Data)
 		}(task)
 	}
 }
 
 // executeTaskForEvent runs a task as a result of an event firing. The event
-// trigger is threaded through to webhook executors so the rendered payload
+// type is threaded through to webhook executors so the rendered payload
 // reflects which event triggered the delivery.
-func (s *Scheduler) executeTaskForEvent(task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) {
-	s.executeTask(task, "event", eventTrigger)
+func (s *Scheduler) executeTaskForEvent(task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) {
+	s.executeTask(task, "event", eventType, eventData)
 }
 
 // executeTask runs a single task. eventTrigger names the event that drove an
 // event-triggered run (empty for scheduled/manual runs).
-func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eventTrigger storage.TaskEventTrigger) (*storage.TaskExecution, error) {
+func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any) (*storage.TaskExecution, error) {
 	ctx := context.Background()
 
 	// Check if server exists
@@ -324,7 +328,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 	var execErr error
 
 	for attempt := 0; ; attempt++ {
-		output, execErr = s.runTaskType(execCtx, server, task, eventTrigger)
+		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData)
 		if execErr == nil || attempt >= task.RetryCount || execCtx.Err() != nil {
 			break
 		}
@@ -377,7 +381,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 }
 
 // runTaskType dispatches a single execution attempt to the type-specific executor
-func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) (string, error) {
+func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
 	switch task.TaskType {
 	case storage.TaskTypeCommand:
 		return s.executeCommandTask(ctx, server, task)
@@ -392,7 +396,7 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 	case storage.TaskTypeScript:
 		return s.executeScriptTask(ctx, server, task)
 	case storage.TaskTypeWebhook:
-		return s.executeWebhookTask(ctx, server, task, eventTrigger)
+		return s.executeWebhookTask(ctx, server, task, eventType, eventData)
 	default:
 		return "", fmt.Errorf("unknown task type: %s", task.TaskType)
 	}
@@ -471,7 +475,7 @@ func (s *Scheduler) executeCommandTask(ctx context.Context, server *storage.Serv
 	return output, err
 }
 
-func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
 	if server.ContainerID == "" {
 		return "", fmt.Errorf("server has no container")
 	}
@@ -509,7 +513,7 @@ func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Serv
 	return "server restarted successfully", nil
 }
 
-func (s *Scheduler) executeStartTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+func (s *Scheduler) executeStartTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
 	if server.ContainerID == "" {
 		return "", fmt.Errorf("server has no container")
 	}
@@ -526,7 +530,7 @@ func (s *Scheduler) executeStartTask(ctx context.Context, server *storage.Server
 	return "server started successfully", nil
 }
 
-func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
 	if server.ContainerID == "" {
 		return "", fmt.Errorf("server has no container")
 	}
@@ -618,7 +622,7 @@ func (s *Scheduler) ValidateCronExpr(expr string) error {
 	return err
 }
 
-func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) (string, error) {
+func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
 	var cfg webhook.Config
 	if task.Config != "" {
 		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
@@ -630,18 +634,25 @@ func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Serv
 	}
 
 	// Determine which event drove this run. Event-triggered runs pass the
-	// firing trigger directly; otherwise fall back to the first subscribed
-	// trigger or "manual".
+	// firing event directly - otherwise fall back to the first subscribed event or "manual"
 	var event string
 	switch {
-	case eventTrigger != "":
-		event = string(eventTrigger)
+	case eventType != v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED:
+		event = webhookEventName(eventType)
 	case len(task.EventTriggers) > 0:
-		event = string(task.EventTriggers[0])
+		event = webhookEventName(task.EventTriggers[0])
 	default:
 		event = "manual"
 	}
-	payload := webhook.BuildPayload(event, server, nil)
+
+	// Pull live count from metrics so payloads report players accurately
+	if s.metrics != nil {
+		if m := s.metrics.GetMetrics(server.ID); m != nil {
+			server.PlayersOnline = m.PlayersOnline
+		}
+	}
+
+	payload := webhook.BuildPayload(event, server, eventData)
 
 	result := webhook.Deliver(ctx, cfg, payload)
 	output := fmt.Sprintf("HTTP %d in %dms (attempt %d)", result.ResponseCode, result.DurationMs, result.Attempts)
@@ -652,4 +663,24 @@ func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Serv
 		return output, nil
 	}
 	return output, fmt.Errorf("%s", result.ErrorMessage)
+}
+
+// Maps a server event type to the lowercase event name used in webhook payloads
+func webhookEventName(t v1.TriggeredEventType) string {
+	switch t {
+	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START:
+		return "server_start"
+	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP:
+		return "server_stop"
+	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_RESTART:
+		return "server_restart"
+	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_HEALTHY:
+		return "server_healthy"
+	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_JOIN:
+		return "player_join"
+	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_LEAVE:
+		return "player_leave"
+	default:
+		return "manual"
+	}
 }

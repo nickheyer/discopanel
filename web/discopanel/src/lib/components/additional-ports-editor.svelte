@@ -52,8 +52,8 @@
 				portErrors[index] = 'Port must be between 1 and 65535';
 			} else {
 				// Check for duplicates within additional ports
-				const hasDuplicate = ports.some((p, i) =>
-					i !== index && p.hostPort === port && p.protocol === ports[index].protocol
+				const hasDuplicate = ports.some(
+					(p, i) => i !== index && p.hostPort === port && p.protocol === ports[index].protocol
 				);
 				if (hasDuplicate) {
 					portErrors[index] = `Duplicate port ${port}/${ports[index].protocol}`;
@@ -70,7 +70,7 @@
 	function findNextAvailablePort(startFrom: number = 25566): number {
 		let port = startFrom;
 		while (port <= 65535) {
-			if (!usedPorts[port] && !ports.some(p => p.hostPort === port)) {
+			if (!usedPorts[port] && !ports.some((p) => p.hostPort === port)) {
 				return port;
 			}
 			port++;
@@ -83,7 +83,7 @@
 	<div class="flex items-center justify-between">
 		<div>
 			<Label class="text-sm font-medium">Additional Ports</Label>
-			<p class="text-xs text-muted-foreground mt-1">
+			<p class="mt-1 text-xs text-muted-foreground">
 				Configure extra ports for mods, plugins, or services (e.g., BlueMap, voice chat, dynmap)
 			</p>
 		</div>
@@ -92,7 +92,7 @@
 			variant="outline"
 			size="sm"
 			onclick={addPort}
-			disabled={disabled}
+			{disabled}
 			class="h-8 gap-1"
 		>
 			<Plus class="h-3 w-3" />
@@ -115,13 +115,13 @@
 				<!-- Port entries -->
 				{#each ports as port, index (index)}
 					<div class="space-y-2">
-						<div class="grid grid-cols-12 gap-2 items-center">
+						<div class="grid grid-cols-12 items-center gap-2">
 							<div class="col-span-4">
 								<Input
 									type="text"
 									placeholder="e.g., BlueMap Web"
 									bind:value={port.name}
-									disabled={disabled}
+									{disabled}
 									onchange={() => updatePort(index, 'name', port.name)}
 									class="h-8 text-xs"
 								/>
@@ -133,7 +133,7 @@
 									max="65535"
 									placeholder="8100"
 									bind:value={port.containerPort}
-									disabled={disabled}
+									{disabled}
 									onchange={() => updatePort(index, 'containerPort', port.containerPort)}
 									class="h-8 text-xs"
 								/>
@@ -145,7 +145,7 @@
 									max="65535"
 									placeholder="8100"
 									bind:value={port.hostPort}
-									disabled={disabled}
+									{disabled}
 									onchange={() => updatePort(index, 'hostPort', port.hostPort)}
 									class="h-8 text-xs {portErrors[index] ? 'border-destructive' : ''}"
 								/>
@@ -155,7 +155,7 @@
 									type="single"
 									value={port.protocol}
 									onValueChange={(v) => updatePort(index, 'protocol', v)}
-									disabled={disabled}
+									{disabled}
 								>
 									<SelectTrigger class="h-8 text-xs">
 										<span>{port.protocol.toUpperCase()}</span>
@@ -172,7 +172,7 @@
 									variant="ghost"
 									size="icon"
 									onclick={() => removePort(index)}
-									disabled={disabled}
+									{disabled}
 									class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
 								>
 									<X class="h-3 w-3" />
@@ -181,7 +181,7 @@
 						</div>
 
 						{#if portErrors[index]}
-							<div class="flex items-center gap-2 text-destructive pl-1">
+							<div class="flex items-center gap-2 pl-1 text-destructive">
 								<AlertCircle class="h-3 w-3" />
 								<span class="text-xs">{portErrors[index]}</span>
 							</div>
@@ -192,7 +192,7 @@
 		</div>
 	{:else}
 		<div class="rounded-lg border border-dashed p-4">
-			<p class="text-sm text-muted-foreground text-center">
+			<p class="text-center text-sm text-muted-foreground">
 				No additional ports configured. Click "Add Port" to expose extra ports for mods or services.
 			</p>
 		</div>

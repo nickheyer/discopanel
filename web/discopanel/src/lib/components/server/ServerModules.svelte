@@ -6,8 +6,26 @@
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { Module, ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
-	import { ModuleStatus, ModuleEventType } from '$lib/proto/discopanel/v1/module_pb';
-	import { Loader2, Plus, Play, Square, RotateCw, Settings, Trash2, Terminal, Cpu, ExternalLink, Package, RefreshCw, Puzzle, Link, Zap, Info } from '@lucide/svelte';
+	import { ModuleStatus } from '$lib/proto/discopanel/v1/module_pb';
+	import { getEventTypeLabel } from '$lib/utils/events';
+	import {
+		Loader2,
+		Plus,
+		Play,
+		Square,
+		RotateCw,
+		Settings,
+		Trash2,
+		Terminal,
+		Cpu,
+		ExternalLink,
+		Package,
+		RefreshCw,
+		Puzzle,
+		Link,
+		Zap,
+		Info
+	} from '@lucide/svelte';
 	import ModuleDialog from './ModuleDialog.svelte';
 	import ModuleLogsDialog from './ModuleLogsDialog.svelte';
 	import ModuleTemplateCreateDialog from './ModuleTemplateCreateDialog.svelte';
@@ -79,7 +97,7 @@
 				silent ? silentCallOptions : undefined
 			);
 			modules = response.modules;
-			modules.forEach(m => loadAliases(m.id));
+			modules.forEach((m) => loadAliases(m.id));
 		} catch {
 			if (!silent) toast.error('Failed to load modules');
 		} finally {
@@ -103,12 +121,14 @@
 				silentCallOptions
 			);
 			aliasValues = { ...aliasValues, [moduleId]: response.aliases };
-		} catch { /* ignore */ }
+		} catch {
+			/* ignore */
+		}
 	}
 
 	function resolve(input: string, moduleId: string): string {
 		const vals = aliasValues[moduleId] ?? {};
-		return input.replace(/\{\{[^}]+\}\}/g, match => vals[match] ?? match);
+		return input.replace(/\{\{[^}]+\}\}/g, (match) => vals[match] ?? match);
 	}
 
 	async function handleStartModule(module: Module) {
@@ -118,7 +138,9 @@
 			toast.success(`Starting ${module.name}...`);
 			await loadModules();
 		} catch (error) {
-			toast.error(`Failed to start module: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to start module: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		} finally {
 			actionLoading = null;
 		}
@@ -131,7 +153,9 @@
 			toast.success(`Stopping ${module.name}...`);
 			await loadModules();
 		} catch (error) {
-			toast.error(`Failed to stop module: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to stop module: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		} finally {
 			actionLoading = null;
 		}
@@ -144,14 +168,18 @@
 			toast.success(`Restarting ${module.name}...`);
 			await loadModules();
 		} catch (error) {
-			toast.error(`Failed to restart module: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to restart module: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		} finally {
 			actionLoading = null;
 		}
 	}
 
 	async function handleDeleteModule(module: Module) {
-		const confirmed = confirm(`Are you sure you want to delete "${module.name}"?\n\nThis will stop and remove the container and all module data.`);
+		const confirmed = confirm(
+			`Are you sure you want to delete "${module.name}"?\n\nThis will stop and remove the container and all module data.`
+		);
 		if (!confirmed) return;
 
 		actionLoading = module.id;
@@ -160,7 +188,9 @@
 			toast.success(`Module "${module.name}" deleted`);
 			await loadModules();
 		} catch (error) {
-			toast.error(`Failed to delete module: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to delete module: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		} finally {
 			actionLoading = null;
 		}
@@ -176,7 +206,9 @@
 		logsDialogOpen = true;
 	}
 
-	function getStatusBadgeVariant(status: ModuleStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
+	function getStatusBadgeVariant(
+		status: ModuleStatus
+	): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {
 			case ModuleStatus.RUNNING:
 				return 'default';
@@ -210,26 +242,17 @@
 		}
 	}
 
-	function getEventTypeLabel(event: ModuleEventType): string {
-		switch (event) {
-			case ModuleEventType.SERVER_START: return 'Server Start';
-			case ModuleEventType.SERVER_STOP: return 'Server Stop';
-			case ModuleEventType.SERVER_HEALTHY: return 'Server Healthy';
-			case ModuleEventType.PLAYER_JOIN: return 'Player Join';
-			case ModuleEventType.PLAYER_LEAVE: return 'Player Leave';
-			default: return 'Unknown';
-		}
-	}
-
 	function getDependencyName(moduleId: string): string {
-		const dep = modules.find(m => m.id === moduleId);
+		const dep = modules.find((m) => m.id === moduleId);
 		return dep?.name || moduleId.slice(0, 8);
 	}
 
 	function hasAdvancedConfig(module: Module): boolean {
-		return (module.dependencies?.length ?? 0) > 0 ||
+		return (
+			(module.dependencies?.length ?? 0) > 0 ||
 			(module.eventHooks?.length ?? 0) > 0 ||
-			Object.keys(module.metadata ?? {}).length > 0;
+			Object.keys(module.metadata ?? {}).length > 0
+		);
 	}
 
 	function handleModuleCreated() {
@@ -248,14 +271,12 @@
 	}
 </script>
 
-<Card class="h-full flex flex-col">
+<Card class="flex h-full flex-col">
 	<CardHeader>
 		<div class="flex items-center justify-between">
 			<div>
 				<CardTitle>Server Modules</CardTitle>
-				<p class="text-sm text-muted-foreground mt-1">
-					Companion services attached to this server
-				</p>
+				<p class="mt-1 text-sm text-muted-foreground">Companion services attached to this server</p>
 			</div>
 			<div class="flex items-center gap-2">
 				<Button variant="outline" size="sm" onclick={() => loadModules()} disabled={loading}>
@@ -266,11 +287,11 @@
 					{/if}
 				</Button>
 				<Button variant="outline" onclick={() => (templateCreateDialogOpen = true)}>
-					<Puzzle class="h-4 w-4 mr-2" />
+					<Puzzle class="mr-2 h-4 w-4" />
 					Create Template
 				</Button>
 				<Button onclick={() => (createDialogOpen = true)} disabled={templates.length === 0}>
-					<Plus class="h-4 w-4 mr-2" />
+					<Plus class="mr-2 h-4 w-4" />
 					Add Module
 				</Button>
 			</div>
@@ -283,40 +304,50 @@
 			</div>
 		{:else if modules.length === 0}
 			<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
-				<Package class="h-12 w-12 mb-4" />
+				<Package class="mb-4 h-12 w-12" />
 				<p>No modules attached to this server</p>
-				<p class="text-sm mt-2">Add a module to extend server functionality</p>
+				<p class="mt-2 text-sm">Add a module to extend server functionality</p>
 				{#if templates.length > 0}
 					<Button class="mt-4" onclick={() => (createDialogOpen = true)}>
-						<Plus class="h-4 w-4 mr-2" />
+						<Plus class="mr-2 h-4 w-4" />
 						Add Module
 					</Button>
 				{:else}
-					<p class="text-xs mt-4 text-muted-foreground/60">No module templates available</p>
+					<p class="mt-4 text-xs text-muted-foreground/60">No module templates available</p>
 				{/if}
 			</div>
 		{:else}
-			<div class="grid gap-4 grid-cols-1 lg:grid-cols-2">
+			<div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
 				{#each modules as module (module.id)}
 					{@const isLoading = actionLoading === module.id}
-					<Card class="group relative overflow-hidden border shadow-sm hover:shadow-md transition-all">
-						<div class="absolute top-0 left-0 right-0 h-1 {module.status === ModuleStatus.RUNNING ? 'bg-green-500' : module.status === ModuleStatus.ERROR ? 'bg-red-500' : 'bg-gray-300'}"></div>
+					<Card
+						class="group relative overflow-hidden border shadow-sm transition-all hover:shadow-md"
+					>
+						<div
+							class="absolute top-0 right-0 left-0 h-1 {module.status === ModuleStatus.RUNNING
+								? 'bg-green-500'
+								: module.status === ModuleStatus.ERROR
+									? 'bg-red-500'
+									: 'bg-gray-300'}"
+						></div>
 						<CardContent class="p-4">
-							<div class="flex items-start justify-between mb-3">
-								<div class="flex-1 min-w-0">
-									<div class="flex items-center gap-2 mb-1">
-										<h3 class="font-semibold truncate">{module.name}</h3>
+							<div class="mb-3 flex items-start justify-between">
+								<div class="min-w-0 flex-1">
+									<div class="mb-1 flex items-center gap-2">
+										<h3 class="truncate font-semibold">{module.name}</h3>
 										<Badge variant={getStatusBadgeVariant(module.status)} class="text-xs">
 											{getStatusLabel(module.status)}
 										</Badge>
 									</div>
-									<p class="text-sm text-muted-foreground truncate">
-									{module.templateName}{#if module.createdByUsername}
-										<span class="ml-2 text-muted-foreground/60">by {module.createdByUsername}</span>
-									{/if}
-								</p>
+									<p class="truncate text-sm text-muted-foreground">
+										{module.templateName}{#if module.createdByUsername}
+											<span class="ml-2 text-muted-foreground/60"
+												>by {module.createdByUsername}</span
+											>
+										{/if}
+									</p>
 								</div>
-								<div class="flex items-center gap-1 ml-2">
+								<div class="ml-2 flex items-center gap-1">
 									{#if module.status === ModuleStatus.STOPPED}
 										<Button
 											size="icon"
@@ -380,12 +411,14 @@
 								</div>
 							</div>
 
-							<div class="text-xs mb-3 space-y-1">
+							<div class="mb-3 space-y-1 text-xs">
 								{#if module.ports?.length}
 									<div class="flex flex-wrap gap-1.5">
 										{#each module.ports as port (port.name)}
-											<Badge variant="outline" class="font-mono text-[10px] px-1.5 py-0">
-												{port.name || 'Port'}: {port.hostPort || '?'}→{port.containerPort}/{(port.protocol || 'tcp').toUpperCase()}
+											<Badge variant="outline" class="px-1.5 py-0 font-mono text-[10px]">
+												{port.name || 'Port'}: {port.hostPort || '?'}→{port.containerPort}/{(
+													port.protocol || 'tcp'
+												).toUpperCase()}
 											</Badge>
 										{/each}
 									</div>
@@ -394,24 +427,26 @@
 								{/if}
 								{#if module.status === ModuleStatus.RUNNING && module.memoryUsage > 0}
 									<div class="flex items-center gap-3 text-muted-foreground">
-										<span><Cpu class="h-3 w-3 inline mr-1" />{module.memoryUsage.toFixed(0)} MB</span>
+										<span
+											><Cpu class="mr-1 inline h-3 w-3" />{module.memoryUsage.toFixed(0)} MB</span
+										>
 										<span>CPU: {module.cpuPercent.toFixed(1)}%</span>
 									</div>
 								{/if}
 							</div>
 
 							{#if module.accessUrls?.length}
-								<div class="space-y-1 mb-3">
+								<div class="mb-3 space-y-1">
 									{#each module.accessUrls as url (url)}
 										{@const resolved = resolve(url, module.id)}
-										<div class="flex items-center gap-2 p-2 rounded bg-muted/50">
-											<ExternalLink class="h-3 w-3 text-muted-foreground shrink-0" />
+										<div class="flex items-center gap-2 rounded bg-muted/50 p-2">
+											<ExternalLink class="h-3 w-3 shrink-0 text-muted-foreground" />
 											<!-- eslint-disable svelte/no-navigation-without-resolve -- external URL -->
-										<a
+											<a
 												href={resolved}
 												target="_blank"
 												rel="noopener noreferrer"
-												class="text-xs font-mono text-primary hover:underline truncate"
+												class="truncate font-mono text-xs text-primary hover:underline"
 											>
 												{resolved}
 											</a>
@@ -423,22 +458,26 @@
 
 							<!-- Advanced Configuration Summary -->
 							{#if hasAdvancedConfig(module)}
-								<div class="space-y-1.5 mb-3 text-xs">
+								<div class="mb-3 space-y-1.5 text-xs">
 									{#if module.dependencies && module.dependencies.length > 0}
 										<div class="flex items-center gap-1.5 text-muted-foreground">
 											<Link class="h-3 w-3" />
 											<span>Depends on:</span>
 											<span class="text-foreground">
-												{module.dependencies.map(d => getDependencyName(d.moduleId)).join(', ')}
+												{module.dependencies.map((d) => getDependencyName(d.moduleId)).join(', ')}
 											</span>
 										</div>
 									{/if}
 									{#if module.eventHooks && module.eventHooks.length > 0}
 										<div class="flex items-center gap-1.5 text-muted-foreground">
 											<Zap class="h-3 w-3" />
-											<span>{module.eventHooks.length} hook{module.eventHooks.length > 1 ? 's' : ''}</span>
+											<span
+												>{module.eventHooks.length} hook{module.eventHooks.length > 1
+													? 's'
+													: ''}</span
+											>
 											<span class="text-muted-foreground/60">
-												({module.eventHooks.map(h => getEventTypeLabel(h.event)).join(', ')})
+												({module.eventHooks.map((h) => getEventTypeLabel(h.event)).join(', ')})
 											</span>
 										</div>
 									{/if}
@@ -448,7 +487,7 @@
 												<div class="flex items-center gap-1.5 text-muted-foreground">
 													<Info class="h-3 w-3 shrink-0" />
 													<span class="font-medium">{key}:</span>
-													<span class="text-foreground truncate">{resolve(value, module.id)}</span>
+													<span class="truncate text-foreground">{resolve(value, module.id)}</span>
 												</div>
 											{/each}
 										</div>
@@ -456,16 +495,17 @@
 								</div>
 							{/if}
 
-							<div class="flex items-center justify-between pt-2 border-t">
+							<div class="flex items-center justify-between border-t pt-2">
 								<div class="flex items-center gap-1">
 									{#if module.autoStart}
-										<Badge variant="secondary" class="text-[10px] px-1.5 py-0">Auto-start</Badge>
+										<Badge variant="secondary" class="px-1.5 py-0 text-[10px]">Auto-start</Badge>
 									{/if}
 									{#if module.followServerLifecycle}
-										<Badge variant="secondary" class="text-[10px] px-1.5 py-0">Follows server</Badge>
+										<Badge variant="secondary" class="px-1.5 py-0 text-[10px]">Follows server</Badge
+										>
 									{/if}
 									{#if module.detached}
-										<Badge variant="secondary" class="text-[10px] px-1.5 py-0">Detached</Badge>
+										<Badge variant="secondary" class="px-1.5 py-0 text-[10px]">Detached</Badge>
 									{/if}
 								</div>
 								<div class="flex items-center gap-1">
@@ -524,10 +564,7 @@
 		onSuccess={handleModuleUpdated}
 	/>
 
-	<ModuleLogsDialog
-		bind:open={logsDialogOpen}
-		module={selectedModule}
-	/>
+	<ModuleLogsDialog bind:open={logsDialogOpen} module={selectedModule} />
 {/if}
 
 <ModuleTemplateCreateDialog

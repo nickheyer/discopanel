@@ -38,7 +38,19 @@
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 
-	import { Server, Home, Settings, Package, User as UserIcon, LogOut, LogIn, FileText, Sun, Moon, Puzzle } from '@lucide/svelte';
+	import {
+		Server,
+		Home,
+		Settings,
+		Package,
+		User as UserIcon,
+		LogOut,
+		LogIn,
+		FileText,
+		Sun,
+		Moon,
+		Puzzle
+	} from '@lucide/svelte';
 	import { toggleMode, mode } from 'mode-watcher';
 	import { ServerStatus, type User } from '$lib/proto/discopanel/v1/common_pb';
 
@@ -69,54 +81,57 @@
 
 	onMount(() => {
 		return new Promise((resolve, reject) => {
-			authStore.checkAuthStatus().then(async (authStatus) => {
-				loading = false;
-				if (authStatus.enabled) {
-					if (authStatus.firstUserSetup) {
-						goto(resolvePath('/login'));
-						return false;
-					}
-					const isValid = await authStore.validateSession();
-					if (!isValid) {
-						// If anonymous access is enabled, allow browsing without login
-						const state = get(authStore);
-						if (!state.anonymousAccessEnabled) {
+			authStore
+				.checkAuthStatus()
+				.then(async (authStatus) => {
+					loading = false;
+					if (authStatus.enabled) {
+						if (authStatus.firstUserSetup) {
 							goto(resolvePath('/login'));
 							return false;
 						}
-					}
-				}
-				return true;
-			}).then((shouldFetch) => {
-				// Only fetch servers if auth succeeded (not redirecting to login)
-				if (shouldFetch && page.url.pathname !== '/login') {
-					serversStore.fetchServers(false).catch(err => {
-						console.error('Failed to fetch initial servers:', err);
-					});
-
-					if (!statusPollingInterval) {
-						statusPollingInterval = setInterval(() => {
-							if (page.url.pathname !== '/login') {
-								serversStore.fetchServers(true);
+						const isValid = await authStore.validateSession();
+						if (!isValid) {
+							// If anonymous access is enabled, allow browsing without login
+							const state = get(authStore);
+							if (!state.anonymousAccessEnabled) {
+								goto(resolvePath('/login'));
+								return false;
 							}
-						}, 10000);
+						}
 					}
-				}
+					return true;
+				})
+				.then((shouldFetch) => {
+					// Only fetch servers if auth succeeded (not redirecting to login)
+					if (shouldFetch && page.url.pathname !== '/login') {
+						serversStore.fetchServers(false).catch((err) => {
+							console.error('Failed to fetch initial servers:', err);
+						});
 
-				// Clean up on unmount
-				resolve(() => {
-					if (statusPollingInterval) {
-						clearInterval(statusPollingInterval);
-						statusPollingInterval = null;
+						if (!statusPollingInterval) {
+							statusPollingInterval = setInterval(() => {
+								if (page.url.pathname !== '/login') {
+									serversStore.fetchServers(true);
+								}
+							}, 10000);
+						}
 					}
+
+					// Clean up on unmount
+					resolve(() => {
+						if (statusPollingInterval) {
+							clearInterval(statusPollingInterval);
+							statusPollingInterval = null;
+						}
+					});
+				})
+				.catch((err) => {
+					console.debug(`Discopanel caught a polling error: ${err}`);
+					reject(err);
 				});
-			}).catch((err) => {
-				console.debug(`Discopanel caught a polling error: ${err}`);
-				reject(err);
-			});
 		});
 	});
-
 </script>
 
 <svelte:head>
@@ -131,7 +146,7 @@
 	{@render children?.()}
 {:else if loading}
 	<div class="flex min-h-screen items-center justify-center">
-		<div class="border-primary h-8 w-8 animate-spin rounded-full border-b-2"></div>
+		<div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
 	</div>
 {:else}
 	<div>
@@ -146,7 +161,9 @@
 
 				<SidebarContent>
 					<SidebarGroup>
-						<SidebarGroupLabel class="group-data-[collapsible=icon]:opacity-0">Navigation</SidebarGroupLabel>
+						<SidebarGroupLabel class="group-data-[collapsible=icon]:opacity-0"
+							>Navigation</SidebarGroupLabel
+						>
 						<SidebarGroupContent>
 							<SidebarMenu>
 								<SidebarMenuItem>
@@ -166,7 +183,11 @@
 												<Server class="h-4 w-4" />
 												<span class="group-data-[collapsible=icon]:hidden">Servers</span>
 												{#if runningCount > 0}
-													<Badge variant="secondary" class="ml-auto group-data-[collapsible=icon]:hidden">{runningCount}</Badge>
+													<Badge
+														variant="secondary"
+														class="ml-auto group-data-[collapsible=icon]:hidden"
+														>{runningCount}</Badge
+													>
 												{/if}
 											</a>
 										{/snippet}
@@ -234,13 +255,16 @@
 														<a href={resolvePath(`/servers/${server.id}`)} {...props}>
 															<div class="flex w-full items-center gap-2">
 																<div
-																	class="h-2 w-2 rounded-full {server.status === ServerStatus.RUNNING
+																	class="h-2 w-2 rounded-full {server.status ===
+																	ServerStatus.RUNNING
 																		? 'bg-green-500'
 																		: server.status === ServerStatus.ERROR
-																			? 'bg-red-500 animate-pulse'
-																		: server.status === ServerStatus.STARTING || server.status === ServerStatus.STOPPING || server.status === ServerStatus.UNHEALTHY
-																			? 'bg-yellow-500'
-																			: 'bg-gray-400'}"
+																			? 'animate-pulse bg-red-500'
+																			: server.status === ServerStatus.STARTING ||
+																				  server.status === ServerStatus.STOPPING ||
+																				  server.status === ServerStatus.UNHEALTHY
+																				? 'bg-yellow-500'
+																				: 'bg-gray-400'}"
 																></div>
 																<span class="truncate">{server.name}</span>
 															</div>
@@ -261,16 +285,20 @@
 						<Separator orientation="horizontal" />
 						<div class="flex items-center justify-between">
 							<DropdownMenu>
-								<div class="py-2 w-full">
-									<DropdownMenuTrigger class="w-full h-full justify-start group-data-[collapsible=icon]:p-0">
+								<div class="w-full py-2">
+									<DropdownMenuTrigger
+										class="h-full w-full justify-start group-data-[collapsible=icon]:p-0"
+									>
 										{#snippet child({ props })}
 											<Button {...props} variant="ghost">
 												<Avatar class="h-8 w-8">
 													<AvatarFallback>{getUserInitials(user)}</AvatarFallback>
 												</Avatar>
 												<div class="ml-2 flex-1 text-left group-data-[collapsible=icon]:hidden">
-													<p class="text-sm font-medium leading-none">{user.username}</p>
-													<p class="text-xs text-muted-foreground capitalize">{getDisplayRole(user)}</p>
+													<p class="text-sm leading-none font-medium">{user.username}</p>
+													<p class="text-xs text-muted-foreground capitalize">
+														{getDisplayRole(user)}
+													</p>
 												</div>
 											</Button>
 										{/snippet}
@@ -279,7 +307,7 @@
 								<DropdownMenuContent class="w-56" align="end">
 									<DropdownMenuLabel>
 										<div class="flex flex-col space-y-1">
-											<p class="text-sm font-medium leading-none">{user.username}</p>
+											<p class="text-sm leading-none font-medium">{user.username}</p>
 											{#if user.email}
 												<p class="text-xs leading-none text-muted-foreground">{user.email}</p>
 											{/if}
@@ -303,8 +331,12 @@
 						</div>
 					{:else if isAuthEnabled && $authStore.anonymousAccessEnabled && !user}
 						<Separator orientation="horizontal" />
-						<div class="py-2 w-full">
-							<Button variant="ghost" class="w-full justify-start" onclick={() => goto(resolvePath('/login'))}>
+						<div class="w-full py-2">
+							<Button
+								variant="ghost"
+								class="w-full justify-start"
+								onclick={() => goto(resolvePath('/login'))}
+							>
 								<LogIn class="h-4 w-4" />
 								<span class="group-data-[collapsible=icon]:hidden">Login</span>
 							</Button>
@@ -312,8 +344,15 @@
 					{/if}
 					<Separator orientation="horizontal" class="mb-2" />
 					<div class="ml-auto flex items-center gap-2">
-						<span class="text-muted-foreground text-xs group-data-[collapsible=icon]:hidden">{__APP_VERSION__}</span>
-						<Button variant="ghost" size="icon" class="h-7 w-7 group-data-[collapsible=icon]:hidden" onclick={toggleMode}>
+						<span class="text-xs text-muted-foreground group-data-[collapsible=icon]:hidden"
+							>{__APP_VERSION__}</span
+						>
+						<Button
+							variant="ghost"
+							size="icon"
+							class="h-7 w-7 group-data-[collapsible=icon]:hidden"
+							onclick={toggleMode}
+						>
 							{#if mode.current === 'light'}
 								<Moon class="h-4 w-4 text-muted-foreground" />
 							{:else}

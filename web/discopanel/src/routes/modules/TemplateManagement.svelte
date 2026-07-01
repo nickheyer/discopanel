@@ -36,7 +36,9 @@
 	}
 
 	async function handleDeleteTemplate(template: ModuleTemplate) {
-		const confirmed = confirm(`Are you sure you want to delete template "${template.name}"?\n\nThis cannot be undone and will not affect existing instances.`);
+		const confirmed = confirm(
+			`Are you sure you want to delete template "${template.name}"?\n\nThis cannot be undone and will not affect existing instances.`
+		);
 		if (!confirmed) return;
 
 		try {
@@ -44,7 +46,9 @@
 			toast.success(`Template "${template.name}" deleted`);
 			await loadTemplates(true);
 		} catch (error) {
-			toast.error(`Failed to delete template: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to delete template: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		}
 	}
 
@@ -84,7 +88,7 @@
 				{/if}
 			</Button>
 			<Button onclick={() => (createDialogOpen = true)}>
-				<Plus class="h-4 w-4 mr-2" />
+				<Plus class="mr-2 h-4 w-4" />
 				Create Template
 			</Button>
 		</div>
@@ -118,50 +122,58 @@
 			<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 		</div>
 	{:else if templates.length === 0}
-		<div class="flex flex-col items-center justify-center py-12 text-center border rounded-lg bg-card">
-			<Layers class="h-12 w-12 mb-4 text-muted-foreground/50" />
-			<h3 class="text-lg font-medium mb-1">No Templates Found</h3>
-			<p class="text-sm text-muted-foreground max-w-sm mb-4">
+		<div
+			class="flex flex-col items-center justify-center rounded-lg border bg-card py-12 text-center"
+		>
+			<Layers class="mb-4 h-12 w-12 text-muted-foreground/50" />
+			<h3 class="mb-1 text-lg font-medium">No Templates Found</h3>
+			<p class="mb-4 max-w-sm text-sm text-muted-foreground">
 				You don't have any module templates configured yet.
 			</p>
 			<Button onclick={() => (createDialogOpen = true)}>
-				<Plus class="h-4 w-4 mr-2" />
+				<Plus class="mr-2 h-4 w-4" />
 				Create Template
 			</Button>
 		</div>
 	{:else}
-		<div class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
 			{#each filteredTemplates as template (template.name)}
-				<Card class="group relative overflow-hidden border shadow-sm hover:shadow-md transition-all">
-					<CardContent class="p-5 flex flex-col h-full">
-						<div class="flex items-start gap-4 mb-4">
-							<div class="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+				<Card
+					class="group relative overflow-hidden border shadow-sm transition-all hover:shadow-md"
+				>
+					<CardContent class="flex h-full flex-col p-5">
+						<div class="mb-4 flex items-start gap-4">
+							<div
+								class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10"
+							>
 								<DynamicIcon name={template.icon} class="h-6 w-6 text-primary" fallback="Package" />
 							</div>
-							<div class="flex-1 min-w-0">
-								<h3 class="font-semibold truncate text-lg">{template.name}</h3>
-								<div class="flex items-center gap-2 mt-1 flex-wrap">
+							<div class="min-w-0 flex-1">
+								<h3 class="truncate text-lg font-semibold">{template.name}</h3>
+								<div class="mt-1 flex flex-wrap items-center gap-2">
 									{#if template.type === ModuleTemplateType.BUILTIN}
-										<Badge variant="default" class="text-[10px] px-1.5 py-0">Built-in</Badge>
+										<Badge variant="default" class="px-1.5 py-0 text-[10px]">Built-in</Badge>
 									{:else}
-										<Badge variant="outline" class="text-[10px] px-1.5 py-0">Custom</Badge>
+										<Badge variant="outline" class="px-1.5 py-0 text-[10px]">Custom</Badge>
 									{/if}
 									{#if template.category}
-										<Badge variant="secondary" class="text-[10px] px-1.5 py-0">{template.category}</Badge>
+										<Badge variant="secondary" class="px-1.5 py-0 text-[10px]"
+											>{template.category}</Badge
+										>
 									{/if}
 								</div>
 							</div>
 						</div>
-						
-						<p class="text-sm text-muted-foreground flex-1 mb-4 line-clamp-2">
+
+						<p class="mb-4 line-clamp-2 flex-1 text-sm text-muted-foreground">
 							{template.description || 'No description provided'}
 						</p>
 
-						<div class="flex items-center justify-between pt-4 border-t mt-auto">
-							<div class="text-xs text-muted-foreground font-mono truncate max-w-[150px]">
+						<div class="mt-auto flex items-center justify-between border-t pt-4">
+							<div class="max-w-[150px] truncate font-mono text-xs text-muted-foreground">
 								{template.dockerImage}
 							</div>
-							
+
 							{#if template.type === ModuleTemplateType.CUSTOM}
 								<div class="flex items-center gap-1">
 									<Button
@@ -184,7 +196,9 @@
 									</Button>
 								</div>
 							{:else}
-								<div class="text-xs text-muted-foreground/50 px-2 py-1 bg-muted rounded">Read-only</div>
+								<div class="rounded bg-muted px-2 py-1 text-xs text-muted-foreground/50">
+									Read-only
+								</div>
 							{/if}
 						</div>
 					</CardContent>

@@ -11,10 +11,12 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 type ServerMetrics struct {
@@ -62,6 +64,12 @@ func DefaultConfig() CollectorConfig {
 	}
 }
 
+// Snapshot of a servers derived lifecycle state
+type lifecycleState struct {
+	healthy bool            // last observed docker health (StatusRunning)
+	players map[string]bool // set of online player names - nil until first sampled
+}
+
 // Collects server metrics in the background
 type Collector struct {
 	store  *storage.Store
@@ -69,9 +77,14 @@ type Collector struct {
 	sender *command.Sender
 	config *config.Config
 	log    *logger.Logger
+	bus    *events.Bus
 
 	metrics map[string]*ServerMetrics
 	mu      sync.RWMutex
+
+	// Per-server lifecycle state for event derivation
+	lifecycle   map[string]lifecycleState
+	lifecycleMu sync.Mutex
 
 	running  bool
 	stopChan chan struct{}
@@ -81,7 +94,7 @@ type Collector struct {
 }
 
 // Creates a new metrics collector
-func NewCollector(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, log *logger.Logger, collectorCfg ...CollectorConfig) *Collector {
+func NewCollector(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, bus *events.Bus, log *logger.Logger, collectorCfg ...CollectorConfig) *Collector {
 	cc := DefaultConfig()
 	if len(collectorCfg) > 0 {
 		cc = collectorCfg[0]
@@ -92,8 +105,10 @@ func NewCollector(store *storage.Store, docker *docker.Client, sender *command.S
 		docker:          docker,
 		sender:          sender,
 		config:          cfg,
+		bus:             bus,
 		log:             log,
 		metrics:         make(map[string]*ServerMetrics),
+		lifecycle:       make(map[string]lifecycleState),
 		collectorConfig: cc,
 	}
 }
@@ -112,7 +127,7 @@ func (c *Collector) Start() error {
 	c.log.Info("Starting metrics collector")
 
 	// Start collection goroutines
-	loopCount := 3
+	loopCount := 4 // stats, rcon, disk, lifecycle-events
 	if c.collectorConfig.SLPEnabled {
 		loopCount += 1
 	}
@@ -120,6 +135,7 @@ func (c *Collector) Start() error {
 	go c.collectDockerStatsLoop()
 	go c.collectRCONDataLoop()
 	go c.collectDiskUsageLoop()
+	go c.collectLifecycleEventsLoop()
 	if c.collectorConfig.SLPEnabled {
 		go c.collectSLPDataLoop()
 	}
@@ -283,13 +299,14 @@ func (c *Collector) collectRCONData() {
 			existingMetrics.SLPAvailable &&
 			time.Since(existingMetrics.SLPLastUpdated) < c.collectorConfig.SLPInterval*2
 
-		// Get player count from RCON
+		// Get player count and roster from RCON
 		if !slpHasPlayerData {
 			output, err := c.sender.SendCommand(ctx, server.ID, "list")
 			if err == nil && output != "" {
-				count, _ := minecraft.ParsePlayerListFromOutput(output)
+				count, players := minecraft.ParsePlayerListFromOutput(output)
 				c.updateMetrics(server.ID, func(m *ServerMetrics) {
 					m.PlayersOnline = count
+					m.PlayerSample = players
 					m.LastUpdated = time.Now()
 				})
 			}
@@ -386,8 +403,9 @@ func (c *Collector) updateMetrics(serverID string, update func(*ServerMetrics)) 
 // Removes metrics for a server on delete
 func (c *Collector) RemoveMetrics(serverID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	delete(c.metrics, serverID)
+	c.mu.Unlock()
+	c.clearLifecycle(serverID)
 }
 
 // Collects SLP data
@@ -479,4 +497,152 @@ func (c *Collector) collectSLPData() {
 			m.LastUpdated = time.Now()
 		})
 	}
+}
+
+// Derives lifecycle events (SERVER_HEALTHY, PLAYER_JOIN, PLAYER_LEAVE) from state and emits on event bus
+func (c *Collector) collectLifecycleEventsLoop() {
+	defer c.wg.Done()
+
+	interval := c.collectorConfig.RCONInterval
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Seed baselines on start so already-running servers don't emit on boot
+	c.detectLifecycleEvents()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.detectLifecycleEvents()
+		case <-c.stopChan:
+			return
+		}
+	}
+}
+
+// Compares each servers current health/player state against the previous state
+func (c *Collector) detectLifecycleEvents() {
+	if c.bus == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	servers, err := c.store.ListServers(ctx)
+	if err != nil {
+		c.log.Debug("Metrics collector lifecycle: failed to list servers: %v", err)
+		return
+	}
+
+	for _, server := range servers {
+		if server.ContainerID == "" {
+			c.clearLifecycle(server.ID)
+			continue
+		}
+
+		status, err := c.docker.GetContainerStatus(ctx, server.ContainerID)
+		if err != nil {
+			c.clearLifecycle(server.ID)
+			continue
+		}
+
+		// Container that is fully down forgets its baseline so a later restart reseeds clean
+		alive := status == storage.StatusRunning || status == storage.StatusUnhealthy || status == storage.StatusStarting
+		if !alive {
+			c.clearLifecycle(server.ID)
+			continue
+		}
+
+		// "Healthy" == docker health check passing (StatusRunning)
+		healthy := status == storage.StatusRunning
+
+		prev, seen := c.getLifecycle(server.ID)
+		if !seen {
+			// First sighting while alive - establish baseline
+			c.setLifecycle(server.ID, lifecycleState{
+				healthy: healthy,
+				players: c.currentRoster(server.ID),
+			})
+			continue
+		}
+
+		next := prev
+
+		// Health transition - not-healthy -> healthy (initial pass or recovery)
+		if healthy && !prev.healthy {
+			c.emit(ctx, v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_HEALTHY, server.ID, nil)
+		}
+		next.healthy = healthy
+
+		// Player join/leave - diff the current roster
+		if healthy {
+			if roster := c.currentRoster(server.ID); roster != nil {
+				if prev.players != nil {
+					for name := range roster {
+						if !prev.players[name] {
+							c.emit(ctx, v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_JOIN, server.ID, map[string]any{"player": name})
+						}
+					}
+					for name := range prev.players {
+						if !roster[name] {
+							c.emit(ctx, v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_LEAVE, server.ID, map[string]any{"player": name})
+						}
+					}
+				}
+				next.players = roster
+			}
+			// roster == nil means the name set is momentarily unknown
+		}
+
+		c.setLifecycle(server.ID, next)
+	}
+}
+
+// Emits a derived lifecycle event on the bus, optionally carrying event data
+func (c *Collector) emit(ctx context.Context, t v1.TriggeredEventType, serverID string, data map[string]any) {
+	if c.bus == nil {
+		return
+	}
+	c.bus.Emit(ctx, events.Event{Type: t, ServerID: serverID, Data: data})
+}
+
+// Returns the set of online player names for a server from latest cached metrics
+func (c *Collector) currentRoster(serverID string) map[string]bool {
+	m := c.GetMetrics(serverID)
+	if m == nil {
+		return nil
+	}
+	if len(m.PlayerSample) < m.PlayersOnline {
+		return nil
+	}
+	set := make(map[string]bool, len(m.PlayerSample))
+	for _, name := range m.PlayerSample {
+		if name != "" {
+			set[name] = true
+		}
+	}
+	return set
+}
+
+func (c *Collector) getLifecycle(serverID string) (lifecycleState, bool) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	st, ok := c.lifecycle[serverID]
+	return st, ok
+}
+
+func (c *Collector) setLifecycle(serverID string, st lifecycleState) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	c.lifecycle[serverID] = st
+}
+
+func (c *Collector) clearLifecycle(serverID string) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	delete(c.lifecycle, serverID)
 }

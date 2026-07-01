@@ -94,7 +94,8 @@
 		const updates = create(DockerOverridesSchema, {});
 
 		// Copy existing values
-		if (overrides.environment && Object.keys(overrides.environment).length > 0) updates.environment = { ...overrides.environment };
+		if (overrides.environment && Object.keys(overrides.environment).length > 0)
+			updates.environment = { ...overrides.environment };
 		if (overrides.volumes && overrides.volumes.length > 0) updates.volumes = [...overrides.volumes];
 		if (overrides.capAdd && overrides.capAdd.length > 0) updates.capAdd = [...overrides.capAdd];
 		if (overrides.capDrop && overrides.capDrop.length > 0) updates.capDrop = [...overrides.capDrop];
@@ -105,18 +106,22 @@
 		if (overrides.memoryLimit) updates.memoryLimit = overrides.memoryLimit;
 		if (overrides.cpuLimit) updates.cpuLimit = overrides.cpuLimit;
 		if (overrides.restartPolicy) updates.restartPolicy = overrides.restartPolicy;
-		if (overrides.entrypoint && overrides.entrypoint.length > 0) updates.entrypoint = [...overrides.entrypoint];
+		if (overrides.entrypoint && overrides.entrypoint.length > 0)
+			updates.entrypoint = [...overrides.entrypoint];
 		if (overrides.dns && overrides.dns.length > 0) updates.dns = [...overrides.dns];
-		if (overrides.labels && Object.keys(overrides.labels).length > 0) updates.labels = { ...overrides.labels };
+		if (overrides.labels && Object.keys(overrides.labels).length > 0)
+			updates.labels = { ...overrides.labels };
 
 		// Update the specific field
-		if (value === undefined || value === null ||
-		    (typeof value === 'string' && !value) ||
-		    (Array.isArray(value) && value.length === 0) ||
-		    (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) ||
-		    (typeof value === 'number' && value === 0) ||
-		    (typeof value === 'bigint' && value === 0n)) {
-			
+		if (
+			value === undefined ||
+			value === null ||
+			(typeof value === 'string' && !value) ||
+			(Array.isArray(value) && value.length === 0) ||
+			(typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) ||
+			(typeof value === 'number' && value === 0) ||
+			(typeof value === 'bigint' && value === 0n)
+		) {
 			// Only delete field when its not an array or object, set arrays and objects to empty
 			if (key == 'environment') {
 				updates.environment = {};
@@ -129,16 +134,20 @@
 			} else {
 				delete updates[key];
 			}
-			
 		} else {
 			updates[key] = value;
 		}
 
 		// Check if any values remain
-		const hasValues = Object.values(updates).some(v =>
-			v !== undefined && v !== null && v !== '' && v !== 0 && v !== 0n &&
-			(!Array.isArray(v) || v.length > 0) &&
-			(typeof v !== 'object' || Array.isArray(v) || Object.keys(v).length > 0)
+		const hasValues = Object.values(updates).some(
+			(v) =>
+				v !== undefined &&
+				v !== null &&
+				v !== '' &&
+				v !== 0 &&
+				v !== 0n &&
+				(!Array.isArray(v) || v.length > 0) &&
+				(typeof v !== 'object' || Array.isArray(v) || Object.keys(v).length > 0)
 		);
 
 		if (hasValues) {
@@ -240,7 +249,7 @@
 		const labelMap = { ...(overrides?.labels || {}) };
 
 		// If label key is DiscoKey show warning
-		if(newKey.startsWith('discopanel.') && oldKey !== newKey) {
+		if (newKey.startsWith('discopanel.') && oldKey !== newKey) {
 			toast.error('This namespace is reserved for system use.');
 		}
 
@@ -270,9 +279,9 @@
 	<div class="flex items-center justify-between">
 		<button
 			type="button"
-			onclick={() => showAdvanced = !showAdvanced}
-			disabled={disabled}
-			class="flex items-center gap-2 text-sm font-medium hover:text-primary transition-colors"
+			onclick={() => (showAdvanced = !showAdvanced)}
+			{disabled}
+			class="flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary"
 		>
 			{#if showAdvanced}
 				<ChevronDown class="h-4 w-4" />
@@ -283,7 +292,7 @@
 			{#if activeCount() > 0}
 				<Badge variant="secondary" class="ml-1">{activeCount()}</Badge>
 			{/if}
-			<span class="text-xs text-muted-foreground ml-1">(Advanced)</span>
+			<span class="ml-1 text-xs text-muted-foreground">(Advanced)</span>
 		</button>
 
 		{#if showAdvanced}
@@ -292,8 +301,8 @@
 				variant="ghost"
 				size="sm"
 				onclick={toggleJsonMode}
-				disabled={disabled}
-				class="gap-2 h-8"
+				{disabled}
+				class="h-8 gap-2"
 			>
 				<Code class="h-3 w-3" />
 				{jsonMode ? 'Visual Editor' : 'JSON Editor'}
@@ -309,12 +318,12 @@
 						<Textarea
 							bind:value={jsonText}
 							oninput={(e) => updateJsonText(e.currentTarget.value)}
-							disabled={disabled}
-							placeholder={"{}"}
-							class="font-mono text-xs min-h-50 {jsonError ? 'border-destructive' : ''}"
+							{disabled}
+							placeholder={'{}'}
+							class="min-h-50 font-mono text-xs {jsonError ? 'border-destructive' : ''}"
 						/>
 						{#if jsonError}
-							<div class="flex items-center gap-2 text-destructive text-xs">
+							<div class="flex items-center gap-2 text-xs text-destructive">
 								<AlertCircle class="h-3 w-3" />
 								{jsonError}
 							</div>
@@ -333,7 +342,7 @@
 					</div>
 				</CardContent>
 			{:else}
-				<CardContent class="pt-6 space-y-6">
+				<CardContent class="space-y-6 pt-6">
 					<!-- Environment Variables -->
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">
@@ -343,8 +352,8 @@
 								variant="ghost"
 								size="sm"
 								onclick={addEnvVar}
-								disabled={disabled}
-								class="h-7 text-xs gap-1"
+								{disabled}
+								class="h-7 gap-1 text-xs"
 							>
 								<Plus class="h-3 w-3" />
 								Add Variable
@@ -359,23 +368,23 @@
 												value={key}
 												onchange={(e) => updateEnvVar(key, e.currentTarget.value, value)}
 												placeholder="VARIABLE_NAME"
-												disabled={disabled}
-												class="h-8 font-mono text-xs flex-1"
+												{disabled}
+												class="h-8 flex-1 font-mono text-xs"
 											/>
-											<span class="text-muted-foreground text-xs">=</span>
+											<span class="text-xs text-muted-foreground">=</span>
 											<Input
-												value={value}
+												{value}
 												oninput={(e) => updateEnvVar(key, key, e.currentTarget.value)}
 												placeholder="value"
-												disabled={disabled}
-												class="h-8 font-mono text-xs flex-1"
+												{disabled}
+												class="h-8 flex-1 font-mono text-xs"
 											/>
 											<Button
 												type="button"
 												variant="ghost"
 												size="icon"
 												onclick={() => removeEnvVar(key)}
-												disabled={disabled}
+												{disabled}
 												class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
 											>
 												<X class="h-3 w-3" />
@@ -385,7 +394,9 @@
 								</div>
 							</div>
 						{:else}
-							<div class="text-xs text-muted-foreground italic">No environment variables configured</div>
+							<div class="text-xs text-muted-foreground italic">
+								No environment variables configured
+							</div>
 						{/if}
 					</div>
 
@@ -398,8 +409,8 @@
 								variant="ghost"
 								size="sm"
 								onclick={addVolume}
-								disabled={disabled}
-								class="h-7 text-xs gap-1"
+								{disabled}
+								class="h-7 gap-1 text-xs"
 							>
 								<Plus class="h-3 w-3" />
 								Add Volume
@@ -409,22 +420,22 @@
 							<div class="rounded-lg border bg-muted/20 p-3">
 								<div class="space-y-3">
 									{#each overrides.volumes as volume, i (i)}
-										<div class="space-y-2 p-2 rounded border bg-background/50">
+										<div class="space-y-2 rounded border bg-background/50 p-2">
 											<div class="flex items-center gap-2">
-												<div class="flex-1 grid grid-cols-2 gap-2">
+												<div class="grid flex-1 grid-cols-2 gap-2">
 													<Input
 														value={volume.source}
 														onchange={(e) => updateVolumeField(i, 'source', e.currentTarget.value)}
 														placeholder="/host/path or volume-name"
-														disabled={disabled}
-														class="h-8 text-xs font-mono"
+														{disabled}
+														class="h-8 font-mono text-xs"
 													/>
 													<Input
 														value={volume.target}
 														onchange={(e) => updateVolumeField(i, 'target', e.currentTarget.value)}
 														placeholder="/container/path"
-														disabled={disabled}
-														class="h-8 text-xs font-mono"
+														{disabled}
+														class="h-8 font-mono text-xs"
 													/>
 												</div>
 												<Button
@@ -432,7 +443,7 @@
 													variant="ghost"
 													size="icon"
 													onclick={() => updateVolume(i, null)}
-													disabled={disabled}
+													{disabled}
 													class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
 												>
 													<X class="h-3 w-3" />
@@ -443,8 +454,11 @@
 													<input
 														type="checkbox"
 														checked={volume.readOnly}
-														onchange={(e) => { updateVolumeField(i, 'readOnly', e.currentTarget.checked); if (e.currentTarget.checked) updateVolumeField(i, 'createDir', false); }}
-														disabled={disabled}
+														onchange={(e) => {
+															updateVolumeField(i, 'readOnly', e.currentTarget.checked);
+															if (e.currentTarget.checked) updateVolumeField(i, 'createDir', false);
+														}}
+														{disabled}
 														class="h-3 w-3"
 													/>
 													<span class="text-xs text-muted-foreground">Read Only</span>
@@ -457,8 +471,9 @@
 															updateVolumeField(i, 'createDir', e.currentTarget.checked);
 															if (e.currentTarget.checked) {
 																updateVolumeField(i, 'readOnly', false);
-															}}}
-														disabled={disabled}
+															}
+														}}
+														{disabled}
 														class="h-3 w-3"
 													/>
 													<span class="text-xs text-muted-foreground">Pre-create Dir</span>
@@ -466,8 +481,8 @@
 												<select
 													value={volume.type || 'bind'}
 													onchange={(e) => updateVolumeField(i, 'type', e.currentTarget.value)}
-													disabled={disabled}
-													class="h-6 text-xs border rounded px-1 bg-background"
+													{disabled}
+													class="h-6 rounded border bg-background px-1 text-xs"
 												>
 													<option value="bind">Bind Mount</option>
 													<option value="volume">Volume</option>
@@ -493,8 +508,12 @@
 								min="0"
 								placeholder="e.g., 2.5"
 								value={overrides?.cpuLimit || ''}
-								onchange={(e) => updateOverride('cpuLimit', e.currentTarget.value ? Number(e.currentTarget.value) : undefined)}
-								disabled={disabled}
+								onchange={(e) =>
+									updateOverride(
+										'cpuLimit',
+										e.currentTarget.value ? Number(e.currentTarget.value) : undefined
+									)}
+								{disabled}
 								class="h-8 text-xs"
 							/>
 						</div>
@@ -506,8 +525,14 @@
 								min="512"
 								placeholder="e.g., 8192"
 								value={overrides?.memoryLimit ? Number(overrides.memoryLimit) / 1024 / 1024 : ''}
-								onchange={(e) => updateOverride('memoryLimit', e.currentTarget.value ? BigInt(Number(e.currentTarget.value) * 1024 * 1024) : undefined)}
-								disabled={disabled}
+								onchange={(e) =>
+									updateOverride(
+										'memoryLimit',
+										e.currentTarget.value
+											? BigInt(Number(e.currentTarget.value) * 1024 * 1024)
+											: undefined
+									)}
+								{disabled}
 								class="h-8 text-xs"
 							/>
 						</div>
@@ -523,7 +548,7 @@
 								placeholder="bridge (default)"
 								value={overrides?.networkMode || ''}
 								onchange={(e) => updateOverride('networkMode', e.currentTarget.value || undefined)}
-								disabled={disabled}
+								{disabled}
 								class="h-8 text-xs"
 							/>
 						</div>
@@ -534,8 +559,9 @@
 								type="text"
 								placeholder="unless-stopped"
 								value={overrides?.restartPolicy || ''}
-								onchange={(e) => updateOverride('restartPolicy', e.currentTarget.value || undefined)}
-								disabled={disabled}
+								onchange={(e) =>
+									updateOverride('restartPolicy', e.currentTarget.value || undefined)}
+								{disabled}
 								class="h-8 text-xs"
 							/>
 						</div>
@@ -554,11 +580,14 @@
 								if (!value) {
 									updateOverride('dns', undefined);
 								} else {
-									const servers = value.split(',').map(s => s.trim()).filter(s => s);
+									const servers = value
+										.split(',')
+										.map((s) => s.trim())
+										.filter((s) => s);
 									updateOverride('dns', servers.length > 0 ? servers : undefined);
 								}
 							}}
-							disabled={disabled}
+							{disabled}
 							class="h-8 text-xs"
 						/>
 						<p class="text-xs text-muted-foreground">Comma-separated DNS server addresses</p>
@@ -572,7 +601,7 @@
 								<Switch
 									checked={overrides?.privileged || false}
 									onCheckedChange={(checked) => updateOverride('privileged', checked)}
-									disabled={disabled}
+									{disabled}
 								/>
 								<span class="text-sm">Privileged Mode</span>
 							</label>
@@ -588,7 +617,7 @@
 							placeholder="1000:1000 or username"
 							value={overrides?.user || ''}
 							onchange={(e) => updateOverride('user', e.currentTarget.value || undefined)}
-							disabled={disabled}
+							{disabled}
 							class="h-8 text-xs"
 						/>
 					</div>
@@ -599,23 +628,26 @@
 						<Input
 							id="entrypoint"
 							type="text"
-							placeholder='/bin/sh, -c, echo "hello"'
+							placeholder="/bin/sh, -c, echo "hello""
 							value={overrides?.entrypoint?.join(', ') || ''}
 							onchange={(e) => {
 								const value = e.currentTarget.value;
 								if (!value) {
 									updateOverride('entrypoint', undefined);
 								} else {
-									const parts = value.split(',').map(s => s.trim()).filter(s => s);
+									const parts = value
+										.split(',')
+										.map((s) => s.trim())
+										.filter((s) => s);
 									updateOverride('entrypoint', parts.length > 0 ? parts : undefined);
 								}
 							}}
-							disabled={disabled}
+							{disabled}
 							class="h-8 text-xs"
 						/>
 						<p class="text-xs text-muted-foreground">Comma-separated arguments</p>
 					</div>
-					
+
 					<!-- Labels -->
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">
@@ -625,8 +657,8 @@
 								variant="ghost"
 								size="sm"
 								onclick={addLabel}
-								disabled={disabled}
-								class="h-7 text-xs gap-1"
+								{disabled}
+								class="h-7 gap-1 text-xs"
 							>
 								<Plus class="h-3 w-3" />
 								Add Label
@@ -641,23 +673,23 @@
 												value={key}
 												onchange={(e) => updateLabel(key, e.currentTarget.value, value)}
 												placeholder="LABEL_NAME"
-												disabled={disabled}
-												class="h-8 font-mono text-xs flex-1"
+												{disabled}
+												class="h-8 flex-1 font-mono text-xs"
 											/>
-											<span class="text-muted-foreground text-xs">=</span>
+											<span class="text-xs text-muted-foreground">=</span>
 											<Input
-												value={value}
+												{value}
 												oninput={(e) => updateLabel(key, key, e.currentTarget.value)}
 												placeholder="value"
-												disabled={disabled}
-												class="h-8 font-mono text-xs flex-1"
+												{disabled}
+												class="h-8 flex-1 font-mono text-xs"
 											/>
 											<Button
 												type="button"
 												variant="ghost"
 												size="icon"
 												onclick={() => removeLabel(key)}
-												disabled={disabled}
+												{disabled}
 												class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
 											>
 												<X class="h-3 w-3" />

@@ -14,6 +14,7 @@ import (
 	appconfig "github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -206,7 +207,7 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		s.wg.Add(1)
 		go func(t *storage.ScheduledTask) {
 			defer s.wg.Done()
-			s.executeTask(t, "scheduled")
+			s.executeTask(t, "scheduled", "")
 		}(task)
 	}
 }
@@ -218,12 +219,37 @@ func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*storage.Ta
 		return nil, err
 	}
 
-	execution, err := s.executeTask(task, "manual")
+	execution, err := s.executeTask(task, "manual", "")
 	return execution, err
 }
 
-// executeTask runs a single task
-func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*storage.TaskExecution, error) {
+// OnEvent dispatches all enabled event-triggered tasks subscribed to eventTrigger
+// for the given server. Each matching task runs in its own goroutine.
+func (s *Scheduler) OnEvent(ctx context.Context, serverID string, eventTrigger storage.TaskEventTrigger) {
+	tasks, err := s.store.ListEventTriggeredTasks(ctx, serverID, eventTrigger)
+	if err != nil {
+		s.log.Error("Failed to list event-triggered tasks for %s: %v", eventTrigger, err)
+		return
+	}
+	for _, task := range tasks {
+		s.wg.Add(1)
+		go func(t *storage.ScheduledTask) {
+			defer s.wg.Done()
+			s.executeTaskForEvent(t, eventTrigger)
+		}(task)
+	}
+}
+
+// executeTaskForEvent runs a task as a result of an event firing. The event
+// trigger is threaded through to webhook executors so the rendered payload
+// reflects which event triggered the delivery.
+func (s *Scheduler) executeTaskForEvent(task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) {
+	s.executeTask(task, "event", eventTrigger)
+}
+
+// executeTask runs a single task. eventTrigger names the event that drove an
+// event-triggered run (empty for scheduled/manual runs).
+func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eventTrigger storage.TaskEventTrigger) (*storage.TaskExecution, error) {
 	ctx := context.Background()
 
 	// Check if server exists
@@ -233,8 +259,10 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*s
 		return nil, err
 	}
 
-	// Check if server is online (if required)
-	if task.RequireOnline && server.Status != storage.StatusRunning {
+	// Check if server is online (if required). Webhook tasks always fire —
+	// they notify, they don't operate on the server, and most useful events
+	// (server_stop, server_restart) happen while the server is not running.
+	if task.RequireOnline && task.TaskType != storage.TaskTypeWebhook && server.Status != storage.StatusRunning {
 		s.log.Debug("Task %s: skipped (server offline)", task.Name)
 
 		// Create skipped execution record
@@ -296,7 +324,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*s
 	var execErr error
 
 	for attempt := 0; ; attempt++ {
-		output, execErr = s.runTaskType(execCtx, server, task)
+		output, execErr = s.runTaskType(execCtx, server, task, eventTrigger)
 		if execErr == nil || attempt >= task.RetryCount || execCtx.Err() != nil {
 			break
 		}
@@ -349,7 +377,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string) (*s
 }
 
 // runTaskType dispatches a single execution attempt to the type-specific executor
-func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) (string, error) {
 	switch task.TaskType {
 	case storage.TaskTypeCommand:
 		return s.executeCommandTask(ctx, server, task)
@@ -363,6 +391,8 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 		return s.executeBackupTask(ctx, server, task)
 	case storage.TaskTypeScript:
 		return s.executeScriptTask(ctx, server, task)
+	case storage.TaskTypeWebhook:
+		return s.executeWebhookTask(ctx, server, task, eventTrigger)
 	default:
 		return "", fmt.Errorf("unknown task type: %s", task.TaskType)
 	}
@@ -405,6 +435,9 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
 	case storage.ScheduleTypeOnce:
 		// Once tasks don't repeat, disable after execution
 		task.Status = storage.TaskStatusDisabled
+		nextRun = nil
+	case storage.ScheduleTypeEvent:
+		// Event-triggered tasks have no time-based next run.
 		nextRun = nil
 	}
 
@@ -570,6 +603,10 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 		}
 		return task.RunAt, nil
 
+	case storage.ScheduleTypeEvent:
+		// No scheduled time; execution is triggered via OnEvent.
+		return nil, nil
+
 	default:
 		return nil, fmt.Errorf("unknown schedule type: %s", task.Schedule)
 	}
@@ -579,4 +616,40 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 func (s *Scheduler) ValidateCronExpr(expr string) error {
 	_, err := s.cronParser.Parse(expr)
 	return err
+}
+
+func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventTrigger storage.TaskEventTrigger) (string, error) {
+	var cfg webhook.Config
+	if task.Config != "" {
+		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
+			return "", fmt.Errorf("invalid webhook config: %w", err)
+		}
+	}
+	if cfg.URL == "" {
+		return "", fmt.Errorf("webhook URL is required")
+	}
+
+	// Determine which event drove this run. Event-triggered runs pass the
+	// firing trigger directly; otherwise fall back to the first subscribed
+	// trigger or "manual".
+	var event string
+	switch {
+	case eventTrigger != "":
+		event = string(eventTrigger)
+	case len(task.EventTriggers) > 0:
+		event = string(task.EventTriggers[0])
+	default:
+		event = "manual"
+	}
+	payload := webhook.BuildPayload(event, server, nil)
+
+	result := webhook.Deliver(ctx, cfg, payload)
+	output := fmt.Sprintf("HTTP %d in %dms (attempt %d)", result.ResponseCode, result.DurationMs, result.Attempts)
+	if result.ResponseBody != "" {
+		output += "\n" + result.ResponseBody
+	}
+	if result.Success {
+		return output, nil
+	}
+	return output, fmt.Errorf("%s", result.ErrorMessage)
 }

@@ -185,8 +185,8 @@ func main() {
 		log.Error("Failed to initialize builtin module templates: %v", err)
 	}
 
-	// Initialize module manager
-	moduleManager := module.NewManager(store, dockerClient, cfg, proxyManager, log)
+	// Initialize module manager (scheduler acts as the event bus for event-triggered tasks)
+	moduleManager := module.NewManager(store, dockerClient, cfg, proxyManager, taskScheduler, log)
 	if err := moduleManager.Start(); err != nil {
 		log.Error("Failed to start module manager: %v", err)
 	}

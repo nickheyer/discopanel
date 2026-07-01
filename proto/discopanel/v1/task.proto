@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package discopanel.v1;
 
+import "discopanel/v1/event.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
@@ -60,15 +61,7 @@ enum ScheduleType {
   SCHEDULE_TYPE_CRON = 1;     // Cron expression
   SCHEDULE_TYPE_INTERVAL = 2; // Fixed interval
   SCHEDULE_TYPE_ONCE = 3;     // Run once at specific time
-  SCHEDULE_TYPE_EVENT = 4;    // Triggered by a server event (see TaskEventTrigger)
-}
-
-// Event trigger enumeration. Only meaningful when ScheduleType == SCHEDULE_TYPE_EVENT.
-enum TaskEventTrigger {
-  TASK_EVENT_TRIGGER_UNSPECIFIED = 0;
-  TASK_EVENT_TRIGGER_SERVER_START = 1;
-  TASK_EVENT_TRIGGER_SERVER_STOP = 2;
-  TASK_EVENT_TRIGGER_SERVER_RESTART = 3;
+  SCHEDULE_TYPE_EVENT = 4;    // Triggered by event
 }
 
 // Execution status enumeration
@@ -115,7 +108,7 @@ message ScheduledTask {
   google.protobuf.Timestamp updated_at = 21;
 
   // Events that trigger this task. Only used when schedule == SCHEDULE_TYPE_EVENT.
-  repeated TaskEventTrigger event_triggers = 22;
+  repeated TriggeredEventType event_triggers = 22;
 }
 
 // Task execution record
@@ -209,7 +202,7 @@ message CreateTaskRequest {
   bool require_online = 14;
 
   // Event triggers (only used when schedule == SCHEDULE_TYPE_EVENT)
-  repeated TaskEventTrigger event_triggers = 15;
+  repeated TriggeredEventType event_triggers = 15;
 }
 
 // Newly created task
@@ -241,7 +234,7 @@ message UpdateTaskRequest {
   optional bool require_online = 14;
 
   // Event triggers (only used when schedule == SCHEDULE_TYPE_EVENT)
-  repeated TaskEventTrigger event_triggers = 15;
+  repeated TriggeredEventType event_triggers = 15;
   bool clear_event_triggers = 16;  // If true, clear event_triggers before applying new ones
 }
 

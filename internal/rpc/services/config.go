@@ -363,15 +363,15 @@ func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 		}
 
 		prop := &v1.ConfigProperty{
-			Key:          jsonTag,
-			Label:        label,
-			Value:        strValue,
-			Type:         inputTag,
-			Description:  descTag,
-			Required:     requiredTag == "true",
-			System:       systemTag == "true",
-			Ephemeral:    ephemeralTag == "true",
-			EnvVar:       envTag,
+			Key:         jsonTag,
+			Label:       label,
+			Value:       strValue,
+			Type:        inputTag,
+			Description: descTag,
+			Required:    requiredTag == "true",
+			System:      systemTag == "true",
+			Ephemeral:   ephemeralTag == "true",
+			EnvVar:      envTag,
 		}
 
 		// Only set default_value if it's explicitly specified in the struct tag

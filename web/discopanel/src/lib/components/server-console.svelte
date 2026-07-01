@@ -5,12 +5,27 @@
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
-	import { GetServerLogsRequestSchema, ClearServerLogsRequestSchema, SendCommandRequestSchema, UploadToMCLogsRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
+	import {
+		GetServerLogsRequestSchema,
+		ClearServerLogsRequestSchema,
+		SendCommandRequestSchema,
+		UploadToMCLogsRequestSchema
+	} from '$lib/proto/discopanel/v1/server_pb';
 	import { ResizablePaneGroup, ResizablePane, ResizableHandle } from '$lib/components/ui/resizable';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
-	import { Terminal, Send, Loader2, Download, Upload, Trash2, RefreshCw, Wifi, WifiOff } from '@lucide/svelte';
+	import {
+		Terminal,
+		Send,
+		Loader2,
+		Download,
+		Upload,
+		Trash2,
+		RefreshCw,
+		Wifi,
+		WifiOff
+	} from '@lucide/svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import AnsiToHtml from 'ansi-to-html';
 	import { getStringForEnum } from '$lib/utils';
@@ -88,9 +103,7 @@
 		// Register handlers
 		const unsubLogs = wsClient.onLogs((serverId, logs) => {
 			if (serverId === server.id) {
-				logEntries = logs.length > MAX_LOG_ENTRIES
-					? logs.slice(-MAX_LOG_ENTRIES)
-					: logs;
+				logEntries = logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs;
 			}
 		});
 
@@ -98,9 +111,8 @@
 			if (serverId === server.id && logs.length > 0) {
 				// Just append logs - browser preserves scrollTop naturally
 				const combined = [...logEntries, ...logs];
-				logEntries = combined.length > MAX_LOG_ENTRIES
-					? combined.slice(-MAX_LOG_ENTRIES)
-					: combined;
+				logEntries =
+					combined.length > MAX_LOG_ENTRIES ? combined.slice(-MAX_LOG_ENTRIES) : combined;
 			}
 		});
 
@@ -126,7 +138,7 @@
 		wsClient.unsubscribe(server.id);
 
 		// Clean up handlers
-		cleanupHandlers.forEach(cleanup => cleanup());
+		cleanupHandlers.forEach((cleanup) => cleanup());
 		cleanupHandlers = [];
 	}
 
@@ -170,9 +182,7 @@
 			});
 			const response = await rpcClient.server.getServerLogs(request);
 			const logs = response.logs || [];
-			logEntries = logs.length > MAX_LOG_ENTRIES
-				? logs.slice(-MAX_LOG_ENTRIES)
-				: logs;
+			logEntries = logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs;
 		} catch (error) {
 			console.error('Failed to fetch logs:', error);
 		}
@@ -228,14 +238,16 @@
 			await navigator.clipboard.writeText(response.url);
 			toast.success('mclo.gs URL copied to clipboard');
 		} catch (error) {
-			toast.error('Failed to upload to mclo.gs: ' + (error instanceof Error ? error.message : 'Unknown error'));
+			toast.error(
+				'Failed to upload to mclo.gs: ' + (error instanceof Error ? error.message : 'Unknown error')
+			);
 		} finally {
 			uploading = false;
 		}
 	}
 
 	function downloadLogs() {
-		const logText = logEntries.map(entry => entry.message).join('\n');
+		const logText = logEntries.map((entry) => entry.message).join('\n');
 		const blob = new Blob([logText], { type: 'text/plain' });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
@@ -260,17 +272,21 @@
 
 	function getConnectionColor() {
 		switch (wsConnectionState) {
-			case 'authenticated': return 'text-green-500';
-			case 'connected': return 'text-yellow-500';
-			case 'connecting': return 'text-yellow-500';
-			default: return 'text-zinc-500';
+			case 'authenticated':
+				return 'text-green-500';
+			case 'connected':
+				return 'text-yellow-500';
+			case 'connecting':
+				return 'text-yellow-500';
+			default:
+				return 'text-zinc-500';
 		}
 	}
 </script>
 
 <ResizablePaneGroup
 	direction="vertical"
-	class="h-full max-h-[800px] min-h-[400px] w-full rounded-lg border bg-black overflow-hidden"
+	class="h-full max-h-[800px] min-h-[400px] w-full overflow-hidden rounded-lg border bg-black"
 >
 	<ResizablePane defaultSize={75} minSize={30}>
 		<div class="flex h-full flex-col">
@@ -278,14 +294,20 @@
 				<div class="flex items-center gap-2">
 					<Terminal class="h-4 w-4 text-green-500" />
 					<span class="font-mono text-sm text-green-500">Server Console</span>
-					<Badge variant={(server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY) ? 'default' : 'secondary'} class="text-xs">
+					<Badge
+						variant={server.status === ServerStatus.RUNNING ||
+						server.status === ServerStatus.UNHEALTHY
+							? 'default'
+							: 'secondary'}
+						class="text-xs"
+					>
 						{getStringForEnum(ServerStatus, server.status)?.toLowerCase()}
 					</Badge>
 					{#if wsConnectionState === 'authenticated'}
-					<Wifi class="h-3 w-3 {getConnectionColor()}" />
-				{:else}
-					<WifiOff class="h-3 w-3 {getConnectionColor()}" />
-				{/if}
+						<Wifi class="h-3 w-3 {getConnectionColor()}" />
+					{:else}
+						<WifiOff class="h-3 w-3 {getConnectionColor()}" />
+					{/if}
 				</div>
 				<div class="flex items-center gap-1">
 					<Tooltip.Root>
@@ -355,18 +377,24 @@
 				</div>
 			</div>
 			<div
-				class="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-auto bg-black px-4 py-2"
+				class="custom-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-auto bg-black px-4 py-2"
 				bind:this={scrollAreaRef}
 				onscroll={handleScroll}
 			>
 				<div class="font-mono text-xs text-zinc-300">
 					{#if logEntries.length === 0}
 						<div class="py-8 text-center text-zinc-500">
-							No logs available. {[ServerStatus.RUNNING, ServerStatus.STARTING, ServerStatus.UNHEALTHY].includes(server.status) ? 'Try refreshing the page.' : 'Start the server to see output.'}
+							No logs available. {[
+								ServerStatus.RUNNING,
+								ServerStatus.STARTING,
+								ServerStatus.UNHEALTHY
+							].includes(server.status)
+								? 'Try refreshing the page.'
+								: 'Start the server to see output.'}
 						</div>
 					{:else}
 						{#each logEntries as entry, i (i)}
-							<div class="log-line whitespace-pre-wrap break-all" data-type={entry.level}>
+							<div class="log-line break-all whitespace-pre-wrap" data-type={entry.level}>
 								<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 								{@html ansiConverter.toHtml(entry.message)}
 							</div>
@@ -385,9 +413,13 @@
 				<span class="font-mono text-sm text-green-500">$</span>
 				<input
 					type="text"
-					placeholder={(server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY)? 'Enter command...' : 'Server must be running'}
+					placeholder={server.status === ServerStatus.RUNNING ||
+					server.status === ServerStatus.UNHEALTHY
+						? 'Enter command...'
+						: 'Server must be running'}
 					bind:value={command}
-					disabled={server.status !== ServerStatus.RUNNING && server.status !== ServerStatus.UNHEALTHY}
+					disabled={server.status !== ServerStatus.RUNNING &&
+						server.status !== ServerStatus.UNHEALTHY}
 					onkeydown={(e) => e.key === 'Enter' && sendCommand()}
 					class="flex-1 bg-transparent font-mono text-sm text-white outline-none placeholder:text-zinc-600"
 				/>
@@ -464,19 +496,19 @@
 	}
 
 	/* Visually distinguish command inputs */
-	.log-line[data-type="command"] {
+	.log-line[data-type='command'] {
 		color: #4ade80;
 		font-weight: 500;
 	}
 
-	.log-line[data-type="command"]::before {
+	.log-line[data-type='command']::before {
 		content: '$ ';
 		color: #22c55e;
 		font-weight: bold;
 	}
 
 	/* Style command output differently */
-	.log-line[data-type="command_output"] {
+	.log-line[data-type='command_output'] {
 		opacity: 0.9;
 		padding-left: 1rem;
 	}

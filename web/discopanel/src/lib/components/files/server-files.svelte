@@ -3,7 +3,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import { DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
+	import {
+		DialogContent,
+		DialogDescription,
+		DialogFooter,
+		DialogHeader,
+		DialogTitle
+	} from '$lib/components/ui/dialog';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import { Loader2, Folder, X } from '@lucide/svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
@@ -120,12 +126,23 @@
 	function isArchiveFile(f: FileInfo): boolean {
 		if (f.isDir) return false;
 		const ext = f.name.toLowerCase().split('.').pop() || '';
-		return ['zip', 'tar', 'gz', 'tgz', 'rar', '7z', 'bz2', 'xz', 'lz', 'zst', 'tbz2', 'txz'].includes(ext);
+		return [
+			'zip',
+			'tar',
+			'gz',
+			'tgz',
+			'rar',
+			'7z',
+			'bz2',
+			'xz',
+			'lz',
+			'zst',
+			'tbz2',
+			'txz'
+		].includes(ext);
 	}
 
-	let canExtractSelection = $derived(
-		selectedFiles.length === 1 && isArchiveFile(selectedFiles[0])
-	);
+	let canExtractSelection = $derived(selectedFiles.length === 1 && isArchiveFile(selectedFiles[0]));
 
 	// --- Lifecycle ---
 	$effect(() => {
@@ -187,8 +204,8 @@
 			lastClickedPath = file.path;
 		} else if (event.shiftKey && lastClickedPath) {
 			// Range select
-			const startIdx = flatFiles.findIndex(f => f.path === lastClickedPath);
-			const endIdx = flatFiles.findIndex(f => f.path === file.path);
+			const startIdx = flatFiles.findIndex((f) => f.path === lastClickedPath);
+			const endIdx = flatFiles.findIndex((f) => f.path === file.path);
 			if (startIdx !== -1 && endIdx !== -1) {
 				const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
 				const next = new SvelteSet(selectedPaths);
@@ -225,7 +242,7 @@
 		if (selectedPaths.size === flatFiles.length) {
 			selectedPaths = new SvelteSet();
 		} else {
-			selectedPaths = new SvelteSet(flatFiles.map(f => f.path));
+			selectedPaths = new SvelteSet(flatFiles.map((f) => f.path));
 		}
 	}
 
@@ -260,7 +277,7 @@
 
 	// --- Keyboard navigation ---
 	function handleKeydown(event: KeyboardEvent) {
-		const idx = flatFiles.findIndex(f => f.path === focusedPath);
+		const idx = flatFiles.findIndex((f) => f.path === focusedPath);
 
 		if (event.key === 'ArrowDown') {
 			event.preventDefault();
@@ -353,7 +370,7 @@
 		// Prevent dropping into self or children
 		for (const p of paths) {
 			if (file.path === p || file.path.startsWith(p + '/')) {
-				toast.error("Cannot move a folder into itself");
+				toast.error('Cannot move a folder into itself');
 				return;
 			}
 		}
@@ -606,7 +623,8 @@
 	}
 
 	async function extractArchive(file?: FileInfo) {
-		const target = file || contextMenuFile || (selectedFiles.length === 1 ? selectedFiles[0] : null);
+		const target =
+			file || contextMenuFile || (selectedFiles.length === 1 ? selectedFiles[0] : null);
 		if (!target || extracting) return;
 		try {
 			extracting = true;
@@ -738,7 +756,9 @@
 				uploadProgress = null;
 
 				const result = await uploadFile(file, {
-					onProgress: (progress) => { uploadProgress = progress; },
+					onProgress: (progress) => {
+						uploadProgress = progress;
+					},
 					signal: uploadAbortController.signal
 				});
 
@@ -796,41 +816,52 @@
 	});
 </script>
 
-<div bind:this={containerEl} class="flex flex-col border rounded-lg overflow-hidden bg-background">
+<div bind:this={containerEl} class="flex flex-col overflow-hidden rounded-lg border bg-background">
 	<!-- Toolbar -->
 	<FileToolbar
 		{filterText}
 		onRefresh={loadFiles}
-		onNewFile={() => { dialogTargetPath = ''; newItemName = ''; showNewFileDialog = true; }}
-		onNewFolder={() => { dialogTargetPath = ''; newItemName = ''; showNewFolderDialog = true; }}
+		onNewFile={() => {
+			dialogTargetPath = '';
+			newItemName = '';
+			showNewFileDialog = true;
+		}}
+		onNewFolder={() => {
+			dialogTargetPath = '';
+			newItemName = '';
+			showNewFolderDialog = true;
+		}}
 		onUpload={() => triggerUpload('')}
-		onFilterChange={(v) => filterText = v}
+		onFilterChange={(v) => (filterText = v)}
 	/>
 
 	<!-- Breadcrumb -->
-	<FileBreadcrumb
-		currentPath={currentPath}
-		onNavigate={handleBreadcrumbNavigate}
-	/>
+	<FileBreadcrumb {currentPath} onNavigate={handleBreadcrumbNavigate} />
 
 	<!-- Upload progress -->
 	{#if uploading && uploadProgress}
-		<div class="px-3 py-2 border-b">
-			<div class="flex items-center justify-between mb-1">
-				<span class="text-xs text-muted-foreground truncate">
+		<div class="border-b px-3 py-2">
+			<div class="mb-1 flex items-center justify-between">
+				<span class="truncate text-xs text-muted-foreground">
 					Uploading: {currentUploadFilename}
 				</span>
 				<div class="flex items-center gap-2">
 					<span class="text-xs text-muted-foreground">
 						{uploadProgress.percentComplete.toFixed(0)}%
 					</span>
-					<Button size="icon" variant="ghost" class="h-5 w-5" onclick={cancelCurrentUpload} title="Cancel">
+					<Button
+						size="icon"
+						variant="ghost"
+						class="h-5 w-5"
+						onclick={cancelCurrentUpload}
+						title="Cancel"
+					>
 						<X class="h-3 w-3" />
 					</Button>
 				</div>
 			</div>
 			<Progress value={uploadProgress.percentComplete} class="h-1.5" />
-			<p class="text-[10px] text-muted-foreground mt-0.5">
+			<p class="mt-0.5 text-[10px] text-muted-foreground">
 				{formatBytes(uploadProgress.bytesUploaded)} / {formatBytes(uploadProgress.totalBytes)}
 			</p>
 		</div>
@@ -838,9 +869,9 @@
 
 	<!-- Extraction progress -->
 	{#if extracting}
-		<div class="px-3 py-2 border-b">
-			<div class="flex items-center justify-between mb-1">
-				<span class="text-xs text-muted-foreground truncate">
+		<div class="border-b px-3 py-2">
+			<div class="mb-1 flex items-center justify-between">
+				<span class="truncate text-xs text-muted-foreground">
 					Extracting: {extractionFilename}
 				</span>
 				<span class="text-xs text-muted-foreground">
@@ -865,14 +896,14 @@
 
 	<!-- Loading state -->
 	{#if loading}
-		<div class="flex-1 flex items-center justify-center">
+		<div class="flex flex-1 items-center justify-center">
 			<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 		</div>
 	{:else if files.length === 0}
-		<div class="flex-1 flex flex-col items-center justify-center text-muted-foreground">
-			<Folder class="h-12 w-12 mb-4" />
+		<div class="flex flex-1 flex-col items-center justify-center text-muted-foreground">
+			<Folder class="mb-4 h-12 w-12" />
 			<p>No files found</p>
-			<p class="text-sm mt-2">Upload files to get started</p>
+			<p class="mt-2 text-sm">Upload files to get started</p>
 		</div>
 	{:else}
 		<!-- File tree -->
@@ -897,7 +928,9 @@
 	{/if}
 
 	<!-- Status bar -->
-	<div class="flex items-center justify-between px-3 py-1 border-t text-[10px] text-muted-foreground bg-muted/20">
+	<div
+		class="flex items-center justify-between border-t bg-muted/20 px-3 py-1 text-[10px] text-muted-foreground"
+	>
 		<span>{flatFiles.length} items</span>
 		{#if selectedPaths.size > 0}
 			<span>{selectedPaths.size} selected</span>
@@ -913,7 +946,7 @@
 	file={contextMenuFile}
 	hasSelection={selectedPaths.size > 0}
 	selectedCount={selectedPaths.size}
-	onClose={() => contextMenuVisible = false}
+	onClose={() => (contextMenuVisible = false)}
 	onEdit={ctxEdit}
 	onRename={ctxRename}
 	onCopy={ctxCopy}
@@ -932,8 +965,13 @@
 	serverId={server.id}
 	file={editingFile}
 	open={showEditor}
-	onClose={() => { showEditor = false; editingFile = null; }}
-	onSave={async () => { await loadFiles(); }}
+	onClose={() => {
+		showEditor = false;
+		editingFile = null;
+	}}
+	onSave={async () => {
+		await loadFiles();
+	}}
 />
 
 <!-- New File Dialog -->
@@ -952,12 +990,14 @@
 					id="new-file-name"
 					bind:value={newItemName}
 					placeholder="example.txt"
-					onkeydown={(e) => { if (e.key === 'Enter') createNewFile(); }}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') createNewFile();
+					}}
 				/>
 			</div>
 		</div>
 		<DialogFooter>
-			<Button variant="outline" onclick={() => showNewFileDialog = false}>Cancel</Button>
+			<Button variant="outline" onclick={() => (showNewFileDialog = false)}>Cancel</Button>
 			<Button onclick={createNewFile}>Create</Button>
 		</DialogFooter>
 	</DialogContent>
@@ -979,12 +1019,14 @@
 					id="new-folder-name"
 					bind:value={newItemName}
 					placeholder="new-folder"
-					onkeydown={(e) => { if (e.key === 'Enter') createNewFolder(); }}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') createNewFolder();
+					}}
 				/>
 			</div>
 		</div>
 		<DialogFooter>
-			<Button variant="outline" onclick={() => showNewFolderDialog = false}>Cancel</Button>
+			<Button variant="outline" onclick={() => (showNewFolderDialog = false)}>Cancel</Button>
 			<Button onclick={createNewFolder}>Create</Button>
 		</DialogFooter>
 	</DialogContent>
@@ -1006,12 +1048,14 @@
 					id="rename-item"
 					bind:value={newItemName}
 					placeholder={renamingItem?.name}
-					onkeydown={(e) => { if (e.key === 'Enter') confirmRename(); }}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') confirmRename();
+					}}
 				/>
 			</div>
 		</div>
 		<DialogFooter>
-			<Button variant="outline" onclick={() => showRenameDialog = false}>Cancel</Button>
+			<Button variant="outline" onclick={() => (showRenameDialog = false)}>Cancel</Button>
 			<Button onclick={confirmRename}>Rename</Button>
 		</DialogFooter>
 	</DialogContent>
@@ -1023,7 +1067,7 @@
 	title="Move {selectedPaths.size} item(s)"
 	{files}
 	onConfirm={confirmMove}
-	onClose={() => showMoveDialog = false}
+	onClose={() => (showMoveDialog = false)}
 />
 
 <!-- Copy Dialog -->
@@ -1032,5 +1076,5 @@
 	title="Copy {selectedPaths.size} item(s)"
 	{files}
 	onConfirm={confirmCopy}
-	onClose={() => showCopyDialog = false}
+	onClose={() => (showCopyDialog = false)}
 />

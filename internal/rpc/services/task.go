@@ -79,54 +79,6 @@ func protoTaskTypeToDB(t v1.TaskType) storage.TaskType {
 	}
 }
 
-// dbEventTriggerToProto converts database event trigger to proto
-func dbEventTriggerToProto(e storage.TaskEventTrigger) v1.TaskEventTrigger {
-	switch e {
-	case storage.TaskEventServerStart:
-		return v1.TaskEventTrigger_TASK_EVENT_TRIGGER_SERVER_START
-	case storage.TaskEventServerStop:
-		return v1.TaskEventTrigger_TASK_EVENT_TRIGGER_SERVER_STOP
-	case storage.TaskEventServerRestart:
-		return v1.TaskEventTrigger_TASK_EVENT_TRIGGER_SERVER_RESTART
-	default:
-		return v1.TaskEventTrigger_TASK_EVENT_TRIGGER_UNSPECIFIED
-	}
-}
-
-// protoEventTriggerToDB converts proto event trigger to database
-func protoEventTriggerToDB(e v1.TaskEventTrigger) storage.TaskEventTrigger {
-	switch e {
-	case v1.TaskEventTrigger_TASK_EVENT_TRIGGER_SERVER_START:
-		return storage.TaskEventServerStart
-	case v1.TaskEventTrigger_TASK_EVENT_TRIGGER_SERVER_STOP:
-		return storage.TaskEventServerStop
-	case v1.TaskEventTrigger_TASK_EVENT_TRIGGER_SERVER_RESTART:
-		return storage.TaskEventServerRestart
-	default:
-		return ""
-	}
-}
-
-func dbEventTriggersToProto(in []storage.TaskEventTrigger) []v1.TaskEventTrigger {
-	out := make([]v1.TaskEventTrigger, 0, len(in))
-	for _, t := range in {
-		if pt := dbEventTriggerToProto(t); pt != v1.TaskEventTrigger_TASK_EVENT_TRIGGER_UNSPECIFIED {
-			out = append(out, pt)
-		}
-	}
-	return out
-}
-
-func protoEventTriggersToDB(in []v1.TaskEventTrigger) []storage.TaskEventTrigger {
-	out := make([]storage.TaskEventTrigger, 0, len(in))
-	for _, t := range in {
-		if dt := protoEventTriggerToDB(t); dt != "" {
-			out = append(out, dt)
-		}
-	}
-	return out
-}
-
 // dbTaskStatusToProto converts database task status to proto
 func dbTaskStatusToProto(s storage.TaskStatus) v1.TaskStatus {
 	switch s {
@@ -232,7 +184,7 @@ func dbTaskToProto(task *storage.ScheduledTask) *v1.ScheduledTask {
 		RetryDelay:    int32(task.RetryDelay),
 		RequireOnline: task.RequireOnline,
 		FailureNotify: task.FailureNotify,
-		EventTriggers: dbEventTriggersToProto(task.EventTriggers),
+		EventTriggers: task.EventTriggers,
 		CreatedAt:     timestamppb.New(task.CreatedAt),
 		UpdatedAt:     timestamppb.New(task.UpdatedAt),
 	}
@@ -331,7 +283,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 
 	// Validate event-triggered tasks
 	taskType := protoTaskTypeToDB(msg.TaskType)
-	eventTriggers := protoEventTriggersToDB(msg.EventTriggers)
+	eventTriggers := msg.EventTriggers
 	if scheduleType == storage.ScheduleTypeEvent && len(eventTriggers) == 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("at least one event_trigger is required for event-scheduled tasks"))
 	}
@@ -457,7 +409,7 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 		task.EventTriggers = nil
 	}
 	if len(msg.EventTriggers) > 0 {
-		task.EventTriggers = protoEventTriggersToDB(msg.EventTriggers)
+		task.EventTriggers = msg.EventTriggers
 	}
 
 	// Validate event-triggered tasks

@@ -23,9 +23,22 @@
 	}
 
 	let {
-		flatFiles, expandedDirs, selectedPaths, focusedPath, dragOverPath,
-		onToggleExpand, onSelect, onCheckboxToggle, onSelectAll, onContextMenu,
-		onDragStart, onDragOver, onDragLeave, onDrop, onKeydown, getDepth
+		flatFiles,
+		expandedDirs,
+		selectedPaths,
+		focusedPath,
+		dragOverPath,
+		onToggleExpand,
+		onSelect,
+		onCheckboxToggle,
+		onSelectAll,
+		onContextMenu,
+		onDragStart,
+		onDragOver,
+		onDragLeave,
+		onDrop,
+		onKeydown,
+		getDepth
 	}: Props = $props();
 
 	let hasSelection = $derived(selectedPaths.size > 0);
@@ -33,29 +46,32 @@
 </script>
 
 <div
-	class="flex-1 min-h-0 overflow-auto focus:outline-none"
+	class="min-h-0 flex-1 overflow-auto focus:outline-none"
 	tabindex="0"
 	role="tree"
 	onkeydown={onKeydown}
 >
 	<!-- Column header - matches row layout exactly -->
-	<div class="flex items-center h-[26px] text-[11px] text-muted-foreground border-b bg-background sticky top-0 z-10 pr-3">
+	<div
+		class="sticky top-0 z-10 flex h-[26px] items-center border-b bg-background pr-3 text-[11px] text-muted-foreground"
+	>
 		<!-- Checkbox column -->
-		<div class="flex items-center justify-center w-6 shrink-0 {hasSelection ? 'visible' : 'invisible'}">
-			<Checkbox
-				checked={allSelected}
-				onCheckedChange={onSelectAll}
-				class="h-3.5 w-3.5"
-			/>
+		<div
+			class="flex w-6 shrink-0 items-center justify-center {hasSelection ? 'visible' : 'invisible'}"
+		>
+			<Checkbox checked={allSelected} onCheckedChange={onSelectAll} class="h-3.5 w-3.5" />
 		</div>
 		<!-- Indent placeholder + chevron column -->
 		<div class="w-4 shrink-0"></div>
 		<!-- Name -->
-		<div class="flex-1 pl-1 font-medium uppercase tracking-wider">Name</div>
+		<div class="flex-1 pl-1 font-medium tracking-wider uppercase">Name</div>
 		<!-- Size -->
-		<span class="w-16 text-right font-medium uppercase tracking-wider shrink-0">Size</span>
+		<span class="w-16 shrink-0 text-right font-medium tracking-wider uppercase">Size</span>
 		<!-- Modified -->
-		<span class="w-20 text-right font-medium uppercase tracking-wider shrink-0 hidden sm:inline-block">Modified</span>
+		<span
+			class="hidden w-20 shrink-0 text-right font-medium tracking-wider uppercase sm:inline-block"
+			>Modified</span
+		>
 	</div>
 
 	<!-- File rows -->
@@ -80,7 +96,7 @@
 	{/each}
 
 	{#if flatFiles.length === 0}
-		<div class="flex flex-col items-center justify-center py-12 text-muted-foreground text-sm">
+		<div class="flex flex-col items-center justify-center py-12 text-sm text-muted-foreground">
 			<p>No files found</p>
 		</div>
 	{/if}

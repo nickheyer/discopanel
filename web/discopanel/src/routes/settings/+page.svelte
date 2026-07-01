@@ -7,19 +7,23 @@
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
-	import { Settings, Globe, Server, Shield, HelpCircle, ScrollText, Users, KeyRound } from '@lucide/svelte';
+	import {
+		Settings,
+		Globe,
+		Server,
+		Shield,
+		HelpCircle,
+		ScrollText,
+		Users,
+		KeyRound
+	} from '@lucide/svelte';
 	import type { ConfigCategory } from '$lib/proto/discopanel/v1/config_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import RoutingSettings from '$lib/components/routing-settings.svelte';
 	import AuthSettings from '$lib/components/auth-settings.svelte';
 	import SupportSettings from '$lib/components/support-settings.svelte';
 	import LogsSettings from '$lib/components/logs-settings.svelte';
-	import {
-		canReadSettings,
-		canReadUsers,
-		canReadRoles,
-		authEnabled,
-	} from '$lib/stores/auth';
+	import { canReadSettings, canReadUsers, canReadRoles, authEnabled } from '$lib/stores/auth';
 
 	let globalConfig = $state<ConfigCategory[]>([]);
 	let loading = $state(true);
@@ -78,20 +82,28 @@
 	});
 </script>
 
-<div class="flex-1 space-y-8 h-full p-8 pt-6 bg-linear-to-br from-background to-muted/10">
-	<div class="flex items-center justify-between pb-6 border-b-2 border-border/50">
+<div class="h-full flex-1 space-y-8 bg-linear-to-br from-background to-muted/10 p-8 pt-6">
+	<div class="flex items-center justify-between border-b-2 border-border/50 pb-6">
 		<div class="flex items-center gap-4">
-			<div class="h-16 w-16 rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center shadow-lg">
+			<div
+				class="flex h-16 w-16 items-center justify-center rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 shadow-lg"
+			>
 				<Settings class="h-8 w-8 text-primary" />
 			</div>
 			<div class="space-y-1">
-				<h2 class="text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Settings</h2>
-				<p class="text-base text-muted-foreground">Configure DiscoPanel and default server settings</p>
+				<h2
+					class="bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-4xl font-bold tracking-tight text-transparent"
+				>
+					Settings
+				</h2>
+				<p class="text-base text-muted-foreground">
+					Configure DiscoPanel and default server settings
+				</p>
 			</div>
 		</div>
 	</div>
 
-	<Tabs value={activeTab} onValueChange={(v) => activeTab = v || activeTab} class="space-y-6">
+	<Tabs value={activeTab} onValueChange={(v) => (activeTab = v || activeTab)} class="space-y-6">
 		<TabsList class="flex w-fit gap-1">
 			{#if showSettings}
 				<TabsTrigger value="server-config" class="flex items-center gap-2 px-4">
@@ -135,21 +147,19 @@
 					<Card>
 						<CardContent class="py-16">
 							<div class="flex items-center justify-center">
-								<div class="text-center space-y-3">
-									<div class="h-12 w-12 mx-auto rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
+								<div class="space-y-3 text-center">
+									<div
+										class="mx-auto flex h-12 w-12 animate-pulse items-center justify-center rounded-full bg-primary/10"
+									>
 										<Settings class="h-6 w-6 text-primary" />
 									</div>
-									<div class="text-muted-foreground font-medium">Loading settings...</div>
+									<div class="font-medium text-muted-foreground">Loading settings...</div>
 								</div>
 							</div>
 						</CardContent>
 					</Card>
 				{:else}
-					<ServerConfiguration
-						config={globalConfig}
-						onSave={saveGlobalSettings}
-						{saving}
-					/>
+					<ServerConfiguration config={globalConfig} onSave={saveGlobalSettings} {saving} />
 				{/if}
 			</TabsContent>
 

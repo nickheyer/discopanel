@@ -11,19 +11,53 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Select from '$lib/components/ui/select';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { Loader2, Plus, Play, Pause, Trash2, Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw, Terminal, RotateCcw, Square, Power, FileText, History, Archive, Wrench, X, Pencil, Webhook as WebhookIcon, Zap, Copy } from '@lucide/svelte';
+	import {
+		Loader2,
+		Plus,
+		Play,
+		Pause,
+		Trash2,
+		Clock,
+		CheckCircle2,
+		XCircle,
+		AlertCircle,
+		RefreshCw,
+		Terminal,
+		RotateCcw,
+		Square,
+		Power,
+		FileText,
+		History,
+		Archive,
+		Wrench,
+		X,
+		Pencil,
+		Webhook as WebhookIcon,
+		Zap,
+		Copy
+	} from '@lucide/svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ScheduledTask, TaskExecution } from '$lib/proto/discopanel/v1/task_pb';
-	import { TaskType, TaskStatus, ScheduleType, ExecutionStatus, TaskEventTrigger, CreateTaskRequestSchema, UpdateTaskRequestSchema, ToggleTaskRequestSchema, TriggerTaskRequestSchema, DeleteTaskRequestSchema, ListTasksRequestSchema, ListTaskExecutionsRequestSchema } from '$lib/proto/discopanel/v1/task_pb';
+	import {
+		TaskType,
+		TaskStatus,
+		ScheduleType,
+		ExecutionStatus,
+		CreateTaskRequestSchema,
+		UpdateTaskRequestSchema,
+		ToggleTaskRequestSchema,
+		TriggerTaskRequestSchema,
+		DeleteTaskRequestSchema,
+		ListTasksRequestSchema,
+		ListTaskExecutionsRequestSchema
+	} from '$lib/proto/discopanel/v1/task_pb';
+	import { TriggeredEventType } from '$lib/proto/discopanel/v1/event_pb';
+	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import { create } from '@bufbuild/protobuf';
 	import { timestampFromDate } from '@bufbuild/protobuf/wkt';
-	import { EditorView } from '@codemirror/view';
-	import { EditorState, Compartment } from '@codemirror/state';
-	import { json } from '@codemirror/lang-json';
-	import { oneDark } from '@codemirror/theme-one-dark';
-	import { basicSetup } from 'codemirror';
+	import CodeEditor from '$lib/components/ui/code-editor.svelte';
 
-	let { server, active }: { server: Server, active?: boolean } = $props();
+	let { server, active }: { server: Server; active?: boolean } = $props();
 
 	let loading = $state(true);
 	let tasks = $state<ScheduledTask[]>([]);
@@ -66,16 +100,52 @@
 	let backupMinBackups = $state(3);
 	let backupMaxBackups = $state(0);
 
-	const dialogSections = $derived<{ id: DialogSection; label: string; icon: typeof FileText; title: string; description: string }[]>([
-		{ id: 'general', label: 'General', icon: FileText, title: 'General', description: 'Task name, type, and configuration' },
+	const dialogSections = $derived<
+		{
+			id: DialogSection;
+			label: string;
+			icon: typeof FileText;
+			title: string;
+			description: string;
+		}[]
+	>([
+		{
+			id: 'general',
+			label: 'General',
+			icon: FileText,
+			title: 'General',
+			description: 'Task name, type, and configuration'
+		},
 		...(taskType === TaskType.WEBHOOK
-			? [{ id: 'payload' as DialogSection, label: 'Payload', icon: WebhookIcon, title: 'Payload', description: 'Customize the request body sent to the webhook' }]
+			? [
+					{
+						id: 'payload' as DialogSection,
+						label: 'Payload',
+						icon: WebhookIcon,
+						title: 'Payload',
+						description: 'Customize the request body sent to the webhook'
+					}
+				]
 			: []),
-		{ id: 'schedule', label: 'Schedule', icon: Clock, title: 'Schedule', description: 'When and how often the task runs' },
-		{ id: 'advanced', label: 'Advanced', icon: Wrench, title: 'Advanced', description: 'Timeouts, retries, and execution conditions' }
+		{
+			id: 'schedule',
+			label: 'Schedule',
+			icon: Clock,
+			title: 'Schedule',
+			description: 'When and how often the task runs'
+		},
+		{
+			id: 'advanced',
+			label: 'Advanced',
+			icon: Wrench,
+			title: 'Advanced',
+			description: 'Timeouts, retries, and execution conditions'
+		}
 	]);
 
-	const currentSection = $derived(dialogSections.find((s) => s.id === activeSection) ?? dialogSections[0]);
+	const currentSection = $derived(
+		dialogSections.find((s) => s.id === activeSection) ?? dialogSections[0]
+	);
 	const DialogTaskIcon = $derived(getTaskTypeIcon(taskType));
 
 	// Keep the active section valid when the available sections change (e.g. switching task type)
@@ -86,7 +156,7 @@
 	});
 
 	let taskConfig = $state('');
-	let eventTriggers = $state<TaskEventTrigger[]>([TaskEventTrigger.SERVER_START]);
+	let eventTriggers = $state<TriggeredEventType[]>([TriggeredEventType.SERVER_START]);
 
 	// Form state — webhook
 	let webhookUrl = $state('');
@@ -143,10 +213,10 @@
     {
       "type": "section",
       "fields": [
-        {"type": "mrkdwn", "text": "*Version:*\n{{.server_mc_version}}"},
-        {"type": "mrkdwn", "text": "*Players:*\n{{.server_players}}/{{.server_max_players}}"},
-        {"type": "mrkdwn", "text": "*Mod Loader:*\n{{.server_mod_loader}}"},
-        {"type": "mrkdwn", "text": "*Port:*\n{{.server_port}}"}
+        {"type": "mrkdwn", "text": "*Version:*\\n{{.server_mc_version}}"},
+        {"type": "mrkdwn", "text": "*Players:*\\n{{.server_players}}/{{.server_max_players}}"},
+        {"type": "mrkdwn", "text": "*Mod Loader:*\\n{{.server_mod_loader}}"},
+        {"type": "mrkdwn", "text": "*Port:*\\n{{.server_port}}"}
       ]
     },
     {
@@ -200,20 +270,18 @@
   "message": "{{.server_name}} — {{.server_status}}",
   "tags": ["video_game"],
   "priority": 3
-}`,
+}`
 	};
 
-	// CodeMirror editor for payload template
-	let editorContainer = $state<HTMLDivElement>();
-	let editorView = $state<EditorView | null>(null);
-	const editableCompartment = new Compartment();
+	// Payload shown in the editor
+	let displayValue = $derived(customizePayload ? payloadTemplate : getDefaultTemplate(webhookUrl));
 
 	const presetLabels: Record<string, string> = {
 		discord: 'Discord',
 		slack: 'Slack',
 		teams: 'Teams',
 		ntfy: 'ntfy',
-		generic: 'Generic',
+		generic: 'Generic'
 	};
 
 	function isDiscordUrl(url: string): boolean {
@@ -223,7 +291,8 @@
 	function getDefaultPresetKey(url: string): string {
 		if (isDiscordUrl(url)) return 'discord';
 		if (url.includes('hooks.slack.com')) return 'slack';
-		if (url.includes('.webhook.office.com') || url.includes('outlook.office.com/webhook')) return 'teams';
+		if (url.includes('.webhook.office.com') || url.includes('outlook.office.com/webhook'))
+			return 'teams';
 		if (url.includes('ntfy.sh')) return 'ntfy';
 		return 'generic';
 	}
@@ -256,69 +325,7 @@
 		}
 	});
 
-	// Create/destroy editor when dialog opens with a webhook task
-	$effect(() => {
-		if (showCreateDialog && taskType === TaskType.WEBHOOK && editorContainer && !editorView) {
-			createEditor();
-		}
-		if (editorView && (!showCreateDialog || taskType !== TaskType.WEBHOOK || !editorContainer)) {
-			destroyEditor();
-		}
-	});
-
-	// Sync editor content/editable when toggle or URL changes
-	$effect(() => {
-		if (!editorView) return;
-		const displayValue = customizePayload ? payloadTemplate : getDefaultTemplate(webhookUrl);
-		const currentValue = editorView.state.doc.toString();
-		const transactions: any[] = [];
-		if (displayValue !== currentValue) {
-			transactions.push({ changes: { from: 0, to: editorView.state.doc.length, insert: displayValue } });
-		}
-		transactions.push({ effects: editableCompartment.reconfigure(EditorView.editable.of(customizePayload)) });
-		for (const t of transactions) editorView.dispatch(t);
-	});
-
-	$effect(() => {
-		return () => destroyEditor();
-	});
-
-	function createEditor() {
-		if (!editorContainer) return;
-		const displayValue = customizePayload ? payloadTemplate : getDefaultTemplate(webhookUrl);
-		editorView = new EditorView({
-			parent: editorContainer,
-			state: EditorState.create({
-				doc: displayValue,
-				extensions: [
-					basicSetup,
-					json(),
-					oneDark,
-					editableCompartment.of(EditorView.editable.of(customizePayload)),
-					EditorView.updateListener.of((update) => {
-						if (update.docChanged && customizePayload) {
-							payloadTemplate = update.state.doc.toString();
-						}
-					}),
-					EditorView.theme({
-						'&': { fontSize: '12px', height: '100%' },
-						'.cm-scroller': { overflow: 'auto', fontFamily: "'JetBrains Mono', 'Fira Code', monospace" },
-						'.cm-content': { padding: '8px 0' },
-						'&.cm-focused': { outline: 'none' },
-					}),
-				],
-			}),
-		});
-	}
-
-	function destroyEditor() {
-		if (editorView) {
-			editorView.destroy();
-			editorView = null;
-		}
-	}
-
-	function toggleEventTrigger(trigger: TaskEventTrigger) {
+	function toggleEventTrigger(trigger: TriggeredEventType) {
 		if (eventTriggers.includes(trigger)) {
 			eventTriggers = eventTriggers.filter((t) => t !== trigger);
 		} else {
@@ -330,11 +337,6 @@
 		const template = webhookTemplatePresets[key];
 		if (template) {
 			payloadTemplate = template;
-			if (editorView) {
-				editorView.dispatch({
-					changes: { from: 0, to: editorView.state.doc.length, insert: template },
-				});
-			}
 		}
 	}
 
@@ -374,7 +376,7 @@
 		backupMaxBackups = 0;
 		activeSection = 'general';
 		taskConfig = '';
-		eventTriggers = [TaskEventTrigger.SERVER_START];
+		eventTriggers = [TriggeredEventType.SERVER_START];
 		webhookUrl = '';
 		webhookSecret = '';
 		payloadTemplate = '';
@@ -411,7 +413,11 @@
 		requireOnline = task.requireOnline;
 
 		let parsed: Record<string, unknown> = {};
-		try { parsed = JSON.parse(task.config || '{}'); } catch { parsed = {}; }
+		try {
+			parsed = JSON.parse(task.config || '{}');
+		} catch {
+			parsed = {};
+		}
 		command = typeof parsed.command === 'string' ? parsed.command : '';
 		scriptPath = typeof parsed.script_path === 'string' ? parsed.script_path : '';
 		scriptArgs = Array.isArray(parsed.args) ? parsed.args.join(' ') : '';
@@ -423,7 +429,10 @@
 		backupMaxBackups = typeof parsed.max_backups === 'number' ? parsed.max_backups : 0;
 
 		taskConfig = task.config;
-		eventTriggers = task.eventTriggers && task.eventTriggers.length > 0 ? [...task.eventTriggers] : [TaskEventTrigger.SERVER_START];
+		eventTriggers =
+			task.eventTriggers && task.eventTriggers.length > 0
+				? [...task.eventTriggers]
+				: [TriggeredEventType.SERVER_START];
 
 		// Webhook-specific: parse JSON config
 		if (task.taskType === TaskType.WEBHOOK) {
@@ -434,7 +443,8 @@
 				originalWebhookHasSecret = !!cfg.secret;
 				payloadTemplate = cfg.payload_template || '';
 				// A stored template that matches the URL's default preset counts as "not customized".
-				customizePayload = !!payloadTemplate && payloadTemplate.trim() !== getDefaultTemplate(webhookUrl).trim();
+				customizePayload =
+					!!payloadTemplate && payloadTemplate.trim() !== getDefaultTemplate(webhookUrl).trim();
 				webhookMaxRetries = cfg.max_retries ?? 3;
 				webhookRetryDelayMs = cfg.retry_delay_ms ?? 1000;
 				webhookTimeoutMs = cfg.timeout_ms ?? 5000;
@@ -458,12 +468,18 @@
 			case TaskType.SCRIPT:
 				return JSON.stringify({
 					script_path: scriptPath.trim(),
-					args: scriptArgs.split(' ').map((a) => a.trim()).filter(Boolean)
+					args: scriptArgs
+						.split(' ')
+						.map((a) => a.trim())
+						.filter(Boolean)
 				});
 			case TaskType.BACKUP:
 				return JSON.stringify({
 					backup_name: backupName.trim(),
-					paths: backupPaths.split(',').map((p) => p.trim()).filter(Boolean),
+					paths: backupPaths
+						.split(',')
+						.map((p) => p.trim())
+						.filter(Boolean),
 					compress: backupCompress,
 					retention_days: backupRetentionDays,
 					min_backups: backupMinBackups,
@@ -482,7 +498,7 @@
 			payload_template: customizePayload ? payloadTemplate : getDefaultTemplate(webhookUrl),
 			max_retries: webhookMaxRetries,
 			retry_delay_ms: webhookRetryDelayMs,
-			timeout_ms: webhookTimeoutMs,
+			timeout_ms: webhookTimeoutMs
 		};
 		// Preserve existing secret on edit unless user typed a new one
 		if (webhookSecret) {
@@ -536,7 +552,10 @@
 		try {
 			const config = taskType === TaskType.WEBHOOK ? buildWebhookConfig() : buildTaskConfig();
 
-			const runAtTimestamp = scheduleType === ScheduleType.ONCE && runAt ? timestampFromDate(new Date(runAt)) : undefined;
+			const runAtTimestamp =
+				scheduleType === ScheduleType.ONCE && runAt
+					? timestampFromDate(new Date(runAt))
+					: undefined;
 
 			const isEventScheduled = scheduleType === ScheduleType.EVENT;
 			if (selectedTask) {
@@ -556,7 +575,7 @@
 					retryDelay: retryDelay,
 					requireOnline: requireOnline,
 					eventTriggers: isEventScheduled ? eventTriggers : [],
-					clearEventTriggers: !isEventScheduled,
+					clearEventTriggers: !isEventScheduled
 				});
 				await rpcClient.task.updateTask(request);
 				toast.success('Task updated successfully');
@@ -576,7 +595,7 @@
 					retryCount: retryCount,
 					retryDelay: retryDelay,
 					requireOnline: requireOnline,
-					eventTriggers: isEventScheduled ? eventTriggers : [],
+					eventTriggers: isEventScheduled ? eventTriggers : []
 				});
 				await rpcClient.task.createTask(request);
 				toast.success('Task created successfully');
@@ -593,7 +612,8 @@
 
 	async function toggleTask(task: ScheduledTask) {
 		try {
-			const newStatus = task.status === TaskStatus.ENABLED ? TaskStatus.DISABLED : TaskStatus.ENABLED;
+			const newStatus =
+				task.status === TaskStatus.ENABLED ? TaskStatus.DISABLED : TaskStatus.ENABLED;
 			const request = create(ToggleTaskRequestSchema, { id: task.id, status: newStatus });
 			await rpcClient.task.toggleTask(request);
 			toast.success(`Task ${newStatus === TaskStatus.ENABLED ? 'enabled' : 'disabled'}`);
@@ -643,56 +663,75 @@
 
 	function getTaskTypeLabel(type: TaskType): string {
 		switch (type) {
-			case TaskType.COMMAND: return 'Command';
-			case TaskType.BACKUP: return 'Backup';
-			case TaskType.RESTART: return 'Restart';
-			case TaskType.START: return 'Start';
-			case TaskType.STOP: return 'Stop';
-			case TaskType.SCRIPT: return 'Script';
-			case TaskType.WEBHOOK: return 'Webhook';
-			default: return 'Unknown';
+			case TaskType.COMMAND:
+				return 'Command';
+			case TaskType.BACKUP:
+				return 'Backup';
+			case TaskType.RESTART:
+				return 'Restart';
+			case TaskType.START:
+				return 'Start';
+			case TaskType.STOP:
+				return 'Stop';
+			case TaskType.SCRIPT:
+				return 'Script';
+			case TaskType.WEBHOOK:
+				return 'Webhook';
+			default:
+				return 'Unknown';
 		}
 	}
 
 	function getTaskTypeIcon(type: TaskType) {
 		switch (type) {
-			case TaskType.COMMAND: return Terminal;
-			case TaskType.BACKUP: return Archive;
-			case TaskType.RESTART: return RotateCcw;
-			case TaskType.START: return Power;
-			case TaskType.STOP: return Square;
-			case TaskType.SCRIPT: return FileText;
-			case TaskType.WEBHOOK: return WebhookIcon;
-			default: return Clock;
+			case TaskType.COMMAND:
+				return Terminal;
+			case TaskType.BACKUP:
+				return Archive;
+			case TaskType.RESTART:
+				return RotateCcw;
+			case TaskType.START:
+				return Power;
+			case TaskType.STOP:
+				return Square;
+			case TaskType.SCRIPT:
+				return FileText;
+			case TaskType.WEBHOOK:
+				return WebhookIcon;
+			default:
+				return Clock;
 		}
 	}
 
 	function getScheduleTypeLabel(s: ScheduleType): string {
 		switch (s) {
-			case ScheduleType.CRON: return 'Cron Expression';
-			case ScheduleType.INTERVAL: return 'Fixed Interval';
-			case ScheduleType.ONCE: return 'Run Once';
-			case ScheduleType.EVENT: return 'On Event';
-			default: return 'Unknown';
-		}
-	}
-
-	function getEventTriggerLabel(e: TaskEventTrigger): string {
-		switch (e) {
-			case TaskEventTrigger.SERVER_START: return 'Server Start';
-			case TaskEventTrigger.SERVER_STOP: return 'Server Stop';
-			case TaskEventTrigger.SERVER_RESTART: return 'Server Restart';
-			default: return 'Unknown';
+			case ScheduleType.CRON:
+				return 'Cron Expression';
+			case ScheduleType.INTERVAL:
+				return 'Fixed Interval';
+			case ScheduleType.ONCE:
+				return 'Run Once';
+			case ScheduleType.EVENT:
+				return 'On Event';
+			default:
+				return 'Unknown';
 		}
 	}
 
 	function getScheduleLabel(task: ScheduledTask): string {
 		switch (task.schedule) {
-			case ScheduleType.CRON: return `Cron: ${task.cronExpr}`;
-			case ScheduleType.INTERVAL: return `Every ${formatInterval(task.intervalSecs)}`;
-			case ScheduleType.ONCE: return task.runAt ? `Once at ${new Date(Number(task.runAt.seconds) * 1000).toLocaleString()}` : 'Once';
-			case ScheduleType.EVENT: return `On ${(task.eventTriggers || []).map(getEventTriggerLabel).join(', ') || 'none'}`;
-			default: return 'Unknown';
+			case ScheduleType.CRON:
+				return `Cron: ${task.cronExpr}`;
+			case ScheduleType.INTERVAL:
+				return `Every ${formatInterval(task.intervalSecs)}`;
+			case ScheduleType.ONCE:
+				return task.runAt
+					? `Once at ${new Date(Number(task.runAt.seconds) * 1000).toLocaleString()}`
+					: 'Once';
+			case ScheduleType.EVENT:
+				return `On ${(task.eventTriggers || []).map(getEventTypeLabel).join(', ') || 'none'}`;
+			default:
+				return 'Unknown';
 		}
 	}
 
@@ -706,7 +745,11 @@
 	function getExecutionStatusBadge(status: ExecutionStatus) {
 		switch (status) {
 			case ExecutionStatus.COMPLETED:
-				return { variant: 'default' as const, icon: CheckCircle2, class: 'bg-green-500/10 text-green-500 border-green-500/20' };
+				return {
+					variant: 'default' as const,
+					icon: CheckCircle2,
+					class: 'bg-green-500/10 text-green-500 border-green-500/20'
+				};
 			case ExecutionStatus.FAILED:
 				return { variant: 'destructive' as const, icon: XCircle, class: '' };
 			case ExecutionStatus.RUNNING:
@@ -724,14 +767,22 @@
 
 	function getExecutionStatusLabel(status: ExecutionStatus): string {
 		switch (status) {
-			case ExecutionStatus.PENDING: return 'Pending';
-			case ExecutionStatus.RUNNING: return 'Running';
-			case ExecutionStatus.COMPLETED: return 'Completed';
-			case ExecutionStatus.FAILED: return 'Failed';
-			case ExecutionStatus.SKIPPED: return 'Skipped';
-			case ExecutionStatus.CANCELLED: return 'Cancelled';
-			case ExecutionStatus.TIMEOUT: return 'Timeout';
-			default: return 'Unknown';
+			case ExecutionStatus.PENDING:
+				return 'Pending';
+			case ExecutionStatus.RUNNING:
+				return 'Running';
+			case ExecutionStatus.COMPLETED:
+				return 'Completed';
+			case ExecutionStatus.FAILED:
+				return 'Failed';
+			case ExecutionStatus.SKIPPED:
+				return 'Skipped';
+			case ExecutionStatus.CANCELLED:
+				return 'Cancelled';
+			case ExecutionStatus.TIMEOUT:
+				return 'Timeout';
+			default:
+				return 'Unknown';
 		}
 	}
 
@@ -780,15 +831,17 @@
 		<div class="flex items-center justify-between">
 			<div>
 				<h3 class="text-lg font-semibold">Tasks</h3>
-				<p class="text-sm text-muted-foreground">Schedule operations or run them on server events (including webhooks).</p>
+				<p class="text-sm text-muted-foreground">
+					Schedule operations or run them on server events (including webhooks).
+				</p>
 			</div>
 			<div class="flex gap-2">
 				<Button variant="outline" size="sm" onclick={loadTasks}>
-					<RefreshCw class="h-4 w-4 mr-2" />
+					<RefreshCw class="mr-2 h-4 w-4" />
 					Refresh
 				</Button>
 				<Button size="sm" onclick={openCreateDialog}>
-					<Plus class="h-4 w-4 mr-2" />
+					<Plus class="mr-2 h-4 w-4" />
 					New Task
 				</Button>
 			</div>
@@ -798,15 +851,17 @@
 		{#if tasks.length === 0}
 			<Card>
 				<CardContent class="py-8">
-					<div class="text-center space-y-4">
-						<Clock class="h-12 w-12 mx-auto text-muted-foreground/50" />
+					<div class="space-y-4 text-center">
+						<Clock class="mx-auto h-12 w-12 text-muted-foreground/50" />
 						<div>
 							<p class="text-lg font-medium">No tasks yet</p>
-							<p class="text-sm text-muted-foreground">Create a scheduled task or a webhook to react to server events.</p>
+							<p class="text-sm text-muted-foreground">
+								Create a scheduled task or a webhook to react to server events.
+							</p>
 						</div>
-						<div class="flex gap-2 justify-center">
+						<div class="flex justify-center gap-2">
 							<Button onclick={openCreateDialog}>
-								<Plus class="h-4 w-4 mr-2" />
+								<Plus class="mr-2 h-4 w-4" />
 								New Task
 							</Button>
 						</div>
@@ -818,16 +873,21 @@
 				{#each tasks as task (task.id)}
 					{@const TaskIcon = getTaskTypeIcon(task.taskType)}
 					{@const webhookUrlDisplay = getWebhookUrlForDisplay(task)}
-					<Card class="hover:shadow-md transition-shadow">
+					<Card class="transition-shadow hover:shadow-md">
 						<CardContent class="p-4">
 							<div class="flex items-start gap-4">
-								<div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+								<div
+									class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10"
+								>
 									<TaskIcon class="h-5 w-5 text-primary" />
 								</div>
-								<div class="flex-1 min-w-0">
-									<div class="flex items-center gap-2 mb-1">
-										<h4 class="font-medium truncate">{task.name}</h4>
-										<Badge variant={task.status === TaskStatus.ENABLED ? 'default' : 'secondary'} class="text-xs">
+								<div class="min-w-0 flex-1">
+									<div class="mb-1 flex items-center gap-2">
+										<h4 class="truncate font-medium">{task.name}</h4>
+										<Badge
+											variant={task.status === TaskStatus.ENABLED ? 'default' : 'secondary'}
+											class="text-xs"
+										>
 											{task.status === TaskStatus.ENABLED ? 'Enabled' : 'Disabled'}
 										</Badge>
 										<Badge variant="outline" class="text-xs">
@@ -835,20 +895,25 @@
 										</Badge>
 										{#if task.schedule === ScheduleType.EVENT}
 											{#each task.eventTriggers as trigger}
-												<Badge variant="outline" class="text-xs flex items-center gap-1">
+												<Badge variant="outline" class="flex items-center gap-1 text-xs">
 													<Zap class="h-3 w-3" />
-													{getEventTriggerLabel(trigger)}
+													{getEventTypeLabel(trigger)}
 												</Badge>
 											{/each}
 										{/if}
 									</div>
 									{#if task.description}
-										<p class="text-sm text-muted-foreground mb-2 truncate">{task.description}</p>
+										<p class="mb-2 truncate text-sm text-muted-foreground">{task.description}</p>
 									{/if}
 									{#if webhookUrlDisplay}
-										<div class="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-											<span class="font-mono truncate max-w-[400px]">{webhookUrlDisplay}</span>
-											<Button variant="ghost" size="icon" class="h-5 w-5" onclick={() => copyText(webhookUrlDisplay)}>
+										<div class="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+											<span class="max-w-[400px] truncate font-mono">{webhookUrlDisplay}</span>
+											<Button
+												variant="ghost"
+												size="icon"
+												class="h-5 w-5"
+												onclick={() => copyText(webhookUrlDisplay)}
+											>
 												<Copy class="h-3 w-3" />
 											</Button>
 										</div>
@@ -870,8 +935,13 @@
 										{/if}
 									</div>
 								</div>
-								<div class="flex items-center gap-1 shrink-0">
-									<Button variant="ghost" size="icon" onclick={() => viewHistory(task)} title="View History">
+								<div class="flex shrink-0 items-center gap-1">
+									<Button
+										variant="ghost"
+										size="icon"
+										onclick={() => viewHistory(task)}
+										title="View History"
+									>
 										<History class="h-4 w-4" />
 									</Button>
 									<Button
@@ -883,17 +953,33 @@
 									>
 										<Play class="h-4 w-4" />
 									</Button>
-									<Button variant="ghost" size="icon" onclick={() => toggleTask(task)} title={task.status === TaskStatus.ENABLED ? 'Disable' : 'Enable'}>
+									<Button
+										variant="ghost"
+										size="icon"
+										onclick={() => toggleTask(task)}
+										title={task.status === TaskStatus.ENABLED ? 'Disable' : 'Enable'}
+									>
 										{#if task.status === TaskStatus.ENABLED}
 											<Pause class="h-4 w-4" />
 										{:else}
 											<Play class="h-4 w-4" />
 										{/if}
 									</Button>
-									<Button variant="ghost" size="icon" onclick={() => openEditDialog(task)} title="Edit">
+									<Button
+										variant="ghost"
+										size="icon"
+										onclick={() => openEditDialog(task)}
+										title="Edit"
+									>
 										<Pencil class="h-4 w-4" />
 									</Button>
-									<Button variant="ghost" size="icon" class="text-destructive hover:text-destructive" onclick={() => deleteTask(task)} title="Delete">
+									<Button
+										variant="ghost"
+										size="icon"
+										class="text-destructive hover:text-destructive"
+										onclick={() => deleteTask(task)}
+										title="Delete"
+									>
 										<Trash2 class="h-4 w-4" />
 									</Button>
 								</div>
@@ -907,30 +993,38 @@
 
 	<!-- Create/Edit Dialog -->
 	<Dialog.Root bind:open={showCreateDialog}>
-		<Dialog.Content class="max-w-4xl! w-[95vw]! h-[80vh]! p-0! gap-0! overflow-hidden flex flex-col" showCloseButton={false}>
+		<Dialog.Content
+			class="flex h-[80vh]! w-[95vw]! max-w-4xl! flex-col gap-0! overflow-hidden p-0!"
+			showCloseButton={false}
+		>
 			<div class="flex h-full">
 				<!-- Sidebar -->
-				<div class="w-56 border-r bg-muted/30 flex flex-col shrink-0">
-					<div class="p-6 border-b">
+				<div class="flex w-56 shrink-0 flex-col border-r bg-muted/30">
+					<div class="border-b p-6">
 						<div class="flex items-center gap-3">
-							<div class="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+							<div
+								class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10"
+							>
 								<DialogTaskIcon class="h-6 w-6 text-primary" />
 							</div>
-							<div class="flex-1 min-w-0">
-								<h3 class="font-semibold truncate">{taskName || (selectedTask ? 'Edit Task' : 'New Task')}</h3>
-								<p class="text-sm text-muted-foreground truncate">{getTaskTypeLabel(taskType)}</p>
+							<div class="min-w-0 flex-1">
+								<h3 class="truncate font-semibold">
+									{taskName || (selectedTask ? 'Edit Task' : 'New Task')}
+								</h3>
+								<p class="truncate text-sm text-muted-foreground">{getTaskTypeLabel(taskType)}</p>
 							</div>
 						</div>
 					</div>
 
-					<nav class="flex-1 p-4 space-y-1">
+					<nav class="flex-1 space-y-1 p-4">
 						{#each dialogSections as section (section.id)}
 							{@const SectionIcon = section.icon}
 							<button
 								onclick={() => (activeSection = section.id)}
-								class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors {activeSection === section.id
+								class="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors {activeSection ===
+								section.id
 									? 'bg-primary text-primary-foreground'
-									: 'hover:bg-muted text-muted-foreground hover:text-foreground'}"
+									: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
 							>
 								<SectionIcon class="h-5 w-5" />
 								<span class="font-medium">{section.label}</span>
@@ -940,12 +1034,12 @@
 				</div>
 
 				<!-- Main Content -->
-				<div class="flex-1 flex flex-col min-w-0">
+				<div class="flex min-w-0 flex-1 flex-col">
 					<!-- Content Header -->
-					<div class="flex items-center justify-between px-8 py-6 border-b bg-muted/30">
+					<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
 						<div>
 							<h2 class="text-2xl font-semibold tracking-tight">{currentSection.title}</h2>
-							<p class="text-muted-foreground mt-1">{currentSection.description}</p>
+							<p class="mt-1 text-muted-foreground">{currentSection.description}</p>
 						</div>
 						<Button variant="ghost" size="icon" onclick={closeDialog} class="h-10 w-10">
 							<X class="h-5 w-5" />
@@ -958,28 +1052,59 @@
 							{#if activeSection === 'general'}
 								<div class="space-y-3">
 									<Label for="taskName">Task Name *</Label>
-									<Input id="taskName" bind:value={taskName} placeholder="Daily Backup" class="h-11" />
+									<Input
+										id="taskName"
+										bind:value={taskName}
+										placeholder="Daily Backup"
+										class="h-11"
+									/>
 								</div>
 
 								<div class="space-y-3">
 									<Label for="taskDescription">Description</Label>
-									<Input id="taskDescription" bind:value={taskDescription} placeholder="Runs every day at midnight" class="h-11" />
+									<Input
+										id="taskDescription"
+										bind:value={taskDescription}
+										placeholder="Runs every day at midnight"
+										class="h-11"
+									/>
 								</div>
 
 								<div class="space-y-3">
 									<Label>Task Type</Label>
-									<Select.Root type="single" name="taskType" value={taskType.toString()} onValueChange={(v) => { if (v) taskType = parseInt(v) as TaskType; }}>
-										<Select.Trigger class="w-full h-11!">
+									<Select.Root
+										type="single"
+										name="taskType"
+										value={taskType.toString()}
+										onValueChange={(v) => {
+											if (v) taskType = parseInt(v) as TaskType;
+										}}
+									>
+										<Select.Trigger class="h-11! w-full">
 											{getTaskTypeLabel(taskType)}
 										</Select.Trigger>
 										<Select.Content>
-											<Select.Item value={TaskType.COMMAND.toString()} label="Command">Command</Select.Item>
-											<Select.Item value={TaskType.BACKUP.toString()} label="Backup">Backup</Select.Item>
-											<Select.Item value={TaskType.RESTART.toString()} label="Restart Server">Restart Server</Select.Item>
-											<Select.Item value={TaskType.START.toString()} label="Start Server">Start Server</Select.Item>
-											<Select.Item value={TaskType.STOP.toString()} label="Stop Server">Stop Server</Select.Item>
-											<Select.Item value={TaskType.SCRIPT.toString()} label="Script">Script</Select.Item>
-											<Select.Item value={TaskType.WEBHOOK.toString()} label="Webhook">Webhook</Select.Item>
+											<Select.Item value={TaskType.COMMAND.toString()} label="Command"
+												>Command</Select.Item
+											>
+											<Select.Item value={TaskType.BACKUP.toString()} label="Backup"
+												>Backup</Select.Item
+											>
+											<Select.Item value={TaskType.RESTART.toString()} label="Restart Server"
+												>Restart Server</Select.Item
+											>
+											<Select.Item value={TaskType.START.toString()} label="Start Server"
+												>Start Server</Select.Item
+											>
+											<Select.Item value={TaskType.STOP.toString()} label="Stop Server"
+												>Stop Server</Select.Item
+											>
+											<Select.Item value={TaskType.SCRIPT.toString()} label="Script"
+												>Script</Select.Item
+											>
+											<Select.Item value={TaskType.WEBHOOK.toString()} label="Webhook"
+												>Webhook</Select.Item
+											>
 										</Select.Content>
 									</Select.Root>
 								</div>
@@ -987,34 +1112,68 @@
 								{#if taskType === TaskType.COMMAND}
 									<div class="space-y-3">
 										<Label for="command">RCON Command *</Label>
-										<Input id="command" bind:value={command} placeholder="say Hello World!" class="h-11 font-mono" />
+										<Input
+											id="command"
+											bind:value={command}
+											placeholder="say Hello World!"
+											class="h-11 font-mono"
+										/>
 										<p class="text-sm text-muted-foreground">The command to execute via RCON</p>
 									</div>
 								{:else if taskType === TaskType.SCRIPT}
 									<div class="space-y-3">
 										<Label for="scriptPath">Script Path or Executable *</Label>
-										<Input id="scriptPath" bind:value={scriptPath} placeholder="/data/scripts/cleanup.sh" class="h-11 font-mono" />
-										<p class="text-sm text-muted-foreground">Path to the script/executable inside the container</p>
+										<Input
+											id="scriptPath"
+											bind:value={scriptPath}
+											placeholder="/data/scripts/cleanup.sh"
+											class="h-11 font-mono"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Path to the script/executable inside the container
+										</p>
 									</div>
 									<div class="space-y-3">
 										<Label for="scriptArgs">Arguments</Label>
-										<Input id="scriptArgs" bind:value={scriptArgs} placeholder="--verbose --level 2" class="h-11 font-mono" />
-										<p class="text-sm text-muted-foreground">Space-separated arguments to pass to the script/executable</p>
+										<Input
+											id="scriptArgs"
+											bind:value={scriptArgs}
+											placeholder="--verbose --level 2"
+											class="h-11 font-mono"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Space-separated arguments to pass to the script/executable
+										</p>
 									</div>
 								{:else if taskType === TaskType.BACKUP}
 									<div class="space-y-3">
 										<Label for="backupName">Backup Name</Label>
-										<Input id="backupName" bind:value={backupName} placeholder={taskName || 'Daily Backup'} class="h-11" />
-										<p class="text-sm text-muted-foreground">Used as the archive filename prefix. Defaults to the task name.</p>
+										<Input
+											id="backupName"
+											bind:value={backupName}
+											placeholder={taskName || 'Daily Backup'}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Used as the archive filename prefix. Defaults to the task name.
+										</p>
 									</div>
 									<div class="space-y-3">
 										<Label for="backupPaths">Paths to Include</Label>
-										<Input id="backupPaths" bind:value={backupPaths} placeholder="world, world_nether, world_the_end" class="h-11 font-mono" />
+										<Input
+											id="backupPaths"
+											bind:value={backupPaths}
+											placeholder="world, world_nether, world_the_end"
+											class="h-11 font-mono"
+										/>
 										<p class="text-sm text-muted-foreground">
-											Comma-separated paths relative to the server directory. Leave empty to back up the world directory.
+											Comma-separated paths relative to the server directory. Leave empty to back up
+											the world directory.
 										</p>
 									</div>
-									<label class="flex items-start gap-4 p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+									<label
+										class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+									>
 										<Switch bind:checked={backupCompress} class="mt-0.5" />
 										<div class="space-y-1">
 											<span class="font-medium">Compress Archive</span>
@@ -1026,33 +1185,67 @@
 									<div class="grid grid-cols-3 gap-6">
 										<div class="space-y-3">
 											<Label for="retentionDays">Retention (days)</Label>
-											<Input id="retentionDays" type="number" bind:value={backupRetentionDays} min={0} class="h-11" />
-											<p class="text-sm text-muted-foreground">Delete backups older than this. 0 = keep forever</p>
+											<Input
+												id="retentionDays"
+												type="number"
+												bind:value={backupRetentionDays}
+												min={0}
+												class="h-11"
+											/>
+											<p class="text-sm text-muted-foreground">
+												Delete backups older than this. 0 = keep forever
+											</p>
 										</div>
 										<div class="space-y-3">
 											<Label for="minBackups">Min Backups</Label>
-											<Input id="minBackups" type="number" bind:value={backupMinBackups} min={0} disabled={backupRetentionDays <= 0} class="h-11" />
-											<p class="text-sm text-muted-foreground">Never expire by age below this many, even past retention</p>
+											<Input
+												id="minBackups"
+												type="number"
+												bind:value={backupMinBackups}
+												min={0}
+												disabled={backupRetentionDays <= 0}
+												class="h-11"
+											/>
+											<p class="text-sm text-muted-foreground">
+												Never expire by age below this many, even past retention
+											</p>
 										</div>
 										<div class="space-y-3">
 											<Label for="maxBackups">Max Backups</Label>
-											<Input id="maxBackups" type="number" bind:value={backupMaxBackups} min={0} class="h-11" />
-											<p class="text-sm text-muted-foreground">Hard cap, oldest deleted first. 0 = unlimited</p>
+											<Input
+												id="maxBackups"
+												type="number"
+												bind:value={backupMaxBackups}
+												min={0}
+												class="h-11"
+											/>
+											<p class="text-sm text-muted-foreground">
+												Hard cap, oldest deleted first. 0 = unlimited
+											</p>
 										</div>
 									</div>
 									<p class="text-sm text-muted-foreground">
-										World saving is automatically paused and flushed while the backup runs, then re-enabled.
+										World saving is automatically paused and flushed while the backup runs, then
+										re-enabled.
 									</p>
 								{:else if taskType === TaskType.WEBHOOK}
 									<div class="space-y-3">
 										<Label for="url">Webhook URL *</Label>
-										<Input id="url" bind:value={webhookUrl} placeholder={isDiscordUrl(webhookUrl) ? 'https://discord.com/api/webhooks/...' : 'https://example.com/webhook'} class="h-11 font-mono" />
+										<Input
+											id="url"
+											bind:value={webhookUrl}
+											placeholder={isDiscordUrl(webhookUrl)
+												? 'https://discord.com/api/webhooks/...'
+												: 'https://example.com/webhook'}
+											class="h-11 font-mono"
+										/>
 										<p class="text-sm text-muted-foreground">
-											The endpoint the request is sent to. Discord/Slack/Teams/ntfy URLs are auto-detected for the default payload preset.
+											The endpoint the request is sent to. Discord/Slack/Teams/ntfy URLs are
+											auto-detected for the default payload preset.
 										</p>
 									</div>
 								{:else}
-									<div class="p-4 border rounded-lg border-dashed text-sm text-muted-foreground">
+									<div class="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
 										No additional configuration required for this task type.
 									</div>
 								{/if}
@@ -1060,11 +1253,12 @@
 								<div class="flex items-center justify-between">
 									<div>
 										<Label class="text-base">Customize Payload</Label>
-										<p class="text-sm text-muted-foreground mt-0.5">
+										<p class="mt-0.5 text-sm text-muted-foreground">
 											{#if customizePayload}
 												Using a custom payload template
 											{:else}
-												Using the default {presetLabels[getDefaultPresetKey(webhookUrl)] || 'Generic'} preset
+												Using the default {presetLabels[getDefaultPresetKey(webhookUrl)] ||
+													'Generic'} preset
 											{/if}
 										</p>
 									</div>
@@ -1079,12 +1273,17 @@
 									/>
 								</div>
 
-								<div class={!customizePayload ? 'opacity-40 pointer-events-none' : ''}>
-									<p class="text-sm font-medium text-muted-foreground mb-1.5">Presets</p>
+								<div class={!customizePayload ? 'pointer-events-none opacity-40' : ''}>
+									<p class="mb-1.5 text-sm font-medium text-muted-foreground">Presets</p>
 									<div class="flex flex-wrap gap-1">
 										{#each Object.keys(presetLabels) as key}
 											{#if webhookTemplatePresets[key]}
-												<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => applyPreset(key)}>
+												<Button
+													variant="outline"
+													size="sm"
+													class="h-7 text-xs"
+													onclick={() => applyPreset(key)}
+												>
 													{presetLabels[key]}
 												</Button>
 											{/if}
@@ -1092,33 +1291,32 @@
 									</div>
 								</div>
 
-								<div
-									bind:this={editorContainer}
-									class="h-[340px] rounded-md border border-border/50 overflow-hidden {!customizePayload ? 'opacity-50 pointer-events-none' : ''}"
-								></div>
+								<div class={!customizePayload ? 'pointer-events-none opacity-50' : ''}>
+									<CodeEditor
+										value={displayValue}
+										language="json-template"
+										readOnly={!customizePayload}
+										height="340px"
+										onChange={(v) => {
+											if (customizePayload) payloadTemplate = v;
+										}}
+									/>
+								</div>
 
 								<div class={!customizePayload ? 'opacity-40' : ''}>
-									<p class="text-sm font-medium text-muted-foreground mb-1">Available variables</p>
-									<div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-muted-foreground font-mono p-2 rounded border border-border/50 bg-muted/20">
-										{#each [
-											['{{.event}}', 'Event name'],
-											['{{.timestamp}}', 'ISO 8601 timestamp'],
-											['{{.title}}', 'Event title'],
-											['{{.color}}', 'Color (int, for Discord)'],
-											['{{.server_id}}', 'Server ID'],
-											['{{.server_name}}', 'Server name'],
-											['{{.server_status}}', 'Server status'],
-											['{{.server_mc_version}}', 'MC version'],
-											['{{.server_mod_loader}}', 'Mod loader'],
-											['{{.server_players}}', 'Player count'],
-											['{{.server_max_players}}', 'Max players'],
-											['{{.server_port}}', 'Server port'],
-										] as [variable, description]}
+									<p class="mb-1 text-sm font-medium text-muted-foreground">Available variables</p>
+									<div
+										class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded border border-border/50 bg-muted/20 p-2 font-mono text-xs text-muted-foreground"
+									>
+										{#each [['{{.event}}', 'Event name'], ['{{.timestamp}}', 'ISO 8601 timestamp'], ['{{.title}}', 'Event title'], ['{{.color}}', 'Color (int, for Discord)'], ['{{.server_id}}', 'Server ID'], ['{{.server_name}}', 'Server name'], ['{{.server_status}}', 'Server status'], ['{{.server_mc_version}}', 'MC version'], ['{{.server_mod_loader}}', 'Mod loader'], ['{{.server_players}}', 'Player count'], ['{{.server_max_players}}', 'Max players'], ['{{.server_port}}', 'Server port'], ['{{.player}}', 'Player name (player join/leave events)']] as [variable, description]}
 											<button
-												class="text-left hover:text-foreground transition-colors cursor-pointer"
+												class="cursor-pointer text-left transition-colors hover:text-foreground"
 												title="Copy {variable}"
-												onclick={() => { navigator.clipboard.writeText(variable); toast.success(`Copied ${variable}`); }}
-											>{variable}</button>
+												onclick={() => {
+													navigator.clipboard.writeText(variable);
+													toast.success(`Copied ${variable}`);
+												}}>{variable}</button
+											>
 											<span class="font-sans">{description}</span>
 										{/each}
 									</div>
@@ -1126,15 +1324,30 @@
 							{:else if activeSection === 'schedule'}
 								<div class="space-y-3">
 									<Label>Schedule Type</Label>
-									<Select.Root type="single" name="scheduleType" value={scheduleType.toString()} onValueChange={(v) => { if (v) scheduleType = parseInt(v) as ScheduleType; }}>
-										<Select.Trigger class="w-full h-11!">
+									<Select.Root
+										type="single"
+										name="scheduleType"
+										value={scheduleType.toString()}
+										onValueChange={(v) => {
+											if (v) scheduleType = parseInt(v) as ScheduleType;
+										}}
+									>
+										<Select.Trigger class="h-11! w-full">
 											{getScheduleTypeLabel(scheduleType)}
 										</Select.Trigger>
 										<Select.Content>
-											<Select.Item value={ScheduleType.EVENT.toString()} label="On Event">On Event</Select.Item>
-											<Select.Item value={ScheduleType.CRON.toString()} label="Cron Expression">Cron Expression</Select.Item>
-											<Select.Item value={ScheduleType.INTERVAL.toString()} label="Fixed Interval">Fixed Interval</Select.Item>
-											<Select.Item value={ScheduleType.ONCE.toString()} label="Run Once">Run Once</Select.Item>
+											<Select.Item value={ScheduleType.EVENT.toString()} label="On Event"
+												>On Event</Select.Item
+											>
+											<Select.Item value={ScheduleType.CRON.toString()} label="Cron Expression"
+												>Cron Expression</Select.Item
+											>
+											<Select.Item value={ScheduleType.INTERVAL.toString()} label="Fixed Interval"
+												>Fixed Interval</Select.Item
+											>
+											<Select.Item value={ScheduleType.ONCE.toString()} label="Run Once"
+												>Run Once</Select.Item
+											>
 										</Select.Content>
 									</Select.Root>
 								</div>
@@ -1142,15 +1355,27 @@
 								{#if scheduleType === ScheduleType.CRON}
 									<div class="space-y-3">
 										<Label for="cronExpr">Cron Expression *</Label>
-										<Input id="cronExpr" bind:value={cronExpr} placeholder="0 0 * * *" class="h-11 font-mono" />
+										<Input
+											id="cronExpr"
+											bind:value={cronExpr}
+											placeholder="0 0 * * *"
+											class="h-11 font-mono"
+										/>
 										<p class="text-sm text-muted-foreground">
-											Format: minute hour day month weekday (e.g., "0 0 * * *" for daily at midnight)
+											Format: minute hour day month weekday (e.g., "0 0 * * *" for daily at
+											midnight)
 										</p>
 									</div>
 								{:else if scheduleType === ScheduleType.INTERVAL}
 									<div class="space-y-3">
 										<Label for="intervalSecs">Interval (seconds)</Label>
-										<Input id="intervalSecs" type="number" bind:value={intervalSecs} min={60} class="h-11" />
+										<Input
+											id="intervalSecs"
+											type="number"
+											bind:value={intervalSecs}
+											min={60}
+											class="h-11"
+										/>
 										<p class="text-sm text-muted-foreground">
 											Minimum 60 seconds. Current: every {formatInterval(intervalSecs)}
 										</p>
@@ -1159,21 +1384,23 @@
 									<div class="space-y-3">
 										<Label for="runAt">Run At</Label>
 										<Input id="runAt" type="datetime-local" bind:value={runAt} class="h-11" />
-										<p class="text-sm text-muted-foreground">The task runs once at this time, then is disabled</p>
+										<p class="text-sm text-muted-foreground">
+											The task runs once at this time, then is disabled
+										</p>
 									</div>
 								{:else if scheduleType === ScheduleType.EVENT}
 									<div class="space-y-3">
 										<Label>Events *</Label>
-										<div class="grid grid-cols-1 gap-2 p-3 rounded-lg border border-border/50 bg-muted/20">
-											{#each [
-												{ trigger: TaskEventTrigger.SERVER_START, label: 'Server Start', description: 'When the server starts' },
-												{ trigger: TaskEventTrigger.SERVER_STOP, label: 'Server Stop', description: 'When the server stops' },
-												{ trigger: TaskEventTrigger.SERVER_RESTART, label: 'Server Restart', description: 'When the server restarts' },
-											] as { trigger, label, description }}
-												<label class="flex items-center gap-3 cursor-pointer hover:bg-muted/40 p-2 rounded">
+										<div
+											class="grid grid-cols-1 gap-2 rounded-lg border border-border/50 bg-muted/20 p-3"
+										>
+											{#each SERVER_EVENT_TYPES as { type, label, description }}
+												<label
+													class="flex cursor-pointer items-center gap-3 rounded p-2 hover:bg-muted/40"
+												>
 													<Checkbox
-														checked={eventTriggers.includes(trigger)}
-														onCheckedChange={() => toggleEventTrigger(trigger)}
+														checked={eventTriggers.includes(type)}
+														onCheckedChange={() => toggleEventTrigger(type)}
 													/>
 													<div>
 														<span class="text-sm font-medium">{label}</span>
@@ -1182,72 +1409,137 @@
 												</label>
 											{/each}
 										</div>
-										<p class="text-sm text-muted-foreground">The task runs whenever any selected event fires.</p>
+										<p class="text-sm text-muted-foreground">
+											The task runs whenever any selected event fires.
+										</p>
 									</div>
 								{/if}
 							{:else if activeSection === 'advanced'}
 								{#if taskType === TaskType.WEBHOOK}
-								<div class="space-y-3">
-									<Label for="secret">Secret (optional)</Label>
-									<Input id="secret" type="password" bind:value={webhookSecret} placeholder={originalWebhookHasSecret ? '(unchanged)' : 'HMAC signing secret'} class="h-11" />
-									<p class="text-sm text-muted-foreground">Signs the payload with HMAC-SHA256 so the receiver can verify it.</p>
-								</div>
+									<div class="space-y-3">
+										<Label for="secret">Secret (optional)</Label>
+										<Input
+											id="secret"
+											type="password"
+											bind:value={webhookSecret}
+											placeholder={originalWebhookHasSecret ? '(unchanged)' : 'HMAC signing secret'}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Signs the payload with HMAC-SHA256 so the receiver can verify it.
+										</p>
+									</div>
 
-								<div class="grid grid-cols-3 gap-6">
-									<div class="space-y-3">
-										<Label for="maxRetries">Max Retries</Label>
-										<Input id="maxRetries" type="number" bind:value={webhookMaxRetries} min={0} max={10} class="h-11" />
-										<p class="text-sm text-muted-foreground">Delivery attempts before giving up</p>
+									<div class="grid grid-cols-3 gap-6">
+										<div class="space-y-3">
+											<Label for="maxRetries">Max Retries</Label>
+											<Input
+												id="maxRetries"
+												type="number"
+												bind:value={webhookMaxRetries}
+												min={0}
+												max={10}
+												class="h-11"
+											/>
+											<p class="text-sm text-muted-foreground">
+												Delivery attempts before giving up
+											</p>
+										</div>
+										<div class="space-y-3">
+											<Label for="retryDelayMs">Retry Delay (ms)</Label>
+											<Input
+												id="retryDelayMs"
+												type="number"
+												bind:value={webhookRetryDelayMs}
+												min={100}
+												max={60000}
+												class="h-11"
+											/>
+											<p class="text-sm text-muted-foreground">Wait between delivery attempts</p>
+										</div>
+										<div class="space-y-3">
+											<Label for="webhookTimeout">Timeout (ms)</Label>
+											<Input
+												id="webhookTimeout"
+												type="number"
+												bind:value={webhookTimeoutMs}
+												min={1000}
+												max={30000}
+												class="h-11"
+											/>
+											<p class="text-sm text-muted-foreground">Per-attempt request timeout</p>
+										</div>
 									</div>
-									<div class="space-y-3">
-										<Label for="retryDelayMs">Retry Delay (ms)</Label>
-										<Input id="retryDelayMs" type="number" bind:value={webhookRetryDelayMs} min={100} max={60000} class="h-11" />
-										<p class="text-sm text-muted-foreground">Wait between delivery attempts</p>
-									</div>
-									<div class="space-y-3">
-										<Label for="webhookTimeout">Timeout (ms)</Label>
-										<Input id="webhookTimeout" type="number" bind:value={webhookTimeoutMs} min={1000} max={30000} class="h-11" />
-										<p class="text-sm text-muted-foreground">Per-attempt request timeout</p>
-									</div>
-								</div>
 								{:else}
-								<div class="space-y-3">
-									<Label for="timeout">Timeout (seconds)</Label>
-									<Input id="timeout" type="number" bind:value={timeout} min={10} max={3600} class="h-11" />
-									<p class="text-sm text-muted-foreground">Maximum execution time before the task is cancelled</p>
-								</div>
-
-								<div class="grid grid-cols-2 gap-6">
 									<div class="space-y-3">
-										<Label for="retryCount">Retry Count</Label>
-										<Input id="retryCount" type="number" bind:value={retryCount} min={0} max={10} class="h-11" />
-										<p class="text-sm text-muted-foreground">Times to retry on failure. 0 = no retries</p>
+										<Label for="timeout">Timeout (seconds)</Label>
+										<Input
+											id="timeout"
+											type="number"
+											bind:value={timeout}
+											min={10}
+											max={3600}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Maximum execution time before the task is cancelled
+										</p>
 									</div>
-									<div class="space-y-3">
-										<Label for="retryDelay">Retry Delay (seconds)</Label>
-										<Input id="retryDelay" type="number" bind:value={retryDelay} min={1} class="h-11" />
-										<p class="text-sm text-muted-foreground">Wait between retry attempts</p>
-									</div>
-								</div>
 
-								<label class="flex items-start gap-4 p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
-									<Switch bind:checked={requireOnline} class="mt-0.5" />
-									<div class="space-y-1">
-										<span class="font-medium">Require Server Online</span>
-										<p class="text-sm text-muted-foreground">Skip this task when the server is offline</p>
+									<div class="grid grid-cols-2 gap-6">
+										<div class="space-y-3">
+											<Label for="retryCount">Retry Count</Label>
+											<Input
+												id="retryCount"
+												type="number"
+												bind:value={retryCount}
+												min={0}
+												max={10}
+												class="h-11"
+											/>
+											<p class="text-sm text-muted-foreground">
+												Times to retry on failure. 0 = no retries
+											</p>
+										</div>
+										<div class="space-y-3">
+											<Label for="retryDelay">Retry Delay (seconds)</Label>
+											<Input
+												id="retryDelay"
+												type="number"
+												bind:value={retryDelay}
+												min={1}
+												class="h-11"
+											/>
+											<p class="text-sm text-muted-foreground">Wait between retry attempts</p>
+										</div>
 									</div>
-								</label>
+
+									<label
+										class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+									>
+										<Switch bind:checked={requireOnline} class="mt-0.5" />
+										<div class="space-y-1">
+											<span class="font-medium">Require Server Online</span>
+											<p class="text-sm text-muted-foreground">
+												Skip this task when the server is offline
+											</p>
+										</div>
+									</label>
 								{/if}
 							{/if}
 						</div>
 					</div>
 
 					<!-- Footer -->
-					<div class="p-4 border-t bg-muted/20 flex justify-between items-center">
+					<div class="flex items-center justify-between border-t bg-muted/20 p-4">
 						<Button variant="ghost" onclick={closeDialog}>Cancel</Button>
-						<Button onclick={saveTask} disabled={!taskName.trim() || creating} class="min-w-[120px]">
+						<Button
+							onclick={saveTask}
+							disabled={!taskName.trim() || creating}
+							class="min-w-[120px]"
+						>
 							{#if creating}
-								<Loader2 class="h-4 w-4 animate-spin mr-2" />
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 								{selectedTask ? 'Saving...' : 'Creating...'}
 							{:else}
 								{selectedTask ? 'Save Changes' : 'Create Task'}
@@ -1261,7 +1553,7 @@
 
 	<!-- History Dialog -->
 	<Dialog.Root bind:open={showHistoryDialog}>
-		<Dialog.Content class="max-w-2xl max-h-[80vh] overflow-y-auto">
+		<Dialog.Content class="max-h-[80vh] max-w-2xl overflow-y-auto">
 			<Dialog.Header>
 				<Dialog.Title>Task History: {selectedTask?.name}</Dialog.Title>
 				<Dialog.Description>Recent execution history for this task</Dialog.Description>
@@ -1272,40 +1564,52 @@
 					<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 				</div>
 			{:else if taskHistory.length === 0}
-				<div class="text-center py-8 text-muted-foreground">
-					<History class="h-12 w-12 mx-auto mb-4 opacity-50" />
+				<div class="py-8 text-center text-muted-foreground">
+					<History class="mx-auto mb-4 h-12 w-12 opacity-50" />
 					<p>No execution history yet</p>
 				</div>
 			{:else}
-				<div class="space-y-2 max-h-96 overflow-y-auto">
+				<div class="max-h-96 space-y-2 overflow-y-auto">
 					{#each taskHistory as execution (execution.id)}
 						{@const statusInfo = getExecutionStatusBadge(execution.status)}
 						{@const StatusIcon = statusInfo.icon}
-						<div class="p-3 rounded-lg border bg-card">
-							<div class="flex items-start justify-between mb-2">
+						<div class="rounded-lg border bg-card p-3">
+							<div class="mb-2 flex items-start justify-between">
 								<div class="flex items-center gap-2">
 									<Badge variant={statusInfo.variant} class={statusInfo.class}>
-										<StatusIcon class="h-3 w-3 mr-1 {execution.status === ExecutionStatus.RUNNING ? 'animate-spin' : ''}" />
+										<StatusIcon
+											class="mr-1 h-3 w-3 {execution.status === ExecutionStatus.RUNNING
+												? 'animate-spin'
+												: ''}"
+										/>
 										{getExecutionStatusLabel(execution.status)}
 									</Badge>
 									<span class="text-xs text-muted-foreground">
-										{execution.trigger === 'manual' ? 'Manual' : execution.trigger === 'event' ? 'Event' : 'Scheduled'}
+										{execution.trigger === 'manual'
+											? 'Manual'
+											: execution.trigger === 'event'
+												? 'Event'
+												: 'Scheduled'}
 									</span>
 								</div>
 								{#if execution.duration}
-									<span class="text-xs text-muted-foreground">{formatDuration(execution.duration)}</span>
+									<span class="text-xs text-muted-foreground"
+										>{formatDuration(execution.duration)}</span
+									>
 								{/if}
 							</div>
-							<div class="text-xs text-muted-foreground mb-1">
+							<div class="mb-1 text-xs text-muted-foreground">
 								{new Date(Number(execution.startedAt?.seconds || 0) * 1000).toLocaleString()}
 							</div>
 							{#if execution.output}
-								<div class="mt-2 p-2 bg-muted rounded text-xs font-mono whitespace-pre-wrap max-h-24 overflow-y-auto">
+								<div
+									class="mt-2 max-h-24 overflow-y-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap"
+								>
 									{execution.output}
 								</div>
 							{/if}
 							{#if execution.error}
-								<div class="mt-2 p-2 bg-destructive/10 rounded text-xs text-destructive">
+								<div class="mt-2 rounded bg-destructive/10 p-2 text-xs text-destructive">
 									{execution.error}
 								</div>
 							{/if}
@@ -1315,7 +1619,14 @@
 			{/if}
 
 			<Dialog.Footer>
-				<Button variant="outline" onclick={() => { showHistoryDialog = false; selectedTask = null; taskHistory = []; }}>Close</Button>
+				<Button
+					variant="outline"
+					onclick={() => {
+						showHistoryDialog = false;
+						selectedTask = null;
+						taskHistory = [];
+					}}>Close</Button
+				>
 			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>

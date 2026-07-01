@@ -157,8 +157,8 @@
 </script>
 
 <Dialog bind:open>
-	<DialogContent class="max-w-4xl h-[80vh] flex flex-col p-0 gap-0">
-		<DialogHeader class="px-4 py-3 border-b border-zinc-800 bg-zinc-900 shrink-0">
+	<DialogContent class="flex h-[80vh] max-w-4xl flex-col gap-0 p-0">
+		<DialogHeader class="shrink-0 border-b border-zinc-800 bg-zinc-900 px-4 py-3">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-2">
 					<Terminal class="h-4 w-4 text-green-500" />
@@ -169,7 +169,7 @@
 						{getStatusLabel(module.status)}
 					</Badge>
 				</div>
-				<div class="flex items-center gap-1 mr-8">
+				<div class="mr-8 flex items-center gap-1">
 					<Button
 						size="sm"
 						variant="ghost"
@@ -206,7 +206,7 @@
 		</DialogHeader>
 
 		<div
-			class="custom-scrollbar flex-1 overflow-y-auto overflow-x-auto bg-black px-4 py-2"
+			class="custom-scrollbar flex-1 overflow-x-auto overflow-y-auto bg-black px-4 py-2"
 			bind:this={scrollAreaRef}
 			onscroll={handleScroll}
 		>
@@ -223,7 +223,7 @@
 					</div>
 				{:else}
 					{#each logEntries as entry, i (i)}
-						<div class="log-line whitespace-pre-wrap break-all" data-type={entry.level}>
+						<div class="log-line break-all whitespace-pre-wrap" data-type={entry.level}>
 							<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 							{@html ansiConverter.toHtml(entry.message)}
 						</div>
@@ -232,7 +232,9 @@
 			</div>
 		</div>
 
-		<div class="flex items-center justify-between px-4 py-2 border-t border-zinc-800 bg-zinc-950 text-xs text-zinc-500 shrink-0">
+		<div
+			class="flex shrink-0 items-center justify-between border-t border-zinc-800 bg-zinc-950 px-4 py-2 text-xs text-zinc-500"
+		>
 			<div class="flex items-center gap-4">
 				<label class="flex items-center gap-2">
 					<input type="checkbox" bind:checked={autoScroll} class="h-3 w-3 rounded" />

@@ -10,7 +10,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { toast } from 'svelte-sonner';
@@ -50,7 +56,7 @@
 			// Store token from OIDC callback in both localStorage and store state
 			authStore.setToken(token);
 			window.history.replaceState({}, '', '/login');
-			authStore.validateSession().then(valid => {
+			authStore.validateSession().then((valid) => {
 				if (valid) {
 					goto(resolve('/'));
 				} else {
@@ -92,7 +98,7 @@
 				try {
 					const resp = await rpcClient.auth.validateInvite(
 						create(ValidateInviteRequestSchema, { code: invite }),
-						silentCallOptions,
+						silentCallOptions
 					);
 					if (resp.valid) {
 						inviteCode = invite;
@@ -147,11 +153,13 @@
 				email,
 				password,
 				inviteValid ? inviteCode : undefined,
-				inviteValid && inviteRequiresPin ? invitePin : undefined,
+				inviteValid && inviteRequiresPin ? invitePin : undefined
 			);
-			toast.success(authStatus.firstUserSetup ?
-				'Admin account created successfully' :
-				'Account created successfully');
+			toast.success(
+				authStatus.firstUserSetup
+					? 'Admin account created successfully'
+					: 'Account created successfully'
+			);
 			setTimeout(() => {
 				goto(resolve('/'));
 			}, 100);
@@ -163,7 +171,9 @@
 
 	async function handleOIDCLogin() {
 		try {
-			const response = await (await import('$lib/api/rpc-client')).rpcClient.auth.getOIDCLoginURL({});
+			const response = await (
+				await import('$lib/api/rpc-client')
+			).rpcClient.auth.getOIDCLoginURL({});
 			if (response.loginUrl) {
 				window.location.href = response.loginUrl;
 			}
@@ -244,7 +254,13 @@
 					</div>
 				</div>
 			{/if}
-			<Button type="button" variant={localAuthEnabled ? 'outline' : 'default'} class="w-full" onclick={handleOIDCLogin} disabled={loading}>
+			<Button
+				type="button"
+				variant={localAuthEnabled ? 'outline' : 'default'}
+				class="w-full"
+				onclick={handleOIDCLogin}
+				disabled={loading}
+			>
 				Sign in with SSO
 			</Button>
 		{/if}
@@ -326,11 +342,11 @@
 	</form>
 {/snippet}
 
-<div class="min-h-screen flex items-center justify-center bg-background p-4">
+<div class="flex min-h-screen items-center justify-center bg-background p-4">
 	<Card class="w-full max-w-md">
 		<CardHeader class="space-y-1">
-			<div class="flex items-center justify-center mb-4">
-				<img src="/g1_24x24.png" alt="DiscoPanel Logo" class="h-8 w-8 mr-2" />
+			<div class="mb-4 flex items-center justify-center">
+				<img src="/g1_24x24.png" alt="DiscoPanel Logo" class="mr-2 h-8 w-8" />
 				<CardTitle class="text-2xl">DiscoPanel</CardTitle>
 			</div>
 			{#if authStatus.firstUserSetup}
@@ -402,7 +418,9 @@
 						<AlertCircle class="h-4 w-4" />
 						<AlertDescription>
 							{#if oidcEnabled}
-								A local admin account is required for initial setup, even with SSO enabled. This ensures you always have a fallback login to manage the system if your identity provider becomes unavailable.
+								A local admin account is required for initial setup, even with SSO enabled. This
+								ensures you always have a fallback login to manage the system if your identity
+								provider becomes unavailable.
 							{:else}
 								This will be the admin account with full system access.
 							{/if}
@@ -439,11 +457,12 @@
 			{/if}
 
 			{#if showRecovery}
-				<div class="space-y-4 mt-4">
+				<div class="mt-4 space-y-4">
 					<Alert variant="destructive">
 						<AlertCircle class="h-4 w-4" />
 						<AlertDescription>
-							This will delete all users, sessions, and invites. Server configs and data are preserved. This cannot be undone.
+							This will delete all users, sessions, and invites. Server configs and data are
+							preserved. This cannot be undone.
 						</AlertDescription>
 					</Alert>
 					<div class="space-y-2">
@@ -457,10 +476,23 @@
 						/>
 					</div>
 					<div class="flex gap-2">
-						<Button variant="outline" class="flex-1" onclick={() => { showRecovery = false; error = ''; }} disabled={loading}>
+						<Button
+							variant="outline"
+							class="flex-1"
+							onclick={() => {
+								showRecovery = false;
+								error = '';
+							}}
+							disabled={loading}
+						>
 							Cancel
 						</Button>
-						<Button variant="destructive" class="flex-1" onclick={handleRecovery} disabled={loading || !recoveryKey}>
+						<Button
+							variant="destructive"
+							class="flex-1"
+							onclick={handleRecovery}
+							disabled={loading || !recoveryKey}
+						>
 							{#if loading}
 								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 								Resetting...
@@ -474,8 +506,8 @@
 				<div class="mt-4 text-center">
 					<button
 						type="button"
-						class="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
-						onclick={() => showRecovery = true}
+						class="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+						onclick={() => (showRecovery = true)}
 					>
 						<KeyRound class="h-3 w-3" />
 						Forgot access? Recovery

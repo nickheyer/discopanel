@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -14,34 +15,28 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
-// EventBus dispatches server lifecycle events to registered listeners
-// (e.g. event-triggered scheduled tasks). The scheduler implements this.
-type EventBus interface {
-	OnEvent(ctx context.Context, serverID string, eventTrigger storage.TaskEventTrigger)
-}
-
 // Manager handles the lifecycle of modules
 type Manager struct {
 	store        *storage.Store
 	docker       *docker.Client
+	sender       *command.Sender
 	config       *config.Config
 	proxyManager *proxy.Manager
 	logger       *logger.Logger
 	logStreamer  *logger.LogStreamer
-	eventBus     EventBus
 	mu           sync.Mutex
 	running      bool
 }
 
 // NewManager creates a new module manager
-func NewManager(store *storage.Store, docker *docker.Client, cfg *config.Config, proxyManager *proxy.Manager, eventBus EventBus, log *logger.Logger) *Manager {
+func NewManager(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, log *logger.Logger) *Manager {
 	return &Manager{
 		store:        store,
 		docker:       docker,
+		sender:       sender,
 		config:       cfg,
 		proxyManager: proxyManager,
 		logger:       log,
-		eventBus:     eventBus,
 	}
 }
 
@@ -565,67 +560,6 @@ func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
 
 	m.logger.Info("Deleted module: %s", module.Name)
 	return nil
-}
-
-// OnServerStart handles module auto-start when parent server starts
-func (m *Manager) OnServerStart(ctx context.Context, serverID string) error {
-	modules, err := m.store.ListServerModules(ctx, serverID)
-	if err != nil {
-		return fmt.Errorf("failed to list server modules: %w", err)
-	}
-
-	for _, module := range modules {
-		if module.AutoStart && !module.Detached {
-			go func(mod *storage.Module) {
-				// Small delay
-				time.Sleep(2 * time.Second)
-				if err := m.StartModule(context.Background(), mod.ID); err != nil {
-					m.logger.Error("Failed to start module %s on server start: %v", mod.Name, err)
-				} else {
-					m.logger.Info("Started module %s with server", mod.Name)
-				}
-			}(module)
-		}
-	}
-
-	// Fire server start event
-	if m.eventBus != nil {
-		m.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStart)
-	}
-
-	return nil
-}
-
-// OnServerStop handles module stop when parent server stops
-func (m *Manager) OnServerStop(ctx context.Context, serverID string) error {
-	modules, err := m.store.ListModulesFollowingServerLifecycle(ctx, serverID)
-	if err != nil {
-		return fmt.Errorf("failed to list server modules: %w", err)
-	}
-
-	for _, module := range modules {
-		if module.Status == storage.ModuleStatusRunning && !module.Detached {
-			if err := m.StopModule(ctx, module.ID); err != nil {
-				m.logger.Error("Failed to stop module %s on server stop: %v", module.Name, err)
-			} else {
-				m.logger.Info("Stopped module %s with server", module.Name)
-			}
-		}
-	}
-
-	// Fire server stop event
-	if m.eventBus != nil {
-		m.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerStop)
-	}
-
-	return nil
-}
-
-// OnServerRestart fires the server restart event for event-triggered tasks.
-func (m *Manager) OnServerRestart(ctx context.Context, serverID string) {
-	if m.eventBus != nil {
-		m.eventBus.OnEvent(ctx, serverID, storage.TaskEventServerRestart)
-	}
 }
 
 // GetModuleStatus returns current status from Docker

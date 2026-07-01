@@ -1,23 +1,62 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { authStore, canCreateUsers, canUpdateUsers, canDeleteUsers } from '$lib/stores/auth';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
+	import {
+		Table,
+		TableBody,
+		TableCell,
+		TableHead,
+		TableHeader,
+		TableRow
+	} from '$lib/components/ui/table';
 	import { Dialog, DialogContent } from '$lib/components/ui/dialog';
 	import { toast } from 'svelte-sonner';
-	import { Users, UserPlus, Trash2, Edit, Loader2, TicketPlus, Copy, Check, X, Link, Shield, Clock, Hash, Lock, Save, KeyRound, Mail, UserCog } from '@lucide/svelte';
+	import {
+		Users,
+		UserPlus,
+		Trash2,
+		Edit,
+		Loader2,
+		TicketPlus,
+		Copy,
+		Check,
+		X,
+		Link,
+		Shield,
+		Clock,
+		Hash,
+		Lock,
+		Save,
+		KeyRound,
+		Mail,
+		UserCog
+	} from '@lucide/svelte';
 	import { Switch } from '$lib/components/ui/switch';
 	import { create } from '@bufbuild/protobuf';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import type { User, Role } from '$lib/proto/discopanel/v1/common_pb';
 	import type { RegistrationInvite } from '$lib/proto/discopanel/v1/auth_pb';
-	import { CreateUserRequestSchema, UpdateUserRequestSchema, DeleteUserRequestSchema } from '$lib/proto/discopanel/v1/user_pb';
-	import { CreateInviteRequestSchema, DeleteInviteRequestSchema } from '$lib/proto/discopanel/v1/auth_pb';
+	import {
+		CreateUserRequestSchema,
+		UpdateUserRequestSchema,
+		DeleteUserRequestSchema
+	} from '$lib/proto/discopanel/v1/user_pb';
+	import {
+		CreateInviteRequestSchema,
+		DeleteInviteRequestSchema
+	} from '$lib/proto/discopanel/v1/auth_pb';
 	import { getRoleBadgeVariant } from '$lib/utils/role-colors';
 
 	let users = $state<User[]>([]);
@@ -55,11 +94,12 @@
 		maxUses: null as number | null,
 		pin: '',
 		expiresValue: null as number | null,
-		expiresUnit: 'hours' as 'hours' | 'days' | 'weeks',
+		expiresUnit: 'hours' as 'hours' | 'days' | 'weeks'
 	});
 
 	function getInviteStatus(invite: RegistrationInvite): 'active' | 'expired' | 'exhausted' {
-		if (invite.expiresAt && new Date(Number(invite.expiresAt.seconds) * 1000) < new Date()) return 'expired';
+		if (invite.expiresAt && new Date(Number(invite.expiresAt.seconds) * 1000) < new Date())
+			return 'expired';
 		if (invite.maxUses > 0 && invite.useCount >= invite.maxUses) return 'exhausted';
 		return 'active';
 	}
@@ -191,7 +231,7 @@
 				roles: newInviteForm.roles,
 				maxUses: newInviteForm.maxUses || 0,
 				pin: newInviteForm.pin || undefined,
-				expiresInHours,
+				expiresInHours
 			});
 			const resp = await rpcClient.auth.createInvite(req);
 			if (resp.invite) {
@@ -201,7 +241,14 @@
 				toast.success('Invite created and URL copied to clipboard');
 			}
 			showCreateInviteDialog = false;
-			newInviteForm = { description: '', roles: [], maxUses: null, pin: '', expiresValue: null, expiresUnit: 'hours' };
+			newInviteForm = {
+				description: '',
+				roles: [],
+				maxUses: null,
+				pin: '',
+				expiresValue: null,
+				expiresUnit: 'hours'
+			};
 		} catch (error: unknown) {
 			toast.error(error instanceof Error ? error.message : 'Failed to create invite');
 		} finally {
@@ -218,7 +265,7 @@
 	async function deleteInvite(id: string) {
 		try {
 			await rpcClient.auth.deleteInvite(create(DeleteInviteRequestSchema, { id }));
-			invites = invites.filter(i => i.id !== id);
+			invites = invites.filter((i) => i.id !== id);
 			toast.success('Invite revoked');
 		} catch (error: unknown) {
 			toast.error(error instanceof Error ? error.message : 'Failed to revoke invite');
@@ -239,7 +286,7 @@
 	function toggleRole(form: { roles: string[] }, roleName: string) {
 		const idx = form.roles.indexOf(roleName);
 		if (idx >= 0) {
-			form.roles = form.roles.filter(r => r !== roleName);
+			form.roles = form.roles.filter((r) => r !== roleName);
 		} else {
 			form.roles = [...form.roles, roleName];
 		}
@@ -247,7 +294,7 @@
 
 	function toggleInviteRole(roleName: string) {
 		if (newInviteForm.roles.includes(roleName)) {
-			newInviteForm.roles = newInviteForm.roles.filter(r => r !== roleName);
+			newInviteForm.roles = newInviteForm.roles.filter((r) => r !== roleName);
 		} else {
 			newInviteForm.roles = [...newInviteForm.roles, roleName];
 		}
@@ -264,7 +311,7 @@
 	}
 
 	let inviteRoleNames = $derived(
-		availableRoles.filter(r => r.name !== 'anonymous').map(r => r.name)
+		availableRoles.filter((r) => r.name !== 'anonymous').map((r) => r.name)
 	);
 
 	onMount(() => {
@@ -275,20 +322,27 @@
 
 <div class="space-y-4">
 	<div class="flex items-center justify-between">
-		<p class="text-sm text-muted-foreground">Manage user accounts, role assignments, and invite links</p>
+		<p class="text-sm text-muted-foreground">
+			Manage user accounts, role assignments, and invite links
+		</p>
 		<div class="flex items-center gap-2">
 			{#if canCreate}
-				<Button variant="outline" onclick={() => { 
-					fetchRoles();
-					showCreateInviteDialog = true;
-				}}>
+				<Button
+					variant="outline"
+					onclick={() => {
+						fetchRoles();
+						showCreateInviteDialog = true;
+					}}
+				>
 					<TicketPlus class="mr-2 h-4 w-4" />
 					Create Invite
 				</Button>
-				<Button onclick={() => {
-					fetchRoles();
-					showCreateDialog = true;
-				}}>
+				<Button
+					onclick={() => {
+						fetchRoles();
+						showCreateDialog = true;
+					}}
+				>
 					<UserPlus class="mr-2 h-4 w-4" />
 					Add User
 				</Button>
@@ -302,15 +356,15 @@
 			<CardContent>
 				{#if loading}
 					<div class="flex items-center justify-center py-16">
-						<div class="text-center space-y-3">
-							<Loader2 class="h-8 w-8 mx-auto animate-spin text-primary" />
+						<div class="space-y-3 text-center">
+							<Loader2 class="mx-auto h-8 w-8 animate-spin text-primary" />
 							<div class="text-muted-foreground">Loading users...</div>
 						</div>
 					</div>
 				{:else if users.length === 0}
 					<div class="flex items-center justify-center py-16">
-						<div class="text-center space-y-3">
-							<Users class="h-12 w-12 mx-auto text-muted-foreground" />
+						<div class="space-y-3 text-center">
+							<Users class="mx-auto h-12 w-12 text-muted-foreground" />
 							<div class="text-muted-foreground">No users found</div>
 						</div>
 					</div>
@@ -335,7 +389,9 @@
 									<TableCell class="font-medium">{user.username}</TableCell>
 									<TableCell>{user.email || '-'}</TableCell>
 									<TableCell>
-										<Badge variant="outline" class="capitalize">{user.authProvider || 'local'}</Badge>
+										<Badge variant="outline" class="capitalize"
+											>{user.authProvider || 'local'}</Badge
+										>
 									</TableCell>
 									<TableCell>
 										<div class="flex flex-wrap gap-1">
@@ -345,7 +401,7 @@
 												</Badge>
 											{/each}
 											{#if !user.roles?.length}
-												<span class="text-muted-foreground text-sm">None</span>
+												<span class="text-sm text-muted-foreground">None</span>
 											{/if}
 										</div>
 									</TableCell>
@@ -357,17 +413,15 @@
 										{/if}
 									</TableCell>
 									<TableCell class="text-sm text-muted-foreground">
-										{user.createdAt ? formatDate(new Date(Number(user.createdAt.seconds) * 1000).toISOString()) : 'Unknown'}
+										{user.createdAt
+											? formatDate(new Date(Number(user.createdAt.seconds) * 1000).toISOString())
+											: 'Unknown'}
 									</TableCell>
 									{#if canUpdate || canDelete}
 										<TableCell class="text-right">
 											<div class="flex justify-end gap-2">
 												{#if canUpdate}
-													<Button
-														size="sm"
-														variant="outline"
-														onclick={() => openEditDialog(user)}
-													>
+													<Button size="sm" variant="outline" onclick={() => openEditDialog(user)}>
 														<Edit class="h-4 w-4" />
 													</Button>
 												{/if}
@@ -410,7 +464,7 @@
 					</div>
 				{:else if invites.length === 0}
 					<div class="rounded-lg border border-dashed p-6 text-center">
-						<TicketPlus class="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+						<TicketPlus class="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
 						<p class="text-sm text-muted-foreground">
 							No invite links yet. Create one to allow controlled registration.
 						</p>
@@ -419,18 +473,20 @@
 					<div class="space-y-2">
 						{#each invites as invite (invite.id)}
 							{@const status = getInviteStatus(invite)}
-							<div class="p-3 rounded-lg border bg-card">
+							<div class="rounded-lg border bg-card p-3">
 								<div class="flex items-center justify-between gap-2">
-									<div class="flex items-center gap-2 min-w-0">
-										<span class="text-sm font-medium truncate">{invite.description || 'Untitled'}</span>
-										<Badge variant={getStatusVariant(status)} class="text-[10px] shrink-0">
+									<div class="flex min-w-0 items-center gap-2">
+										<span class="truncate text-sm font-medium"
+											>{invite.description || 'Untitled'}</span
+										>
+										<Badge variant={getStatusVariant(status)} class="shrink-0 text-[10px]">
 											{status}
 										</Badge>
 										{#if invite.hasPin}
-											<Badge variant="outline" class="text-[10px] shrink-0">PIN</Badge>
+											<Badge variant="outline" class="shrink-0 text-[10px]">PIN</Badge>
 										{/if}
 									</div>
-									<div class="flex items-center gap-0.5 shrink-0">
+									<div class="flex shrink-0 items-center gap-0.5">
 										<Button
 											variant="ghost"
 											size="icon"
@@ -453,15 +509,23 @@
 										{/if}
 									</div>
 								</div>
-								<div class="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground flex-wrap">
-									<span>{invite.useCount}{invite.maxUses > 0 ? `/${invite.maxUses}` : '/\u221e'} uses</span>
+								<div
+									class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground"
+								>
+									<span
+										>{invite.useCount}{invite.maxUses > 0 ? `/${invite.maxUses}` : '/\u221e'} uses</span
+									>
 									{#if invite.roles && invite.roles.length > 0}
 										<span class="text-muted-foreground/50">|</span>
 										<span>{invite.roles.join(', ')}</span>
 									{/if}
 									{#if invite.expiresAt}
 										<span class="text-muted-foreground/50">|</span>
-										<span>{new Date(Number(invite.expiresAt.seconds) * 1000).toLocaleDateString()}</span>
+										<span
+											>{new Date(
+												Number(invite.expiresAt.seconds) * 1000
+											).toLocaleDateString()}</span
+										>
 									{/if}
 								</div>
 							</div>
@@ -474,43 +538,50 @@
 </div>
 
 <!-- Create User Dialog -->
-<Dialog open={showCreateDialog} onOpenChange={(open) => showCreateDialog = open}>
-	<DialogContent class="!max-w-3xl !w-[90vw] !h-[70vh] !p-0 !gap-0 overflow-hidden flex flex-col" showCloseButton={false}>
+<Dialog open={showCreateDialog} onOpenChange={(open) => (showCreateDialog = open)}>
+	<DialogContent
+		class="flex !h-[70vh] !w-[90vw] !max-w-3xl flex-col !gap-0 overflow-hidden !p-0"
+		showCloseButton={false}
+	>
 		<div class="flex h-full">
 			<!-- Sidebar -->
-			<div class="w-64 border-r bg-muted/30 flex flex-col">
-				<div class="p-6 border-b">
+			<div class="flex w-64 flex-col border-r bg-muted/30">
+				<div class="border-b p-6">
 					<div class="flex items-center gap-3">
-						<div class="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+						<div class="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
 							<UserPlus class="h-6 w-6 text-primary" />
 						</div>
-						<div class="flex-1 min-w-0">
+						<div class="min-w-0 flex-1">
 							<h3 class="font-semibold">New User</h3>
-							<p class="text-xs text-muted-foreground mt-0.5">Local account</p>
+							<p class="mt-0.5 text-xs text-muted-foreground">Local account</p>
 						</div>
 					</div>
 				</div>
 
-				<div class="flex-1 p-4 space-y-4">
+				<div class="flex-1 space-y-4 p-4">
 					<div class="space-y-3">
 						<div class="flex items-start gap-3 text-sm">
-							<KeyRound class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-							<p class="text-muted-foreground">Creates a local account with password authentication.</p>
+							<KeyRound class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+							<p class="text-muted-foreground">
+								Creates a local account with password authentication.
+							</p>
 						</div>
 						<div class="flex items-start gap-3 text-sm">
-							<Shield class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+							<Shield class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 							<p class="text-muted-foreground">Assign roles to control what the user can access.</p>
 						</div>
 						<div class="flex items-start gap-3 text-sm">
-							<Mail class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-							<p class="text-muted-foreground">Email is optional and used for display purposes only.</p>
+							<Mail class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+							<p class="text-muted-foreground">
+								Email is optional and used for display purposes only.
+							</p>
 						</div>
 					</div>
 				</div>
 
-				<div class="p-4 border-t">
-					<div class="p-4 rounded-lg bg-muted/50">
-						<p class="text-sm font-medium mb-1">Password policy</p>
+				<div class="border-t p-4">
+					<div class="rounded-lg bg-muted/50 p-4">
+						<p class="mb-1 text-sm font-medium">Password policy</p>
 						<p class="text-xs text-muted-foreground">
 							Passwords must be at least 8 characters. The user can change their password later.
 						</p>
@@ -519,13 +590,18 @@
 			</div>
 
 			<!-- Main Content -->
-			<div class="flex-1 flex flex-col min-w-0">
-				<div class="flex items-center justify-between px-8 py-6 border-b bg-muted/30">
+			<div class="flex min-w-0 flex-1 flex-col">
+				<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
 					<div>
 						<h2 class="text-2xl font-semibold tracking-tight">Create User</h2>
-						<p class="text-muted-foreground mt-1">Add a new user to the system</p>
+						<p class="mt-1 text-muted-foreground">Add a new user to the system</p>
 					</div>
-					<Button variant="ghost" size="icon" onclick={() => showCreateDialog = false} class="h-10 w-10">
+					<Button
+						variant="ghost"
+						size="icon"
+						onclick={() => (showCreateDialog = false)}
+						class="h-10 w-10"
+					>
 						<X class="h-5 w-5" />
 					</Button>
 				</div>
@@ -590,11 +666,11 @@
 					</div>
 				</div>
 
-				<div class="flex items-center justify-end gap-3 px-8 py-5 border-t bg-muted/30">
-					<Button variant="outline" onclick={() => showCreateDialog = false} class="h-11 px-6">
+				<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-8 py-5">
+					<Button variant="outline" onclick={() => (showCreateDialog = false)} class="h-11 px-6">
 						Cancel
 					</Button>
-					<Button onclick={createUser} class="h-11 px-8 gap-2">
+					<Button onclick={createUser} class="h-11 gap-2 px-8">
 						<UserPlus class="h-4 w-4" />
 						Create User
 					</Button>
@@ -605,31 +681,36 @@
 </Dialog>
 
 <!-- Edit User Dialog -->
-<Dialog open={showEditDialog} onOpenChange={(open) => showEditDialog = open}>
-	<DialogContent class="!max-w-3xl !w-[90vw] !h-[70vh] !p-0 !gap-0 overflow-hidden flex flex-col" showCloseButton={false}>
+<Dialog open={showEditDialog} onOpenChange={(open) => (showEditDialog = open)}>
+	<DialogContent
+		class="flex !h-[70vh] !w-[90vw] !max-w-3xl flex-col !gap-0 overflow-hidden !p-0"
+		showCloseButton={false}
+	>
 		<div class="flex h-full">
 			<!-- Sidebar -->
-			<div class="w-64 border-r bg-muted/30 flex flex-col">
-				<div class="p-6 border-b">
+			<div class="flex w-64 flex-col border-r bg-muted/30">
+				<div class="border-b p-6">
 					<div class="flex items-center gap-3">
-						<div class="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+						<div class="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
 							<UserCog class="h-6 w-6 text-primary" />
 						</div>
-						<div class="flex-1 min-w-0">
-							<h3 class="font-semibold truncate">{editingUser?.username ?? 'User'}</h3>
-							<p class="text-xs text-muted-foreground mt-0.5 capitalize">{editingUser?.authProvider || 'local'} account</p>
+						<div class="min-w-0 flex-1">
+							<h3 class="truncate font-semibold">{editingUser?.username ?? 'User'}</h3>
+							<p class="mt-0.5 text-xs text-muted-foreground capitalize">
+								{editingUser?.authProvider || 'local'} account
+							</p>
 						</div>
 					</div>
 				</div>
 
-				<div class="flex-1 p-4 space-y-4">
+				<div class="flex-1 space-y-4 p-4">
 					{#if editingUser}
 						<div class="space-y-3">
 							<div class="flex items-start gap-3 text-sm">
-								<Shield class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+								<Shield class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 								<div>
 									<p class="text-muted-foreground">Current roles</p>
-									<div class="flex flex-wrap gap-1 mt-1">
+									<div class="mt-1 flex flex-wrap gap-1">
 										{#each editingUser.roles || [] as role (role)}
 											<Badge variant={getRoleBadgeVariant(role)} class="text-[10px]">{role}</Badge>
 										{/each}
@@ -640,11 +721,15 @@
 								</div>
 							</div>
 							<div class="flex items-start gap-3 text-sm">
-								<Clock class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+								<Clock class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 								<div>
 									<p class="text-muted-foreground">Created</p>
-									<p class="text-xs mt-0.5">
-										{editingUser.createdAt ? formatDate(new Date(Number(editingUser.createdAt.seconds) * 1000).toISOString()) : 'Unknown'}
+									<p class="mt-0.5 text-xs">
+										{editingUser.createdAt
+											? formatDate(
+													new Date(Number(editingUser.createdAt.seconds) * 1000).toISOString()
+												)
+											: 'Unknown'}
 									</p>
 								</div>
 							</div>
@@ -652,9 +737,9 @@
 					{/if}
 				</div>
 
-				<div class="p-4 border-t">
-					<div class="p-4 rounded-lg bg-muted/50">
-						<p class="text-sm font-medium mb-1">User management</p>
+				<div class="border-t p-4">
+					<div class="rounded-lg bg-muted/50 p-4">
+						<p class="mb-1 text-sm font-medium">User management</p>
 						<p class="text-xs text-muted-foreground">
 							Changes to roles and status take effect immediately. The username cannot be changed.
 						</p>
@@ -663,13 +748,18 @@
 			</div>
 
 			<!-- Main Content -->
-			<div class="flex-1 flex flex-col min-w-0">
-				<div class="flex items-center justify-between px-8 py-6 border-b bg-muted/30">
+			<div class="flex min-w-0 flex-1 flex-col">
+				<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
 					<div>
 						<h2 class="text-2xl font-semibold tracking-tight">Edit User</h2>
-						<p class="text-muted-foreground mt-1">Update account details and permissions</p>
+						<p class="mt-1 text-muted-foreground">Update account details and permissions</p>
 					</div>
-					<Button variant="ghost" size="icon" onclick={() => showEditDialog = false} class="h-10 w-10">
+					<Button
+						variant="ghost"
+						size="icon"
+						onclick={() => (showEditDialog = false)}
+						class="h-10 w-10"
+					>
 						<X class="h-5 w-5" />
 					</Button>
 				</div>
@@ -721,18 +811,18 @@
 								<Switch
 									id="edit-active"
 									checked={editUserForm.isActive}
-									onCheckedChange={(checked) => editUserForm.isActive = checked}
+									onCheckedChange={(checked) => (editUserForm.isActive = checked)}
 								/>
 							</div>
 						</div>
 					{/if}
 				</div>
 
-				<div class="flex items-center justify-end gap-3 px-8 py-5 border-t bg-muted/30">
-					<Button variant="outline" onclick={() => showEditDialog = false} class="h-11 px-6">
+				<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-8 py-5">
+					<Button variant="outline" onclick={() => (showEditDialog = false)} class="h-11 px-6">
 						Cancel
 					</Button>
-					<Button onclick={updateUser} class="h-11 px-8 gap-2">
+					<Button onclick={updateUser} class="h-11 gap-2 px-8">
 						<Save class="h-4 w-4" />
 						Save Changes
 					</Button>
@@ -743,62 +833,75 @@
 </Dialog>
 
 <!-- Create Invite Dialog -->
-<Dialog open={showCreateInviteDialog} onOpenChange={(open) => showCreateInviteDialog = open}>
-	<DialogContent class="!max-w-3xl !w-[90vw] !h-[70vh] !p-0 !gap-0 overflow-hidden flex flex-col" showCloseButton={false}>
+<Dialog open={showCreateInviteDialog} onOpenChange={(open) => (showCreateInviteDialog = open)}>
+	<DialogContent
+		class="flex !h-[70vh] !w-[90vw] !max-w-3xl flex-col !gap-0 overflow-hidden !p-0"
+		showCloseButton={false}
+	>
 		<div class="flex h-full">
 			<!-- Sidebar -->
-			<div class="w-64 border-r bg-muted/30 flex flex-col">
+			<div class="flex w-64 flex-col border-r bg-muted/30">
 				<!-- Sidebar Header -->
-				<div class="p-6 border-b">
+				<div class="border-b p-6">
 					<div class="flex items-center gap-3">
-						<div class="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+						<div class="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
 							<TicketPlus class="h-6 w-6 text-primary" />
 						</div>
-						<div class="flex-1 min-w-0">
+						<div class="min-w-0 flex-1">
 							<h3 class="font-semibold">New Invite</h3>
-							<p class="text-xs text-muted-foreground mt-0.5">Registration link</p>
+							<p class="mt-0.5 text-xs text-muted-foreground">Registration link</p>
 						</div>
 					</div>
 				</div>
 
 				<!-- Info -->
-				<div class="flex-1 p-4 space-y-4">
+				<div class="flex-1 space-y-4 p-4">
 					<div class="space-y-3">
 						<div class="flex items-start gap-3 text-sm">
-							<Link class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-							<p class="text-muted-foreground">Generates a unique URL that allows someone to register an account.</p>
+							<Link class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+							<p class="text-muted-foreground">
+								Generates a unique URL that allows someone to register an account.
+							</p>
 						</div>
 						<div class="flex items-start gap-3 text-sm">
-							<Shield class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-							<p class="text-muted-foreground">Assigned roles are applied automatically on registration.</p>
+							<Shield class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+							<p class="text-muted-foreground">
+								Assigned roles are applied automatically on registration.
+							</p>
 						</div>
 						<div class="flex items-start gap-3 text-sm">
-							<Lock class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+							<Lock class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 							<p class="text-muted-foreground">Optional PIN adds an extra layer of protection.</p>
 						</div>
 					</div>
 				</div>
 
 				<!-- Sidebar Footer -->
-				<div class="p-4 border-t">
-					<div class="p-4 rounded-lg bg-muted/50">
-						<p class="text-sm font-medium mb-1">How it works</p>
+				<div class="border-t p-4">
+					<div class="rounded-lg bg-muted/50 p-4">
+						<p class="mb-1 text-sm font-medium">How it works</p>
 						<p class="text-xs text-muted-foreground">
-							After creation, the invite URL is copied to your clipboard. Share it with the person you want to invite.
+							After creation, the invite URL is copied to your clipboard. Share it with the person
+							you want to invite.
 						</p>
 					</div>
 				</div>
 			</div>
 
 			<!-- Main Content -->
-			<div class="flex-1 flex flex-col min-w-0">
+			<div class="flex min-w-0 flex-1 flex-col">
 				<!-- Content Header -->
-				<div class="flex items-center justify-between px-8 py-6 border-b bg-muted/30">
+				<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
 					<div>
 						<h2 class="text-2xl font-semibold tracking-tight">Create Invite</h2>
-						<p class="text-muted-foreground mt-1">Configure invite settings and restrictions</p>
+						<p class="mt-1 text-muted-foreground">Configure invite settings and restrictions</p>
 					</div>
-					<Button variant="ghost" size="icon" onclick={() => showCreateInviteDialog = false} class="h-10 w-10">
+					<Button
+						variant="ghost"
+						size="icon"
+						onclick={() => (showCreateInviteDialog = false)}
+						class="h-10 w-10"
+					>
 						<X class="h-5 w-5" />
 					</Button>
 				</div>
@@ -818,8 +921,10 @@
 
 						<div class="space-y-2">
 							<Label>Roles</Label>
-							<p class="text-xs text-muted-foreground">Assigned on registration. If none selected, default roles are used.</p>
-							<div class="flex flex-wrap gap-2 mt-1">
+							<p class="text-xs text-muted-foreground">
+								Assigned on registration. If none selected, default roles are used.
+							</p>
+							<div class="mt-1 flex flex-wrap gap-2">
 								{#each inviteRoleNames as role (role)}
 									<Button
 										size="sm"
@@ -868,7 +973,9 @@
 									<Select
 										value={newInviteForm.expiresUnit}
 										type="single"
-										onValueChange={(v) => { if (v) newInviteForm.expiresUnit = v as 'hours' | 'days' | 'weeks'; }}
+										onValueChange={(v) => {
+											if (v) newInviteForm.expiresUnit = v as 'hours' | 'days' | 'weeks';
+										}}
 										disabled={creatingInvite || !newInviteForm.expiresValue}
 									>
 										<SelectTrigger class="h-9 w-[100px]">
@@ -896,17 +1003,24 @@
 								placeholder="Optional"
 								disabled={creatingInvite}
 							/>
-							<p class="text-xs text-muted-foreground">If set, users must enter this PIN to use the invite.</p>
+							<p class="text-xs text-muted-foreground">
+								If set, users must enter this PIN to use the invite.
+							</p>
 						</div>
 					</div>
 				</div>
 
 				<!-- Footer -->
-				<div class="flex items-center justify-end gap-3 px-8 py-5 border-t bg-muted/30">
-					<Button variant="outline" onclick={() => showCreateInviteDialog = false} disabled={creatingInvite} class="h-11 px-6">
+				<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-8 py-5">
+					<Button
+						variant="outline"
+						onclick={() => (showCreateInviteDialog = false)}
+						disabled={creatingInvite}
+						class="h-11 px-6"
+					>
 						Cancel
 					</Button>
-					<Button onclick={createInvite} disabled={creatingInvite} class="h-11 px-8 gap-2">
+					<Button onclick={createInvite} disabled={creatingInvite} class="h-11 gap-2 px-8">
 						{#if creatingInvite}
 							<Loader2 class="h-4 w-4 animate-spin" />
 							Creating...

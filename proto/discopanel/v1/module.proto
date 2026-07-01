@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package discopanel.v1;
 
+import "discopanel/v1/event.proto";
 import "discopanel/v1/server.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -88,21 +89,6 @@ enum ModuleStatus {
   MODULE_STATUS_CREATING = 6;
 }
 
-// ModuleEventType defines server lifecycle events that modules can react to.
-enum ModuleEventType {
-  MODULE_EVENT_TYPE_UNSPECIFIED = 0;
-  // Triggered when the parent server container starts.
-  MODULE_EVENT_TYPE_SERVER_START = 1;
-  // Triggered when the parent server container stops.
-  MODULE_EVENT_TYPE_SERVER_STOP = 2;
-  // Triggered when the parent server passes its health check.
-  MODULE_EVENT_TYPE_SERVER_HEALTHY = 3;
-  // Triggered when a player joins the server.
-  MODULE_EVENT_TYPE_PLAYER_JOIN = 4;
-  // Triggered when a player leaves the server.
-  MODULE_EVENT_TYPE_PLAYER_LEAVE = 5;
-}
-
 // ModuleEventAction defines actions that can be triggered by module event hooks.
 enum ModuleEventAction {
   MODULE_EVENT_ACTION_UNSPECIFIED = 0;
@@ -145,7 +131,7 @@ message ModuleDependency {
 // ModuleEventHook configures an action to take when a server event occurs.
 message ModuleEventHook {
   // The event that triggers this hook.
-  ModuleEventType event = 1;
+  TriggeredEventType event = 1;
   // The action to perform when triggered.
   ModuleEventAction action = 2;
   // Command to execute for EXEC or RCON actions.

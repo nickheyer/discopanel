@@ -6,7 +6,20 @@
 	import { toast } from 'svelte-sonner';
 	import type { Module } from '$lib/proto/discopanel/v1/module_pb';
 	import { ModuleStatus } from '$lib/proto/discopanel/v1/module_pb';
-	import { Loader2, Play, Square, RotateCw, Settings, Trash2, Terminal, Cpu, Server, ExternalLink, Package, RefreshCw } from '@lucide/svelte';
+	import {
+		Loader2,
+		Play,
+		Square,
+		RotateCw,
+		Settings,
+		Trash2,
+		Terminal,
+		Cpu,
+		Server,
+		ExternalLink,
+		Package,
+		RefreshCw
+	} from '@lucide/svelte';
 	import ModuleDialog from '$lib/components/server/ModuleDialog.svelte';
 	import ModuleLogsDialog from '$lib/components/server/ModuleLogsDialog.svelte';
 	import { onMount, onDestroy } from 'svelte';
@@ -37,7 +50,10 @@
 		try {
 			if (!silent) loading = true;
 			// Without serverId, it fetches all modules
-			const response = await rpcClient.module.listModules({}, silent ? silentCallOptions : undefined);
+			const response = await rpcClient.module.listModules(
+				{},
+				silent ? silentCallOptions : undefined
+			);
 			modules = response.modules;
 		} catch {
 			if (!silent) toast.error('Failed to load modules');
@@ -53,7 +69,9 @@
 			toast.success(`Starting ${module.name}...`);
 			await loadModules(true);
 		} catch (error) {
-			toast.error(`Failed to start module: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to start module: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		} finally {
 			actionLoading = null;
 		}
@@ -66,7 +84,9 @@
 			toast.success(`Stopping ${module.name}...`);
 			await loadModules(true);
 		} catch (error) {
-			toast.error(`Failed to stop module: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to stop module: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		} finally {
 			actionLoading = null;
 		}
@@ -79,14 +99,18 @@
 			toast.success(`Restarting ${module.name}...`);
 			await loadModules(true);
 		} catch (error) {
-			toast.error(`Failed to restart module: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to restart module: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		} finally {
 			actionLoading = null;
 		}
 	}
 
 	async function handleDeleteModule(module: Module) {
-		const confirmed = confirm(`Are you sure you want to delete "${module.name}"?\n\nThis will stop and remove the container and all module data.`);
+		const confirmed = confirm(
+			`Are you sure you want to delete "${module.name}"?\n\nThis will stop and remove the container and all module data.`
+		);
 		if (!confirmed) return;
 
 		actionLoading = module.id;
@@ -95,7 +119,9 @@
 			toast.success(`Module "${module.name}" deleted`);
 			await loadModules(true);
 		} catch (error) {
-			toast.error(`Failed to delete module: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to delete module: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		} finally {
 			actionLoading = null;
 		}
@@ -111,26 +137,39 @@
 		logsDialogOpen = true;
 	}
 
-	function getStatusBadgeVariant(status: ModuleStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
+	function getStatusBadgeVariant(
+		status: ModuleStatus
+	): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {
-			case ModuleStatus.RUNNING: return 'default';
+			case ModuleStatus.RUNNING:
+				return 'default';
 			case ModuleStatus.STARTING:
 			case ModuleStatus.STOPPING:
-			case ModuleStatus.CREATING: return 'secondary';
-			case ModuleStatus.ERROR: return 'destructive';
-			default: return 'outline';
+			case ModuleStatus.CREATING:
+				return 'secondary';
+			case ModuleStatus.ERROR:
+				return 'destructive';
+			default:
+				return 'outline';
 		}
 	}
 
 	function getStatusLabel(status: ModuleStatus): string {
 		switch (status) {
-			case ModuleStatus.RUNNING: return 'Running';
-			case ModuleStatus.STOPPED: return 'Stopped';
-			case ModuleStatus.STARTING: return 'Starting';
-			case ModuleStatus.STOPPING: return 'Stopping';
-			case ModuleStatus.ERROR: return 'Error';
-			case ModuleStatus.CREATING: return 'Creating';
-			default: return 'Unknown';
+			case ModuleStatus.RUNNING:
+				return 'Running';
+			case ModuleStatus.STOPPED:
+				return 'Stopped';
+			case ModuleStatus.STARTING:
+				return 'Starting';
+			case ModuleStatus.STOPPING:
+				return 'Stopping';
+			case ModuleStatus.ERROR:
+				return 'Error';
+			case ModuleStatus.CREATING:
+				return 'Creating';
+			default:
+				return 'Unknown';
 		}
 	}
 </script>
@@ -155,35 +194,47 @@
 			<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 		</div>
 	{:else if modules.length === 0}
-		<div class="flex flex-col items-center justify-center py-12 text-center border rounded-lg bg-card">
-			<Package class="h-12 w-12 mb-4 text-muted-foreground/50" />
-			<h3 class="text-lg font-medium mb-1">No Active Modules</h3>
-			<p class="text-sm text-muted-foreground max-w-sm">
+		<div
+			class="flex flex-col items-center justify-center rounded-lg border bg-card py-12 text-center"
+		>
+			<Package class="mb-4 h-12 w-12 text-muted-foreground/50" />
+			<h3 class="mb-1 text-lg font-medium">No Active Modules</h3>
+			<p class="max-w-sm text-sm text-muted-foreground">
 				You don't have any modules running on any of your servers right now.
 			</p>
 		</div>
 	{:else}
-		<div class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
 			{#each modules as module (module.id)}
 				{@const isLoading = actionLoading === module.id}
-				<Card class="group relative overflow-hidden border shadow-sm hover:shadow-md transition-all">
-					<div class="absolute top-0 left-0 right-0 h-1 {module.status === ModuleStatus.RUNNING ? 'bg-green-500' : module.status === ModuleStatus.ERROR ? 'bg-red-500' : 'bg-gray-300'}"></div>
+				<Card
+					class="group relative overflow-hidden border shadow-sm transition-all hover:shadow-md"
+				>
+					<div
+						class="absolute top-0 right-0 left-0 h-1 {module.status === ModuleStatus.RUNNING
+							? 'bg-green-500'
+							: module.status === ModuleStatus.ERROR
+								? 'bg-red-500'
+								: 'bg-gray-300'}"
+					></div>
 					<CardContent class="p-4">
-						<div class="flex items-start justify-between mb-3">
-							<div class="flex-1 min-w-0">
-								<div class="flex items-center gap-2 mb-1">
-									<h3 class="font-semibold truncate">{module.name}</h3>
+						<div class="mb-3 flex items-start justify-between">
+							<div class="min-w-0 flex-1">
+								<div class="mb-1 flex items-center gap-2">
+									<h3 class="truncate font-semibold">{module.name}</h3>
 									<Badge variant={getStatusBadgeVariant(module.status)} class="text-xs">
 										{getStatusLabel(module.status)}
 									</Badge>
 								</div>
-								<div class="flex items-center gap-2 text-xs text-muted-foreground truncate">
-									<span class="flex items-center gap-1"><Server class="h-3 w-3" /> {module.serverName || module.serverId}</span>
+								<div class="flex items-center gap-2 truncate text-xs text-muted-foreground">
+									<span class="flex items-center gap-1"
+										><Server class="h-3 w-3" /> {module.serverName || module.serverId}</span
+									>
 									<span>•</span>
 									<span class="truncate">{module.templateName}</span>
 								</div>
 							</div>
-							<div class="flex items-center gap-1 ml-2">
+							<div class="ml-2 flex items-center gap-1">
 								{#if module.status === ModuleStatus.STOPPED}
 									<Button
 										size="icon"
@@ -247,23 +298,23 @@
 							</div>
 						</div>
 
-						<div class="text-xs mb-3 space-y-1">
+						<div class="mb-3 space-y-1 text-xs">
 							{#if module.status === ModuleStatus.RUNNING && module.memoryUsage > 0}
 								<div class="flex items-center gap-3 text-muted-foreground">
-									<span><Cpu class="h-3 w-3 inline mr-1" />{module.memoryUsage.toFixed(0)} MB</span>
+									<span><Cpu class="mr-1 inline h-3 w-3" />{module.memoryUsage.toFixed(0)} MB</span>
 									<span>CPU: {module.cpuPercent.toFixed(1)}%</span>
 								</div>
 							{:else}
-								<div class="text-muted-foreground/60 invisible flex items-center gap-3">
-									<span><Cpu class="h-3 w-3 inline mr-1" />0 MB</span>
+								<div class="invisible flex items-center gap-3 text-muted-foreground/60">
+									<span><Cpu class="mr-1 inline h-3 w-3" />0 MB</span>
 								</div>
 							{/if}
 						</div>
 
-						<div class="flex items-center justify-between pt-2 border-t">
+						<div class="flex items-center justify-between border-t pt-2">
 							<div class="flex items-center gap-1">
 								{#if module.autoStart}
-									<Badge variant="secondary" class="text-[10px] px-1.5 py-0">Auto-start</Badge>
+									<Badge variant="secondary" class="px-1.5 py-0 text-[10px]">Auto-start</Badge>
 								{/if}
 							</div>
 							<div class="flex items-center gap-1">
@@ -312,8 +363,5 @@
 		onSuccess={() => loadModules(true)}
 	/>
 
-	<ModuleLogsDialog
-		bind:open={logsDialogOpen}
-		module={selectedModule}
-	/>
+	<ModuleLogsDialog bind:open={logsDialogOpen} module={selectedModule} />
 {/if}

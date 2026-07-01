@@ -1,13 +1,24 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { create } from '@bufbuild/protobuf';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
-	import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '$lib/components/ui/accordion';
+	import {
+		Accordion,
+		AccordionContent,
+		AccordionItem,
+		AccordionTrigger
+	} from '$lib/components/ui/accordion';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { canUpdateSettings } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
@@ -23,7 +34,7 @@
 		Globe,
 		FileCode,
 		Container,
-		Terminal,
+		Terminal
 	} from '@lucide/svelte';
 
 	let loading = $state(true);
@@ -39,12 +50,11 @@
 	let canEdit = $derived($canUpdateSettings);
 
 	let hasChanges = $derived(
-		config != null && (
-			localAuthEnabled !== config.localAuthEnabled ||
-			allowRegistration !== config.allowRegistration ||
-			anonymousAccess !== config.anonymousAccess ||
-			Math.round(sessionTimeoutHours * 3600) !== config.sessionTimeout
-		)
+		config != null &&
+			(localAuthEnabled !== config.localAuthEnabled ||
+				allowRegistration !== config.allowRegistration ||
+				anonymousAccess !== config.anonymousAccess ||
+				Math.round(sessionTimeoutHours * 3600) !== config.sessionTimeout)
 	);
 
 	async function loadConfig() {
@@ -111,16 +121,22 @@
 {:else if config}
 	<div class="grid gap-6 lg:grid-cols-2">
 		<!-- Card 1: Authentication Settings -->
-		<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
-			<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+		<Card
+			class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
+		>
+			<div
+				class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
+			></div>
 			<CardHeader class="relative pb-4">
 				<div class="flex items-center gap-3">
-					<div class="h-12 w-12 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+					<div
+						class="flex h-12 w-12 items-center justify-center rounded-lg bg-linear-to-br from-primary/20 to-primary/10"
+					>
 						<Shield class="h-6 w-6 text-primary" />
 					</div>
 					<div>
 						<CardTitle class="text-2xl font-semibold">Authentication Settings</CardTitle>
-						<CardDescription class="text-base mt-1">
+						<CardDescription class="mt-1 text-base">
 							Manage login methods and access controls
 						</CardDescription>
 					</div>
@@ -128,7 +144,7 @@
 			</CardHeader>
 			<CardContent class="relative space-y-5">
 				<!-- Local Authentication -->
-				<div class="flex items-center justify-between p-3 rounded-lg border bg-card">
+				<div class="flex items-center justify-between rounded-lg border bg-card p-3">
 					<div class="space-y-0.5">
 						<Label class="text-sm font-medium">Local Authentication</Label>
 						<p class="text-xs text-muted-foreground">Username and password login</p>
@@ -136,7 +152,10 @@
 					{#if canEdit}
 						<Switch
 							checked={localAuthEnabled}
-							onCheckedChange={(v) => { localAuthEnabled = v; if (!v) allowRegistration = false; }}
+							onCheckedChange={(v) => {
+								localAuthEnabled = v;
+								if (!v) allowRegistration = false;
+							}}
 							disabled={saving}
 						/>
 					{:else}
@@ -151,7 +170,11 @@
 				</div>
 
 				<!-- User Registration -->
-				<div class="flex items-center justify-between p-3 rounded-lg border bg-card {!localAuthEnabled ? 'opacity-50' : ''}">
+				<div
+					class="flex items-center justify-between rounded-lg border bg-card p-3 {!localAuthEnabled
+						? 'opacity-50'
+						: ''}"
+				>
 					<div class="space-y-0.5">
 						<Label class="text-sm font-medium">User Registration</Label>
 						<p class="text-xs text-muted-foreground">Allow new users to self-register</p>
@@ -159,7 +182,9 @@
 					{#if canEdit}
 						<Switch
 							checked={allowRegistration}
-							onCheckedChange={(v) => { allowRegistration = v; }}
+							onCheckedChange={(v) => {
+								allowRegistration = v;
+							}}
 							disabled={saving || !localAuthEnabled}
 						/>
 					{:else}
@@ -174,7 +199,7 @@
 				</div>
 
 				<!-- Anonymous Access -->
-				<div class="flex items-center justify-between p-3 rounded-lg border bg-card">
+				<div class="flex items-center justify-between rounded-lg border bg-card p-3">
 					<div class="space-y-0.5">
 						<Label class="text-sm font-medium">Anonymous Access</Label>
 						<p class="text-xs text-muted-foreground">Limited unauthenticated browsing</p>
@@ -182,7 +207,9 @@
 					{#if canEdit}
 						<Switch
 							checked={anonymousAccess}
-							onCheckedChange={(v) => { anonymousAccess = v; }}
+							onCheckedChange={(v) => {
+								anonymousAccess = v;
+							}}
 							disabled={saving}
 						/>
 					{:else}
@@ -197,7 +224,7 @@
 				</div>
 
 				<!-- Session Timeout -->
-				<div class="flex items-center justify-between p-3 rounded-lg border bg-card">
+				<div class="flex items-center justify-between rounded-lg border bg-card p-3">
 					<div class="space-y-0.5">
 						<Label class="text-sm font-medium">Session Timeout</Label>
 						<p class="text-xs text-muted-foreground">How long sessions remain valid</p>
@@ -208,7 +235,7 @@
 								type="number"
 								min="0.084"
 								step="0.5"
-								class="w-20 h-8 text-sm"
+								class="h-8 w-20 text-sm"
 								bind:value={sessionTimeoutHours}
 								disabled={saving}
 							/>
@@ -220,11 +247,7 @@
 				</div>
 
 				{#if canEdit}
-					<Button
-						onclick={saveSettings}
-						disabled={saving || !hasChanges}
-						class="w-full"
-					>
+					<Button onclick={saveSettings} disabled={saving || !hasChanges} class="w-full">
 						{#if saving}
 							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 							Saving...
@@ -238,17 +261,23 @@
 		</Card>
 
 		<!-- Card 2: OIDC / Single Sign-On -->
-		<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
-			<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+		<Card
+			class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
+		>
+			<div
+				class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
+			></div>
 			<CardHeader class="relative pb-4">
 				<div class="flex items-center gap-3">
-					<div class="h-12 w-12 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+					<div
+						class="flex h-12 w-12 items-center justify-center rounded-lg bg-linear-to-br from-primary/20 to-primary/10"
+					>
 						<KeyRound class="h-6 w-6 text-primary" />
 					</div>
 					<div class="flex items-center gap-3">
 						<div>
 							<CardTitle class="text-2xl font-semibold">OIDC / Single Sign-On</CardTitle>
-							<CardDescription class="text-base mt-1">
+							<CardDescription class="mt-1 text-base">
 								External identity provider integration
 							</CardDescription>
 						</div>
@@ -265,30 +294,30 @@
 					<!-- OIDC Info Grid -->
 					<div class="grid gap-3">
 						{#if config.oidcIssuerUri}
-							<div class="p-3 rounded-lg border bg-card">
+							<div class="rounded-lg border bg-card p-3">
 								<Label class="text-xs text-muted-foreground">Issuer URI</Label>
-								<p class="text-sm font-mono mt-0.5 break-all">{config.oidcIssuerUri}</p>
+								<p class="mt-0.5 font-mono text-sm break-all">{config.oidcIssuerUri}</p>
 							</div>
 						{/if}
 
 						{#if config.oidcClientId}
-							<div class="p-3 rounded-lg border bg-card">
+							<div class="rounded-lg border bg-card p-3">
 								<Label class="text-xs text-muted-foreground">Client ID</Label>
-								<p class="text-sm font-mono mt-0.5 break-all">{config.oidcClientId}</p>
+								<p class="mt-0.5 font-mono text-sm break-all">{config.oidcClientId}</p>
 							</div>
 						{/if}
 
 						{#if config.oidcRedirectUrl}
-							<div class="p-3 rounded-lg border bg-card">
+							<div class="rounded-lg border bg-card p-3">
 								<Label class="text-xs text-muted-foreground">Redirect URL</Label>
-								<p class="text-sm font-mono mt-0.5 break-all">{config.oidcRedirectUrl}</p>
+								<p class="mt-0.5 font-mono text-sm break-all">{config.oidcRedirectUrl}</p>
 							</div>
 						{/if}
 
 						{#if config.oidcScopes && config.oidcScopes.length > 0}
-							<div class="p-3 rounded-lg border bg-card">
+							<div class="rounded-lg border bg-card p-3">
 								<Label class="text-xs text-muted-foreground">Scopes</Label>
-								<div class="flex flex-wrap gap-1.5 mt-1">
+								<div class="mt-1 flex flex-wrap gap-1.5">
 									{#each config.oidcScopes as scope (scope)}
 										<Badge variant="secondary" class="text-xs">{scope}</Badge>
 									{/each}
@@ -297,18 +326,19 @@
 						{/if}
 
 						{#if config.oidcRoleClaim}
-							<div class="p-3 rounded-lg border bg-card">
+							<div class="rounded-lg border bg-card p-3">
 								<Label class="text-xs text-muted-foreground">Role Claim</Label>
-								<p class="text-sm font-mono mt-0.5">{config.oidcRoleClaim}</p>
+								<p class="mt-0.5 font-mono text-sm">{config.oidcRoleClaim}</p>
 							</div>
 						{/if}
 					</div>
 				{:else}
 					<!-- OIDC Not Configured -->
 					<div class="rounded-lg border border-dashed p-4 text-center">
-						<Globe class="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-						<p class="text-sm text-muted-foreground mb-1">
-							OIDC allows users to sign in with external identity providers like Keycloak, Authelia, Google, or any OpenID Connect compatible service.
+						<Globe class="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+						<p class="mb-1 text-sm text-muted-foreground">
+							OIDC allows users to sign in with external identity providers like Keycloak, Authelia,
+							Google, or any OpenID Connect compatible service.
 						</p>
 						<p class="text-xs text-muted-foreground">
 							OIDC must be configured outside the UI using one of the methods below.
@@ -324,7 +354,8 @@
 								</span>
 							</AccordionTrigger>
 							<AccordionContent>
-								<pre class="bg-muted rounded-md p-3 text-xs overflow-x-auto"><code>auth:
+								<pre class="overflow-x-auto rounded-md bg-muted p-3 text-xs"><code
+										>auth:
   oidc:
     enabled: true
     issuer_uri: "https://your-provider/.well-known/openid-configuration"
@@ -332,7 +363,8 @@
     client_secret: "your-secret"
     redirect_url: "https://your-domain/api/v1/auth/oidc/callback"
     scopes: ["openid", "profile", "email", "groups"]
-    role_claim: "groups"</code></pre>
+    role_claim: "groups"</code
+									></pre>
 							</AccordionContent>
 						</AccordionItem>
 
@@ -344,7 +376,8 @@
 								</span>
 							</AccordionTrigger>
 							<AccordionContent>
-								<pre class="bg-muted rounded-md p-3 text-xs overflow-x-auto"><code>services:
+								<pre class="overflow-x-auto rounded-md bg-muted p-3 text-xs"><code
+										>services:
   discopanel:
     environment:
       DISCOPANEL_AUTH_OIDC_ENABLED: "true"
@@ -353,7 +386,8 @@
       DISCOPANEL_AUTH_OIDC_CLIENT_SECRET: "your-secret"
       DISCOPANEL_AUTH_OIDC_REDIRECT_URL: "https://..."
       DISCOPANEL_AUTH_OIDC_SCOPES: "openid,profile,email,groups"
-      DISCOPANEL_AUTH_OIDC_ROLE_CLAIM: "groups"</code></pre>
+      DISCOPANEL_AUTH_OIDC_ROLE_CLAIM: "groups"</code
+									></pre>
 							</AccordionContent>
 						</AccordionItem>
 
@@ -365,21 +399,50 @@
 								</span>
 							</AccordionTrigger>
 							<AccordionContent>
-								<div class="space-y-1.5 text-xs font-mono">
-									<p><code class="bg-muted px-1.5 py-0.5 rounded">DISCOPANEL_AUTH_OIDC_ENABLED</code></p>
-									<p><code class="bg-muted px-1.5 py-0.5 rounded">DISCOPANEL_AUTH_OIDC_ISSUER_URI</code></p>
-									<p><code class="bg-muted px-1.5 py-0.5 rounded">DISCOPANEL_AUTH_OIDC_CLIENT_ID</code></p>
-									<p><code class="bg-muted px-1.5 py-0.5 rounded">DISCOPANEL_AUTH_OIDC_CLIENT_SECRET</code></p>
-									<p><code class="bg-muted px-1.5 py-0.5 rounded">DISCOPANEL_AUTH_OIDC_REDIRECT_URL</code></p>
-									<p><code class="bg-muted px-1.5 py-0.5 rounded">DISCOPANEL_AUTH_OIDC_SCOPES</code></p>
-									<p><code class="bg-muted px-1.5 py-0.5 rounded">DISCOPANEL_AUTH_OIDC_ROLE_CLAIM</code></p>
+								<div class="space-y-1.5 font-mono text-xs">
+									<p>
+										<code class="rounded bg-muted px-1.5 py-0.5">DISCOPANEL_AUTH_OIDC_ENABLED</code>
+									</p>
+									<p>
+										<code class="rounded bg-muted px-1.5 py-0.5"
+											>DISCOPANEL_AUTH_OIDC_ISSUER_URI</code
+										>
+									</p>
+									<p>
+										<code class="rounded bg-muted px-1.5 py-0.5"
+											>DISCOPANEL_AUTH_OIDC_CLIENT_ID</code
+										>
+									</p>
+									<p>
+										<code class="rounded bg-muted px-1.5 py-0.5"
+											>DISCOPANEL_AUTH_OIDC_CLIENT_SECRET</code
+										>
+									</p>
+									<p>
+										<code class="rounded bg-muted px-1.5 py-0.5"
+											>DISCOPANEL_AUTH_OIDC_REDIRECT_URL</code
+										>
+									</p>
+									<p>
+										<code class="rounded bg-muted px-1.5 py-0.5">DISCOPANEL_AUTH_OIDC_SCOPES</code>
+									</p>
+									<p>
+										<code class="rounded bg-muted px-1.5 py-0.5"
+											>DISCOPANEL_AUTH_OIDC_ROLE_CLAIM</code
+										>
+									</p>
 								</div>
 							</AccordionContent>
 						</AccordionItem>
 					</Accordion>
 
 					<p class="text-xs text-muted-foreground">
-						Provider examples are available in the <a href="https://docs.discopanel.app/introduction/" target="_blank" rel="noopener noreferrer" class="underline hover:text-foreground">discopanel docs</a>.
+						Provider examples are available in the <a
+							href="https://docs.discopanel.app/introduction/"
+							target="_blank"
+							rel="noopener noreferrer"
+							class="underline hover:text-foreground">discopanel docs</a
+						>.
 					</p>
 				{/if}
 			</CardContent>

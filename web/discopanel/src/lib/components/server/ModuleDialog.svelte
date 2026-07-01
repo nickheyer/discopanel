@@ -13,11 +13,34 @@
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import type { ModuleTemplate, Module, ModulePort, ModuleDependency, ModuleEventHook } from '$lib/proto/discopanel/v1/module_pb';
-	import { ModuleStatus, ModuleEventType, ModuleEventAction } from '$lib/proto/discopanel/v1/module_pb';
+	import type {
+		ModuleTemplate,
+		Module,
+		ModulePort,
+		ModuleDependency,
+		ModuleEventHook
+	} from '$lib/proto/discopanel/v1/module_pb';
+	import { ModuleStatus, ModuleEventAction } from '$lib/proto/discopanel/v1/module_pb';
+	import { TriggeredEventType } from '$lib/proto/discopanel/v1/event_pb';
+	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import {
-		Loader2, ArrowLeft, Package, Check, Plus, Trash2, Copy, Save, X,
-		Settings, Network, Variable, HardDrive, Wrench, Info, Play, Heart
+		Loader2,
+		ArrowLeft,
+		Package,
+		Check,
+		Plus,
+		Trash2,
+		Copy,
+		Save,
+		X,
+		Settings,
+		Network,
+		Variable,
+		HardDrive,
+		Wrench,
+		Info,
+		Play,
+		Heart
 	} from '@lucide/svelte';
 	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
 
@@ -31,13 +54,32 @@
 		onTemplateDeleted?: () => void;
 	}
 
-	interface EnvVar { key: string; value: string; }
-	interface VolumeMount { hostPath: string; containerPath: string; readOnly: boolean; createDir: boolean; }
-	interface MetadataEntry { key: string; value: string; }
+	interface EnvVar {
+		key: string;
+		value: string;
+	}
+	interface VolumeMount {
+		hostPath: string;
+		containerPath: string;
+		readOnly: boolean;
+		createDir: boolean;
+	}
+	interface MetadataEntry {
+		key: string;
+		value: string;
+	}
 
 	type ConfigSection = 'general' | 'ports' | 'environment' | 'volumes' | 'advanced';
 
-	let { open = $bindable(), mode, server, templates, module, onSuccess, onTemplateDeleted }: Props = $props();
+	let {
+		open = $bindable(),
+		mode,
+		server,
+		templates,
+		module,
+		onSuccess,
+		onTemplateDeleted
+	}: Props = $props();
 
 	let step = $state<'select' | 'configure'>('select');
 	let selectedTemplate = $state<ModuleTemplate | null>(null);
@@ -78,7 +120,7 @@
 		{ id: 'ports', label: 'Ports', icon: Network },
 		{ id: 'environment', label: 'Environment', icon: Variable },
 		{ id: 'volumes', label: 'Volumes', icon: HardDrive },
-		{ id: 'advanced', label: 'Advanced', icon: Wrench },
+		{ id: 'advanced', label: 'Advanced', icon: Wrench }
 	];
 
 	// Helpers
@@ -216,7 +258,7 @@
 		eventHooks = [
 			...eventHooks,
 			{
-				event: ModuleEventType.SERVER_START,
+				event: TriggeredEventType.SERVER_START,
 				action: ModuleEventAction.START,
 				command: '',
 				delaySeconds: 0,
@@ -232,17 +274,6 @@
 	}
 	function removeMetadataEntry(i: number) {
 		metadata = metadata.filter((_, idx) => idx !== i);
-	}
-
-	function getEventTypeLabel(e: ModuleEventType): string {
-		const labels: Record<number, string> = {
-			[ModuleEventType.SERVER_START]: 'Server Start',
-			[ModuleEventType.SERVER_STOP]: 'Server Stop',
-			[ModuleEventType.SERVER_HEALTHY]: 'Server Healthy',
-			[ModuleEventType.PLAYER_JOIN]: 'Player Join',
-			[ModuleEventType.PLAYER_LEAVE]: 'Player Leave'
-		};
-		return labels[e] || 'Unknown';
 	}
 
 	function getEventActionLabel(a: ModuleEventAction): string {
@@ -352,7 +383,9 @@
 	}
 
 	async function handleDeleteTemplate(template: ModuleTemplate) {
-		const confirmed = confirm(`Are you sure you want to delete template "${template.name}"?\n\nThis cannot be undone.`);
+		const confirmed = confirm(
+			`Are you sure you want to delete template "${template.name}"?\n\nThis cannot be undone.`
+		);
 		if (!confirmed) return;
 
 		try {
@@ -362,7 +395,9 @@
 				onTemplateDeleted();
 			}
 		} catch (error) {
-			toast.error(`Failed to delete template: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			toast.error(
+				`Failed to delete template: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
 		}
 	}
 
@@ -373,15 +408,21 @@
 		const w: string[] = [];
 
 		if (ports.some((p) => p.proxyEnabled) && !hasProxy) {
-			w.push('One or more ports have proxy enabled, but this server has no proxy hostname configured. Proxy-routed ports won\'t be accessible from the host');
+			w.push(
+				"One or more ports have proxy enabled, but this server has no proxy hostname configured. Proxy-routed ports won't be accessible from the host"
+			);
 		}
 
 		if (ports.some((p) => p.hostPort === 0 && p.containerPort > 0)) {
-			w.push('One or more ports have no host port assigned. They will not be accessible from outside the container.');
+			w.push(
+				'One or more ports have no host port assigned. They will not be accessible from outside the container.'
+			);
 		}
 
 		if (memory < 64) {
-			w.push(`Memory limit is set to ${memory}MB, which is very low and may cause the container to be killed.`);
+			w.push(
+				`Memory limit is set to ${memory}MB, which is very low and may cause the container to be killed.`
+			);
 		}
 
 		if (w.length === 0) return Promise.resolve(true);
@@ -542,15 +583,18 @@
 </script>
 
 <Dialog bind:open>
-	<DialogContent class="max-w-6xl! w-[95vw]! h-[85vh]! p-0! gap-0! overflow-hidden flex flex-col" showCloseButton={false}>
+	<DialogContent
+		class="flex h-[85vh]! w-[95vw]! max-w-6xl! flex-col gap-0! overflow-hidden p-0!"
+		showCloseButton={false}
+	>
 		{#if mode === 'create' && step === 'select'}
 			<!-- Template Selection -->
-			<div class="flex flex-col h-full">
+			<div class="flex h-full flex-col">
 				<!-- Header -->
-				<div class="flex items-center justify-between px-8 py-6 border-b bg-muted/30">
+				<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
 					<div>
 						<h2 class="text-2xl font-semibold tracking-tight">Add Module</h2>
-						<p class="text-muted-foreground mt-1">Select a module template to get started</p>
+						<p class="mt-1 text-muted-foreground">Select a module template to get started</p>
 					</div>
 					<Button variant="ghost" size="icon" onclick={() => (open = false)} class="h-10 w-10">
 						<X class="h-5 w-5" />
@@ -559,39 +603,45 @@
 
 				<!-- Content -->
 				<div class="flex-1 overflow-y-auto p-8">
-					<ModuleTemplateMenu {templates} onSelect={selectTemplate} onDelete={handleDeleteTemplate} />
+					<ModuleTemplateMenu
+						{templates}
+						onSelect={selectTemplate}
+						onDelete={handleDeleteTemplate}
+					/>
 				</div>
 			</div>
 		{:else}
 			<!-- Configuration View -->
 			<div class="flex h-full">
 				<!-- Sidebar -->
-				<div class="w-64 border-r bg-muted/30 flex flex-col">
+				<div class="flex w-64 flex-col border-r bg-muted/30">
 					<!-- Sidebar Header -->
-					<div class="p-6 border-b">
+					<div class="border-b p-6">
 						{#if mode === 'create'}
 							<button
 								onclick={() => {
 									step = 'select';
 									selectedTemplate = null;
 								}}
-								class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
+								class="mb-4 flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
 							>
 								<ArrowLeft class="h-4 w-4" />
 								Back to templates
 							</button>
 						{/if}
 						<div class="flex items-center gap-3">
-							<div class="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+							<div class="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
 								<Package class="h-6 w-6 text-primary" />
 							</div>
-							<div class="flex-1 min-w-0">
-								<h3 class="font-semibold truncate">
+							<div class="min-w-0 flex-1">
+								<h3 class="truncate font-semibold">
 									{mode === 'create' ? selectedTemplate?.name : module?.templateName}
 								</h3>
 								{#if module}
-									<div class="flex items-center gap-2 mt-1">
-										<span class={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(module.status)}`}>
+									<div class="mt-1 flex items-center gap-2">
+										<span
+											class={`rounded-full border px-2 py-0.5 text-xs ${getStatusColor(module.status)}`}
+										>
 											{getStatusLabel(module.status)}
 										</span>
 									</div>
@@ -601,15 +651,15 @@
 					</div>
 
 					<!-- Navigation -->
-					<nav class="flex-1 p-4 space-y-1">
+					<nav class="flex-1 space-y-1 p-4">
 						{#each navItems as item (item.id)}
 							{@const Icon = item.icon}
 							<button
 								onclick={() => (activeSection = item.id)}
-								class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors {activeSection ===
+								class="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors {activeSection ===
 								item.id
 									? 'bg-primary text-primary-foreground'
-									: 'hover:bg-muted text-muted-foreground hover:text-foreground'}"
+									: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
 							>
 								<Icon class="h-5 w-5" />
 								<span class="font-medium">{item.label}</span>
@@ -618,12 +668,12 @@
 					</nav>
 
 					<!-- Sidebar Footer -->
-					<div class="p-4 border-t space-y-4">
+					<div class="space-y-4 border-t p-4">
 						{#if module?.id}
 							<div>
-								<div class="text-xs text-muted-foreground mb-2">Module ID</div>
+								<div class="mb-2 text-xs text-muted-foreground">Module ID</div>
 								<div class="flex items-center gap-2">
-									<code class="flex-1 text-xs font-mono bg-muted px-2 py-1.5 rounded truncate">
+									<code class="flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">
 										{module.id}
 									</code>
 									<Button
@@ -637,9 +687,9 @@
 								</div>
 							</div>
 						{/if}
-						<div class="p-4 rounded-lg bg-muted/50">
-							<p class="text-sm font-medium mb-2">Module Aliases</p>
-							<p class="text-xs text-muted-foreground mb-3">
+						<div class="rounded-lg bg-muted/50 p-4">
+							<p class="mb-2 text-sm font-medium">Module Aliases</p>
+							<p class="mb-3 text-xs text-muted-foreground">
 								Use aliases for dynamic values in any configuration field.
 							</p>
 							<AliasHelper serverId={serverId || ''} moduleId={module?.id} showLabel />
@@ -648,9 +698,9 @@
 				</div>
 
 				<!-- Main Content -->
-				<div class="flex-1 flex flex-col min-w-0">
+				<div class="flex min-w-0 flex-1 flex-col">
 					<!-- Content Header -->
-					<div class="flex items-center justify-between px-8 py-6 border-b bg-muted/30">
+					<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
 						<div>
 							<h2 class="text-2xl font-semibold tracking-tight">
 								{#if activeSection === 'general'}General Settings
@@ -660,12 +710,15 @@
 								{:else if activeSection === 'advanced'}Advanced Settings
 								{/if}
 							</h2>
-							<p class="text-muted-foreground mt-1">
-								{#if activeSection === 'general'}Configure basic module settings and lifecycle behavior
+							<p class="mt-1 text-muted-foreground">
+								{#if activeSection === 'general'}Configure basic module settings and lifecycle
+									behavior
 								{:else if activeSection === 'ports'}Define network ports for container communication
-								{:else if activeSection === 'environment'}Set environment variables for the container
+								{:else if activeSection === 'environment'}Set environment variables for the
+									container
 								{:else if activeSection === 'volumes'}Mount host directories into the container
-								{:else if activeSection === 'advanced'}Dependencies, health checks, hooks, and metadata
+								{:else if activeSection === 'advanced'}Dependencies, health checks, hooks, and
+									metadata
 								{/if}
 							</p>
 						</div>
@@ -735,7 +788,7 @@
 												id="uid"
 												bind:value={uid}
 												placeholder={'{{host.uid}}'}
-												class="h-12 text-base font-mono"
+												class="h-12 font-mono text-base"
 											/>
 											<p class="text-sm text-muted-foreground">User ID or alias</p>
 										</div>
@@ -745,7 +798,7 @@
 												id="gid"
 												bind:value={gid}
 												placeholder={'{{host.gid}}'}
-												class="h-12 text-base font-mono"
+												class="h-12 font-mono text-base"
 											/>
 											<p class="text-sm text-muted-foreground">Group ID or alias</p>
 										</div>
@@ -756,7 +809,9 @@
 								<div class="space-y-4">
 									<h3 class="text-base font-medium">Lifecycle Behavior</h3>
 									<div class="space-y-4">
-										<label class="flex items-start gap-4 p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+										<label
+											class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+										>
 											<Switch bind:checked={autoStart} class="mt-0.5" />
 											<div class="space-y-1">
 												<span class="font-medium">Auto-start</span>
@@ -766,7 +821,9 @@
 											</div>
 										</label>
 
-										<label class="flex items-start gap-4 p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+										<label
+											class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+										>
 											<Switch bind:checked={followServerLifecycle} class="mt-0.5" />
 											<div class="space-y-1">
 												<span class="font-medium">Follow server lifecycle</span>
@@ -776,7 +833,9 @@
 											</div>
 										</label>
 
-										<label class="flex items-start gap-4 p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+										<label
+											class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+										>
 											<Switch bind:checked={detached} class="mt-0.5" />
 											<div class="space-y-1">
 												<span class="font-medium">Detached mode</span>
@@ -789,11 +848,11 @@
 								</div>
 
 								{#if mode === 'create'}
-									<div class="p-4 border rounded-lg bg-primary/5 border-primary/20">
-										<label class="flex items-start gap-4 cursor-pointer">
+									<div class="rounded-lg border border-primary/20 bg-primary/5 p-4">
+										<label class="flex cursor-pointer items-start gap-4">
 											<Switch bind:checked={startImmediately} class="mt-0.5" />
 											<div class="space-y-1">
-												<span class="font-medium flex items-center gap-2">
+												<span class="flex items-center gap-2 font-medium">
 													<Play class="h-4 w-4" />
 													Start immediately
 												</span>
@@ -808,9 +867,9 @@
 								{#if module?.dataPath}
 									<div class="space-y-3">
 										<Label>Data Path</Label>
-										<div class="flex items-center gap-3 p-4 bg-muted rounded-lg">
-											<HardDrive class="h-5 w-5 text-muted-foreground shrink-0" />
-											<code class="flex-1 font-mono text-sm truncate">{module.dataPath}</code>
+										<div class="flex items-center gap-3 rounded-lg bg-muted p-4">
+											<HardDrive class="h-5 w-5 shrink-0 text-muted-foreground" />
+											<code class="flex-1 truncate font-mono text-sm">{module.dataPath}</code>
 											<Button
 												variant="ghost"
 												size="icon"
@@ -823,7 +882,6 @@
 									</div>
 								{/if}
 							</div>
-
 						{:else if activeSection === 'ports'}
 							<!-- Ports Section -->
 							<div class="space-y-6">
@@ -842,7 +900,7 @@
 								{#if ports.length > 0}
 									<div class="space-y-4">
 										{#each ports as port, i (port.containerPort)}
-											<div class="p-6 border rounded-xl bg-card space-y-4">
+											<div class="space-y-4 rounded-xl border bg-card p-6">
 												<div class="flex items-center justify-between">
 													<span class="font-medium">Port {i + 1}</span>
 													<Button
@@ -905,10 +963,15 @@
 													<span class="text-sm">Enable proxy for this port</span>
 												</label>
 												{#if port.proxyEnabled && !hasProxy}
-													<div class="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400">
-														<Info class="h-4 w-4 mt-0.5 shrink-0" />
+													<div
+														class="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400"
+													>
+														<Info class="mt-0.5 h-4 w-4 shrink-0" />
 														<div class="flex-1 text-xs">
-															<p>This server has no proxy hostname configured. Proxy-routed ports won't be accessible from the host.</p>
+															<p>
+																This server has no proxy hostname configured. Proxy-routed ports
+																won't be accessible from the host.
+															</p>
 															<Button
 																variant="outline"
 																size="sm"
@@ -927,10 +990,12 @@
 										{/each}
 									</div>
 								{:else}
-									<div class="flex flex-col items-center justify-center py-16 text-center border rounded-xl border-dashed">
-										<Network class="h-12 w-12 text-muted-foreground/50 mb-4" />
-										<h3 class="font-medium mb-1">No ports configured</h3>
-										<p class="text-sm text-muted-foreground mb-4">
+									<div
+										class="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-center"
+									>
+										<Network class="mb-4 h-12 w-12 text-muted-foreground/50" />
+										<h3 class="mb-1 font-medium">No ports configured</h3>
+										<p class="mb-4 text-sm text-muted-foreground">
 											Add ports to expose container services
 										</p>
 										<Button onclick={addPort} variant="outline" class="gap-2">
@@ -940,7 +1005,6 @@
 									</div>
 								{/if}
 							</div>
-
 						{:else if activeSection === 'environment'}
 							<!-- Environment Section -->
 							<div class="space-y-6">
@@ -959,23 +1023,23 @@
 								{#if envVars.length > 0}
 									<div class="space-y-3">
 										{#each envVars as env, i (i)}
-											<div class="flex items-center gap-3 p-4 border rounded-lg bg-card">
+											<div class="flex items-center gap-3 rounded-lg border bg-card p-4">
 												<Input
 													bind:value={env.key}
 													placeholder="VARIABLE_NAME"
-													class="w-56 font-mono h-11"
+													class="h-11 w-56 font-mono"
 												/>
-												<span class="text-muted-foreground text-xl">=</span>
+												<span class="text-xl text-muted-foreground">=</span>
 												<Input
 													bind:value={env.value}
 													placeholder="value"
-													class="flex-1 font-mono h-11"
+													class="h-11 flex-1 font-mono"
 												/>
 												<Button
 													variant="ghost"
 													size="icon"
 													onclick={() => removeEnvVar(i)}
-													class="h-10 w-10 text-destructive hover:text-destructive shrink-0"
+													class="h-10 w-10 shrink-0 text-destructive hover:text-destructive"
 												>
 													<Trash2 class="h-4 w-4" />
 												</Button>
@@ -983,10 +1047,12 @@
 										{/each}
 									</div>
 								{:else}
-									<div class="flex flex-col items-center justify-center py-16 text-center border rounded-xl border-dashed">
-										<Variable class="h-12 w-12 text-muted-foreground/50 mb-4" />
-										<h3 class="font-medium mb-1">No environment variables</h3>
-										<p class="text-sm text-muted-foreground mb-4">
+									<div
+										class="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-center"
+									>
+										<Variable class="mb-4 h-12 w-12 text-muted-foreground/50" />
+										<h3 class="mb-1 font-medium">No environment variables</h3>
+										<p class="mb-4 text-sm text-muted-foreground">
 											Add variables to configure the container
 										</p>
 										<Button onclick={addEnvVar} variant="outline" class="gap-2">
@@ -996,7 +1062,6 @@
 									</div>
 								{/if}
 							</div>
-
 						{:else if activeSection === 'volumes'}
 							<!-- Volumes Section -->
 							<div class="space-y-6">
@@ -1015,7 +1080,7 @@
 								{#if volumes.length > 0}
 									<div class="space-y-4">
 										{#each volumes as vol, i (i)}
-											<div class="p-6 border rounded-xl bg-card space-y-4">
+											<div class="space-y-4 rounded-xl border bg-card p-6">
 												<div class="flex items-center justify-between">
 													<span class="font-medium">Volume {i + 1}</span>
 													<Button
@@ -1034,7 +1099,7 @@
 														<Input
 															bind:value={vol.hostPath}
 															placeholder="/host/path"
-															class="font-mono h-11"
+															class="h-11 font-mono"
 														/>
 													</div>
 													<div class="space-y-2">
@@ -1042,26 +1107,34 @@
 														<Input
 															bind:value={vol.containerPath}
 															placeholder="/container/path"
-															class="font-mono h-11"
+															class="h-11 font-mono"
 														/>
 													</div>
 												</div>
 
 												<div class="flex items-center gap-6 pt-2">
 													<label class="flex items-center gap-3">
-														<Checkbox checked={vol.readOnly} onCheckedChange={(checked) => {
-															vol.readOnly = !!checked;
-															if (vol.readOnly) {
-																vol.createDir = false;
-															}}} />
+														<Checkbox
+															checked={vol.readOnly}
+															onCheckedChange={(checked) => {
+																vol.readOnly = !!checked;
+																if (vol.readOnly) {
+																	vol.createDir = false;
+																}
+															}}
+														/>
 														<span class="text-sm">Read-only mount</span>
 													</label>
 													<label class="flex items-center gap-3">
-														<Checkbox checked={vol.createDir} onCheckedChange={(checked) => {
-															vol.createDir = !!checked;
-															if (vol.createDir) {
-																vol.readOnly = false;
-															}}} />
+														<Checkbox
+															checked={vol.createDir}
+															onCheckedChange={(checked) => {
+																vol.createDir = !!checked;
+																if (vol.createDir) {
+																	vol.readOnly = false;
+																}
+															}}
+														/>
 														<span class="text-sm">Pre-create directory</span>
 													</label>
 												</div>
@@ -1069,10 +1142,12 @@
 										{/each}
 									</div>
 								{:else}
-									<div class="flex flex-col items-center justify-center py-16 text-center border rounded-xl border-dashed">
-										<HardDrive class="h-12 w-12 text-muted-foreground/50 mb-4" />
-										<h3 class="font-medium mb-1">No volumes mounted</h3>
-										<p class="text-sm text-muted-foreground mb-4">
+									<div
+										class="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-center"
+									>
+										<HardDrive class="mb-4 h-12 w-12 text-muted-foreground/50" />
+										<h3 class="mb-1 font-medium">No volumes mounted</h3>
+										<p class="mb-4 text-sm text-muted-foreground">
 											Mount host directories to persist data
 										</p>
 										<Button onclick={addVolume} variant="outline" class="gap-2">
@@ -1082,7 +1157,6 @@
 									</div>
 								{/if}
 							</div>
-
 						{:else if activeSection === 'advanced'}
 							<!-- Advanced Section -->
 							<div class="space-y-10">
@@ -1091,7 +1165,7 @@
 									<div class="flex items-center justify-between">
 										<div>
 											<h3 class="text-lg font-medium">Dependencies</h3>
-											<p class="text-sm text-muted-foreground mt-1">
+											<p class="mt-1 text-sm text-muted-foreground">
 												Modules that must be running before this one starts
 											</p>
 										</div>
@@ -1109,7 +1183,7 @@
 									{#if dependencies.length > 0}
 										<div class="space-y-3">
 											{#each dependencies as dep, i (i)}
-												<div class="flex items-center gap-4 p-4 border rounded-lg bg-card">
+												<div class="flex items-center gap-4 rounded-lg border bg-card p-4">
 													<Select
 														type="single"
 														value={dep.moduleId}
@@ -1117,7 +1191,7 @@
 															if (v) dep.moduleId = v;
 														}}
 													>
-														<SelectTrigger class="w-64 h-11">
+														<SelectTrigger class="h-11 w-64">
 															<span
 																>{serverModules.find((m) => m.id === dep.moduleId)?.name ||
 																	'Select module...'}</span
@@ -1140,7 +1214,7 @@
 														<Input
 															type="number"
 															bind:value={dep.timeoutSeconds}
-															class="w-24 h-11"
+															class="h-11 w-24"
 														/>
 													</div>
 
@@ -1148,7 +1222,7 @@
 														variant="ghost"
 														size="icon"
 														onclick={() => removeDependency(i)}
-														class="h-10 w-10 text-destructive hover:text-destructive ml-auto"
+														class="ml-auto h-10 w-10 text-destructive hover:text-destructive"
 													>
 														<Trash2 class="h-4 w-4" />
 													</Button>
@@ -1156,7 +1230,9 @@
 											{/each}
 										</div>
 									{:else}
-										<div class="p-6 border rounded-lg border-dashed text-center text-muted-foreground">
+										<div
+											class="rounded-lg border border-dashed p-6 text-center text-muted-foreground"
+										>
 											{serverModules.length === 0
 												? 'No other modules available on this server'
 												: 'No dependencies configured'}
@@ -1167,44 +1243,29 @@
 								<!-- Health Check -->
 								<div class="space-y-4">
 									<div>
-										<h3 class="text-lg font-medium flex items-center gap-2">
+										<h3 class="flex items-center gap-2 text-lg font-medium">
 											<Heart class="h-5 w-5" />
 											Health Check
 										</h3>
-										<p class="text-sm text-muted-foreground mt-1">
+										<p class="mt-1 text-sm text-muted-foreground">
 											Configure how the module's health is monitored
 										</p>
 									</div>
 
-									<div class="grid grid-cols-3 gap-6 p-6 border rounded-lg bg-card">
+									<div class="grid grid-cols-3 gap-6 rounded-lg border bg-card p-6">
 										<div class="space-y-2">
 											<Label>Interval (seconds)</Label>
-											<Input
-												type="number"
-												bind:value={healthCheckInterval}
-												min={5}
-												class="h-11"
-											/>
+											<Input type="number" bind:value={healthCheckInterval} min={5} class="h-11" />
 											<p class="text-xs text-muted-foreground">Time between checks</p>
 										</div>
 										<div class="space-y-2">
 											<Label>Timeout (seconds)</Label>
-											<Input
-												type="number"
-												bind:value={healthCheckTimeout}
-												min={1}
-												class="h-11"
-											/>
+											<Input type="number" bind:value={healthCheckTimeout} min={1} class="h-11" />
 											<p class="text-xs text-muted-foreground">Max wait for response</p>
 										</div>
 										<div class="space-y-2">
 											<Label>Retries</Label>
-											<Input
-												type="number"
-												bind:value={healthCheckRetries}
-												min={1}
-												class="h-11"
-											/>
+											<Input type="number" bind:value={healthCheckRetries} min={1} class="h-11" />
 											<p class="text-xs text-muted-foreground">Failures before unhealthy</p>
 										</div>
 									</div>
@@ -1214,18 +1275,18 @@
 								<div class="space-y-4">
 									<div>
 										<h3 class="text-lg font-medium">Init Command</h3>
-										<p class="text-sm text-muted-foreground mt-1">
+										<p class="mt-1 text-sm text-muted-foreground">
 											Execute a command inside the container after it starts
 										</p>
 									</div>
 
-									<div class="p-6 border rounded-lg bg-card space-y-4">
+									<div class="space-y-4 rounded-lg border bg-card p-6">
 										<div class="space-y-2">
 											<Label>Command</Label>
 											<Input
 												bind:value={initCommand}
 												placeholder="sh -c 'sed -i ...'"
-												class="font-mono h-11"
+												class="h-11 font-mono"
 											/>
 											<p class="text-xs text-muted-foreground">
 												Shell command to exec inside the container after start
@@ -1234,12 +1295,7 @@
 										<div class="grid grid-cols-2 gap-6">
 											<div class="space-y-2">
 												<Label>Delay (seconds)</Label>
-												<Input
-													type="number"
-													bind:value={initCommandDelay}
-													min={0}
-													class="h-11"
-												/>
+												<Input type="number" bind:value={initCommandDelay} min={0} class="h-11" />
 												<p class="text-xs text-muted-foreground">
 													Seconds to wait after start before running
 												</p>
@@ -1264,7 +1320,7 @@
 									<div class="flex items-center justify-between">
 										<div>
 											<h3 class="text-lg font-medium">Event Hooks</h3>
-											<p class="text-sm text-muted-foreground mt-1">
+											<p class="mt-1 text-sm text-muted-foreground">
 												Actions to run when specific events occur
 											</p>
 										</div>
@@ -1277,7 +1333,7 @@
 									{#if eventHooks.length > 0}
 										<div class="space-y-4">
 											{#each eventHooks as hook, i (i)}
-												<div class="p-6 border rounded-xl bg-card space-y-4">
+												<div class="space-y-4 rounded-xl border bg-card p-6">
 													<div class="flex items-center justify-between">
 														<span class="font-medium">Hook {i + 1}</span>
 														<Button
@@ -1304,21 +1360,9 @@
 																	<span>{getEventTypeLabel(hook.event)}</span>
 																</SelectTrigger>
 																<SelectContent>
-																	<SelectItem value={String(ModuleEventType.SERVER_START)}
-																		>Server Start</SelectItem
-																	>
-																	<SelectItem value={String(ModuleEventType.SERVER_STOP)}
-																		>Server Stop</SelectItem
-																	>
-																	<SelectItem value={String(ModuleEventType.SERVER_HEALTHY)}
-																		>Server Healthy</SelectItem
-																	>
-																	<SelectItem value={String(ModuleEventType.PLAYER_JOIN)}
-																		>Player Join</SelectItem
-																	>
-																	<SelectItem value={String(ModuleEventType.PLAYER_LEAVE)}
-																		>Player Leave</SelectItem
-																	>
+																	{#each SERVER_EVENT_TYPES as { type, label }}
+																		<SelectItem value={String(type)}>{label}</SelectItem>
+																	{/each}
 																</SelectContent>
 															</Select>
 														</div>
@@ -1370,7 +1414,7 @@
 															<Input
 																bind:value={hook.command}
 																placeholder="Command to execute"
-																class="font-mono h-11"
+																class="h-11 font-mono"
 															/>
 														</div>
 													{/if}
@@ -1380,14 +1424,16 @@
 														<Input
 															bind:value={hook.condition}
 															placeholder="Conditional expression"
-															class="font-mono h-11"
+															class="h-11 font-mono"
 														/>
 													</div>
 												</div>
 											{/each}
 										</div>
 									{:else}
-										<div class="p-6 border rounded-lg border-dashed text-center text-muted-foreground">
+										<div
+											class="rounded-lg border border-dashed p-6 text-center text-muted-foreground"
+										>
 											No event hooks configured
 										</div>
 									{/if}
@@ -1397,11 +1443,11 @@
 								<div class="space-y-4">
 									<div class="flex items-center justify-between">
 										<div>
-											<h3 class="text-lg font-medium flex items-center gap-2">
+											<h3 class="flex items-center gap-2 text-lg font-medium">
 												<Info class="h-5 w-5" />
 												Metadata
 											</h3>
-											<p class="text-sm text-muted-foreground mt-1">
+											<p class="mt-1 text-sm text-muted-foreground">
 												Custom key-value pairs for module configuration
 											</p>
 										</div>
@@ -1414,23 +1460,23 @@
 									{#if metadata.length > 0}
 										<div class="space-y-3">
 											{#each metadata as entry, i (i)}
-												<div class="flex items-center gap-3 p-4 border rounded-lg bg-card">
+												<div class="flex items-center gap-3 rounded-lg border bg-card p-4">
 													<Input
 														bind:value={entry.key}
 														placeholder="key"
-														class="w-48 font-mono h-11"
+														class="h-11 w-48 font-mono"
 													/>
-													<span class="text-muted-foreground text-xl">:</span>
+													<span class="text-xl text-muted-foreground">:</span>
 													<Input
 														bind:value={entry.value}
 														placeholder="value"
-														class="flex-1 font-mono h-11"
+														class="h-11 flex-1 font-mono"
 													/>
 													<Button
 														variant="ghost"
 														size="icon"
 														onclick={() => removeMetadataEntry(i)}
-														class="h-10 w-10 text-destructive hover:text-destructive shrink-0"
+														class="h-10 w-10 shrink-0 text-destructive hover:text-destructive"
 													>
 														<Trash2 class="h-4 w-4" />
 													</Button>
@@ -1438,7 +1484,9 @@
 											{/each}
 										</div>
 									{:else}
-										<div class="p-6 border rounded-lg border-dashed text-center text-muted-foreground">
+										<div
+											class="rounded-lg border border-dashed p-6 text-center text-muted-foreground"
+										>
 											No metadata entries
 										</div>
 									{/if}
@@ -1448,7 +1496,7 @@
 					</div>
 
 					<!-- Footer -->
-					<div class="flex items-center justify-end gap-3 px-8 py-5 border-t bg-muted/30">
+					<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-8 py-5">
 						{#if mode === 'create'}
 							<Button
 								variant="outline"
@@ -1468,7 +1516,7 @@
 						<Button
 							onclick={handleSubmit}
 							disabled={submitting || !name.trim()}
-							class="h-11 px-8 gap-2"
+							class="h-11 gap-2 px-8"
 						>
 							{#if submitting}
 								<Loader2 class="h-4 w-4 animate-spin" />
@@ -1488,7 +1536,12 @@
 	</DialogContent>
 </Dialog>
 
-<AlertDialog.Root open={warnings.length > 0} onOpenChange={(o) => { if (!o) handleWarningCancel(); }}>
+<AlertDialog.Root
+	open={warnings.length > 0}
+	onOpenChange={(o) => {
+		if (!o) handleWarningCancel();
+	}}
+>
 	<AlertDialog.Content>
 		<AlertDialog.Header>
 			<AlertDialog.Title class="flex items-center gap-2">
@@ -1496,13 +1549,16 @@
 				Review Warnings
 			</AlertDialog.Title>
 			<AlertDialog.Description>
-				The following issues were detected. You can still proceed, but you may want to review them first.
+				The following issues were detected. You can still proceed, but you may want to review them
+				first.
 			</AlertDialog.Description>
 		</AlertDialog.Header>
 		<div class="space-y-2 py-2">
 			{#each warnings as warning (warning)}
-				<div class="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm">
-					<AlertTriangle class="h-4 w-4 mt-0.5 shrink-0" />
+				<div
+					class="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+				>
+					<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
 					<span>{warning}</span>
 				</div>
 			{/each}

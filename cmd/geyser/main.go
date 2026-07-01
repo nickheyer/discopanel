@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	geyserJar     = "/opt/geyser/Geyser.jar"
-	geyserURL     = "https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/standalone"
-	dataDir       = "/data"
-	configFile    = "/data/config.yml"
+	geyserJar  = "/opt/geyser/Geyser.jar"
+	geyserURL  = "https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/standalone"
+	dataDir    = "/data"
+	configFile = "/data/config.yml"
 )
 
 func main() {

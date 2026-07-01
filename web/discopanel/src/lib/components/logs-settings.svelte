@@ -1,16 +1,15 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import {
-		ScrollText,
-		RefreshCw,
-		Download,
-		Loader2,
-		AlertCircle,
-		ArrowDown
-	} from '@lucide/svelte';
+	import { ScrollText, RefreshCw, Download, Loader2, AlertCircle, ArrowDown } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { rpcClient } from '$lib/api/rpc-client';
 
@@ -99,13 +98,17 @@
 	});
 </script>
 
-<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
-	<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
+<Card
+	class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
+>
+	<div
+		class="pointer-events-none absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
+	></div>
 	<CardHeader class="relative pb-4">
 		<div class="flex items-center justify-between">
 			<div>
 				<CardTitle class="text-2xl font-semibold">Application Logs</CardTitle>
-				<CardDescription class="text-base mt-2">
+				<CardDescription class="mt-2 text-base">
 					View real-time DiscoPanel application logs for debugging and monitoring.
 				</CardDescription>
 			</div>
@@ -125,63 +128,45 @@
 		<!-- Controls -->
 		<div class="flex items-center justify-between gap-4">
 			<div class="flex items-center gap-2">
-				<Button
-					onclick={() => loadLogs(true)}
-					disabled={refreshing}
-					variant="outline"
-					size="sm"
-				>
+				<Button onclick={() => loadLogs(true)} disabled={refreshing} variant="outline" size="sm">
 					{#if refreshing}
-						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 					{:else}
-						<RefreshCw class="h-4 w-4 mr-2" />
+						<RefreshCw class="mr-2 h-4 w-4" />
 					{/if}
 					Refresh
 				</Button>
-				<Button
-					onclick={downloadLogs}
-					disabled={!logs}
-					variant="outline"
-					size="sm"
-				>
-					<Download class="h-4 w-4 mr-2" />
+				<Button onclick={downloadLogs} disabled={!logs} variant="outline" size="sm">
+					<Download class="mr-2 h-4 w-4" />
 					Download
 				</Button>
-				<Button
-					onclick={scrollToBottom}
-					variant="outline"
-					size="sm"
-				>
-					<ArrowDown class="h-4 w-4 mr-2" />
+				<Button onclick={scrollToBottom} variant="outline" size="sm">
+					<ArrowDown class="mr-2 h-4 w-4" />
 					Scroll to Bottom
 				</Button>
 			</div>
 			<div class="flex items-center gap-2">
-				<label class="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-					<input
-						type="checkbox"
-						bind:checked={autoScroll}
-						class="rounded border-border"
-					/>
+				<label class="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+					<input type="checkbox" bind:checked={autoScroll} class="rounded border-border" />
 					Auto-scroll
 				</label>
 			</div>
 		</div>
 
 		<!-- Log Display -->
-		<div class="relative rounded-lg border border-border bg-black/90 overflow-hidden">
+		<div class="relative overflow-hidden rounded-lg border border-border bg-black/90">
 			{#if loading}
-				<div class="flex items-center justify-center h-96">
-					<div class="text-center space-y-3">
-						<Loader2 class="h-8 w-8 mx-auto text-primary animate-spin" />
-						<div class="text-muted-foreground text-sm">Loading logs...</div>
+				<div class="flex h-96 items-center justify-center">
+					<div class="space-y-3 text-center">
+						<Loader2 class="mx-auto h-8 w-8 animate-spin text-primary" />
+						<div class="text-sm text-muted-foreground">Loading logs...</div>
 					</div>
 				</div>
 			{:else if !logs}
-				<div class="flex items-center justify-center h-96">
-					<div class="text-center space-y-3">
-						<AlertCircle class="h-8 w-8 mx-auto text-muted-foreground" />
-						<div class="text-muted-foreground text-sm">No logs available</div>
+				<div class="flex h-96 items-center justify-center">
+					<div class="space-y-3 text-center">
+						<AlertCircle class="mx-auto h-8 w-8 text-muted-foreground" />
+						<div class="text-sm text-muted-foreground">No logs available</div>
 						<p class="text-xs text-muted-foreground">
 							File logging may not be enabled in your configuration.
 						</p>
@@ -190,20 +175,19 @@
 			{:else}
 				<pre
 					bind:this={logContainer}
-					class="h-96 overflow-auto p-4 text-xs font-mono text-green-400 whitespace-pre-wrap break-all"
-				>{logs}</pre>
+					class="h-96 overflow-auto p-4 font-mono text-xs break-all whitespace-pre-wrap text-green-400">{logs}</pre>
 			{/if}
 		</div>
 
 		<!-- Info Notice -->
 		<div class="rounded-lg border border-border/50 bg-muted/30 p-4">
 			<div class="flex gap-3">
-				<ScrollText class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+				<ScrollText class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 				<div class="space-y-1 text-sm text-muted-foreground">
 					<p class="font-medium">Log Information</p>
 					<p class="text-xs leading-relaxed">
-						Showing the last 500 lines of application logs. Logs auto-refresh every 5 seconds.
-						For complete logs, use the Support tab to generate a support bundle or click Download.
+						Showing the last 500 lines of application logs. Logs auto-refresh every 5 seconds. For
+						complete logs, use the Support tab to generate a support bundle or click Download.
 					</p>
 				</div>
 			</div>

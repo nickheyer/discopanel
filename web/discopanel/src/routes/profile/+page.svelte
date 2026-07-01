@@ -1,15 +1,44 @@
 <script lang="ts">
 	import { authStore, currentUser } from '$lib/stores/auth';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Dialog, DialogContent } from '$lib/components/ui/dialog';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
+	import {
+		Table,
+		TableBody,
+		TableCell,
+		TableHead,
+		TableHeader,
+		TableRow
+	} from '$lib/components/ui/table';
 	import { toast } from 'svelte-sonner';
-	import { User, Key, Loader2, Mail, Calendar, Clock, Shield, Activity, Plus, Trash2, Copy, X, Check, AlertTriangle, KeyRound } from '@lucide/svelte';
+	import {
+		User,
+		Key,
+		Loader2,
+		Mail,
+		Calendar,
+		Clock,
+		Shield,
+		Activity,
+		Plus,
+		Trash2,
+		Copy,
+		X,
+		Check,
+		AlertTriangle,
+		KeyRound
+	} from '@lucide/svelte';
 	import { getRoleBadgeVariant } from '$lib/utils/role-colors';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { onMount } from 'svelte';
@@ -127,7 +156,9 @@
 			await navigator.clipboard.writeText(createdToken);
 			copied = true;
 			toast.success('Token copied to clipboard');
-			setTimeout(() => { copied = false; }, 2000);
+			setTimeout(() => {
+				copied = false;
+			}, 2000);
 		} catch {
 			toast.error('Failed to copy token');
 		}
@@ -190,13 +221,19 @@
 <div class="flex-1 space-y-8 p-8 pt-6">
 	{#if user}
 		<!-- Header with Avatar -->
-		<div class="flex items-center gap-6 pb-6 border-b-2 border-border/50">
-			<div class="h-16 w-16 rounded-2xl bg-linear-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">
+		<div class="flex items-center gap-6 border-b-2 border-border/50 pb-6">
+			<div
+				class="flex h-16 w-16 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-primary/70 shadow-lg"
+			>
 				<span class="text-2xl font-bold text-primary-foreground">{initials}</span>
 			</div>
 			<div class="space-y-1">
 				<div class="flex items-center gap-3">
-					<h2 class="text-4xl font-bold tracking-tight bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">{user.username}</h2>
+					<h2
+						class="bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-4xl font-bold tracking-tight text-transparent"
+					>
+						{user.username}
+					</h2>
 					<Badge variant={getRoleBadgeVariant(primaryRole)} class="text-sm">{primaryRole}</Badge>
 				</div>
 				<p class="text-base text-muted-foreground">Manage your account settings and security</p>
@@ -205,11 +242,17 @@
 
 		<div class="grid gap-6 md:grid-cols-2">
 			<!-- Account Information -->
-			<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
-				<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+			<Card
+				class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
+			>
+				<div
+					class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
+				></div>
 				<CardHeader class="relative">
 					<div class="flex items-center gap-3">
-						<div class="h-10 w-10 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+						<div
+							class="flex h-10 w-10 items-center justify-center rounded-lg bg-linear-to-br from-primary/20 to-primary/10"
+						>
 							<User class="h-5 w-5 text-primary" />
 						</div>
 						<div>
@@ -220,8 +263,8 @@
 				</CardHeader>
 				<CardContent class="relative space-y-4">
 					<!-- Username -->
-					<div class="flex items-center gap-3 p-3 rounded-lg border bg-card">
-						<User class="h-4 w-4 text-muted-foreground shrink-0" />
+					<div class="flex items-center gap-3 rounded-lg border bg-card p-3">
+						<User class="h-4 w-4 shrink-0 text-muted-foreground" />
 						<div>
 							<p class="text-xs text-muted-foreground">Username</p>
 							<p class="text-sm font-medium">{user.username}</p>
@@ -229,8 +272,8 @@
 					</div>
 
 					<!-- Provider -->
-					<div class="flex items-center gap-3 p-3 rounded-lg border bg-card">
-						<Shield class="h-4 w-4 text-muted-foreground shrink-0" />
+					<div class="flex items-center gap-3 rounded-lg border bg-card p-3">
+						<Shield class="h-4 w-4 shrink-0 text-muted-foreground" />
 						<div class="flex items-center gap-2">
 							<div>
 								<p class="text-xs text-muted-foreground">Auth Provider</p>
@@ -242,8 +285,8 @@
 
 					<!-- Email -->
 					{#if user.email}
-						<div class="flex items-center gap-3 p-3 rounded-lg border bg-card">
-							<Mail class="h-4 w-4 text-muted-foreground shrink-0" />
+						<div class="flex items-center gap-3 rounded-lg border bg-card p-3">
+							<Mail class="h-4 w-4 shrink-0 text-muted-foreground" />
 							<div>
 								<p class="text-xs text-muted-foreground">Email</p>
 								<p class="text-sm font-medium">{user.email}</p>
@@ -252,24 +295,24 @@
 					{/if}
 
 					<!-- Roles -->
-					<div class="flex items-center gap-3 p-3 rounded-lg border bg-card">
-						<Shield class="h-4 w-4 text-muted-foreground shrink-0" />
+					<div class="flex items-center gap-3 rounded-lg border bg-card p-3">
+						<Shield class="h-4 w-4 shrink-0 text-muted-foreground" />
 						<div class="flex-1">
-							<p class="text-xs text-muted-foreground mb-1">Roles</p>
+							<p class="mb-1 text-xs text-muted-foreground">Roles</p>
 							<div class="flex flex-wrap gap-1.5">
 								{#each user.roles || [] as role (role)}
 									<Badge variant={getRoleBadgeVariant(role)}>{role}</Badge>
 								{/each}
 								{#if !user.roles?.length}
-									<span class="text-muted-foreground text-xs">No roles assigned</span>
+									<span class="text-xs text-muted-foreground">No roles assigned</span>
 								{/if}
 							</div>
 						</div>
 					</div>
 
 					<!-- Member Since -->
-					<div class="flex items-center gap-3 p-3 rounded-lg border bg-card">
-						<Calendar class="h-4 w-4 text-muted-foreground shrink-0" />
+					<div class="flex items-center gap-3 rounded-lg border bg-card p-3">
+						<Calendar class="h-4 w-4 shrink-0 text-muted-foreground" />
 						<div>
 							<p class="text-xs text-muted-foreground">Member since</p>
 							<p class="text-sm font-medium">{memberSince}</p>
@@ -278,8 +321,8 @@
 
 					<!-- Last Active -->
 					{#if lastActive}
-						<div class="flex items-center gap-3 p-3 rounded-lg border bg-card">
-							<Clock class="h-4 w-4 text-muted-foreground shrink-0" />
+						<div class="flex items-center gap-3 rounded-lg border bg-card p-3">
+							<Clock class="h-4 w-4 shrink-0 text-muted-foreground" />
 							<div>
 								<p class="text-xs text-muted-foreground">Last active</p>
 								<p class="text-sm font-medium">{lastActive}</p>
@@ -288,8 +331,8 @@
 					{/if}
 
 					<!-- Account Status -->
-					<div class="flex items-center gap-3 p-3 rounded-lg border bg-card">
-						<Activity class="h-4 w-4 text-muted-foreground shrink-0" />
+					<div class="flex items-center gap-3 rounded-lg border bg-card p-3">
+						<Activity class="h-4 w-4 shrink-0 text-muted-foreground" />
 						<div>
 							<p class="text-xs text-muted-foreground">Account status</p>
 							<p class="text-sm font-medium">{user.isActive ? 'Active' : 'Inactive'}</p>
@@ -302,11 +345,17 @@
 			</Card>
 
 			<!-- Security Card -->
-			<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
-				<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+			<Card
+				class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
+			>
+				<div
+					class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
+				></div>
 				<CardHeader class="relative">
 					<div class="flex items-center gap-3">
-						<div class="h-10 w-10 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+						<div
+							class="flex h-10 w-10 items-center justify-center rounded-lg bg-linear-to-br from-primary/20 to-primary/10"
+						>
 							<Key class="h-5 w-5 text-primary" />
 						</div>
 						<div>
@@ -320,7 +369,7 @@
 					<div class="space-y-3">
 						<Label class="text-sm font-medium text-muted-foreground">Session</Label>
 						<div class="grid gap-2">
-							<div class="flex items-center justify-between p-2.5 rounded-lg border bg-card">
+							<div class="flex items-center justify-between rounded-lg border bg-card p-2.5">
 								<span class="text-xs text-muted-foreground">Provider</span>
 								<Badge variant="outline" class="text-xs">{providerLabel}</Badge>
 							</div>
@@ -330,8 +379,16 @@
 					<!-- Password Form (local users only) -->
 					{#if user.authProvider === 'local' || !user.authProvider}
 						<div class="border-t pt-5">
-							<Label class="text-sm font-medium text-muted-foreground mb-3 block">Change Password</Label>
-							<form onsubmit={(e) => { e.preventDefault(); changePassword(); }} class="space-y-3">
+							<Label class="mb-3 block text-sm font-medium text-muted-foreground"
+								>Change Password</Label
+							>
+							<form
+								onsubmit={(e) => {
+									e.preventDefault();
+									changePassword();
+								}}
+								class="space-y-3"
+							>
 								<div class="space-y-1.5">
 									<Label for="old-password" class="text-xs">Current Password</Label>
 									<Input
@@ -380,9 +437,10 @@
 					{:else}
 						<div class="border-t pt-5">
 							<div class="rounded-lg border border-dashed p-4 text-center">
-								<Key class="h-6 w-6 text-muted-foreground mx-auto mb-2" />
+								<Key class="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
 								<p class="text-sm text-muted-foreground">
-									Your account uses <span class="font-medium">{providerLabel}</span> authentication. Password changes are managed by your identity provider.
+									Your account uses <span class="font-medium">{providerLabel}</span> authentication.
+									Password changes are managed by your identity provider.
 								</p>
 							</div>
 						</div>
@@ -392,20 +450,28 @@
 		</div>
 
 		<!-- API Tokens Card (full width) -->
-		<Card class="relative overflow-hidden border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl bg-linear-to-br from-card to-card/80">
-			<div class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+		<Card
+			class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
+		>
+			<div
+				class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
+			></div>
 			<CardHeader class="relative">
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3">
-						<div class="h-10 w-10 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+						<div
+							class="flex h-10 w-10 items-center justify-center rounded-lg bg-linear-to-br from-primary/20 to-primary/10"
+						>
 							<KeyRound class="h-5 w-5 text-primary" />
 						</div>
 						<div>
 							<CardTitle>API Tokens</CardTitle>
-							<CardDescription>Programmatic access tokens that inherit your identity and permissions</CardDescription>
+							<CardDescription
+								>Programmatic access tokens that inherit your identity and permissions</CardDescription
+							>
 						</div>
 					</div>
-					<Button onclick={() => showCreateTokenDialog = true} size="sm" class="gap-1.5">
+					<Button onclick={() => (showCreateTokenDialog = true)} size="sm" class="gap-1.5">
 						<Plus class="h-4 w-4" />
 						Create Token
 					</Button>
@@ -418,12 +484,14 @@
 					</div>
 				{:else if apiTokens.length === 0}
 					<div class="rounded-lg border border-dashed p-8 text-center">
-						<KeyRound class="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+						<KeyRound class="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
 						<p class="text-sm font-medium text-muted-foreground">No API tokens</p>
-						<p class="text-xs text-muted-foreground mt-1">Create a token to authenticate programmatically with the DiscoPanel API.</p>
+						<p class="mt-1 text-xs text-muted-foreground">
+							Create a token to authenticate programmatically with the DiscoPanel API.
+						</p>
 					</div>
 				{:else}
-					<div class="rounded-lg border overflow-hidden">
+					<div class="overflow-hidden rounded-lg border">
 						<Table>
 							<TableHeader>
 								<TableRow>
@@ -443,19 +511,24 @@
 												{token.name}
 											</div>
 										</TableCell>
-										<TableCell class="text-muted-foreground text-sm">
+										<TableCell class="text-sm text-muted-foreground">
 											{formatTimestamp(token.createdAt)}
 										</TableCell>
 										<TableCell>
 											{#if token.expiresAt}
-												<Badge variant={isExpired(token.expiresAt) ? 'destructive' : 'outline'} class="text-xs">
-													{isExpired(token.expiresAt) ? 'Expired' : formatTimestamp(token.expiresAt)}
+												<Badge
+													variant={isExpired(token.expiresAt) ? 'destructive' : 'outline'}
+													class="text-xs"
+												>
+													{isExpired(token.expiresAt)
+														? 'Expired'
+														: formatTimestamp(token.expiresAt)}
 												</Badge>
 											{:else}
-												<span class="text-muted-foreground text-sm">Never</span>
+												<span class="text-sm text-muted-foreground">Never</span>
 											{/if}
 										</TableCell>
-										<TableCell class="text-muted-foreground text-sm">
+										<TableCell class="text-sm text-muted-foreground">
 											{formatTimestamp(token.lastUsedAt)}
 										</TableCell>
 										<TableCell>
@@ -485,63 +558,77 @@
 </div>
 
 <!-- Create API Token Dialog -->
-<Dialog open={showCreateTokenDialog} onOpenChange={(open) => { if (!open) closeCreateDialog(); }}>
-	<DialogContent class="!max-w-3xl !w-[90vw] !h-[70vh] !p-0 !gap-0 overflow-hidden flex flex-col" showCloseButton={false}>
+<Dialog
+	open={showCreateTokenDialog}
+	onOpenChange={(open) => {
+		if (!open) closeCreateDialog();
+	}}
+>
+	<DialogContent
+		class="flex !h-[70vh] !w-[90vw] !max-w-3xl flex-col !gap-0 overflow-hidden !p-0"
+		showCloseButton={false}
+	>
 		<div class="flex h-full">
 			<!-- Sidebar -->
-			<div class="w-64 border-r bg-muted/30 flex flex-col">
+			<div class="flex w-64 flex-col border-r bg-muted/30">
 				<!-- Sidebar Header -->
-				<div class="p-6 border-b">
+				<div class="border-b p-6">
 					<div class="flex items-center gap-3">
-						<div class="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+						<div class="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
 							<KeyRound class="h-6 w-6 text-primary" />
 						</div>
-						<div class="flex-1 min-w-0">
+						<div class="min-w-0 flex-1">
 							<h3 class="font-semibold">New API Token</h3>
-							<p class="text-xs text-muted-foreground mt-0.5">Programmatic access</p>
+							<p class="mt-0.5 text-xs text-muted-foreground">Programmatic access</p>
 						</div>
 					</div>
 				</div>
 
 				<!-- Info -->
-				<div class="flex-1 p-4 space-y-4">
+				<div class="flex-1 space-y-4 p-4">
 					<div class="space-y-3">
 						<div class="flex items-start gap-3 text-sm">
-							<User class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-							<p class="text-muted-foreground">Tokens inherit your full identity, roles, and permissions.</p>
+							<User class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+							<p class="text-muted-foreground">
+								Tokens inherit your full identity, roles, and permissions.
+							</p>
 						</div>
 						<div class="flex items-start gap-3 text-sm">
-							<Shield class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-							<p class="text-muted-foreground">Use tokens to authenticate API requests programmatically.</p>
+							<Shield class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+							<p class="text-muted-foreground">
+								Use tokens to authenticate API requests programmatically.
+							</p>
 						</div>
 						<div class="flex items-start gap-3 text-sm">
-							<AlertTriangle class="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-							<p class="text-muted-foreground">The token value is shown only once after creation.</p>
+							<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+							<p class="text-muted-foreground">
+								The token value is shown only once after creation.
+							</p>
 						</div>
 					</div>
 				</div>
 
 				<!-- Sidebar Footer -->
-				<div class="p-4 border-t">
-					<div class="p-4 rounded-lg bg-muted/50">
-						<p class="text-sm font-medium mb-1">Usage</p>
-						<p class="text-xs text-muted-foreground font-mono">
-							Authorization: Bearer dp_...
-						</p>
+				<div class="border-t p-4">
+					<div class="rounded-lg bg-muted/50 p-4">
+						<p class="mb-1 text-sm font-medium">Usage</p>
+						<p class="font-mono text-xs text-muted-foreground">Authorization: Bearer dp_...</p>
 					</div>
 				</div>
 			</div>
 
 			<!-- Main Content -->
-			<div class="flex-1 flex flex-col min-w-0">
+			<div class="flex min-w-0 flex-1 flex-col">
 				<!-- Content Header -->
-				<div class="flex items-center justify-between px-8 py-6 border-b bg-muted/30">
+				<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
 					<div>
 						<h2 class="text-2xl font-semibold tracking-tight">
 							{createdToken ? 'Token Created' : 'Create API Token'}
 						</h2>
-						<p class="text-muted-foreground mt-1">
-							{createdToken ? 'Copy your token now — it won\'t be shown again' : 'Configure your new API token'}
+						<p class="mt-1 text-muted-foreground">
+							{createdToken
+								? "Copy your token now — it won't be shown again"
+								: 'Configure your new API token'}
 						</p>
 					</div>
 					<Button variant="ghost" size="icon" onclick={closeCreateDialog} class="h-10 w-10">
@@ -554,19 +641,21 @@
 					{#if createdToken}
 						<!-- Token Created View -->
 						<div class="space-y-6">
-							<div class="rounded-lg border-2 border-primary/50 bg-primary/5 p-6 space-y-4">
+							<div class="space-y-4 rounded-lg border-2 border-primary/50 bg-primary/5 p-6">
 								<div class="flex items-center gap-2 text-primary">
 									<Check class="h-5 w-5" />
 									<span class="font-semibold">Token created successfully</span>
 								</div>
 								<div class="relative">
-									<div class="font-mono text-sm bg-card border rounded-lg p-4 pr-12 break-all select-all">
+									<div
+										class="rounded-lg border bg-card p-4 pr-12 font-mono text-sm break-all select-all"
+									>
 										{createdToken}
 									</div>
 									<Button
 										variant="ghost"
 										size="icon"
-										class="absolute right-2 top-2 h-8 w-8"
+										class="absolute top-2 right-2 h-8 w-8"
 										onclick={copyToken}
 									>
 										{#if copied}
@@ -578,11 +667,15 @@
 								</div>
 							</div>
 
-							<div class="flex items-start gap-3 p-4 rounded-lg border border-destructive/30 bg-destructive/5">
-								<AlertTriangle class="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+							<div
+								class="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4"
+							>
+								<AlertTriangle class="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
 								<div>
-									<p class="text-sm font-medium text-destructive">This token will not be shown again</p>
-									<p class="text-xs text-muted-foreground mt-1">
+									<p class="text-sm font-medium text-destructive">
+										This token will not be shown again
+									</p>
+									<p class="mt-1 text-xs text-muted-foreground">
 										Make sure you copy it now. If you lose it, you'll need to create a new one.
 									</p>
 								</div>
@@ -590,11 +683,13 @@
 
 							<div class="space-y-2">
 								<p class="text-sm font-medium">Example usage</p>
-								<pre class="font-mono text-xs bg-card border rounded-lg p-4 overflow-x-auto whitespace-pre text-muted-foreground">curl {window.location.origin}/discopanel.v1.UserService/ListUsers \
+								<pre
+									class="overflow-x-auto rounded-lg border bg-card p-4 font-mono text-xs whitespace-pre text-muted-foreground">curl {window
+										.location.origin}/discopanel.v1.UserService/ListUsers \
   -X POST \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer {createdToken}' \
-  -d '{"{}"}'</pre>
+  -d '{'{}'}'</pre>
 							</div>
 						</div>
 					{:else}
@@ -608,7 +703,9 @@
 									placeholder="e.g. CI/CD Pipeline, Monitoring Script"
 									disabled={creatingToken}
 								/>
-								<p class="text-xs text-muted-foreground">A descriptive name to help you identify this token.</p>
+								<p class="text-xs text-muted-foreground">
+									A descriptive name to help you identify this token.
+								</p>
 							</div>
 
 							<div class="space-y-2">
@@ -616,7 +713,9 @@
 								<Select
 									value={newTokenForm.expiresInDays || 'never'}
 									type="single"
-									onValueChange={(v) => { if (v) newTokenForm.expiresInDays = v === 'never' ? '' : v; }}
+									onValueChange={(v) => {
+										if (v) newTokenForm.expiresInDays = v === 'never' ? '' : v;
+									}}
 									disabled={creatingToken}
 								>
 									<SelectTrigger class="h-9">
@@ -645,7 +744,9 @@
 									</SelectContent>
 								</Select>
 								<p class="text-xs text-muted-foreground">
-									{newTokenForm.expiresInDays ? `Token will expire after ${newTokenForm.expiresInDays} days.` : 'Token will never expire. You can revoke it at any time.'}
+									{newTokenForm.expiresInDays
+										? `Token will expire after ${newTokenForm.expiresInDays} days.`
+										: 'Token will never expire. You can revoke it at any time.'}
 								</p>
 							</div>
 						</div>
@@ -653,9 +754,9 @@
 				</div>
 
 				<!-- Footer -->
-				<div class="flex items-center justify-end gap-3 px-8 py-5 border-t bg-muted/30">
+				<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-8 py-5">
 					{#if createdToken}
-						<Button onclick={copyToken} variant="outline" class="h-11 px-6 gap-2">
+						<Button onclick={copyToken} variant="outline" class="h-11 gap-2 px-6">
 							{#if copied}
 								<Check class="h-4 w-4" />
 								Copied
@@ -664,14 +765,21 @@
 								Copy Token
 							{/if}
 						</Button>
-						<Button onclick={closeCreateDialog} class="h-11 px-8">
-							Done
-						</Button>
+						<Button onclick={closeCreateDialog} class="h-11 px-8">Done</Button>
 					{:else}
-						<Button variant="outline" onclick={closeCreateDialog} disabled={creatingToken} class="h-11 px-6">
+						<Button
+							variant="outline"
+							onclick={closeCreateDialog}
+							disabled={creatingToken}
+							class="h-11 px-6"
+						>
 							Cancel
 						</Button>
-						<Button onclick={createToken} disabled={creatingToken || !newTokenForm.name.trim()} class="h-11 px-8 gap-2">
+						<Button
+							onclick={createToken}
+							disabled={creatingToken || !newTokenForm.name.trim()}
+							class="h-11 gap-2 px-8"
+						>
 							{#if creatingToken}
 								<Loader2 class="h-4 w-4 animate-spin" />
 								Creating...

@@ -87,7 +87,7 @@ func ReadHandshakePacket(r io.Reader) (*HandshakePacket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read packet length: %w", err)
 	}
-	
+
 	if length < 1 || length > 255 {
 		return nil, fmt.Errorf("invalid packet length: %d", length)
 	}

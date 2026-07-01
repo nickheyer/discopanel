@@ -32,7 +32,7 @@
 </script>
 
 {#if categories.length > 0}
-	<div class="flex flex-wrap gap-2 mb-6">
+	<div class="mb-6 flex flex-wrap gap-2">
 		<Button
 			variant={selectedCategory === null ? 'default' : 'outline'}
 			size="sm"
@@ -59,31 +59,31 @@
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_interactive_supports_focus -->
 		<div
-			class="w-full flex items-center gap-5 p-5 rounded-xl border bg-card text-left hover:bg-muted/50 hover:border-primary/50 transition-all group cursor-pointer"
+			class="group flex w-full cursor-pointer items-center gap-5 rounded-xl border bg-card p-5 text-left transition-all hover:border-primary/50 hover:bg-muted/50"
 			role="button"
 			onclick={() => onSelect(template)}
 		>
-			<div class="h-14 w-14 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+			<div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-primary/10">
 				<DynamicIcon name={template.icon} class="h-7 w-7 text-primary" fallback="Package" />
 			</div>
-			<div class="flex-1 min-w-0 space-y-1">
+			<div class="min-w-0 flex-1 space-y-1">
 				<div class="flex items-center gap-3">
-					<span class="font-semibold text-base">{template.name}</span>
+					<span class="text-base font-semibold">{template.name}</span>
 					{#if template.category}
 						<Badge variant="secondary" class="text-xs">{template.category}</Badge>
 					{/if}
 				</div>
-				<p class="text-sm text-muted-foreground leading-relaxed">
+				<p class="text-sm leading-relaxed text-muted-foreground">
 					{template.description || 'No description provided'}
 				</p>
 			</div>
-			
-			<div class="flex items-center gap-2 shrink-0">
+
+			<div class="flex shrink-0 items-center gap-2">
 				{#if template.type === ModuleTemplateType.CUSTOM && onDelete}
 					<Button
 						variant="ghost"
 						size="icon"
-						class="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+						class="text-destructive opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
 						onclick={(e) => {
 							e.stopPropagation();
 							onDelete?.(template);
@@ -92,7 +92,9 @@
 						<Trash2 class="h-5 w-5" />
 					</Button>
 				{/if}
-				<ChevronRight class="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+				<ChevronRight
+					class="h-5 w-5 text-muted-foreground transition-colors group-hover:text-primary"
+				/>
 			</div>
 		</div>
 	{/each}
@@ -100,11 +102,11 @@
 
 {#if !templates || templates.length === 0}
 	<div class="flex flex-col items-center justify-center py-20 text-center">
-		<div class="h-20 w-20 rounded-2xl bg-muted flex items-center justify-center mb-6">
+		<div class="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-muted">
 			<Package class="h-10 w-10 text-muted-foreground/50" />
 		</div>
-		<h3 class="text-lg font-medium mb-2">No templates available</h3>
-		<p class="text-sm text-muted-foreground max-w-sm">
+		<h3 class="mb-2 text-lg font-medium">No templates available</h3>
+		<p class="max-w-sm text-sm text-muted-foreground">
 			Create a custom template to get started with your module configuration
 		</p>
 	</div>

@@ -1,6 +1,13 @@
 <script lang="ts">
-	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
-	import { Dialog as DialogPrimitive } from "bits-ui";
+	import {
+		Dialog,
+		DialogContent,
+		DialogDescription,
+		DialogFooter,
+		DialogHeader,
+		DialogTitle
+	} from '$lib/components/ui/dialog';
+	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import { Button } from '$lib/components/ui/button';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
@@ -14,8 +21,8 @@
 	import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 
 	// Configure Monaco Environment only once globally
-	if (!(self).MonacoEnvironment) {
-		(self).MonacoEnvironment = {
+	if (!self.MonacoEnvironment) {
+		self.MonacoEnvironment = {
 			getWorker(_, label: string) {
 				if (label === 'json') {
 					return new jsonWorker();
@@ -104,7 +111,7 @@
 
 	async function loadFileContent() {
 		if (!file) return;
-		
+
 		loading = true;
 		try {
 			const response = await rpcClient.file.getFile({ serverId: serverId, path: file.path });
@@ -153,7 +160,7 @@
 
 		// Determine if file is large (over 100KB)
 		const isLargeFile = content.length > 100000;
-		
+
 		editor = monaco.editor.create(editorContainer, {
 			value: content,
 			language: file ? getFileLanguage(file.name) : 'plaintext',
@@ -183,7 +190,7 @@
 			mouseWheelZoom: false,
 			quickSuggestions: !isLargeFile
 		});
-		
+
 		// Manual resize handling for better performance
 		resizeObserver = new ResizeObserver(() => {
 			editor?.layout();
@@ -209,54 +216,54 @@
 	function getFileLanguage(fileName: string): string {
 		const ext = fileName.toLowerCase().split('.').pop() || '';
 		const languageMap: Record<string, string> = {
-			'js': 'javascript',
-			'ts': 'typescript',
-			'jsx': 'javascript',
-			'tsx': 'typescript',
-			'json': 'json',
-			'yml': 'yaml',
-			'yaml': 'yaml',
-			'toml': 'toml',
-			'properties': 'properties',
-			'conf': 'conf',
-			'cfg': 'ini',
-			'ini': 'ini',
-			'xml': 'xml',
-			'html': 'html',
-			'css': 'css',
-			'scss': 'scss',
-			'sass': 'sass',
-			'less': 'less',
-			'md': 'markdown',
-			'py': 'python',
-			'java': 'java',
-			'cpp': 'cpp',
-			'c': 'c',
-			'h': 'c',
-			'cs': 'csharp',
-			'go': 'go',
-			'rs': 'rust',
-			'php': 'php',
-			'rb': 'ruby',
-			'lua': 'lua',
-			'sh': 'bash',
-			'bash': 'bash',
-			'zsh': 'bash',
-			'fish': 'bash',
-			'ps1': 'powershell',
-			'bat': 'batch',
-			'cmd': 'batch',
-			'dockerfile': 'dockerfile',
-			'makefile': 'makefile',
-			'gradle': 'groovy',
-			'groovy': 'groovy',
-			'kt': 'kotlin',
-			'swift': 'swift',
-			'r': 'r',
-			'scala': 'scala',
-			'sql': 'sql',
-			'pl': 'perl',
-			'vim': 'vim'
+			js: 'javascript',
+			ts: 'typescript',
+			jsx: 'javascript',
+			tsx: 'typescript',
+			json: 'json',
+			yml: 'yaml',
+			yaml: 'yaml',
+			toml: 'toml',
+			properties: 'properties',
+			conf: 'conf',
+			cfg: 'ini',
+			ini: 'ini',
+			xml: 'xml',
+			html: 'html',
+			css: 'css',
+			scss: 'scss',
+			sass: 'sass',
+			less: 'less',
+			md: 'markdown',
+			py: 'python',
+			java: 'java',
+			cpp: 'cpp',
+			c: 'c',
+			h: 'c',
+			cs: 'csharp',
+			go: 'go',
+			rs: 'rust',
+			php: 'php',
+			rb: 'ruby',
+			lua: 'lua',
+			sh: 'bash',
+			bash: 'bash',
+			zsh: 'bash',
+			fish: 'bash',
+			ps1: 'powershell',
+			bat: 'batch',
+			cmd: 'batch',
+			dockerfile: 'dockerfile',
+			makefile: 'makefile',
+			gradle: 'groovy',
+			groovy: 'groovy',
+			kt: 'kotlin',
+			swift: 'swift',
+			r: 'r',
+			scala: 'scala',
+			sql: 'sql',
+			pl: 'perl',
+			vim: 'vim'
 		};
 		return languageMap[ext] || 'plaintext';
 	}
@@ -272,12 +279,17 @@
 </script>
 
 <Dialog {open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
-	<DialogContent showCloseButton={false} class={isFullscreen ? "max-w-[95vw]! w-[95vw]! h-[95vh] flex flex-col sm:max-w-[95vw]!" : "max-w-[90vw]! w-[90vw]! h-[85vh] flex flex-col sm:max-w-[90vw]!"}>
-		<div class="absolute right-4 top-4 flex gap-1">
+	<DialogContent
+		showCloseButton={false}
+		class={isFullscreen
+			? 'flex h-[95vh] w-[95vw]! max-w-[95vw]! flex-col sm:max-w-[95vw]!'
+			: 'flex h-[85vh] w-[90vw]! max-w-[90vw]! flex-col sm:max-w-[90vw]!'}
+	>
+		<div class="absolute top-4 right-4 flex gap-1">
 			<button
 				onclick={toggleFullscreen}
-				title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-				class="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+				title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+				class="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
 			>
 				{#if isFullscreen}
 					<Minimize2 class="h-4 w-4" />
@@ -286,7 +298,7 @@
 				{/if}
 			</button>
 			<DialogPrimitive.Close
-				class="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+				class="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
 			>
 				<X class="h-4 w-4" />
 				<span class="sr-only">Close</span>
@@ -309,18 +321,18 @@
 				{/if}
 			</DialogDescription>
 		</DialogHeader>
-		
-		<div class="flex-1 min-h-0 border rounded-md overflow-hidden bg-background relative">
+
+		<div class="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-background">
 			{#if loading}
-				<div class="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
+				<div class="absolute inset-0 z-10 flex items-center justify-center bg-background/80">
 					<Loader2 class="h-8 w-8 animate-spin" />
 				</div>
 			{/if}
-			<div bind:this={editorContainer} class="w-full h-full"></div>
+			<div bind:this={editorContainer} class="h-full w-full"></div>
 		</div>
-		
+
 		<DialogFooter class="shrink-0">
-			<div class="flex items-center justify-between w-full">
+			<div class="flex w-full items-center justify-between">
 				<div class="flex items-center gap-4 text-sm text-muted-foreground">
 					<span>
 						{#if file}
@@ -339,22 +351,20 @@
 					{/if}
 				</div>
 				<div class="flex items-center gap-2">
-					<span class="text-xs text-muted-foreground">
-						Ctrl+S to save
-					</span>
+					<span class="text-xs text-muted-foreground"> Ctrl+S to save </span>
 					<Button variant="outline" onclick={handleClose}>
-						<X class="h-4 w-4 mr-2" />
+						<X class="mr-2 h-4 w-4" />
 						Close
 					</Button>
-					<Button 
-						onclick={handleSave} 
+					<Button
+						onclick={handleSave}
 						disabled={!isDirty || saving || loading}
-						variant={isDirty ? "default" : "secondary"}
+						variant={isDirty ? 'default' : 'secondary'}
 					>
 						{#if saving}
-							<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 						{:else}
-							<Save class="h-4 w-4 mr-2" />
+							<Save class="mr-2 h-4 w-4" />
 						{/if}
 						Save
 					</Button>

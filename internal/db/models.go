@@ -99,7 +99,8 @@ type Server struct {
 
 	// Runtime stats (not persisted to DB)
 	MemoryUsage   float64 `json:"memory_usage" gorm:"-"`   // Current memory usage in MB
-	CPUPercent    float64 `json:"cpu_percent" gorm:"-"`    // Current CPU usage percentage
+	CPUPercent    float64 `json:"cpu_percent" gorm:"-"`    // Current CPU usage percentage (docker stats scale, 100 per core)
+	CPUCores      int     `json:"cpu_cores" gorm:"-"`      // CPU cores visible to the container
 	DiskUsage     int64   `json:"disk_usage" gorm:"-"`     // Total server data size in bytes
 	DiskTotal     int64   `json:"disk_total" gorm:"-"`     // Total disk space available in bytes
 	WorldSize     int64   `json:"world_size" gorm:"-"`     // World directory size in bytes

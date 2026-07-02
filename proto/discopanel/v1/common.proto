@@ -82,6 +82,7 @@ message Server {
   // Runtime stats
   int64 memory_usage = 21;
   double cpu_percent = 22;
+  int32 cpu_cores = 40;
   int64 disk_usage = 23;
   int64 disk_total = 24;
   int32 players_online = 25;

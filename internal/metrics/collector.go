@@ -22,6 +22,7 @@ import (
 type ServerMetrics struct {
 	ServerID      string
 	CPUPercent    float64
+	CPUCount      int
 	MemoryUsage   float64 // MB
 	DiskUsage     int64   // bytes (total server data)
 	DiskTotal     int64   // bytes
@@ -284,6 +285,7 @@ func (c *Collector) collectDockerStats() {
 
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {
 			m.CPUPercent = stats.CPUPercent
+			m.CPUCount = stats.CPUCount
 			m.MemoryUsage = stats.MemoryUsage
 			m.LastUpdated = time.Now()
 		})

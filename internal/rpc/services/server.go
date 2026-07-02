@@ -97,6 +97,7 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		TpsCommand:      server.TPSCommand,
 		MemoryUsage:     int64(server.MemoryUsage),
 		CpuPercent:      server.CPUPercent,
+		CpuCores:        int32(server.CPUCores),
 		DiskUsage:       server.DiskUsage,
 		DiskTotal:       server.DiskTotal,
 		WorldSize:       server.WorldSize,
@@ -280,6 +281,7 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 				if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
 					server.MemoryUsage = m.MemoryUsage
 					server.CPUPercent = m.CPUPercent
+					server.CPUCores = m.CPUCount
 					server.DiskUsage = m.DiskUsage
 					server.DiskTotal = m.DiskTotal
 					server.WorldSize = m.WorldSize
@@ -338,6 +340,7 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 		if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
 			server.MemoryUsage = m.MemoryUsage
 			server.CPUPercent = m.CPUPercent
+			server.CPUCores = m.CPUCount
 			server.DiskUsage = m.DiskUsage
 			server.DiskTotal = m.DiskTotal
 			server.WorldSize = m.WorldSize

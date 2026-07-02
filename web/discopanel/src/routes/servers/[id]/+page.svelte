@@ -925,7 +925,11 @@
 						<div>
 							<div class="mb-1.5 flex items-center justify-between">
 								<span class="text-xs font-semibold text-muted-foreground/70">CPU</span>
-								{#if server.cpuPercent !== undefined}
+								{#if server.cpuPercent !== undefined && server.cpuCores > 0}
+									<span class="font-mono text-xs text-blue-500"
+										>{(server.cpuPercent / server.cpuCores).toFixed(1)}%</span
+									>
+								{:else if server.cpuPercent !== undefined}
 									<span class="font-mono text-xs text-blue-500"
 										>{server.cpuPercent.toFixed(1)}%</span
 									>
@@ -933,22 +937,50 @@
 									<span class="font-mono text-xs text-muted-foreground/50">--</span>
 								{/if}
 							</div>
-							<div
-								class="relative h-3 overflow-hidden rounded-full bg-linear-to-r from-muted/50 to-muted/30"
-							>
-								{#if server.cpuPercent !== undefined}
-									<div
-										class="relative h-full rounded-full bg-linear-to-r from-blue-500 to-cyan-500 transition-all duration-700"
-										style="width: {Math.min(server.cpuPercent, 100)}%"
-									>
+							{#if server.cpuPercent !== undefined && server.cpuCores > 0}
+								<div
+									class="flex h-3 {server.cpuCores > 16 ? 'gap-px' : 'gap-0.5'}"
+									title="{server.cpuPercent.toFixed(0)}% total across {server.cpuCores} cores"
+								>
+									{#each Array.from({ length: server.cpuCores }) as _, i}
+										{@const fill = Math.min(Math.max(server.cpuPercent - i * 100, 0), 100)}
 										<div
-											class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"
-										></div>
-									</div>
-								{:else}
-									<div class="h-full bg-muted/50"></div>
-								{/if}
-							</div>
+											class="relative h-full flex-1 overflow-hidden rounded-full bg-linear-to-r from-muted/50 to-muted/30"
+										>
+											{#if fill > 0}
+												<div
+													class="relative h-full rounded-full bg-linear-to-r from-blue-500 to-cyan-500 transition-all duration-700"
+													style="width: {fill}%"
+												>
+													<div
+														class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"
+													></div>
+												</div>
+											{/if}
+										</div>
+									{/each}
+								</div>
+								<p class="mt-1 text-[10px] text-muted-foreground/50">
+									{(server.cpuPercent / 100).toFixed(1)} of {server.cpuCores} cores in use
+								</p>
+							{:else}
+								<div
+									class="relative h-3 overflow-hidden rounded-full bg-linear-to-r from-muted/50 to-muted/30"
+								>
+									{#if server.cpuPercent !== undefined}
+										<div
+											class="relative h-full rounded-full bg-linear-to-r from-blue-500 to-cyan-500 transition-all duration-700"
+											style="width: {Math.min(server.cpuPercent, 100)}%"
+										>
+											<div
+												class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"
+											></div>
+										</div>
+									{:else}
+										<div class="h-full bg-muted/50"></div>
+									{/if}
+								</div>
+							{/if}
 						</div>
 
 						<!-- Disk Usage -->

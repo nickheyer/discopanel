@@ -43,6 +43,7 @@ const (
 
 type ContainerStats struct {
 	CPUPercent  float64 `json:"cpu_percent"`
+	CPUCount    int     `json:"cpu_count"`
 	MemoryUsage float64 `json:"memory_usage"` // in MB
 	MemoryLimit float64 `json:"memory_limit"` // in MB
 }
@@ -656,6 +657,7 @@ func (c *Client) GetContainerStats(ctx context.Context, containerID string) (*Co
 
 	return &ContainerStats{
 		CPUPercent:  cpuPercent,
+		CPUCount:    int(cpuCount),
 		MemoryUsage: memoryUsage,
 		MemoryLimit: memoryLimit,
 	}, nil

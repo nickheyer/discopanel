@@ -26,18 +26,16 @@ type ProxyService struct {
 	proxyManager *proxy.Manager
 	config       *config.Config
 	log          *logger.Logger
-	logStreamer  *logger.LogStreamer
 }
 
 // NewProxyService creates a new proxy service
-func NewProxyService(store *storage.Store, dockerClient *docker.Client, proxyManager *proxy.Manager, cfg *config.Config, logStreamer *logger.LogStreamer, log *logger.Logger) *ProxyService {
+func NewProxyService(store *storage.Store, dockerClient *docker.Client, proxyManager *proxy.Manager, cfg *config.Config, log *logger.Logger) *ProxyService {
 	return &ProxyService{
 		store:        store,
 		docker:       dockerClient,
 		proxyManager: proxyManager,
 		config:       cfg,
 		log:          log,
-		logStreamer:  logStreamer,
 	}
 }
 

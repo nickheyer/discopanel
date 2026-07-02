@@ -28,15 +28,16 @@ type PlayerCounter interface {
 }
 
 type Manager struct {
-	store   *storage.Store
-	docker  *docker.Client
-	prov    *provisioner.Provisioner
-	sender  *command.Sender
-	proxy   *proxy.Manager
-	bus     *events.Bus
-	cfg     *config.Config
-	log     *logger.Logger
-	players PlayerCounter
+	store    *storage.Store
+	docker   *docker.Client
+	prov     *provisioner.Provisioner
+	sender   *command.Sender
+	proxy    *proxy.Manager
+	bus      *events.Bus
+	cfg      *config.Config
+	log      *logger.Logger
+	players  PlayerCounter
+	streamer *logger.LogStreamer
 
 	// Per-server start locks: rejects concurrent starts of the same server.
 	startMu sync.Mutex
@@ -80,6 +81,11 @@ func NewManager(store *storage.Store, dockerClient *docker.Client, prov *provisi
 // because the collector depends on the docker client this manager also uses).
 func (m *Manager) SetPlayerCounter(pc PlayerCounter) {
 	m.players = pc
+}
+
+// SetLogStreamer wires the log streamer so container output follows the servers log stream
+func (m *Manager) SetLogStreamer(streamer *logger.LogStreamer) {
+	m.streamer = streamer
 }
 
 func (m *Manager) tryBeginStart(serverID string) bool {
@@ -179,6 +185,13 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 		if err := m.docker.StartContainer(ctx, server.ContainerID); err != nil {
 			m.setStatus(ctx, server, storage.StatusError)
 			return fmt.Errorf("failed to start recreated container: %w", err)
+		}
+	}
+
+	// Attach the containers output to the server's log stream
+	if m.streamer != nil {
+		if err := m.streamer.StartStreaming(server.ID, server.ContainerID); err != nil {
+			m.log.Warn("lifecycle: failed to start log streaming for %s: %v", server.Name, err)
 		}
 	}
 

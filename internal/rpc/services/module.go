@@ -957,13 +957,6 @@ func (s *ModuleService) GetModuleLogs(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
 
-	if module.ContainerID == "" {
-		return connect.NewResponse(&v1.GetModuleLogsResponse{
-			Logs:  []*v1.LogEntry{},
-			Total: 0,
-		}), nil
-	}
-
 	tail := int(msg.Tail)
 	if tail == 0 {
 		tail = 100
@@ -972,7 +965,12 @@ func (s *ModuleService) GetModuleLogs(ctx context.Context, req *connect.Request[
 	// Get structured log entries from the log streamer if available
 	var protoLogs []*v1.LogEntry
 	if s.logStreamer != nil {
-		protoLogs = s.logStreamer.GetLogs(module.ContainerID, tail)
+		if module.ContainerID != "" {
+			if err := s.logStreamer.StartStreaming(module.ID, module.ContainerID); err != nil {
+				s.log.Warn("Failed to start log streaming for module %s: %v", module.ID, err)
+			}
+		}
+		protoLogs = s.logStreamer.GetLogs(module.ID, tail)
 	}
 
 	return connect.NewResponse(&v1.GetModuleLogsResponse{

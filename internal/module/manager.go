@@ -207,7 +207,7 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 
 	// Start log streaming
 	if m.logStreamer != nil {
-		if err := m.logStreamer.StartStreaming(module.ContainerID); err != nil {
+		if err := m.logStreamer.StartStreaming(module.ID, module.ContainerID); err != nil {
 			m.logger.Warn("Failed to start log streaming for module %s: %v", module.Name, err)
 		}
 	}

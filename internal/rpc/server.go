@@ -86,7 +86,8 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 
 	// Initialize log streamer
 	logStreamer := logger.NewLogStreamer(docker.GetDockerClient(), log, 10000)
-	docker.SetLogStreamer(logStreamer)
+	lifecycleManager.SetLogStreamer(logStreamer)
+	moduleManager.SetLogStreamer(logStreamer)
 
 	// Initialize upload manager
 	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
@@ -199,7 +200,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
-	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
+	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.log)
 	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.lifecycle, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
@@ -319,7 +320,7 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// pollingProcedures lists endpoints that are called frequently and should be excluded from logging.
+// Lists endpoints that are called frequently and should be excluded from logging
 var pollingProcedures = []string{
 	"/discopanel.v1.AuthService/GetAuthStatus",
 	"/discopanel.v1.ServerService/ListServers",
@@ -414,8 +415,7 @@ func isConnectPath(path string) bool {
 	return false
 }
 
-// extractObjectID extracts a named string field from a protobuf request message
-// using reflection. Falls back to "*" if the field is missing or empty.
+// Extracts a named string field from a protobuf request message
 func extractObjectID(req connect.AnyRequest, fieldName string) string {
 	msg, ok := req.Any().(proto.Message)
 	if !ok {
@@ -437,13 +437,12 @@ func (s *Server) RecoveryKey() string {
 	return s.authManager.GetRecoveryKey()
 }
 
-// Starts log streaming for a container
-// LogStreamer exposes the streamer for cross-component wiring (e.g. the
-// provisioner's progress sink).
+// LogStreamer exposes the streamer for cross-component wiring
 func (s *Server) LogStreamer() *logger.LogStreamer {
 	return s.logStreamer
 }
 
-func (s *Server) StartLogStreaming(containerID string) error {
-	return s.logStreamer.StartStreaming(containerID)
+// Attaches a servers container output to its log stream
+func (s *Server) StartLogStreaming(serverID, containerID string) error {
+	return s.logStreamer.StartStreaming(serverID, containerID)
 }

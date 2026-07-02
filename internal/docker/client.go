@@ -92,16 +92,9 @@ type ClientConfig struct {
 	Labels       map[string]string
 }
 
-type ContainerLogStreamer interface {
-	StartStreaming(containerID string) error
-	StopStreaming(containerID string)
-	MigrateSubscribers(oldContainerID, newContainerID string)
-}
-
 type Client struct {
 	docker        *client.Client
 	config        ClientConfig
-	logStreamer   ContainerLogStreamer
 	healthChecker HealthChecker
 	log           *logger.Logger
 }
@@ -110,11 +103,6 @@ type Client struct {
 // GetContainerStatus for running containers.
 func (c *Client) SetHealthChecker(hc HealthChecker) {
 	c.healthChecker = hc
-}
-
-// Auto manage streams at the client level when set
-func (c *Client) SetLogStreamer(ls ContainerLogStreamer) {
-	c.logStreamer = ls
 }
 
 func NewClient(host string, log *logger.Logger, config ...ClientConfig) (*Client, error) {
@@ -406,29 +394,13 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 }
 
 func (c *Client) StartContainer(ctx context.Context, containerID string) error {
-	if err := c.docker.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		return err
-	}
-
-	// Start log streaming if configured
-	if c.logStreamer != nil {
-		if err := c.logStreamer.StartStreaming(containerID); err != nil {
-			c.log.Warn("Failed to start log streaming for container %s: %v", containerID, err)
-		}
-	}
-
-	return nil
+	return c.docker.ContainerStart(ctx, containerID, container.StartOptions{})
 }
 
 // StopContainer stops a container, allowing timeoutSeconds for a graceful
 // shutdown (SIGTERM saves the world) before force-killing. Returns
 // (containerFound, error); (false, nil) lets callers clean stale references.
 func (c *Client) StopContainer(ctx context.Context, containerID string, timeoutSeconds int) (bool, error) {
-	// Stop log streaming before stopping container
-	if c.logStreamer != nil {
-		c.logStreamer.StopStreaming(containerID)
-	}
-
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = DefaultStopTimeoutSeconds
 	}
@@ -520,11 +492,6 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 	result.NewContainerID = newContainerID
-
-	// Migrate log subscribers from old to new container
-	if c.logStreamer != nil && oldContainerID != "" {
-		c.logStreamer.MigrateSubscribers(oldContainerID, newContainerID)
-	}
 
 	// Start if it was running before
 	if result.WasRunning {

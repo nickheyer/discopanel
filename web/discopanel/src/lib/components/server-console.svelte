@@ -384,13 +384,9 @@
 				<div class="font-mono text-xs text-zinc-300">
 					{#if logEntries.length === 0}
 						<div class="py-8 text-center text-zinc-500">
-							No logs available. {[
-								ServerStatus.RUNNING,
-								ServerStatus.STARTING,
-								ServerStatus.UNHEALTHY
-							].includes(server.status)
-								? 'Try refreshing the page.'
-								: 'Start the server to see output.'}
+							No logs available. {[ServerStatus.STOPPED, ServerStatus.ERROR].includes(server.status)
+								? 'Start the server to see output.'
+								: 'Waiting for output...'}
 						</div>
 					{:else}
 						{#each logEntries as entry, i (i)}

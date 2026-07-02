@@ -290,7 +290,7 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 		}
 	}
 
-	// Get server to find container ID
+	// Validate the server exists
 	ctx := context.Background()
 	server, err := c.hub.store.GetServer(ctx, msg.ServerId)
 	if err != nil {
@@ -303,32 +303,26 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 		tail = 500
 	}
 
-	// If server has no container yet (just created, never started),
-	// send empty logs and confirm subscription without starting streaming.
-	// The client will re-subscribe when the server status changes.
-	if server.ContainerID == "" {
-		c.sendLogs(msg.ServerId, nil)
-		c.sendSubscribed(msg.ServerId)
-		return
-	}
-
-	// Ensure log streaming is active for this container
-	if err := c.hub.logStreamer.StartStreaming(server.ContainerID); err != nil {
-		c.hub.log.Warn("Failed to start log streaming for container %s: %v", server.ContainerID, err)
-	}
-
-	// Check if already subscribed
+	// The subscription is keyed by server ID and lives for the connection;
+	// container follows attach underneath as the lifecycle starts containers.
 	c.subscriptionsMu.Lock()
 	if _, exists := c.subscriptions[msg.ServerId]; !exists {
-		// Subscribe to log streamer
-		ch := c.hub.logStreamer.Subscribe(server.ContainerID)
+		ch := c.hub.logStreamer.Subscribe(msg.ServerId)
 		c.subscriptions[msg.ServerId] = ch
 		go c.forwardLogs(msg.ServerId, ch)
 	}
 	c.subscriptionsMu.Unlock()
 
+	// Attach a follow if the server already has a container and none is
+	// active (e.g. panel restarted while the server was running).
+	if server.ContainerID != "" {
+		if err := c.hub.logStreamer.StartStreaming(msg.ServerId, server.ContainerID); err != nil {
+			c.hub.log.Warn("Failed to start log streaming for server %s: %v", msg.ServerId, err)
+		}
+	}
+
 	// Send initial logs
-	logs := c.hub.logStreamer.GetLogs(server.ContainerID, tail)
+	logs := c.hub.logStreamer.GetLogs(msg.ServerId, tail)
 	c.sendLogs(msg.ServerId, logs)
 
 	// Confirm subscription
@@ -349,19 +343,10 @@ func (c *Client) handleUnsubscribe(msg *v1.UnsubscribeMessage) {
 		return
 	}
 
-	// Get server to find container ID
-	ctx := context.Background()
-	server, err := c.hub.store.GetServer(ctx, msg.ServerId)
-
-	// Always clean up the subscription
 	c.subscriptionsMu.Lock()
 	if ch, exists := c.subscriptions[msg.ServerId]; exists {
 		delete(c.subscriptions, msg.ServerId)
-		if err == nil && server.ContainerID != "" {
-			c.hub.logStreamer.Unsubscribe(server.ContainerID, ch)
-		} else {
-			close(ch) // Close the channel to stop the forwardLogs goroutine
-		}
+		c.hub.logStreamer.Unsubscribe(msg.ServerId, ch)
 	}
 	c.subscriptionsMu.Unlock()
 
@@ -416,7 +401,7 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 	// Add command to log stream if not silent
 	commandTime := time.Now()
 	if !silent {
-		c.hub.logStreamer.AddCommandEntry(server.ContainerID, msg.Command, commandTime)
+		c.hub.logStreamer.AddCommandEntry(server.ID, msg.Command, commandTime)
 	}
 
 	output, err := c.hub.sender.SendCommand(ctx, server.ID, msg.Command)
@@ -424,7 +409,7 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 
 	// Add output to log stream if not silent
 	if !silent && (output != "" || !success) {
-		c.hub.logStreamer.AddCommandOutput(server.ContainerID, output, success, commandTime)
+		c.hub.logStreamer.AddCommandOutput(server.ID, output, success, commandTime)
 	}
 
 	if err != nil {
@@ -440,12 +425,8 @@ func (c *Client) cleanup() {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
 
-	ctx := context.Background()
 	for serverId, ch := range c.subscriptions {
-		server, err := c.hub.store.GetServer(ctx, serverId)
-		if err == nil && server.ContainerID != "" {
-			c.hub.logStreamer.Unsubscribe(server.ContainerID, ch)
-		}
+		c.hub.logStreamer.Unsubscribe(serverId, ch)
 	}
 	c.subscriptions = make(map[string]chan *v1.LogEntry)
 }

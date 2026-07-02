@@ -1141,7 +1141,7 @@ func (s *ServerService) SendCommand(ctx context.Context, req *connect.Request[v1
 	// Add command to log stream if available
 	commandTime := time.Now()
 	if !silent && s.logStreamer != nil {
-		s.logStreamer.AddCommandEntry(server.ContainerID, req.Msg.Command, commandTime)
+		s.logStreamer.AddCommandEntry(server.ID, req.Msg.Command, commandTime)
 	}
 
 	// Send command
@@ -1150,7 +1150,7 @@ func (s *ServerService) SendCommand(ctx context.Context, req *connect.Request[v1
 
 	// Add command output to log stream if available
 	if !silent && s.logStreamer != nil && (output != "" || !success) {
-		s.logStreamer.AddCommandOutput(server.ContainerID, output, success, commandTime)
+		s.logStreamer.AddCommandOutput(server.ID, output, success, commandTime)
 	}
 
 	if err != nil {
@@ -1247,18 +1247,17 @@ func (s *ServerService) GetServerLogs(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
-	// If container not created yet, return empty logs
-	if server.ContainerID == "" {
-		return connect.NewResponse(&v1.GetServerLogsResponse{
-			Logs:  []*v1.LogEntry{},
-			Total: 0,
-		}), nil
-	}
-
 	// Get structured log entries from the log streamer if available
 	var protoLogs []*v1.LogEntry
 	if s.logStreamer != nil {
-		protoLogs = s.logStreamer.GetLogs(server.ContainerID, tail)
+		// Attach a follow if the container is up but nothing is streaming
+		// yet (e.g. panel restarted while the server was running).
+		if server.ContainerID != "" {
+			if err := s.logStreamer.StartStreaming(server.ID, server.ContainerID); err != nil {
+				s.log.Warn("Failed to start log streaming for server %s: %v", server.ID, err)
+			}
+		}
+		protoLogs = s.logStreamer.GetLogs(server.ID, tail)
 	}
 
 	return connect.NewResponse(&v1.GetServerLogsResponse{
@@ -1274,13 +1273,9 @@ func (s *ServerService) ClearServerLogs(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
-	if server.ContainerID == "" {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("server container not created"))
-	}
-
 	// Clear structured log entries if log streamer is available
 	if s.logStreamer != nil {
-		s.logStreamer.ClearLogs(server.ContainerID)
+		s.logStreamer.ClearLogs(server.ID)
 	}
 
 	return connect.NewResponse(&v1.ClearServerLogsResponse{}), nil

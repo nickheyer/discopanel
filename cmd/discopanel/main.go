@@ -226,9 +226,7 @@ func main() {
 	// Provisioning progress lines land in the server console via the log streamer
 	if streamer := rpcServer.LogStreamer(); streamer != nil {
 		prov.SetProgressSink(func(serverID, message string) {
-			if server, err := store.GetServer(context.Background(), serverID); err == nil && server.ContainerID != "" {
-				streamer.AddCommandOutput(server.ContainerID, "[provision] "+message, true, time.Now())
-			}
+			streamer.AddCommandOutput(serverID, "[provision] "+message, true, time.Now())
 		})
 	}
 
@@ -263,7 +261,7 @@ func main() {
 				if server.ContainerID != "" {
 					if status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID); err == nil &&
 						(status == storage.StatusRunning || status == storage.StatusStarting) {
-						if err := rpcServer.StartLogStreaming(server.ContainerID); err != nil {
+						if err := rpcServer.StartLogStreaming(server.ID, server.ContainerID); err != nil {
 							log.Error("Failed to start log streaming for running server %s: %v", server.Name, err)
 						}
 						if server.ProxyHostname != "" {

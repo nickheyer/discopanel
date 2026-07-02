@@ -32,10 +32,24 @@ type CommandResultHandler = (result: CommandResultMessage) => void;
 class WebSocketClient {
 	private socket: WebSocket | null = null;
 	private reconnectAttempts = 0;
-	private maxReconnectAttempts = 5;
 	private reconnectDelay = 1000;
+	private static readonly MAX_RECONNECT_DELAY_MS = 30000;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private pingTimer: ReturnType<typeof setInterval> | null = null;
+	private shouldReconnect = false;
+
+	constructor() {
+		if (browser) {
+			// Recover promptly after network loss or tab sleep instead of
+			// waiting out the backoff timer
+			window.addEventListener('online', () => this.reconnectNow());
+			document.addEventListener('visibilitychange', () => {
+				if (document.visibilityState === 'visible') {
+					this.reconnectNow();
+				}
+			});
+		}
+	}
 
 	// Log batching
 	private static readonly LOG_FLUSH_INTERVAL_MS = 100;
@@ -59,6 +73,7 @@ class WebSocketClient {
 
 	connect(): void {
 		if (!browser) return;
+		this.shouldReconnect = true;
 		if (this.socket?.readyState === WebSocket.OPEN) return;
 		if (this.state.connectionState === 'connecting') return;
 
@@ -114,6 +129,7 @@ class WebSocketClient {
 	}
 
 	disconnect(): void {
+		this.shouldReconnect = false;
 		if (this.socket) {
 			this.socket.close(1000, 'Client disconnect');
 			this.socket = null;
@@ -158,19 +174,30 @@ class WebSocketClient {
 	}
 
 	private scheduleReconnect(): void {
-		if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-			console.log('[WS] Max reconnect attempts reached');
-			this.state.error = 'Unable to connect. Please refresh the page.';
-			return;
-		}
+		if (!this.shouldReconnect || this.reconnectTimer) return;
 
-		const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
+		const delay = Math.min(
+			this.reconnectDelay * Math.pow(2, this.reconnectAttempts),
+			WebSocketClient.MAX_RECONNECT_DELAY_MS
+		);
 		this.reconnectAttempts++;
 
 		console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 		this.reconnectTimer = setTimeout(() => {
+			this.reconnectTimer = null;
 			this.connect();
 		}, delay);
+	}
+
+	private reconnectNow(): void {
+		if (!this.shouldReconnect) return;
+		if (this.socket?.readyState === WebSocket.OPEN) return;
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		this.reconnectAttempts = 0;
+		this.connect();
 	}
 
 	private startPingTimer(): void {

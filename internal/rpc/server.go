@@ -15,6 +15,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/events"
+	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
@@ -48,6 +49,7 @@ type Server struct {
 	oidcHandler      *auth.OIDCHandler
 	logStreamer      *logger.LogStreamer
 	scheduler        *scheduler.Scheduler
+	lifecycle        *lifecycle.Manager
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	bus              *events.Bus
@@ -57,7 +59,7 @@ type Server struct {
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, log *logger.Logger) *Server {
 	// Initialize RBAC enforcer
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
@@ -109,6 +111,7 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 		oidcHandler:      oidcHandler,
 		logStreamer:      logStreamer,
 		scheduler:        sched,
+		lifecycle:        lifecycleManager,
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
 		bus:              bus,
@@ -191,13 +194,13 @@ func (s *Server) setupHandler() {
 func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
-	configService := services.NewConfigService(s.store, s.config, s.docker, s.log)
+	configService := services.NewConfigService(s.store, s.config, s.docker, s.lifecycle, s.log)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.lifecycle, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
@@ -435,6 +438,12 @@ func (s *Server) RecoveryKey() string {
 }
 
 // Starts log streaming for a container
+// LogStreamer exposes the streamer for cross-component wiring (e.g. the
+// provisioner's progress sink).
+func (s *Server) LogStreamer() *logger.LogStreamer {
+	return s.logStreamer
+}
+
 func (s *Server) StartLogStreaming(containerID string) error {
 	return s.logStreamer.StartStreaming(containerID)
 }

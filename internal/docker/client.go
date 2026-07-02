@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/containerd/errdefs"
@@ -24,18 +22,11 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	models "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 const (
-	// Docker images manifest URL from itzg/docker-minecraft-server repo
-	dockerImagesURL = "https://raw.githubusercontent.com/itzg/docker-minecraft-server/refs/heads/master/images.json"
-
-	// Cache for 1 hour
-	dockerImagesCacheDuration = time.Hour
-
 	// Default Minecraft server port inside containers
 	DefaultMinecraftPort = 25565
 
@@ -44,6 +35,10 @@ const (
 
 	// Offset added to game port for RCON host binding
 	RCONPortOffset = 10
+
+	// DefaultStopTimeoutSeconds is the graceful-stop window when a server has
+	// no explicit stop duration configured.
+	DefaultStopTimeoutSeconds = 60
 )
 
 type ContainerStats struct {
@@ -51,27 +46,6 @@ type ContainerStats struct {
 	MemoryUsage float64 `json:"memory_usage"` // in MB
 	MemoryLimit float64 `json:"memory_limit"` // in MB
 }
-
-type DockerImageTag struct {
-	Tag           string   `json:"tag"`           // Docker tag name (e.g., "latest", "java21", etc.)
-	Java          string   `json:"java"`          // Java version number
-	Distribution  string   `json:"distribution"`  // Linux distribution (ubuntu, alpine, oracle)
-	JVM           string   `json:"jvm"`           // JVM type (hotspot, graalvm)
-	Architectures []string `json:"architectures"` // Supported architectures
-	Deprecated    bool     `json:"deprecated"`    // Whether this tag is deprecated
-	LTS           bool     `json:"lts"`           // Whether this is an LTS version
-	JDK           bool     `json:"jdk"`           // Whether this includes JDK
-	Notes         string   `json:"notes"`         // Additional notes about the tag
-}
-
-// Cached docker images data
-type dockerImagesCache struct {
-	mu            sync.RWMutex
-	images        []DockerImageTag
-	lastFetchTime time.Time
-}
-
-var dockerCache = &dockerImagesCache{}
 
 // Converts a container-internal path to a host path.
 // When DISCOPANEL_HOST_DATA_PATH is not set (running on host), it returns the path unchanged.
@@ -92,95 +66,29 @@ func TranslateToHostPath(path string) string {
 	return filepath.Join(hostDataPath, relPath)
 }
 
-// Fetches the docker images manifest from itzg
-func fetchDockerImages() ([]DockerImageTag, error) {
-	// Check cache first
-	dockerCache.mu.RLock()
-	if len(dockerCache.images) > 0 && time.Since(dockerCache.lastFetchTime) < dockerImagesCacheDuration {
-		images := dockerCache.images
-		dockerCache.mu.RUnlock()
-		return images, nil
-	}
-	dockerCache.mu.RUnlock()
+// HealthState is the panel-side health verdict for a running container,
+// derived from Server List Ping results (replacing in-container healthchecks).
+type HealthState int
 
-	// Fetch new manifest
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
+const (
+	HealthUnknown HealthState = iota
+	HealthStarting
+	HealthHealthy
+	HealthUnhealthy
+)
 
-	resp, err := client.Get(dockerImagesURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch docker images manifest: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch docker images manifest: status code %d", resp.StatusCode)
-	}
-
-	var images []DockerImageTag
-	if err := json.NewDecoder(resp.Body).Decode(&images); err != nil {
-		return nil, fmt.Errorf("failed to decode docker images manifest: %w", err)
-	}
-
-	// Update cache
-	dockerCache.mu.Lock()
-	dockerCache.images = images
-	dockerCache.lastFetchTime = time.Now()
-	dockerCache.mu.Unlock()
-
-	return images, nil
-}
-
-// Gets ideal docker tag for a given Minecraft version + mod loader
-func GetOptimalDockerTag(mcVersion string, modLoader models.ModLoader, preferGraalVM bool) string {
-	javaVersion := GetRequiredJavaVersion(mcVersion, modLoader)
-	if javaVersion == "0" || javaVersion == "" {
-		// Could not determine Java version, use stable
-		return "stable"
-	}
-
-	// Fetch Docker images from API
-	images, err := fetchDockerImages()
-	if err != nil {
-		// Could not fetch Docker images, use stable
-		return "stable"
-	}
-
-	// Find matching tag
-	for _, tag := range images {
-		if tag.Java == javaVersion && !tag.Deprecated {
-			if preferGraalVM && strings.Contains(tag.Tag, "graalvm") {
-				return tag.Tag
-			}
-			// Return first matching non-special tag (not graalvm, alpine, or jdk)
-			if !strings.Contains(tag.Tag, "graalvm") && !strings.Contains(tag.Tag, "alpine") && !strings.Contains(tag.Tag, "jdk") {
-				return tag.Tag
-			}
-		}
-	}
-
-	// No matching tag found, construct one
-	return fmt.Sprintf("java%s", javaVersion)
-}
-
-// Gets required Java version for a Minecraft version
-func GetRequiredJavaVersion(mcVersion string, modLoader models.ModLoader) string {
-	// Fetch the Java version from the Minecraft version metadata
-	javaVersion, err := minecraft.GetJavaVersion(mcVersion)
-	if err != nil {
-		// If we can't determine the Java version, return 0 to indicate error
-		return "0"
-	}
-	return javaVersion
+// HealthChecker reports panel-side health for running containers.
+type HealthChecker interface {
+	ContainerHealth(containerID string, startedAt time.Time) HealthState
 }
 
 type ClientConfig struct {
-	APIVersion  string
-	NetworkName string
-	RegistryURL string
-	DNS         string
-	Labels      map[string]string
+	APIVersion   string
+	NetworkName  string
+	RegistryURL  string
+	RuntimeImage string
+	DNS          string
+	Labels       map[string]string
 }
 
 type ContainerLogStreamer interface {
@@ -190,10 +98,17 @@ type ContainerLogStreamer interface {
 }
 
 type Client struct {
-	docker      *client.Client
-	config      ClientConfig
-	logStreamer ContainerLogStreamer
-	log         *logger.Logger
+	docker        *client.Client
+	config        ClientConfig
+	logStreamer   ContainerLogStreamer
+	healthChecker HealthChecker
+	log           *logger.Logger
+}
+
+// SetHealthChecker registers the panel-side health source consulted by
+// GetContainerStatus for running containers.
+func (c *Client) SetHealthChecker(hc HealthChecker) {
+	c.healthChecker = hc
 }
 
 // Auto manage streams at the client level when set
@@ -360,13 +275,7 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 }
 
 func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerConfig) (string, error) {
-	// Use server's DockerImage if specified, otherwise determine based on version and loader
-	var imageName string
-	if server.DockerImage != "" {
-		imageName = "itzg/minecraft-server:" + server.DockerImage
-	} else {
-		imageName = getDockerImage(server.ModLoader, server.MCVersion)
-	}
+	imageName := c.DesiredImage(server)
 
 	// Try pulling latest
 	if err := c.pullImage(ctx, imageName); err != nil {
@@ -377,18 +286,11 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	env := buildEnvFromConfig(serverConfig)
 
 	// Determine container port - proxy servers always use default port internally
+	// (the provisioner writes the matching server-port into server.properties)
 	useProxy := server.ProxyHostname != ""
 	containerPort := server.Port
 	if useProxy {
 		containerPort = DefaultMinecraftPort
-		// Override SERVER_PORT env var for proxy servers
-		filtered := make([]string, 0, len(env))
-		for _, e := range env {
-			if !strings.HasPrefix(e, "SERVER_PORT=") {
-				filtered = append(filtered, e)
-			}
-		}
-		env = append(filtered, fmt.Sprintf("SERVER_PORT=%d", DefaultMinecraftPort))
 	}
 
 	c.log.Debug("Creating container for server %s with image %s", server.ID, imageName)
@@ -517,18 +419,20 @@ func (c *Client) StartContainer(ctx context.Context, containerID string) error {
 	return nil
 }
 
-// StopContainer stops a container. Returns (containerFound, error).
-// If container doesn't exist, returns (false, nil) so caller can clean up stale references.
-func (c *Client) StopContainer(ctx context.Context, containerID string) (bool, error) {
+// StopContainer stops a container, allowing timeoutSeconds for a graceful
+// shutdown (SIGTERM saves the world) before force-killing. Returns
+// (containerFound, error); (false, nil) lets callers clean stale references.
+func (c *Client) StopContainer(ctx context.Context, containerID string, timeoutSeconds int) (bool, error) {
 	// Stop log streaming before stopping container
 	if c.logStreamer != nil {
 		c.logStreamer.StopStreaming(containerID)
 	}
 
-	// First try graceful stop with a short timeout
-	timeout := 5 // seconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = DefaultStopTimeoutSeconds
+	}
 	err := c.docker.ContainerStop(ctx, containerID, container.StopOptions{
-		Timeout: &timeout,
+		Timeout: &timeoutSeconds,
 	})
 
 	if err != nil {
@@ -560,7 +464,7 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string) error 
 
 // Stops and starts a container with an optional delay between operations
 func (c *Client) RestartContainer(ctx context.Context, containerID string, delay time.Duration) error {
-	if _, err := c.StopContainer(ctx, containerID); err != nil {
+	if _, err := c.StopContainer(ctx, containerID, DefaultStopTimeoutSeconds); err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
@@ -597,7 +501,7 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 			c.log.Debug("Container %s not found during recreation: %v", oldContainerID, err)
 		} else if status == models.StatusRunning || status == models.StatusUnhealthy {
 			result.WasRunning = true
-			if _, err := c.StopContainer(ctx, oldContainerID); err != nil {
+			if _, err := c.StopContainer(ctx, oldContainerID, DefaultStopTimeoutSeconds); err != nil {
 				return nil, fmt.Errorf("failed to stop container: %w", err)
 			}
 		}
@@ -639,31 +543,80 @@ func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (mo
 
 	switch inspect.State.Status {
 	case "running":
-		// Check health status if available
-		if inspect.State.Health != nil {
-			switch inspect.State.Health.Status {
-			case "healthy":
+		// Health comes from the panel-side SLP checker, not the container.
+		if c.healthChecker != nil {
+			startedAt, _ := time.Parse(time.RFC3339Nano, inspect.State.StartedAt)
+			switch c.healthChecker.ContainerHealth(containerID, startedAt) {
+			case HealthHealthy:
 				return models.StatusRunning, nil
-			case "starting":
+			case HealthStarting:
 				return models.StatusStarting, nil
-			case "unhealthy":
-				// Server process isn't responding
+			case HealthUnhealthy:
 				return models.StatusUnhealthy, nil
-			default:
-				// No health status or unknown, assume running
-				return models.StatusRunning, nil
 			}
 		}
 		return models.StatusRunning, nil
+	case "paused":
+		return models.StatusPaused, nil
 	case "restarting":
 		return models.StatusStarting, nil
 	case "exited", "dead":
 		return models.StatusStopped, nil
-	case "created", "paused", "removing":
+	case "created", "removing":
 		return models.StatusStopped, nil
 	default:
 		return models.StatusError, nil
 	}
+}
+
+// PauseContainer freezes all processes in a container (autopause).
+func (c *Client) PauseContainer(ctx context.Context, containerID string) error {
+	return c.docker.ContainerPause(ctx, containerID)
+}
+
+// UnpauseContainer resumes a paused container (wake-on-connect).
+func (c *Client) UnpauseContainer(ctx context.Context, containerID string) error {
+	return c.docker.ContainerUnpause(ctx, containerID)
+}
+
+// IsContainerPaused reports whether a container is currently paused.
+func (c *Client) IsContainerPaused(ctx context.Context, containerID string) (bool, error) {
+	inspect, err := c.docker.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return false, err
+	}
+	return inspect.State.Status == "paused", nil
+}
+
+// ContainerImage returns the image reference a container was created from.
+func (c *Client) ContainerImage(ctx context.Context, containerID string) (string, error) {
+	inspect, err := c.docker.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", err
+	}
+	return inspect.Config.Image, nil
+}
+
+// ContainerRunInfo is the raw run state used by the panel-side health tracker.
+type ContainerRunInfo struct {
+	Running   bool
+	Paused    bool
+	StartedAt time.Time
+}
+
+// GetContainerRunInfo returns the raw container run state without health
+// interpretation (the health tracker itself must not consult health).
+func (c *Client) GetContainerRunInfo(ctx context.Context, containerID string) (*ContainerRunInfo, error) {
+	inspect, err := c.docker.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, err
+	}
+	startedAt, _ := time.Parse(time.RFC3339Nano, inspect.State.StartedAt)
+	return &ContainerRunInfo{
+		Running:   inspect.State.Status == "running",
+		Paused:    inspect.State.Status == "paused",
+		StartedAt: startedAt,
+	}, nil
 }
 
 func (c *Client) GetContainerStats(ctx context.Context, containerID string) (*ContainerStats, error) {
@@ -716,7 +669,7 @@ func (c *Client) Exec(ctx context.Context, containerID string, execCmd []string)
 		AttachStdout: true,
 		AttachStderr: true,
 		Tty:          false,
-		Cmd:          execCmd, //[]string{"rcon-cli", command},
+		Cmd:          execCmd,
 	}
 
 	// Create exec instance
@@ -752,14 +705,15 @@ func (c *Client) Exec(ctx context.Context, containerID string, execCmd []string)
 	return outputBuf.String(), nil
 }
 
-// ExecCommand executes a command inside the container and returns the output
-func (c *Client) ExecCommand(ctx context.Context, containerID string, command string) (string, error) {
-	return c.Exec(ctx, containerID, []string{"rcon-cli", command})
-}
-
 func (c *Client) pullImage(ctx context.Context, imageName string) error {
 	reader, err := c.docker.ImagePull(ctx, imageName, image.PullOptions{})
 	if err != nil {
+		// Locally built or already-present images (e.g. dev runtime builds,
+		// air-gapped hosts) are fine even when the registry pull fails.
+		if _, inspectErr := c.docker.ImageInspect(ctx, imageName); inspectErr == nil {
+			c.log.Debug("Image %s unavailable from registry, using local copy: %v", imageName, err)
+			return nil
+		}
 		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
 	}
 	defer reader.Close()
@@ -771,32 +725,6 @@ func (c *Client) pullImage(ctx context.Context, imageName string) error {
 	}
 
 	return nil
-}
-
-func (c *Client) GetDockerImages() []DockerImageTag {
-	images, err := fetchDockerImages()
-	if err != nil {
-		c.log.Error("Failed to fetch docker images: %v", err)
-		return []DockerImageTag{}
-	}
-
-	// Filter out deprecated and dedup
-	seen := make(map[string]bool)
-	var activeImages []DockerImageTag
-	for _, img := range images {
-		if !img.Deprecated && !seen[img.Tag] {
-			seen[img.Tag] = true
-			activeImages = append(activeImages, img)
-		}
-	}
-	return activeImages
-}
-
-func getDockerImage(loader models.ModLoader, mcVersion string) string {
-	_ = loader
-	// itzg/minecraft-server supports all mod loaders through environment variables
-	// We use Java version specific tags for better compatibility
-	return "itzg/minecraft-server:" + GetOptimalDockerTag(mcVersion, loader, false)
 }
 
 // Creates the Docker network if it doesn't exist - attaches itself to that network when applicable
@@ -873,9 +801,7 @@ func (c *Client) attachSelfToNetwork(ctx context.Context) {
 
 // Builds Docker environment variables from ServerConfig struct
 func buildEnvFromConfig(config *models.ServerConfig) []string {
-	env := []string{
-		"DUMP_SERVER_PROPERTIES=true",
-	}
+	var env []string
 
 	configValue := reflect.ValueOf(config).Elem()
 	configType := configValue.Type()

@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -23,6 +25,8 @@ type MinecraftProxy struct {
 	runningMutex sync.RWMutex
 	ctx          context.Context
 	cancel       context.CancelFunc
+	gate         ServerGate
+	gateMutex    sync.RWMutex
 }
 
 // NewMinecraftProxy creates a new Minecraft proxy instance
@@ -34,7 +38,21 @@ func NewMinecraftProxy(cfg *Config) *MinecraftProxy {
 		listenAddr: cfg.ListenAddr,
 		ctx:        ctx,
 		cancel:     cancel,
+		gate:       cfg.Gate,
 	}
+}
+
+// SetGate registers the wake gate for paused servers.
+func (p *MinecraftProxy) SetGate(gate ServerGate) {
+	p.gateMutex.Lock()
+	p.gate = gate
+	p.gateMutex.Unlock()
+}
+
+func (p *MinecraftProxy) getGate() ServerGate {
+	p.gateMutex.RLock()
+	defer p.gateMutex.RUnlock()
+	return p.gate
 }
 
 // AddRoute adds a new routing rule
@@ -194,9 +212,27 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 		return
 	}
 
+	// Paused (autopaused) servers: answer status pings without waking, wake on login.
+	if gate := p.getGate(); gate != nil {
+		if info, sleeping := gate.SleepingInfo(route.ServerID); sleeping {
+			if handshake.NextState == 1 {
+				p.serveSleepingStatus(clientConn, handshake, info)
+				return
+			}
+			p.logger.Info("Waking sleeping server %s for incoming login", route.ServerID)
+			wakeCtx, cancel := context.WithTimeout(p.ctx, 15*time.Second)
+			err := gate.WakeServer(wakeCtx, route.ServerID)
+			cancel()
+			if err != nil {
+				p.logger.Error("Failed to wake server %s: %v", route.ServerID, err)
+				return
+			}
+		}
+	}
+
 	// Connect to backend
 	backendAddr := net.JoinHostPort(route.BackendHost, fmt.Sprintf("%d", route.BackendPort))
-	backendConn, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
+	backendConn, err := dialBackendWithRetry(backendAddr, 10*time.Second)
 	if err != nil {
 		p.logger.Error("Failed to connect to backend %s: %v", backendAddr, err)
 		return
@@ -273,4 +309,102 @@ func (p *MinecraftProxy) IsRunning() bool {
 	p.runningMutex.RLock()
 	defer p.runningMutex.RUnlock()
 	return p.running
+}
+
+// dialBackendWithRetry dials a backend, retrying briefly. A just-woken
+// container needs a moment before the JVM accepts connections again.
+func dialBackendWithRetry(addr string, timeout time.Duration) (net.Conn, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, lastErr
+		}
+		dialTimeout := 5 * time.Second
+		if remaining < dialTimeout {
+			dialTimeout = remaining
+		}
+		conn, err := net.DialTimeout("tcp", addr, dialTimeout)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// serveSleepingStatus answers a status handshake for a paused server with a
+// synthesized response, so server-list refreshes never wake the container.
+func (p *MinecraftProxy) serveSleepingStatus(conn net.Conn, handshake *HandshakePacket, info *SleepingServer) {
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+
+	statusJSON, err := json.Marshal(map[string]any{
+		"version": map[string]any{
+			// Echo the client protocol so the entry renders as compatible.
+			"name":     "Sleeping",
+			"protocol": int(handshake.ProtocolVersion),
+		},
+		"players": map[string]any{
+			"max":    info.MaxPlayers,
+			"online": 0,
+		},
+		"description": map[string]any{
+			"text": info.MOTD,
+		},
+	})
+	if err != nil {
+		return
+	}
+
+	for {
+		// Read next packet: status request (0x00) or ping (0x01).
+		length, err := ReadVarInt(conn)
+		if err != nil || length < 1 || length > 1024 {
+			return
+		}
+		data := make([]byte, length)
+		if _, err := io.ReadFull(conn, data); err != nil {
+			return
+		}
+		reader := bytes.NewReader(data)
+		packetID, err := ReadVarInt(reader)
+		if err != nil {
+			return
+		}
+
+		switch packetID {
+		case 0x00: // status request -> status response
+			var payload bytes.Buffer
+			WriteVarInt(&payload, 0x00)
+			WriteVarInt(&payload, VarInt(len(statusJSON)))
+			payload.Write(statusJSON)
+			if err := writeFramed(conn, payload.Bytes()); err != nil {
+				return
+			}
+		case 0x01: // ping -> pong (echo the 8-byte payload)
+			var payload bytes.Buffer
+			WriteVarInt(&payload, 0x01)
+			pingData := make([]byte, 8)
+			if _, err := io.ReadFull(reader, pingData); err != nil {
+				return
+			}
+			payload.Write(pingData)
+			writeFramed(conn, payload.Bytes())
+			return
+		default:
+			return
+		}
+	}
+}
+
+// writeFramed writes a length-prefixed Minecraft packet.
+func writeFramed(w io.Writer, data []byte) error {
+	var buf bytes.Buffer
+	if err := WriteVarInt(&buf, VarInt(len(data))); err != nil {
+		return err
+	}
+	buf.Write(data)
+	_, err := w.Write(buf.Bytes())
+	return err
 }

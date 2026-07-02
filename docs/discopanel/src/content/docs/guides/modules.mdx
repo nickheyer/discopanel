@@ -1,0 +1,34 @@
+---
+title: Modules
+description: Add-ons that run beside your server - Bedrock crossplay, a 3D web map, a status page, and more.
+---
+
+Modules are add-ons that run in their own little container next to a Minecraft server. Each server has a **Modules** tab where you can add them, start and stop them, and find their addresses. Modules can auto-start with the server, and DiscoPanel picks their ports for you.
+
+## Geyser - play from phones and consoles
+
+Geyser lets **Bedrock Edition** players (phones, tablets, consoles, Windows 10/11 edition) join your **Java Edition** server. Add the Geyser module to a server and share the Bedrock address shown in the module's details.
+
+For Bedrock players to log in with their real accounts, install the **Floodgate** plugin or mod on the server itself (it's on Modrinth - you can add it via the **Modrinth Projects** field or upload it). Without it, Geyser connects players in offline mode.
+
+:::note
+Bedrock uses its own port (UDP). If friends connect from outside your network, that port needs to be forwarded on your router - it doesn't go through the Minecraft proxy.
+:::
+
+## BlueMap - a 3D map in your browser
+
+BlueMap renders your world into an interactive 3D map you can open in a web browser and share with your players. It reads the world read-only, so it can't hurt anything. Give it a couple of minutes after the first start - rendering a whole world takes a while.
+
+## Status Panel
+
+A small live dashboard for one server - player count, TPS, memory - that you can share with people who shouldn't have access to DiscoPanel itself.
+
+## Prometheus Exporter
+
+Publishes server stats (status, players, response time) in Prometheus format for people who run monitoring dashboards like Grafana. If you don't know what that means, you don't need it.
+
+## Good to know
+
+- Modules get their web ports assigned automatically (from the range in the panel's `module` config, `8100-8199` by default). The exact URL for each module is shown in its details.
+- A module belongs to one server. Two servers that both want BlueMap each get their own copy.
+- Module files live inside the server's folder under `modules/`, so they're covered by whatever you do with the server folder.

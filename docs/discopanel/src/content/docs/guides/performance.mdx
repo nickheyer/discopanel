@@ -1,0 +1,24 @@
+---
+title: Server Performance
+description: Memory, the one checkbox worth ticking, and why servers restart fast.
+---
+
+## Memory
+
+Give a server its memory when you create it (you can change it later in Settings). DiscoPanel splits it between Java and the overhead the server process needs, so the number you pick is the total the server gets. If you're not sure, 4 GB is fine for vanilla and small plugin servers, and 6 to 10 GB for modpacks.
+
+More isn't always better. Java's garbage collector works harder with a huge amount of memory, so don't hand a server 20 GB just because it's available.
+
+## One checkbox worth ticking
+
+**Use Aikar Flags** in the server configuration enables the garbage collector tuning that most serious Minecraft servers run. It reduces lag spikes, especially on busy or modded servers, and it's safe for everything. There's rarely a reason to leave it off.
+
+**Use MeowIce Flags** is a newer, more aggressive set for modern Java versions. Pick one of the two, not both.
+
+## Why restarts are fast
+
+DiscoPanel installs a server's files once, up front. After that, starting the server is nothing but Java starting up, so restarts take seconds instead of sitting through downloads and install scripts.
+
+## For the tinkerers
+
+The configuration tab has fields for raw JVM options (**JVM Options**, **JVM XX Options**, **JVM DD Options**) and for arguments passed to the server itself (**Extra Arguments**). There are also switches for SIMD optimizations, the Flare profiler, and remote JMX. If none of that means anything to you, you're not missing out.

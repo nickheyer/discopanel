@@ -204,7 +204,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// Enforce required claim if configured
 	if h.config.RequiredClaim != "" && len(h.config.RequiredValues) > 0 {
 		if !h.checkRequiredClaim(claims) {
-			h.log.Warn("OIDC: login rejected — required claim %q not satisfied", h.config.RequiredClaim)
+			h.log.Warn("OIDC: login rejected - required claim %q not satisfied", h.config.RequiredClaim)
 			http.Redirect(w, r, "/login?error=access_denied", http.StatusFound)
 			return
 		}
@@ -227,7 +227,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// Resolve roles before creating user to avoid orphaned records on rejection
 	resolvedRoles := h.resolveClaimRoles(claims)
 	if len(resolvedRoles) == 0 && h.config.RejectUnmapped {
-		h.log.Warn("OIDC: login rejected — no mapped roles for user %s", username)
+		h.log.Warn("OIDC: login rejected - no mapped roles for user %s", username)
 		http.Redirect(w, r, "/login?error=no_mapped_roles", http.StatusFound)
 		return
 	}
@@ -280,7 +280,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 // findOrCreateOIDCUser looks up a user by OIDC subject (returning user),
 // or creates a new OIDC user. Local users with the same username are not
-// affected — the composite unique constraint (username, auth_provider)
+// affected - the composite unique constraint (username, auth_provider)
 // allows both to coexist.
 func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, email string) (*db.User, error) {
 	// Step 1: try to find by OIDC subject (returning user)
@@ -367,7 +367,7 @@ func (h *OIDCHandler) resolveClaimRoles(claims map[string]any) []string {
 			}
 		}
 	} else if !h.config.RejectUnmapped {
-		// No mapping configured and not rejecting unmapped — use claim values directly
+		// No mapping configured and not rejecting unmapped - use claim values directly
 		resolvedRoles = claimValues
 	}
 

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 
 	"connectrpc.com/connect"
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -88,50 +89,17 @@ func (s *MinecraftService) GetModLoaders(ctx context.Context, req *connect.Reque
 	}), nil
 }
 
-// GetDockerImages gets available Docker images
+// GetDockerImages lists the published discopanel-runtime image variants
 func (s *MinecraftService) GetDockerImages(ctx context.Context, req *connect.Request[v1.GetDockerImagesRequest]) (*connect.Response[v1.GetDockerImagesResponse], error) {
-	// Get Docker images from docker client
-	dockerImages := s.docker.GetDockerImages()
+	runtimeImages := docker.RuntimeImages()
 
-	// Convert to proto format
-	protoImages := make([]*v1.DockerImage, 0, len(dockerImages))
-	for _, img := range dockerImages {
-		// Create display name
-		displayName := img.Tag
-		if img.Java != "" {
-			displayName = "Java " + img.Java + ": " + img.JVM
-			if img.Distribution != "" {
-				displayName += " (" + img.Distribution + ")"
-			}
-
-		}
-
-		// Create description
-		description := ""
-		if img.LTS {
-			description = "LTS version"
-		}
-		if img.JDK {
-			if description != "" {
-				description += ", "
-			}
-			description += "includes JDK"
-		}
-		if img.Notes != "" {
-			if description != "" {
-				description += ". "
-			}
-			description += img.Notes
-		}
-
-		// Mark recommended images
-		recommended := img.LTS && !img.Deprecated
-
+	protoImages := make([]*v1.DockerImage, 0, len(runtimeImages))
+	for i, img := range runtimeImages {
 		protoImages = append(protoImages, &v1.DockerImage{
 			Tag:         img.Tag,
-			DisplayName: displayName,
-			Description: description,
-			Recommended: recommended,
+			DisplayName: fmt.Sprintf("Java %d (discopanel-runtime)", img.JavaMajor),
+			Description: fmt.Sprintf("Minimal Temurin %d JRE runtime; server files are provisioned by DiscoPanel", img.JavaMajor),
+			Recommended: i == 0,
 		})
 	}
 

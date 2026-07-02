@@ -467,7 +467,7 @@ func (m *Manager) StopModule(ctx context.Context, moduleID string) error {
 	}
 
 	// Stop the container
-	if _, err := m.docker.StopContainer(ctx, module.ContainerID); err != nil {
+	if _, err := m.docker.StopContainer(ctx, module.ContainerID, 30); err != nil {
 		m.logger.Error("Failed to stop module container: %v", err)
 	}
 

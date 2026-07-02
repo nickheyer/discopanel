@@ -184,7 +184,7 @@ func (s *Store) ClearEphemeralConfigFields(ctx context.Context, serverID string)
 	}
 
 	// Clear ephemeral fields
-	config.CFForceReinstallModloader = nil
+	config.ForceProvision = nil
 
 	return s.SaveServerConfig(ctx, config)
 }
@@ -201,10 +201,7 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 		}
 	}
 
-	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
-	config.Type = stringPtr(string(server.ModLoader))
-	config.Version = stringPtr(server.MCVersion)
 	config.ServerPort = intPtr(server.Port)
 	config.MaxPlayers = intPtr(server.MaxPlayers)
 
@@ -229,8 +226,6 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 		EnableRCON:   boolPtr(true),
 		RCONPassword: stringPtr(rconPassword),
 		RCONPort:     intPtr(25575),
-		Version:      stringPtr("LATEST"),
-		Type:         stringPtr("VANILLA"),
 		Difficulty:   stringPtr("easy"),
 		Mode:         stringPtr("survival"),
 		MaxPlayers:   intPtr(20),
@@ -254,8 +249,7 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 			field := configType.Field(i)
 			// Skip these fields as they're server-specific
 			if field.Name == "ID" || field.Name == "ServerID" || field.Name == "UpdatedAt" ||
-				field.Name == "Server" || field.Name == "RCONPassword" ||
-				field.Name == "Type" || field.Name == "Version" || field.Name == "Memory" ||
+				field.Name == "Server" || field.Name == "RCONPassword" || field.Name == "Memory" ||
 				field.Name == "InitMemory" || field.Name == "MaxMemory" || field.Name == "ServerPort" ||
 				field.Name == "MaxPlayers" {
 				continue

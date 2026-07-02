@@ -2,6 +2,7 @@ package fuego
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -46,6 +47,7 @@ type Pagination struct {
 type Modpack struct {
 	ID                 int          `json:"id"`
 	GameID             int          `json:"gameId"`
+	ClassID            int          `json:"classId"`
 	Name               string       `json:"name"`
 	Slug               string       `json:"slug"`
 	Links              Links        `json:"links"`
@@ -226,4 +228,98 @@ func (c *Client) GetModpack(ctx context.Context, modID int) (*Modpack, error) {
 	}
 
 	return &result.Data, nil
+}
+
+// GetModBySlug resolves a project (any class, not just modpacks) by its slug.
+func (c *Client) GetModBySlug(ctx context.Context, slug string, classID int) (*Modpack, error) {
+	if c.apiKey == "" {
+		return nil, indexers.NewAuthConfigError("fuego", "API key not configured")
+	}
+
+	params := url.Values{}
+	params.Set("gameId", strconv.Itoa(MinecraftGameID))
+	params.Set("slug", slug)
+	if classID > 0 {
+		params.Set("classId", strconv.Itoa(classID))
+	}
+
+	var result SearchModsResponse
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/mods/search?%s", BaseURL, params.Encode()), &result); err != nil {
+		return nil, err
+	}
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("no CurseForge project found for slug %q", slug)
+	}
+	return &result.Data[0], nil
+}
+
+// GetFile fetches metadata for a single file of a mod/modpack.
+func (c *Client) GetFile(ctx context.Context, modID, fileID int) (*File, error) {
+	if c.apiKey == "" {
+		return nil, indexers.NewAuthConfigError("fuego", "API key not configured")
+	}
+
+	var result struct {
+		Data File `json:"data"`
+	}
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/mods/%d/files/%d", BaseURL, modID, fileID), &result); err != nil {
+		return nil, err
+	}
+	return &result.Data, nil
+}
+
+// GetFilesByIDs bulk-fetches file metadata.
+func (c *Client) GetFilesByIDs(ctx context.Context, fileIDs []int) ([]File, error) {
+	if c.apiKey == "" {
+		return nil, indexers.NewAuthConfigError("fuego", "API key not configured")
+	}
+
+	var result struct {
+		Data []File `json:"data"`
+	}
+	body := map[string]any{"fileIds": fileIDs}
+	if err := c.http.PostJSON(ctx, fmt.Sprintf("%s/mods/files", BaseURL), body, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// GetModsByIDs bulk-fetches mod metadata (used for class/slug resolution of pack contents).
+func (c *Client) GetModsByIDs(ctx context.Context, modIDs []int) ([]Modpack, error) {
+	if c.apiKey == "" {
+		return nil, indexers.NewAuthConfigError("fuego", "API key not configured")
+	}
+
+	var result struct {
+		Data []Modpack `json:"data"`
+	}
+	body := map[string]any{"modIds": modIDs}
+	if err := c.http.PostJSON(ctx, fmt.Sprintf("%s/mods", BaseURL), body, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// GetFileDownloadURL resolves the CDN download URL for a file. Returns "" (no
+// error) when the author has disallowed automated distribution.
+func (c *Client) GetFileDownloadURL(ctx context.Context, modID, fileID int) (string, error) {
+	if c.apiKey == "" {
+		return "", indexers.NewAuthConfigError("fuego", "API key not configured")
+	}
+
+	var result struct {
+		Data *string `json:"data"`
+	}
+	err := c.http.DoJSON(ctx, fmt.Sprintf("%s/mods/%d/files/%d/download-url", BaseURL, modID, fileID), &result)
+	if err != nil {
+		var apiErr *indexers.IndexerError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 403 {
+			return "", nil // blocked by author
+		}
+		return "", err
+	}
+	if result.Data == nil {
+		return "", nil
+	}
+	return *result.Data, nil
 }

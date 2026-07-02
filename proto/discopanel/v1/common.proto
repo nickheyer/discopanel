@@ -17,6 +17,8 @@ enum ServerStatus {
   SERVER_STATUS_RESTARTING = 6;
   SERVER_STATUS_ERROR = 7;
   SERVER_STATUS_UNHEALTHY = 8;
+  SERVER_STATUS_PROVISIONING = 9;
+  SERVER_STATUS_PAUSED = 10;
 }
 
 // Minecraft server software type

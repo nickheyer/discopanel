@@ -1,6 +1,7 @@
 package indexers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -31,12 +32,32 @@ func NewHTTPClient(indexer string, userAgent string, extraHeaders map[string]str
 // DoJSON performs a GET request, checks the status, and JSON-decodes into dest.
 // It returns structured IndexerErrors for all failure modes.
 func (h *HTTPClient) DoJSON(ctx context.Context, url string, dest any) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	return h.do(ctx, "GET", url, nil, dest)
+}
+
+// PostJSON performs a POST request with a JSON body and decodes the response into dest.
+func (h *HTTPClient) PostJSON(ctx context.Context, url string, body any, dest any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return &IndexerError{Kind: ErrNetwork, Indexer: h.indexer, URL: url, Err: err}
+	}
+	return h.do(ctx, "POST", url, payload, dest)
+}
+
+func (h *HTTPClient) do(ctx context.Context, method, url string, body []byte, dest any) error {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return &IndexerError{Kind: ErrNetwork, Indexer: h.indexer, URL: url, Err: err}
 	}
 
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if h.userAgent != "" {
 		req.Header.Set("User-Agent", h.userAgent)
 	}

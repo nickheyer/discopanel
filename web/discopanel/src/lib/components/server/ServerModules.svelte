@@ -416,7 +416,7 @@
 									<div class="flex flex-wrap gap-1.5">
 										{#each module.ports as port (port.name)}
 											<Badge variant="outline" class="px-1.5 py-0 font-mono text-[10px]">
-												{port.name || 'Port'}: {port.hostPort || '?'}→{port.containerPort}/{(
+												{port.name || 'Port'}: {port.hostPort || '?'}:{port.containerPort}/{(
 													port.protocol || 'tcp'
 												).toUpperCase()}
 											</Badge>

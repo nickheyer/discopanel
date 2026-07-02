@@ -408,7 +408,7 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 
 	// Check server status
 	status, err := c.hub.docker.GetContainerStatus(ctx, server.ContainerID)
-	if err != nil || status != storage.StatusRunning {
+	if err != nil || (status != storage.StatusRunning && status != storage.StatusUnhealthy) {
 		c.sendCommandResult(msg.ServerId, false, "", "server is not running")
 		return
 	}

@@ -440,7 +440,7 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 		}
 
 		javaVersion := docker.GetRequiredJavaVersion(mcVersion, modLoader)
-		dockerImage := docker.GetOptimalDockerTag(mcVersion, modLoader, false)
+		dockerImage := docker.OptimalRuntimeTag(mcVersion)
 
 		dbModpack := &storage.IndexedModpack{
 			ID:            modpack.ID,
@@ -592,7 +592,7 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 	}
 
 	javaVersion := docker.GetRequiredJavaVersion(manifest.Minecraft.Version, modLoader)
-	dockerImage := docker.GetOptimalDockerTag(manifest.Minecraft.Version, modLoader, false)
+	dockerImage := docker.OptimalRuntimeTag(manifest.Minecraft.Version)
 
 	// Create database entry
 	gameVersionsJSON, _ := json.Marshal([]string{manifest.Minecraft.Version})

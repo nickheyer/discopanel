@@ -50,18 +50,31 @@ type CollectorConfig struct {
 	SLPInterval   time.Duration // default 15s
 	SLPTimeout    time.Duration // default 5s
 	SLPEnabled    bool          // default true
+
+	// Panel-side health (SLP is the health source; replaces in-container checks)
+	HealthStartupGrace  time.Duration // starting -> unhealthy after this without a first ping (default 15m)
+	HealthFailThreshold int           // healthy -> unhealthy after this many consecutive failed pings (default 3)
 }
 
 // Get default collector configuration
 func DefaultConfig() CollectorConfig {
 	return CollectorConfig{
-		StatsInterval: 5 * time.Second,
-		RCONInterval:  10 * time.Second,
-		DiskInterval:  60 * time.Second,
-		SLPInterval:   15 * time.Second,
-		SLPTimeout:    5 * time.Second,
-		SLPEnabled:    true,
+		StatsInterval:       5 * time.Second,
+		RCONInterval:        10 * time.Second,
+		DiskInterval:        60 * time.Second,
+		SLPInterval:         15 * time.Second,
+		SLPTimeout:          5 * time.Second,
+		SLPEnabled:          true,
+		HealthStartupGrace:  15 * time.Minute,
+		HealthFailThreshold: 3,
 	}
+}
+
+// containerHealth tracks SLP results for one container run.
+type containerHealth struct {
+	startedAt        time.Time
+	everHealthy      bool
+	consecutiveFails int
 }
 
 // Snapshot of a servers derived lifecycle state
@@ -86,6 +99,10 @@ type Collector struct {
 	lifecycle   map[string]lifecycleState
 	lifecycleMu sync.Mutex
 
+	// Per-container SLP health records (the panel-side health source)
+	health   map[string]*containerHealth
+	healthMu sync.Mutex
+
 	running  bool
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -109,6 +126,7 @@ func NewCollector(store *storage.Store, docker *docker.Client, sender *command.S
 		log:             log,
 		metrics:         make(map[string]*ServerMetrics),
 		lifecycle:       make(map[string]lifecycleState),
+		health:          make(map[string]*containerHealth),
 		collectorConfig: cc,
 	}
 }
@@ -253,7 +271,7 @@ func (c *Collector) collectDockerStats() {
 
 		// Check if server is running
 		status, err := c.docker.GetContainerStatus(ctx, server.ContainerID)
-		if err != nil || (status != storage.StatusRunning && status != storage.StatusUnhealthy) {
+		if err != nil || (status != storage.StatusRunning && status != storage.StatusUnhealthy && status != storage.StatusStarting) {
 			continue
 		}
 
@@ -288,9 +306,10 @@ func (c *Collector) collectRCONData() {
 			continue
 		}
 
-		// Check if server is running
+		// Starting/unhealthy servers are polled too: a server whose SLP is
+		// blocked (e.g. by a mod) but whose RCON responds is healthy.
 		status, err := c.docker.GetContainerStatus(ctx, server.ContainerID)
-		if err != nil || status != storage.StatusRunning {
+		if err != nil || (status != storage.StatusRunning && status != storage.StatusStarting && status != storage.StatusUnhealthy) {
 			continue
 		}
 
@@ -309,6 +328,10 @@ func (c *Collector) collectRCONData() {
 					m.PlayerSample = players
 					m.LastUpdated = time.Now()
 				})
+				// A responsive RCON is proof of life even when SLP is blocked.
+				if info, err := c.docker.GetContainerRunInfo(ctx, server.ContainerID); err == nil && info.Running {
+					c.recordHealth(server.ContainerID, info.StartedAt, true)
+				}
 			}
 		}
 
@@ -408,6 +431,81 @@ func (c *Collector) RemoveMetrics(serverID string) {
 	c.clearLifecycle(serverID)
 }
 
+// recordHealth folds an SLP result into the container's health record.
+func (c *Collector) recordHealth(containerID string, startedAt time.Time, ok bool) {
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+
+	h := c.health[containerID]
+	// A different StartedAt means the container restarted: reset the record.
+	if h == nil || !h.startedAt.Equal(startedAt) {
+		h = &containerHealth{startedAt: startedAt}
+		c.health[containerID] = h
+	}
+	if ok {
+		h.everHealthy = true
+		h.consecutiveFails = 0
+	} else {
+		h.consecutiveFails++
+	}
+}
+
+func (c *Collector) clearHealth(containerID string) {
+	c.healthMu.Lock()
+	delete(c.health, containerID)
+	c.healthMu.Unlock()
+}
+
+// ContainerHealth implements docker.HealthChecker: the SLP ping record is the
+// panel-side health verdict for running containers.
+func (c *Collector) ContainerHealth(containerID string, startedAt time.Time) docker.HealthState {
+	c.healthMu.Lock()
+	h := c.health[containerID]
+	var record containerHealth
+	if h != nil {
+		record = *h
+	}
+	c.healthMu.Unlock()
+
+	grace := c.collectorConfig.HealthStartupGrace
+	threshold := c.collectorConfig.HealthFailThreshold
+
+	// No record for this run yet (collector hasn't pinged since (re)start).
+	if h == nil || !record.startedAt.Equal(startedAt) {
+		if time.Since(startedAt) < grace {
+			return docker.HealthStarting
+		}
+		// Long-running container with no data (e.g. panel restart): assume
+		// healthy until pings prove otherwise.
+		return docker.HealthUnknown
+	}
+
+	if record.everHealthy {
+		if record.consecutiveFails >= threshold {
+			return docker.HealthUnhealthy
+		}
+		return docker.HealthHealthy
+	}
+
+	// Never answered a ping this run.
+	if time.Since(startedAt) >= grace {
+		return docker.HealthUnhealthy
+	}
+	return docker.HealthStarting
+}
+
+// PlayersOnline implements lifecycle.PlayerCounter from fresh SLP data.
+func (c *Collector) PlayersOnline(serverID string) (int, bool) {
+	m := c.GetMetrics(serverID)
+	if m == nil {
+		return 0, false
+	}
+	if m.SLPAvailable && time.Since(m.SLPLastUpdated) < 2*c.collectorConfig.SLPInterval {
+		return m.PlayersOnline, true
+	}
+	return 0, false
+}
+
 // Collects SLP data
 func (c *Collector) collectSLPDataLoop() {
 	defer c.wg.Done()
@@ -445,10 +543,11 @@ func (c *Collector) collectSLPData() {
 			continue
 		}
 
-		// Check if server is running
-		status, err := c.docker.GetContainerStatus(ctx, server.ContainerID)
-		if err != nil || status != storage.StatusRunning {
-			// Mark SLP as unavailable for no op
+		// Ping any container whose raw state is running (health derives from
+		// these pings, so this must not consult GetContainerStatus).
+		info, err := c.docker.GetContainerRunInfo(ctx, server.ContainerID)
+		if err != nil || !info.Running || info.Paused {
+			c.clearHealth(server.ContainerID)
 			c.updateMetrics(server.ID, func(m *ServerMetrics) {
 				m.SLPAvailable = false
 			})
@@ -459,6 +558,7 @@ func (c *Collector) collectSLPData() {
 		containerIP, err := proxy.GetContainerIP(server.ContainerID, c.config.Docker.NetworkName)
 		if err != nil {
 			c.log.Debug("Metrics collector SLP: failed to get container IP for %s: %v", server.ID, err)
+			c.recordHealth(server.ContainerID, info.StartedAt, false)
 			c.updateMetrics(server.ID, func(m *ServerMetrics) {
 				m.SLPAvailable = false
 			})
@@ -476,11 +576,14 @@ func (c *Collector) collectSLPData() {
 
 		if err != nil {
 			c.log.Debug("Metrics collector SLP: failed to ping %s (%s:%d): %v", server.ID, containerIP, port, err)
+			c.recordHealth(server.ContainerID, info.StartedAt, false)
 			c.updateMetrics(server.ID, func(m *ServerMetrics) {
 				m.SLPAvailable = false
 			})
 			continue
 		}
+
+		c.recordHealth(server.ContainerID, info.StartedAt, true)
 
 		// Update
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {

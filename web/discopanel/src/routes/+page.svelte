@@ -384,7 +384,7 @@
 						/>
 						<p class="mt-1 text-xs text-muted-foreground">Used / Allocated</p>
 					{:else}
-						<div class="text-2xl font-bold text-muted-foreground">—</div>
+						<div class="text-2xl font-bold text-muted-foreground">-</div>
 						<p class="mt-1 text-xs text-muted-foreground">No data available</p>
 					{/if}
 				</CardContent>
@@ -422,7 +422,7 @@
 							{stats.avgCpu > 0 ? `${stats.avgCpu.toFixed(1)}% CPU` : 'CPU data unavailable'}
 						</p>
 					{:else}
-						<div class="text-2xl font-bold text-muted-foreground">—</div>
+						<div class="text-2xl font-bold text-muted-foreground">-</div>
 						<p class="mt-1 text-xs text-muted-foreground">Performance monitoring inactive</p>
 					{/if}
 				</CardContent>
@@ -449,7 +449,7 @@
 								: ''} running slow.</span
 						>
 					{/if}
-					<a href={resolve('/servers')} class="ml-2 text-primary hover:underline">View details →</a>
+					<a href={resolve('/servers')} class="ml-2 text-primary hover:underline">View details ></a>
 				</AlertDescription>
 			</Alert>
 		{/if}
@@ -730,19 +730,19 @@
 							<p class="text-xl font-bold">
 								{stats.running > 0
 									? `${((stats.running / Math.max(stats.total, 1)) * 100).toFixed(0)}%`
-									: '—'}
+									: '-'}
 							</p>
 						</div>
 						<div class="space-y-1">
 							<p class="text-xs text-muted-foreground">Load</p>
 							<p class="text-xl font-bold {getCpuColor(stats.avgCpu)}">
-								{stats.avgCpu > 0 ? `${stats.avgCpu.toFixed(0)}%` : '—'}
+								{stats.avgCpu > 0 ? `${stats.avgCpu.toFixed(0)}%` : '-'}
 							</p>
 						</div>
 						<div class="space-y-1">
 							<p class="text-xs text-muted-foreground">Avg TPS</p>
 							<p class="text-xl font-bold {getTpsColor(stats.avgTps)}">
-								{stats.avgTps > 0 ? stats.avgTps.toFixed(1) : '—'}
+								{stats.avgTps > 0 ? stats.avgTps.toFixed(1) : '-'}
 							</p>
 						</div>
 						<div class="space-y-1">

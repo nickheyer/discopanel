@@ -44,6 +44,13 @@ type VersionMetadata struct {
 		Component    string `json:"component"`
 		MajorVersion int    `json:"majorVersion"`
 	} `json:"javaVersion"`
+	Downloads struct {
+		Server struct {
+			SHA1 string `json:"sha1"`
+			Size int64  `json:"size"`
+			URL  string `json:"url"`
+		} `json:"server"`
+	} `json:"downloads"`
 }
 
 // Manifest data
@@ -225,6 +232,40 @@ func IsSnapshot(version string) bool {
 	return false
 }
 
+// Fetches the full metadata document for a specific Minecraft version
+func GetVersionMetadata(mcVersion string) (*VersionMetadata, error) {
+	versionInfo, err := GetVersionInfo(mcVersion)
+	if err != nil {
+		return nil, fmt.Errorf("version %s not found in manifest", mcVersion)
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(versionInfo.URL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch version metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch version metadata: status code %d", resp.StatusCode)
+	}
+
+	var metadata VersionMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		return nil, fmt.Errorf("failed to decode version metadata: %w", err)
+	}
+
+	// Cache the java version for GetJavaVersion
+	cache.mu.Lock()
+	cache.javaVersions[mcVersion] = strconv.Itoa(metadata.JavaVersion.MajorVersion)
+	cache.mu.Unlock()
+
+	return &metadata, nil
+}
+
 // Fetches required Java version for a specific Minecraft version
 func GetJavaVersion(mcVersion string) (string, error) {
 	// Check cache first
@@ -235,40 +276,12 @@ func GetJavaVersion(mcVersion string) (string, error) {
 	}
 	cache.mu.RUnlock()
 
-	// Get version URL from manifest
-	versionInfo, err := GetVersionInfo(mcVersion)
+	metadata, err := GetVersionMetadata(mcVersion)
 	if err != nil {
-		return "0", fmt.Errorf("version %s not found in manifest", mcVersion)
+		return "0", err
 	}
 
-	// Fetch version metadata
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Get(versionInfo.URL)
-	if err != nil {
-		return "0", fmt.Errorf("failed to fetch version metadata: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "0", fmt.Errorf("failed to fetch version metadata: status code %d", resp.StatusCode)
-	}
-
-	var metadata VersionMetadata
-	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
-		return "0", fmt.Errorf("failed to decode version metadata: %w", err)
-	}
-
-	javaVersion := strconv.Itoa(metadata.JavaVersion.MajorVersion)
-
-	// Cache the result
-	cache.mu.Lock()
-	cache.javaVersions[mcVersion] = javaVersion
-	cache.mu.Unlock()
-
-	return javaVersion, nil
+	return strconv.Itoa(metadata.JavaVersion.MajorVersion), nil
 }
 
 func FindMostRecentMinecraftVersion(versions []string) string {

@@ -399,7 +399,7 @@ func CopyDir(src, dst string) error {
 }
 
 func CopyFile(src, dst string) error {
-	// Prevent copying a file onto itself — os.Create truncates before io.Copy reads.
+	// Prevent copying a file onto itself - os.Create truncates before io.Copy reads.
 	if filepath.Clean(src) == filepath.Clean(dst) {
 		return fmt.Errorf("source and destination are the same file: %s", src)
 	}

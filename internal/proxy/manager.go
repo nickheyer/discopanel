@@ -21,6 +21,20 @@ type Manager struct {
 	logger      *logger.Logger
 	mu          sync.Mutex
 	networkName string
+	gate        ServerGate
+}
+
+// SetServerGate registers the wake gate consulted for paused servers. Must be
+// called before Start so every listener proxy picks it up.
+func (m *Manager) SetServerGate(gate ServerGate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gate = gate
+	for _, p := range m.proxies {
+		if mp, ok := p.(*MinecraftProxy); ok {
+			mp.SetGate(gate)
+		}
+	}
 }
 
 // NewManager creates a new proxy manager
@@ -65,6 +79,7 @@ func (m *Manager) Start() error {
 		proxy := NewMinecraftProxy(&Config{
 			ListenAddr: listenAddr,
 			Logger:     m.logger,
+			Gate:       m.gate,
 		})
 
 		m.proxies[listener.Port] = proxy
@@ -183,7 +198,7 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 	hostname := m.generateHostname(server)
 
 	// Add or update route for servers that are starting or running with proxy hostname
-	if (server.Status == db.StatusRunning || server.Status == db.StatusStarting) && server.ProxyHostname != "" {
+	if (server.Status == db.StatusRunning || server.Status == db.StatusStarting || server.Status == db.StatusPaused) && server.ProxyHostname != "" {
 		// Get the container's IP address on the Docker network
 		containerIP := ""
 		if server.ContainerID != "" {
@@ -329,6 +344,7 @@ func (m *Manager) AddListener(listener *db.ProxyListener) error {
 	proxy := NewMinecraftProxy(&Config{
 		ListenAddr: listenAddr,
 		Logger:     m.logger,
+		Gate:       m.gate,
 	})
 
 	// Start the proxy

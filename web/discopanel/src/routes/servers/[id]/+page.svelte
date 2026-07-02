@@ -254,7 +254,7 @@
 								year: 'numeric'
 							})}
 							{#if server.lastStarted}
-								• Last started {(() => {
+								| Last started {(() => {
 									const date = timestampToDate(server.lastStarted);
 									const now = new Date();
 									const diff = now.getTime() - date.getTime();
@@ -316,7 +316,7 @@
 						{/if}
 						<span class="sm:inline">Stop</span>
 					</Button>
-				{:else if server.status === ServerStatus.RUNNING || server.status === ServerStatus.STARTING || server.status === ServerStatus.UNHEALTHY}
+				{:else if server.status === ServerStatus.RUNNING || server.status === ServerStatus.STARTING || server.status === ServerStatus.UNHEALTHY || server.status === ServerStatus.PAUSED || server.status === ServerStatus.PROVISIONING}
 					<Button
 						variant="destructive"
 						onclick={() => handleServerAction('stop')}
@@ -576,6 +576,10 @@
 									<span class="text-blue-500">CREATING</span>
 								{:else if server.status === ServerStatus.RESTARTING}
 									<span class="text-orange-500">RESTARTING</span>
+								{:else if server.status === ServerStatus.PROVISIONING}
+									<span class="text-yellow-500">PROVISIONING</span>
+								{:else if server.status === ServerStatus.PAUSED}
+									<span class="text-blue-500">SLEEPING</span>
 								{:else if server.status === ServerStatus.ERROR}
 									<span class="text-red-500">ERROR</span>
 								{:else}
@@ -597,6 +601,10 @@
 									Setting up server container
 								{:else if server.status === ServerStatus.RESTARTING}
 									Server is restarting
+								{:else if server.status === ServerStatus.PROVISIONING}
+									Installing server files and mods
+								{:else if server.status === ServerStatus.PAUSED}
+									Paused while idle - joins will wake it
 								{:else if server.status === ServerStatus.ERROR}
 									Server encountered an error
 								{:else}

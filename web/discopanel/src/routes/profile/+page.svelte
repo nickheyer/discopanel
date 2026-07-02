@@ -627,7 +627,7 @@
 						</h2>
 						<p class="mt-1 text-muted-foreground">
 							{createdToken
-								? "Copy your token now — it won't be shown again"
+								? "Copy your token now - it won't be shown again"
 								: 'Configure your new API token'}
 						</p>
 					</div>

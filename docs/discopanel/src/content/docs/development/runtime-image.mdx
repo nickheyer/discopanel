@@ -1,0 +1,68 @@
+---
+title: Runtime Image
+description: What discopanel-runtime is built from, how tags map to Java versions, and how to ship a new one.
+---
+
+`discopanel-runtime` is the image every Minecraft server runs on.
+
+## Contents
+
+`docker/Dockerfile.runtime` has two stages:
+
+1. `golang:alpine` compiles `cmd/runtime` (stdlib plus `pkg/runtimespec`, statically linked).
+2. `eclipse-temurin:<JAVA_VERSION>-jre` plus `ca-certificates` and `tzdata`, with the compiled binary as the entrypoint. Temurin's Ubuntu base was picked over Alpine because mod natives expect glibc.
+
+That's the whole image. The entrypoint reads `/data/.discopanel/launch.json`, builds the java argv from env vars (heap, flag sets, JMX, user options), fixes `/data` ownership, drops to the configured UID/GID and execs java. Java runs as PID 1, so `docker stop` delivers SIGTERM straight to the server and the world saves during the graceful window (the server's Stop Duration setting, 60s by default).
+
+## The env contract
+
+Environment variables are the container's entire config surface besides `launch.json`, and they carry JVM concerns only. The panel builds them by reflection over `env:` tags on `ServerConfig`. The entrypoint consumes:
+
+| Variable | Effect |
+|---|---|
+| `UID`, `GID` | ownership fix + privilege drop (default 1000/1000) |
+| `MEMORY`, `INIT_MEMORY`, `MAX_MEMORY` | `-Xms`/`-Xmx`. `MEMORY` sets both, the others override individually |
+| `USE_AIKAR_FLAGS` | Aikar G1GC set, switching to the large-heap variant at 12 GB max heap or more |
+| `USE_MEOWICE_FLAGS` | MeowIce set behind `-XX:+IgnoreUnrecognizedVMOptions`, plus the vector module on Java 16+ |
+| `USE_FLARE_FLAGS`, `USE_SIMD_FLAGS` | Flare profiler flags, and `jdk.incubator.vector` (Java 16+) |
+| `ENABLE_JMX`, `JMX_HOST` | remote JMX on port 7091 with no auth/ssl. `JMX_HOST` sets the RMI hostname |
+| `TZ` | `-Duser.timezone` |
+| `JVM_OPTS`, `JVM_XX_OPTS`, `JVM_DD_OPTS`, `EXTRA_ARGS` | raw passthrough. `JVM_DD_OPTS` entries get `-D` prefixed and `EXTRA_ARGS` goes after the jar |
+
+`-Dlog4j2.formatMsgNoLookups=true` is always added (Log4Shell). Booleans accept `true`/`1`/`yes`, case-insensitive. The image exposes 25565 (game) and 25575 (RCON) and declares `/data` as its volume. There is no HEALTHCHECK - health is panel-side, see [Lifecycle & Health](/development/lifecycle/#health).
+
+## Tags
+
+Tags map to Java major versions and nothing else: `java8`, `java11`, `java17`, `java21`, `java25`. Minecraft versions, loaders and packs are data-directory concerns and never appear in tags.
+
+Selection is automatic. `docker.RequiredJavaMajor` reads the required Java major from Mojang's version metadata and rounds up to the nearest published tag. MC 1.17 asks for Java 16 and runs on `java17`, which is the industry norm since Temurin never shipped a 16 JRE. Per-server overrides are validated against the published set, and a DB migration cleared the old itzg-era tags.
+
+## The three sync points
+
+The supported Java list lives in three places that must stay identical:
+
+1. `SupportedJavaVersions` in `internal/docker/images.go`
+2. `RUNTIME_JAVA_VERSIONS` in the `Makefile`
+3. the runtime loop in `.github/workflows/modules.yml`
+
+## Shipping a new Java version
+
+New variants are only needed when Mojang bumps the Java requirement.
+
+1. Check that `eclipse-temurin:<N>-jre` exists on Docker Hub.
+2. Add `N` to all three sync points.
+3. `make runtime-local-<N>`, then run the e2e test against a Minecraft version that needs it.
+4. Publish. Existing servers don't change. New and upgraded ones resolve the new tag automatically.
+
+Keep old tags published even after dropping them from the list. Servers may still pin them.
+
+## Building and publishing
+
+- `make runtime-local-21` builds one variant locally, no push.
+- `make runtime` builds and pushes every variant.
+- `make modules` does runtime plus all the sidecar images.
+- Pushing a `mod-*` git tag (or dispatching the Module Builder workflow) builds multi-arch (amd64 and arm64) in CI and pushes.
+
+The image contents change so rarely that the Java major is the whole version story. If the entrypoint's behavior ever changes, that ships with a panel release, since both live in this repo.
+
+Private mirrors: set `docker.runtime_image` in the panel config to another repository carrying the same tags. If a registry pull fails but the image exists locally, the panel uses the local copy. That fallback is also what makes unpublished dev builds usable.

@@ -87,7 +87,7 @@
 
 	let scopeableResources = $derived([...new Set(availableObjects.map((o) => o.resource))]);
 
-	// Map resource → scope source (e.g., "files" → "servers")
+	// Map resource to scope source (e.g., "files" to "servers")
 	let scopeSourceMap = $derived.by(() => {
 		const map: Record<string, string> = {};
 		for (const obj of availableObjects) {
@@ -589,7 +589,7 @@
 															<Checkbox {checked} onCheckedChange={() => togglePermission(key)} />
 														</div>
 													{:else}
-														<span class="text-muted-foreground/20">—</span>
+														<span class="text-muted-foreground/20">-</span>
 													{/if}
 												</TableCell>
 											{/each}

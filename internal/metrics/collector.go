@@ -13,7 +13,6 @@ import (
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/minecraft"
-	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -557,7 +556,7 @@ func (c *Collector) collectSLPData() {
 		}
 
 		// Get container IP
-		containerIP, err := proxy.GetContainerIP(server.ContainerID, c.config.Docker.NetworkName)
+		containerIP, err := c.docker.ContainerIP(ctx, server.ContainerID)
 		if err != nil {
 			c.log.Debug("Metrics collector SLP: failed to get container IP for %s: %v", server.ID, err)
 			c.recordHealth(server.ContainerID, info.StartedAt, false)

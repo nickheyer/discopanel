@@ -69,7 +69,7 @@ func TestE2EVanillaServer(t *testing.T) {
 		t.Fatalf("network: %v", err)
 	}
 
-	sender := command.NewSender(store, cfg)
+	sender := command.NewSender(store, dockerClient, cfg)
 	bus := events.NewBus(log)
 	collector := metrics.NewCollector(store, dockerClient, sender, cfg, bus, log, metrics.CollectorConfig{
 		StatsInterval:       5 * time.Second,

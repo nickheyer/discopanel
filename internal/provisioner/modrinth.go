@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
+	"golang.org/x/sync/errgroup"
 )
 
 // mrpackIndex is the modrinth.index.json inside a .mrpack archive.
@@ -68,7 +70,7 @@ func (p *Provisioner) installModrinthPack(ctx context.Context, server *storage.S
 	} else if packFile.Hashes.SHA1 != "" {
 		sum = &checksum{algo: "sha1", value: packFile.Hashes.SHA1}
 	}
-	if err := p.download(ctx, packFile.URL, packPath, sum, nil); err != nil {
+	if err := p.download(ctx, packFile.URL, packPath, sum, nil, p.reporter(server, packFile.Filename)); err != nil {
 		return nil, err
 	}
 
@@ -159,51 +161,63 @@ func (p *Provisioner) installMrpack(ctx context.Context, server *storage.Server,
 	excludes := splitPatterns(strVal(cfg.ModrinthExcludeFiles))
 	forceIncludes := splitPatterns(strVal(cfg.ModrinthForceIncludeFiles))
 
-	// Download pack files.
+	// Resolve the wanted file set up front, then download concurrently
+	// (bounded), since packs reference hundreds of files.
+	var pending []mrpackFile
 	total := 0
 	for _, file := range index.Files {
 		if !p.mrpackFileWanted(server, file, excludes, forceIncludes) {
 			continue
 		}
 		total++
-	}
-	p.progress(server, "installing %s: %d files...", index.Name, total)
-
-	done := 0
-	for _, file := range index.Files {
-		if !p.mrpackFileWanted(server, file, excludes, forceIncludes) {
-			continue
-		}
 		if len(file.Downloads) == 0 {
 			return nil, fmt.Errorf("mrpack file %q has no download URLs", file.Path)
 		}
-
-		dest := joinData(server.DataPath, file.Path)
-		var sum *checksum
-		if v := file.Hashes["sha512"]; v != "" {
-			sum = &checksum{algo: "sha512", value: v}
-		} else if v := file.Hashes["sha1"]; v != "" {
-			sum = &checksum{algo: "sha1", value: v}
-		}
-
-		if !force && fileExists(dest) {
-			done++
+		if !force && fileExists(joinData(server.DataPath, file.Path)) {
 			continue
 		}
+		pending = append(pending, file)
+	}
+	p.progress(server, "installing %s: downloading %d files (%d already present)...",
+		index.Name, len(pending), total-len(pending))
 
-		var lastErr error
-		for _, u := range file.Downloads {
-			if lastErr = p.download(ctx, u, dest, sum, nil); lastErr == nil {
-				break
+	var done atomic.Int64
+	done.Store(int64(total - len(pending)))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(packDownloadConcurrency)
+	for _, file := range pending {
+		g.Go(func() error {
+			dest := joinData(server.DataPath, file.Path)
+			var sum *checksum
+			if v := file.Hashes["sha512"]; v != "" {
+				sum = &checksum{algo: "sha512", value: v}
+			} else if v := file.Hashes["sha1"]; v != "" {
+				sum = &checksum{algo: "sha1", value: v}
 			}
-		}
-		if lastErr != nil {
-			return nil, fmt.Errorf("failed to download %q: %w", file.Path, lastErr)
-		}
-		done++
-		if done%25 == 0 {
-			p.progress(server, "downloaded %d/%d files...", done, total)
-		}
+
+			err := retryTransient(gctx, func() error {
+				var lastErr error
+				for _, u := range file.Downloads {
+					if lastErr = p.download(gctx, u, dest, sum, nil, nil); lastErr == nil {
+						return nil
+					}
+				}
+				return lastErr
+			})
+			if err != nil {
+				return fmt.Errorf("failed to download %q: %w", file.Path, err)
+			}
+			if n := done.Add(1); n%25 == 0 {
+				p.progress(server, "downloaded %d/%d files...", n, total)
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	if len(pending) > 0 {
+		p.progress(server, "pack downloads complete (%d/%d)", done.Load(), total)
 	}
 
 	// Apply overrides then server-overrides on top.
@@ -216,7 +230,7 @@ func (p *Provisioner) installMrpack(ctx context.Context, server *storage.Server,
 	return index, nil
 }
 
-// mrpackFileWanted applies env.server and user include/exclude rules.
+// Applies env.server and user include/exclude rules
 func (p *Provisioner) mrpackFileWanted(server *storage.Server, file mrpackFile, excludes, forceIncludes []string) bool {
 	name := strings.ToLower(filepath.Base(file.Path))
 	for _, pattern := range forceIncludes {
@@ -237,7 +251,7 @@ func (p *Provisioner) mrpackFileWanted(server *storage.Server, file mrpackFile, 
 	return true
 }
 
-// extractZipPrefix extracts entries under prefix from an open zip into destDir.
+// Extracts entries under prefix from an open zip into destDir
 func (p *Provisioner) extractZipPrefix(reader *zip.ReadCloser, prefix, destDir string, skipExisting bool) error {
 	for _, f := range reader.File {
 		if !strings.HasPrefix(f.Name, prefix) || f.Name == prefix {
@@ -391,7 +405,7 @@ func (p *Provisioner) installModrinthProjects(ctx context.Context, server *stora
 			if file.Hashes.SHA512 != "" {
 				sum = &checksum{algo: "sha512", value: file.Hashes.SHA512}
 			}
-			if err := p.download(ctx, file.URL, dest, sum, nil); err != nil {
+			if err := p.download(ctx, file.URL, dest, sum, nil, nil); err != nil {
 				return fmt.Errorf("failed to download Modrinth project %q: %w", project, err)
 			}
 		}

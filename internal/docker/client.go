@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/containerd/errdefs"
@@ -97,6 +98,10 @@ type Client struct {
 	config        ClientConfig
 	healthChecker HealthChecker
 	log           *logger.Logger
+
+	// Background image refresh bookkeeping (see ensureImage).
+	refreshMu      sync.Mutex
+	imageRefreshed map[string]time.Time
 }
 
 // SetHealthChecker registers the panel-side health source consulted by
@@ -125,7 +130,7 @@ func NewClient(host string, log *logger.Logger, config ...ClientConfig) (*Client
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
 	}
 
-	c := &Client{docker: docker, log: log}
+	c := &Client{docker: docker, log: log, imageRefreshed: make(map[string]time.Time)}
 	if len(config) > 0 {
 		c.config = config[0]
 	} else {
@@ -263,12 +268,13 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 	}
 }
 
-func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerConfig) (string, error) {
+// CreateContainer creates the server container. Setup steps (image pull
+// progress in particular) are reported through progress, which may be nil.
+func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerConfig, progress func(string)) (string, error) {
 	imageName := c.DesiredImage(server)
 
-	// Try pulling latest
-	if err := c.pullImage(ctx, imageName); err != nil {
-		return "", fmt.Errorf("failed to pull image: %w", err)
+	if err := c.ensureImage(ctx, imageName, progress); err != nil {
+		return "", err
 	}
 
 	// Build environment variables
@@ -463,7 +469,7 @@ type RecreateContainerResult struct {
 }
 
 // Stops, removes, and creates a new container - Returns new container ID and whether it was running before
-func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, server *models.Server, serverConfig *models.ServerConfig) (*RecreateContainerResult, error) {
+func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, server *models.Server, serverConfig *models.ServerConfig, progress func(string)) (*RecreateContainerResult, error) {
 	result := &RecreateContainerResult{}
 
 	// Check if container was running before we stop it
@@ -487,7 +493,7 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 	}
 
 	// Create new container
-	newContainerID, err := c.CreateContainer(ctx, server, serverConfig)
+	newContainerID, err := c.CreateContainer(ctx, server, serverConfig, progress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
@@ -674,26 +680,124 @@ func (c *Client) Exec(ctx context.Context, containerID string, execCmd []string)
 	return outputBuf.String(), nil
 }
 
-func (c *Client) pullImage(ctx context.Context, imageName string) error {
+// ensureImage makes imageName available locally, pulling it only when absent
+// so starts never block on the registry. A present image is refreshed in the
+// background (at most once per hour) to pick up updated runtime tags. Pull
+// progress is reported through progress (which may be nil) as throttled
+// human-readable lines.
+func (c *Client) ensureImage(ctx context.Context, imageName string, progress func(string)) error {
+	if _, err := c.docker.ImageInspect(ctx, imageName); err == nil {
+		c.refreshImageAsync(imageName)
+		return nil
+	}
+
+	if progress != nil {
+		progress(fmt.Sprintf("pulling image %s...", imageName))
+	}
 	reader, err := c.docker.ImagePull(ctx, imageName, image.PullOptions{})
 	if err != nil {
-		// Locally built or already-present images (e.g. dev runtime builds,
-		// air-gapped hosts) are fine even when the registry pull fails.
-		if _, inspectErr := c.docker.ImageInspect(ctx, imageName); inspectErr == nil {
-			c.log.Debug("Image %s unavailable from registry, using local copy: %v", imageName, err)
-			return nil
-		}
 		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
 	}
 	defer reader.Close()
 
-	// Read the output to ensure the pull completes
-	_, err = io.Copy(io.Discard, reader)
-	if err != nil {
-		return fmt.Errorf("failed to complete image pull for %s: %w", imageName, err)
+	// Aggregate per-layer progress into one throttled line: docker reports a
+	// JSON message per layer event, far too noisy for a server console. Only
+	// Downloading events count - each layer also emits Extracting progress
+	// that restarts at zero and would make the line run backwards.
+	type layerState struct{ current, total int64 }
+	layers := map[string]*layerState{}
+	lastReport := time.Now()
+	dec := json.NewDecoder(reader)
+	for {
+		var msg struct {
+			ID             string `json:"id"`
+			Status         string `json:"status"`
+			Error          string `json:"error"`
+			ProgressDetail struct {
+				Current int64 `json:"current"`
+				Total   int64 `json:"total"`
+			} `json:"progressDetail"`
+		}
+		if err := dec.Decode(&msg); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("failed to complete image pull for %s: %w", imageName, err)
+		}
+		if msg.Error != "" {
+			return fmt.Errorf("failed to pull image %s: %s", imageName, msg.Error)
+		}
+		if msg.ID != "" && msg.Status == "Downloading" && msg.ProgressDetail.Total > 0 {
+			ls := layers[msg.ID]
+			if ls == nil {
+				ls = &layerState{}
+				layers[msg.ID] = ls
+			}
+			ls.current = msg.ProgressDetail.Current
+			ls.total = msg.ProgressDetail.Total
+		}
+		if progress != nil && time.Since(lastReport) >= 2*time.Second && len(layers) > 0 {
+			var current, total int64
+			for _, ls := range layers {
+				current += ls.current
+				total += ls.total
+			}
+			progress(fmt.Sprintf("pulling image %s: %.1f/%.1f MB",
+				imageName, float64(current)/1024/1024, float64(total)/1024/1024))
+			lastReport = time.Now()
+		}
 	}
 
+	if progress != nil {
+		progress(fmt.Sprintf("image %s ready", imageName))
+	}
 	return nil
+}
+
+// refreshImageAsync re-pulls an already-present image in the background so
+// updated runtime tags are picked up without ever blocking a server start.
+func (c *Client) refreshImageAsync(imageName string) {
+	c.refreshMu.Lock()
+	if time.Since(c.imageRefreshed[imageName]) < time.Hour {
+		c.refreshMu.Unlock()
+		return
+	}
+	c.imageRefreshed[imageName] = time.Now()
+	c.refreshMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		reader, err := c.docker.ImagePull(ctx, imageName, image.PullOptions{})
+		if err != nil {
+			c.log.Debug("Background refresh of image %s failed: %v", imageName, err)
+			return
+		}
+		defer reader.Close()
+		if _, err := io.Copy(io.Discard, reader); err != nil {
+			c.log.Debug("Background refresh of image %s interrupted: %v", imageName, err)
+		}
+	}()
+}
+
+// ContainerIP resolves a container's IP address on the panel network (falling
+// back to any attached network) using the shared docker client.
+func (c *Client) ContainerIP(ctx context.Context, containerID string) (string, error) {
+	inspect, err := c.docker.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect container: %w", err)
+	}
+	if c.config.NetworkName != "" {
+		if network, ok := inspect.NetworkSettings.Networks[c.config.NetworkName]; ok && network.IPAddress != "" {
+			return network.IPAddress, nil
+		}
+	}
+	for _, network := range inspect.NetworkSettings.Networks {
+		if network.IPAddress != "" {
+			return network.IPAddress, nil
+		}
+	}
+	return "", fmt.Errorf("no IP address found for container")
 }
 
 // Creates the Docker network if it doesn't exist - attaches itself to that network when applicable

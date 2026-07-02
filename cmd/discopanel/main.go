@@ -155,7 +155,7 @@ func main() {
 	}
 
 	// Initialize proxy manager
-	proxyManager := proxy.NewManager(store, cfg, log)
+	proxyManager := proxy.NewManager(store, dockerClient, cfg, log)
 
 	// Start proxy if enabled
 	if err := proxyManager.Start(); err != nil {
@@ -164,7 +164,7 @@ func main() {
 	defer proxyManager.Stop()
 
 	// Initialize command sender
-	sender := command.NewSender(store, cfg)
+	sender := command.NewSender(store, dockerClient, cfg)
 
 	// Initialize the central event bus
 	eventBus := events.NewBus(log)
@@ -225,9 +225,7 @@ func main() {
 
 	// Provisioning progress lines land in the server console via the log streamer
 	if streamer := rpcServer.LogStreamer(); streamer != nil {
-		prov.SetProgressSink(func(serverID, message string) {
-			streamer.AddCommandOutput(serverID, "[provision] "+message, true, time.Now())
-		})
+		prov.SetProgressSink(streamer.AddSystemEntry)
 	}
 
 	// Print recovery key

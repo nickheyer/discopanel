@@ -56,7 +56,7 @@ Everything the provisioner tracks lives in `<data>/.discopanel/`:
 | Paper / Folia | fill.papermc.io/v3 | The old api.papermc.io v2 is dead (HTTP 410). SHA-256 verified. |
 | Purpur | api.purpurmc.org/v2 | Latest successful build, MD5 verified. |
 
-Anything else falls through to a clear error pointing at the custom jar path. Downloads are atomic (temp file, then rename) and checksum-verified whenever the upstream publishes digests. All requests go out with the panel's configured User-Agent.
+Anything else falls through to a clear error pointing at the custom jar path. Downloads are atomic (temp file, then rename) and checksum-verified whenever the upstream publishes digests. Large downloads report throttled byte progress to the server console, and modpack file sets download eight at a time. All requests go out with the panel's configured User-Agent.
 
 ## Modpacks
 

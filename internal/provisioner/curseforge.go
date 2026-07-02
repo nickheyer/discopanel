@@ -10,11 +10,17 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/indexers/fuego"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
+	"golang.org/x/sync/errgroup"
 )
+
+// packDownloadConcurrency bounds concurrent modpack file downloads.
+const packDownloadConcurrency = 8
 
 // cfManifest is the manifest.json found inside CurseForge pack zips.
 type cfManifest struct {
@@ -118,7 +124,7 @@ func (p *Provisioner) installCurseForgePack(ctx context.Context, server *storage
 
 	p.progress(server, "downloading %s (%s)...", pack.Name, dlFile.FileName)
 	zipPath := filepath.Join(installerDir(server.DataPath), "modpack.zip")
-	if err := p.download(ctx, dlURL, zipPath, cfChecksum(dlFile), nil); err != nil {
+	if err := p.download(ctx, dlURL, zipPath, cfChecksum(dlFile), nil, p.reporter(server, dlFile.FileName)); err != nil {
 		return nil, err
 	}
 
@@ -273,8 +279,18 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 	excludes := splitPatterns(strVal(cfg.CFExcludeMods))
 	forceIncludes := splitPatterns(strVal(cfg.CFForceIncludeMods))
 
-	var blocked []BlockedMod
-	done := 0
+	// Resolve the wanted file set up front, then download concurrently:
+	// packs routinely reference hundreds of mods and sequential fetches
+	// dominate provisioning wall-clock time.
+	type cfDownload struct {
+		projectID int
+		fileID    int
+		file      fuego.File
+		mod       fuego.Modpack
+		dest      string
+	}
+	var pending []cfDownload
+	total := 0
 	for _, entry := range manifest.Files {
 		file, ok := files[entry.FileID]
 		if !ok {
@@ -285,38 +301,74 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 		if !p.cfFileWanted(server, &file, &mod, entry.ProjectID, excludes, forceIncludes) {
 			continue
 		}
+		total++
 
-		destDir := cfClassDir(mod.ClassID)
-		dest := joinData(server.DataPath, filepath.Join(destDir, file.FileName))
+		dest := joinData(server.DataPath, filepath.Join(cfClassDir(mod.ClassID), file.FileName))
 		if fileExists(dest) && !force {
-			done++
 			continue
 		}
+		pending = append(pending, cfDownload{
+			projectID: entry.ProjectID,
+			fileID:    entry.FileID,
+			file:      file,
+			mod:       mod,
+			dest:      dest,
+		})
+	}
 
-		dlURL := file.DownloadURL
-		if dlURL == "" {
-			var err error
-			dlURL, err = client.GetFileDownloadURL(ctx, entry.ProjectID, entry.FileID)
-			if err != nil {
-				return nil, err
+	var (
+		blockedMu sync.Mutex
+		blocked   []BlockedMod
+		done      atomic.Int64
+	)
+	done.Store(int64(total - len(pending)))
+	if len(pending) > 0 {
+		p.progress(server, "downloading %d mods (%d already present)...", len(pending), total-len(pending))
+	}
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(packDownloadConcurrency)
+	for _, dl := range pending {
+		g.Go(func() error {
+			dlURL := dl.file.DownloadURL
+			if dlURL == "" {
+				err := retryTransient(gctx, func() error {
+					var uerr error
+					dlURL, uerr = client.GetFileDownloadURL(gctx, dl.projectID, dl.fileID)
+					return uerr
+				})
+				if err != nil {
+					return err
+				}
 			}
-		}
-		if dlURL == "" {
-			blocked = append(blocked, BlockedMod{
-				Name:     mod.Name,
-				FileName: file.FileName,
-				URL:      modFileURL(&mod, entry.FileID),
-			})
-			continue
-		}
+			if dlURL == "" {
+				blockedMu.Lock()
+				blocked = append(blocked, BlockedMod{
+					Name:     dl.mod.Name,
+					FileName: dl.file.FileName,
+					URL:      modFileURL(&dl.mod, dl.fileID),
+				})
+				blockedMu.Unlock()
+				return nil
+			}
 
-		if err := p.download(ctx, dlURL, dest, cfChecksum(&file), nil); err != nil {
-			return nil, fmt.Errorf("failed to download %s: %w", file.FileName, err)
-		}
-		done++
-		if done%25 == 0 {
-			p.progress(server, "downloaded %d/%d mods...", done, len(manifest.Files))
-		}
+			err := retryTransient(gctx, func() error {
+				return p.download(gctx, dlURL, dl.dest, cfChecksum(&dl.file), nil, nil)
+			})
+			if err != nil {
+				return fmt.Errorf("failed to download %s: %w", dl.file.FileName, err)
+			}
+			if n := done.Add(1); n%25 == 0 {
+				p.progress(server, "downloaded %d/%d mods...", n, total)
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	if len(pending) > 0 {
+		p.progress(server, "mod downloads complete (%d/%d)", done.Load(), total)
 	}
 
 	if len(blocked) > 0 {

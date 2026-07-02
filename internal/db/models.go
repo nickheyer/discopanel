@@ -133,7 +133,7 @@ type ServerConfig struct {
 	TZ              *string `json:"tz" env:"TZ" default:"UTC" desc:"Timezone configuration" input:"text" label:"Timezone"`
 	EnableJMX       *bool   `json:"enableJmx" env:"ENABLE_JMX" default:"false" desc:"Enable remote JMX for profiling (port 7091)" input:"checkbox" label:"Enable JMX"`
 	JMXHost         *string `json:"jmxHost" env:"JMX_HOST" default:"" desc:"IP/host running the Docker container for JMX" input:"text" label:"JMX Host"`
-	UseAikarFlags   *bool   `json:"useAikarFlags" env:"USE_AIKAR_FLAGS" default:"false" desc:"Use Aikar's optimized JVM flags for GC tuning" input:"checkbox" label:"Use Aikar Flags"`
+	UseAikarFlags   *bool   `json:"useAikarFlags" env:"USE_AIKAR_FLAGS" default:"true" desc:"Use Aikar's optimized JVM flags for GC tuning (applied by default unless disabled or MeowIce flags are enabled)" input:"checkbox" label:"Use Aikar Flags"`
 	UseMeowiceFlags *bool   `json:"useMeowiceFlags" env:"USE_MEOWICE_FLAGS" default:"false" desc:"Use MeowIce's JVM flags optimized for Java 17+" input:"checkbox" label:"Use MeowIce Flags"`
 	UseFlareFlags   *bool   `json:"useFlareFlags" env:"USE_FLARE_FLAGS" default:"false" desc:"Enable JVM flags for Flare profiling suite" input:"checkbox" label:"Use Flare Flags"`
 	UseSimdFlags    *bool   `json:"useSimdFlags" env:"USE_SIMD_FLAGS" default:"false" desc:"Support for optimized SIMD operations (Java 16+)" input:"checkbox" label:"Use SIMD Flags"`

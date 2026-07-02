@@ -39,7 +39,7 @@ func (p *Provisioner) downloadVanillaJar(ctx context.Context, server *storage.Se
 	}
 	p.progress(server, "downloading vanilla server jar for MC %s...", mcVersion)
 	return p.download(ctx, meta.Downloads.Server.URL, joinData(server.DataPath, relPath),
-		&checksum{algo: "sha1", value: meta.Downloads.Server.SHA1}, nil)
+		&checksum{algo: "sha1", value: meta.Downloads.Server.SHA1}, nil, p.reporter(server, relPath))
 }
 
 // installFabric downloads the Fabric server launcher and pre-seeds the vanilla
@@ -94,7 +94,7 @@ func (p *Provisioner) installFabric(ctx context.Context, server *storage.Server,
 
 	p.progress(server, "downloading Fabric server launcher (loader %s)...", loaderVersion)
 	launcherURL := fmt.Sprintf("%s/versions/loader/%s/%s/%s/server/jar", fabricMetaURL, mc, loaderVersion, installerVersion)
-	if err := p.download(ctx, launcherURL, joinData(server.DataPath, "fabric-server-launch.jar"), nil, nil); err != nil {
+	if err := p.download(ctx, launcherURL, joinData(server.DataPath, "fabric-server-launch.jar"), nil, nil, p.reporter(server, "fabric-server-launch.jar")); err != nil {
 		return nil, err
 	}
 
@@ -154,7 +154,7 @@ func (p *Provisioner) installQuilt(ctx context.Context, server *storage.Server, 
 
 	installerRel := filepath.Join(".discopanel", "installers", "quilt-installer.jar")
 	p.progress(server, "downloading Quilt installer %s...", installer.Version)
-	if err := p.download(ctx, installer.URL, joinData(server.DataPath, installerRel), nil, nil); err != nil {
+	if err := p.download(ctx, installer.URL, joinData(server.DataPath, installerRel), nil, nil, p.reporter(server, "quilt installer")); err != nil {
 		return nil, err
 	}
 
@@ -195,7 +195,7 @@ func (p *Provisioner) installPaperMC(ctx context.Context, server *storage.Server
 
 	p.progress(server, "downloading %s build %d for MC %s...", project, build.ID, mc)
 	if err := p.download(ctx, dl.URL, joinData(server.DataPath, "server.jar"),
-		&checksum{algo: "sha256", value: dl.Checksums.SHA256}, nil); err != nil {
+		&checksum{algo: "sha256", value: dl.Checksums.SHA256}, nil, p.reporter(server, "server.jar")); err != nil {
 		return nil, err
 	}
 
@@ -238,7 +238,7 @@ func (p *Provisioner) installPurpur(ctx context.Context, server *storage.Server)
 
 	p.progress(server, "downloading Purpur build %s for MC %s...", buildNum, mc)
 	if err := p.download(ctx, fmt.Sprintf("%s/%s/%s/download", purpurAPIURL, mc, buildNum),
-		joinData(server.DataPath, "server.jar"), &checksum{algo: "md5", value: buildInfo.MD5}, nil); err != nil {
+		joinData(server.DataPath, "server.jar"), &checksum{algo: "md5", value: buildInfo.MD5}, nil, p.reporter(server, "server.jar")); err != nil {
 		return nil, err
 	}
 
@@ -260,7 +260,7 @@ func (p *Provisioner) installCustom(ctx context.Context, server *storage.Server,
 				jarRel = "server.jar"
 			}
 			p.progress(server, "downloading custom server jar from %s...", customServer)
-			if err := p.download(ctx, customServer, joinData(server.DataPath, jarRel), nil, nil); err != nil {
+			if err := p.download(ctx, customServer, joinData(server.DataPath, jarRel), nil, nil, p.reporter(server, jarRel)); err != nil {
 				return nil, err
 			}
 		} else {

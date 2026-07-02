@@ -26,8 +26,8 @@ type OneShotOptions struct {
 // the data dir mounted at /data, forwards output lines to logFn, and removes
 // the container. A non-zero exit code is returned as an error.
 func (c *Client) RunOneShot(ctx context.Context, opts OneShotOptions, logFn func(line string)) error {
-	if err := c.pullImage(ctx, opts.Image); err != nil {
-		return fmt.Errorf("failed to pull image %s: %w", opts.Image, err)
+	if err := c.ensureImage(ctx, opts.Image, logFn); err != nil {
+		return err
 	}
 
 	// Remove any stale container from a previous interrupted run.

@@ -61,7 +61,7 @@ func (p *Provisioner) fetchForgeInstaller(ctx context.Context, server *storage.S
 	// User-provided installer URL.
 	if u := strVal(cfg.ForgeInstallerURL); u != "" {
 		p.progress(server, "downloading Forge installer from %s...", u)
-		if err := p.download(ctx, u, joinData(server.DataPath, installerRel), nil, nil); err != nil {
+		if err := p.download(ctx, u, joinData(server.DataPath, installerRel), nil, nil, p.reporter(server, "forge installer")); err != nil {
 			return "", "", err
 		}
 		return installerRel, forgeVersion, nil
@@ -94,7 +94,7 @@ func (p *Provisioner) fetchForgeInstaller(ctx context.Context, server *storage.S
 	sum, _ := p.fetchChecksumSidecar(ctx, installerURL, "sha256")
 
 	p.progress(server, "downloading Forge %s installer...", forgeVersion)
-	if err := p.download(ctx, installerURL, joinData(server.DataPath, installerRel), sum, nil); err != nil {
+	if err := p.download(ctx, installerURL, joinData(server.DataPath, installerRel), sum, nil, p.reporter(server, "forge installer")); err != nil {
 		return "", "", err
 	}
 	return installerRel, forgeVersion, nil
@@ -153,7 +153,7 @@ func (p *Provisioner) installNeoForge(ctx context.Context, server *storage.Serve
 	sum, _ := p.fetchChecksumSidecar(ctx, installerURL, "sha256")
 
 	p.progress(server, "downloading NeoForge %s installer...", neoVersion)
-	if err := p.download(ctx, installerURL, joinData(server.DataPath, installerRel), sum, nil); err != nil {
+	if err := p.download(ctx, installerURL, joinData(server.DataPath, installerRel), sum, nil, p.reporter(server, "neoforge installer")); err != nil {
 		return nil, err
 	}
 

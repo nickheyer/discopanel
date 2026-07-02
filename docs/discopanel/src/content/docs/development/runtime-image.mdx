@@ -22,8 +22,8 @@ Environment variables are the container's entire config surface besides `launch.
 |---|---|
 | `UID`, `GID` | ownership fix + privilege drop (default 1000/1000) |
 | `MEMORY`, `INIT_MEMORY`, `MAX_MEMORY` | `-Xms`/`-Xmx`. `MEMORY` sets both, the others override individually |
-| `USE_AIKAR_FLAGS` | Aikar G1GC set, switching to the large-heap variant at 12 GB max heap or more |
-| `USE_MEOWICE_FLAGS` | MeowIce set behind `-XX:+IgnoreUnrecognizedVMOptions`, plus the vector module on Java 16+ |
+| `USE_AIKAR_FLAGS` | Aikar G1GC set, switching to the large-heap variant at 12 GB max heap or more. Applied by default when neither flag-set variable is present |
+| `USE_MEOWICE_FLAGS` | MeowIce set behind `-XX:+IgnoreUnrecognizedVMOptions`, plus transparent huge pages, NUMA, and the vector module on Java 16+ |
 | `USE_FLARE_FLAGS`, `USE_SIMD_FLAGS` | Flare profiler flags, and `jdk.incubator.vector` (Java 16+) |
 | `ENABLE_JMX`, `JMX_HOST` | remote JMX on port 7091 with no auth/ssl. `JMX_HOST` sets the RMI hostname |
 | `TZ` | `-Duser.timezone` |
@@ -65,4 +65,4 @@ Keep old tags published even after dropping them from the list. Servers may stil
 
 The image contents change so rarely that the Java major is the whole version story. If the entrypoint's behavior ever changes, that ships with a panel release, since both live in this repo.
 
-Private mirrors: set `docker.runtime_image` in the panel config to another repository carrying the same tags. If a registry pull fails but the image exists locally, the panel uses the local copy. That fallback is also what makes unpublished dev builds usable.
+Private mirrors: set `docker.runtime_image` in the panel config to another repository carrying the same tags. The panel pulls an image only when it's absent locally, so starts never block on the registry. Already-present images are re-pulled in the background (at most hourly) to pick up tag updates, and local-only images (unpublished dev builds) work because presence is checked before any pull.

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
@@ -23,6 +24,10 @@ func main() {
 	if err != nil {
 		fatal("no launch spec at %s (%v) - this container must be provisioned and started by DiscoPanel", runtimespec.LaunchPath(dataDir), err)
 	}
+
+	// Banner first: everything below can take a while on big modpacks and the
+	// console must never sit silent.
+	fmt.Printf("[discopanel-runtime] %s %s (%s, MC %s)\n", spec.Kind, launchTarget(spec), spec.Loader, spec.MCVersion)
 
 	uid := getEnvInt("UID", 1000)
 	gid := getEnvInt("GID", 1000)
@@ -45,7 +50,6 @@ func main() {
 		fatal("failed to chdir to %s: %v", dataDir, err)
 	}
 
-	fmt.Printf("[discopanel-runtime] %s %s (%s, MC %s)\n", spec.Kind, launchTarget(spec), spec.Loader, spec.MCVersion)
 	fmt.Printf("[discopanel-runtime] exec: java %s\n", strings.Join(args[1:], " "))
 
 	if os.Getuid() == 0 && uid > 0 {
@@ -99,11 +103,16 @@ func buildJavaArgs(spec *runtimespec.LaunchSpec) ([]string, error) {
 		args = append(args, "-Xmx"+maxMem)
 	}
 
-	if envBool("USE_AIKAR_FLAGS") {
-		args = append(args, aikarFlags(maxMem)...)
+	// Aikars tuned GC is the default - mutually exclusive with meowice
+	useAikar := envBool("USE_AIKAR_FLAGS")
+	useMeowice := envBool("USE_MEOWICE_FLAGS")
+	if os.Getenv("USE_AIKAR_FLAGS") == "" && os.Getenv("USE_MEOWICE_FLAGS") == "" {
+		useAikar = true
 	}
-	if envBool("USE_MEOWICE_FLAGS") {
+	if useMeowice {
 		args = append(args, meowiceFlags(spec.JavaMajor)...)
+	} else if useAikar {
+		args = append(args, aikarFlags(maxMem)...)
 	}
 	if envBool("USE_FLARE_FLAGS") {
 		args = append(args, "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints")
@@ -265,6 +274,8 @@ func meowiceFlags(javaMajor int) []string {
 		"-XX:+UseXmmI2F",
 		"-XX:+UseXmmLoadAndClearUpper",
 		"-XX:+UseXmmRegToRegMoveAll",
+		"-XX:+UseTransparentHugePages",
+		"-XX:+UseNUMA",
 		"-Djdk.nio.maxCachedBufferSize=262144",
 	}
 	if javaMajor >= 16 {
@@ -284,13 +295,18 @@ func ensureOwnership(dir string, uid, gid int) {
 	if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) == uid && int(st.Gid) == gid {
 		return
 	}
+	fmt.Printf("[discopanel-runtime] fixing file ownership (%d:%d), this can take a moment on large packs...\n", uid, gid)
+	start := time.Now()
+	files := 0
 	filepath.Walk(dir, func(name string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
 		os.Lchown(name, uid, gid)
+		files++
 		return nil
 	})
+	fmt.Printf("[discopanel-runtime] ownership fixed (%d files in %s)\n", files, time.Since(start).Round(time.Millisecond))
 }
 
 func envBool(key string) bool {

@@ -147,6 +147,8 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 			MCVersion:     manifest.MCVersion,
 			JavaMajor:     manifest.JavaMajor,
 		}
+		p.progress(server, "server files verified (%s %s, MC %s, Java %d)",
+			result.Loader, result.LoaderVersion, result.MCVersion, result.JavaMajor)
 	}
 
 	// Configuration files are cheap and authoritative from the DB - always applied.

@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -101,7 +100,7 @@ func (p *HTTPProxy) handleWebSocket(w http.ResponseWriter, r *http.Request, rout
 		return
 	}
 
-	clientConn, _, err := hijacker.Hijack()
+	clientConn, clientRW, err := hijacker.Hijack()
 	if err != nil {
 		p.logger.Error("WebSocket: Failed to hijack connection: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -125,25 +124,19 @@ func (p *HTTPProxy) handleWebSocket(w http.ResponseWriter, r *http.Request, rout
 		return
 	}
 
+	// Client bytes the HTTP server read ahead into its buffered reader
+	// NOTE: (pipelined first frames) must reach the backend before the raw relay
+	if buffered := clientRW.Reader.Buffered(); buffered > 0 {
+		pending, _ := clientRW.Reader.Peek(buffered)
+		if _, err := backendConn.Write(pending); err != nil {
+			p.logger.Error("WebSocket: Failed to flush buffered client data: %v", err)
+			return
+		}
+		clientRW.Reader.Discard(buffered)
+	}
+
 	p.logger.Debug("WebSocket connection established: %s -> %s", r.RemoteAddr, backendAddr)
-
-	// Bidirectional copy
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		io.Copy(backendConn, clientConn)
-		backendConn.Close()
-	}()
-
-	go func() {
-		defer wg.Done()
-		io.Copy(clientConn, backendConn)
-		clientConn.Close()
-	}()
-
-	wg.Wait()
+	relay(clientConn, backendConn)
 }
 
 // AddRoute adds a new routing rule

@@ -86,21 +86,30 @@ func (ls *LogStreamer) StartStreaming(key, containerID string) error {
 		stream.cancelFunc()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	// Unfollowed container have no lines in buffer - resume from container start time
+	newContainer := stream.containerID != containerID
 	stream.containerID = containerID
 	stream.cancelFunc = cancel
 	stream.active = true
 	stream.gen++
 	gen := stream.gen
 	seedTail := len(stream.logs) == 0
+	var since time.Time
+	if !seedTail && !newContainer {
+		since = stream.logs[len(stream.logs)-1].Timestamp.AsTime().Add(time.Nanosecond)
+	}
 	stream.mu.Unlock()
 
-	go ls.streamLogs(ctx, stream, containerID, gen, seedTail)
+	go ls.streamLogs(ctx, stream, containerID, gen, seedTail, since)
 
 	return nil
 }
 
-// streamLogs follows a container's output and appends it to the stream buffer
-func (ls *LogStreamer) streamLogs(ctx context.Context, stream *LogStream, containerID string, gen int, seedTail bool) {
+// Follows a containers output and appends it to the stream
+// buffer. A zero since with seedTail=false means "everything since the
+// container started", resolved from the container's own timestamps so panel
+// clock skew can never skip early lines.
+func (ls *LogStreamer) streamLogs(ctx context.Context, stream *LogStream, containerID string, gen int, seedTail bool, since time.Time) {
 	defer func() {
 		stream.mu.Lock()
 		if stream.gen == gen {
@@ -125,7 +134,15 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *LogStream, contai
 	if seedTail {
 		options.Tail = "500"
 	} else {
-		options.Since = time.Now().Format(time.RFC3339Nano)
+		if since.IsZero() {
+			// New container for this stream - capture from its actual start
+			if started, perr := time.Parse(time.RFC3339Nano, inspect.State.StartedAt); perr == nil {
+				since = started
+			} else {
+				since = time.Now()
+			}
+		}
+		options.Since = since.Format(time.RFC3339Nano)
 	}
 
 	reader, err := ls.docker.ContainerLogs(ctx, containerID, options)
@@ -227,6 +244,28 @@ func (ls *LogStreamer) shouldFilterLine(line string) bool {
 	}
 
 	return false
+}
+
+// AddSystemEntry records a panel-side lifecycle/provisioning line in the
+// stream so setup steps appear in the server console alongside container
+// output. Lines carry a uniform "[setup]" prefix.
+func (ls *LogStreamer) AddSystemEntry(key, message string) {
+	stream := ls.getOrCreateStream(key)
+
+	entry := &v1.LogEntry{
+		Timestamp: timestamppb.New(time.Now()),
+		Message:   "[setup] " + message,
+		Level:     "info",
+		Source:    "system",
+		IsCommand: false,
+		IsError:   false,
+	}
+
+	stream.mu.Lock()
+	stream.appendLocked(entry)
+	stream.mu.Unlock()
+
+	ls.broadcast(key, entry)
 }
 
 // AddCommandEntry records command input in the stream

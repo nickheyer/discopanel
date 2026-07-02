@@ -8,18 +8,20 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/internal/docker"
 	rcon "github.com/nickheyer/discopanel/internal/rcon"
 )
 
 type Sender struct {
 	store  *storage.Store
+	docker *docker.Client
 	config *config.Config
 }
 
-func NewSender(store *storage.Store, cfg *config.Config) *Sender {
+func NewSender(store *storage.Store, dockerClient *docker.Client, cfg *config.Config) *Sender {
 	return &Sender{
 		store:  store,
+		docker: dockerClient,
 		config: cfg,
 	}
 }
@@ -81,7 +83,7 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 		}
 	}
 
-	ip, err := proxy.GetContainerIP(server.ContainerID, s.config.Docker.NetworkName)
+	ip, err := s.docker.ContainerIP(ctx, server.ContainerID)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve container ip: %w", err)
 	}

@@ -88,6 +88,15 @@ func (m *Manager) SetLogStreamer(streamer *logger.LogStreamer) {
 	m.streamer = streamer
 }
 
+// console emits a lifecycle step line into the server's console stream so
+// users watching a server start/stop see every phase, not just java output.
+func (m *Manager) console(serverID, format string, args ...any) {
+	if m.streamer == nil {
+		return
+	}
+	m.streamer.AddSystemEntry(serverID, fmt.Sprintf(format, args...))
+}
+
 func (m *Manager) tryBeginStart(serverID string) bool {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
@@ -153,6 +162,7 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 	result, err := m.prov.Ensure(ctx, server, serverCfg)
 	if err != nil {
 		m.setStatus(ctx, server, storage.StatusError)
+		m.console(server.ID, "provisioning failed: %v", err)
 		return fmt.Errorf("provisioning failed: %w", err)
 	}
 
@@ -167,23 +177,30 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 	m.setStatus(ctx, server, storage.StatusCreating)
 	if err := m.ensureContainer(ctx, server, serverCfg); err != nil {
 		m.setStatus(ctx, server, storage.StatusError)
+		m.console(server.ID, "container setup failed: %v", err)
 		return err
 	}
 
 	// Start it.
+	m.console(server.ID, "starting container...")
 	if err := m.docker.StartContainer(ctx, server.ContainerID); err != nil {
 		m.log.Warn("lifecycle: start failed for %s, recreating container: %v", server.Name, err)
-		recreated, rerr := m.docker.RecreateContainer(ctx, server.ContainerID, server, serverCfg)
+		m.console(server.ID, "container failed to start (%v), recreating it...", err)
+		recreated, rerr := m.docker.RecreateContainer(ctx, server.ContainerID, server, serverCfg, func(line string) {
+			m.console(server.ID, "%s", line)
+		})
 		if rerr != nil {
 			if recreated != nil && recreated.NewContainerID != "" {
 				server.ContainerID = recreated.NewContainerID
 			}
 			m.setStatus(ctx, server, storage.StatusError)
+			m.console(server.ID, "container start failed: %v", rerr)
 			return fmt.Errorf("failed to start server container: %w", rerr)
 		}
 		server.ContainerID = recreated.NewContainerID
 		if err := m.docker.StartContainer(ctx, server.ContainerID); err != nil {
 			m.setStatus(ctx, server, storage.StatusError)
+			m.console(server.ID, "container start failed: %v", err)
 			return fmt.Errorf("failed to start recreated container: %w", err)
 		}
 	}
@@ -194,6 +211,7 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 			m.log.Warn("lifecycle: failed to start log streaming for %s: %v", server.Name, err)
 		}
 	}
+	m.console(server.ID, "container started, launching server process")
 
 	now := time.Now()
 	server.Status = storage.StatusStarting
@@ -230,6 +248,7 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 // desired runtime image changed (e.g. new Java requirement after MC upgrade).
 func (m *Manager) ensureContainer(ctx context.Context, server *storage.Server, serverCfg *storage.ServerConfig) error {
 	desired := m.docker.DesiredImage(server)
+	progress := func(line string) { m.console(server.ID, "%s", line) }
 
 	if server.ContainerID != "" {
 		current, err := m.docker.ContainerImage(ctx, server.ContainerID)
@@ -238,8 +257,9 @@ func (m *Manager) ensureContainer(ctx context.Context, server *storage.Server, s
 		}
 		if err == nil && current != desired {
 			m.log.Info("lifecycle: %s image changed (%s -> %s), recreating container", server.Name, current, desired)
+			m.console(server.ID, "runtime image changed (%s -> %s), recreating container", current, desired)
 		}
-		result, err := m.docker.RecreateContainer(ctx, server.ContainerID, server, serverCfg)
+		result, err := m.docker.RecreateContainer(ctx, server.ContainerID, server, serverCfg, progress)
 		if err != nil {
 			return fmt.Errorf("failed to recreate server container: %w", err)
 		}
@@ -247,7 +267,8 @@ func (m *Manager) ensureContainer(ctx context.Context, server *storage.Server, s
 		return m.store.UpdateServer(ctx, server)
 	}
 
-	containerID, err := m.docker.CreateContainer(ctx, server, serverCfg)
+	m.console(server.ID, "creating container (image %s)...", desired)
+	containerID, err := m.docker.CreateContainer(ctx, server, serverCfg, progress)
 	if err != nil {
 		return fmt.Errorf("failed to create server container: %w", err)
 	}
@@ -297,6 +318,7 @@ func (m *Manager) Stop(ctx context.Context, serverID string) error {
 	}
 
 	m.setStatus(ctx, server, storage.StatusStopping)
+	m.console(server.ID, "stopping server (up to %ds for world save)...", stopDuration)
 
 	found, err := m.docker.StopContainer(ctx, server.ContainerID, stopDuration)
 	if err != nil {
@@ -309,6 +331,7 @@ func (m *Manager) Stop(ctx context.Context, serverID string) error {
 		server.ContainerID = ""
 	}
 	m.setStatus(ctx, server, storage.StatusStopped)
+	m.console(server.ID, "server stopped")
 
 	m.setPaused(server.ID, false)
 	m.resetRoster(server.ID)

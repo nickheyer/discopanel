@@ -173,6 +173,16 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 	}
 	server.JavaVersion = strconv.Itoa(result.JavaMajor)
 
+	// Provision the runtime agent connection (non-fatal: the server still
+	// runs with SLP/RCON-based monitoring when this fails).
+	if err := m.writeAgentSpec(ctx, server, serverCfg); err != nil {
+		m.log.Warn("lifecycle: agent spec for %s not written, telemetry disabled: %v", server.Name, err)
+		m.console(server.ID, "agent telemetry unavailable: %v", err)
+	}
+
+	// A heap that cannot fit the container limit is clamped for this start.
+	m.applyMemoryGuardrail(server, serverCfg)
+
 	// Ensure a container matching the desired image exists.
 	m.setStatus(ctx, server, storage.StatusCreating)
 	if err := m.ensureContainer(ctx, server, serverCfg); err != nil {

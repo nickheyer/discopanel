@@ -98,6 +98,23 @@ func (s *Store) ListServers(ctx context.Context) ([]*Server, error) {
 	return servers, err
 }
 
+// GetServerByAgentTokenHash resolves the server owning a runtime agent token
+// (stored as a SHA-256 hex digest).
+func (s *Store) GetServerByAgentTokenHash(ctx context.Context, hash string) (*Server, error) {
+	if hash == "" {
+		return nil, fmt.Errorf("server not found")
+	}
+	var server Server
+	err := s.db.WithContext(ctx).First(&server, "agent_token_hash = ?", hash).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("server not found")
+		}
+		return nil, err
+	}
+	return &server, nil
+}
+
 func (s *Store) UpdateServer(ctx context.Context, server *Server) error {
 	if err := s.db.WithContext(ctx).Save(server).Error; err != nil {
 		return err

@@ -7,12 +7,14 @@ description: What discopanel-runtime is built from, how tags map to Java version
 
 ## Contents
 
-`docker/Dockerfile.runtime` has two stages:
+`docker/Dockerfile.runtime` has four stages:
 
-1. `golang:alpine` compiles `cmd/runtime` (stdlib plus `pkg/runtimespec`, statically linked).
-2. `eclipse-temurin:<JAVA_VERSION>-jre` plus `ca-certificates` and `tzdata`, with the compiled binary as the entrypoint. Temurin's Ubuntu base was picked over Alpine because mod natives expect glibc.
+1. `bufbuild/buf` regenerates the protobuf code (Go for the entrypoint, javalite for the mod) with the same recipe as `make proto`, so image builds work from a clean checkout - no `make gen` first, no generated code in the build context.
+2. `golang:alpine` compiles `cmd/runtime` (statically linked, `pkg/runtimespec` plus the generated agent protos).
+3. `gradle:9-jdk21` builds the disco-agent mod jars from `agent/`, one per loader family.
+4. `eclipse-temurin:<JAVA_VERSION>-jre` plus `ca-certificates` and `tzdata`, with the compiled binary as the entrypoint and the agent jars at `/opt/discopanel/agent/`. Temurin's Ubuntu base was picked over Alpine because mod natives expect glibc.
 
-That's the whole image. The entrypoint reads `/data/.discopanel/launch.json`, builds the java argv from env vars (heap, flag sets, JMX, user options), fixes `/data` ownership, drops to the configured UID/GID and execs java. Java runs as PID 1, so `docker stop` delivers SIGTERM straight to the server and the world saves during the graceful window (the server's Stop Duration setting, 60s by default).
+That's the whole image. The entrypoint reads `/data/.discopanel/launch.json`, installs or removes the loader-matched agent jar, fixes `/data` ownership, builds the java argv from env vars (heap, flag sets, JMX, user options), and runs java as a supervised child under the configured UID/GID. The entrypoint stays PID 1: it forwards SIGTERM so the world saves during the graceful window (the server's Stop Duration setting, 60s by default), propagates java's exit code so docker restart policies keep working, watches the console for readiness and crashes, feeds console commands to java stdin, and streams telemetry to the panel. The supervisor half of the story is on [Runtime Agent](/development/agent/).
 
 ## The env contract
 
@@ -22,14 +24,18 @@ Environment variables are the container's entire config surface besides `launch.
 |---|---|
 | `UID`, `GID` | ownership fix + privilege drop (default 1000/1000) |
 | `MEMORY`, `INIT_MEMORY`, `MAX_MEMORY` | `-Xms`/`-Xmx`. `MEMORY` sets both, the others override individually |
+| `AUTO_MEMORY` | replaces fixed `-Xms`/`-Xmx` with `-XX:InitialRAMPercentage=50` and `-XX:MaxRAMPercentage=75`, so the JVM sizes its heap from the cgroup memory limit |
 | `USE_AIKAR_FLAGS` | Aikar G1GC set, switching to the large-heap variant at 12 GB max heap or more. Applied by default when neither flag-set variable is present |
 | `USE_MEOWICE_FLAGS` | MeowIce set behind `-XX:+IgnoreUnrecognizedVMOptions`, plus transparent huge pages, NUMA, and the vector module on Java 16+ |
+| `USE_ZGC_FLAGS` | generational ZGC instead of G1. Java 21+ only, falls back to the G1 sets below it with a console warning. Wins over both G1 sets |
 | `USE_FLARE_FLAGS`, `USE_SIMD_FLAGS` | Flare profiler flags, and `jdk.incubator.vector` (Java 16+) |
 | `ENABLE_JMX`, `JMX_HOST` | remote JMX on port 7091 with no auth/ssl. `JMX_HOST` sets the RMI hostname |
 | `TZ` | `-Duser.timezone` |
 | `JVM_OPTS`, `JVM_XX_OPTS`, `JVM_DD_OPTS`, `EXTRA_ARGS` | raw passthrough. `JVM_DD_OPTS` entries get `-D` prefixed and `EXTRA_ARGS` goes after the jar |
 
-`-Dlog4j2.formatMsgNoLookups=true` is always added (Log4Shell). Booleans accept `true`/`1`/`yes`, case-insensitive. The image exposes 25565 (game) and 25575 (RCON) and declares `/data` as its volume. There is no HEALTHCHECK - health is panel-side, see [Lifecycle & Health](/development/lifecycle/#health).
+A few args are added without any env var: `-Dlog4j2.formatMsgNoLookups=true` (Log4Shell), unified GC logging to `/data/.discopanel/gc.log` on Java 11+ (rotated and size-capped, the supervisor tails it for pause telemetry), and `-XX:ActiveProcessorCount` pinned to the CFS quota when the container has one and the user hasn't set it themselves, so GC and compiler threads aren't sized for the host's cores. The agent connection itself is not configured by env - the supervisor reads `/data/.discopanel/agent.json`, written by the panel before each start (see [Runtime Agent](/development/agent/)).
+
+Booleans accept `true`/`1`/`yes`, case-insensitive. The image exposes 25565 (game) and 25575 (RCON) and declares `/data` as its volume. There is no HEALTHCHECK - health is panel-side, see [Lifecycle & Health](/development/lifecycle/#health).
 
 ## Tags
 

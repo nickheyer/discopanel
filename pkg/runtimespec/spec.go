@@ -21,6 +21,10 @@ const (
 
 	// ManifestFileName records what the provisioner installed, for idempotency.
 	ManifestFileName = "manifest.json"
+
+	// AgentFileName is the agent connection spec consumed by the runtime
+	// supervisor: where to reach the panel and how to authenticate.
+	AgentFileName = "agent.json"
 )
 
 // Launch kinds understood by the runtime entrypoint.
@@ -44,6 +48,17 @@ type LaunchSpec struct {
 	JavaMajor int    `json:"java_major"`
 }
 
+// AgentSpec tells the runtime supervisor how to reach the panel's agent
+// endpoint. Written by the panel lifecycle manager before each start; the
+// token authenticates exactly one server's telemetry session.
+type AgentSpec struct {
+	Version  int    `json:"version"`
+	Enabled  bool   `json:"enabled"`
+	PanelURL string `json:"panel_url"`
+	Token    string `json:"token"`
+	ServerID string `json:"server_id"`
+}
+
 // ModpackRef identifies the modpack a server was provisioned from.
 type ModpackRef struct {
 	Source    string `json:"source"` // "curseforge" | "modrinth" | "zip"
@@ -65,6 +80,39 @@ type Manifest struct {
 
 func LaunchPath(dataDir string) string {
 	return filepath.Join(dataDir, StateDir, LaunchFileName)
+}
+
+func AgentPath(dataDir string) string {
+	return filepath.Join(dataDir, StateDir, AgentFileName)
+}
+
+// ReadAgentSpec loads the agent spec; returns (nil, nil) when absent.
+func ReadAgentSpec(dataDir string) (*AgentSpec, error) {
+	data, err := os.ReadFile(AgentPath(dataDir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var spec AgentSpec
+	if err := json.Unmarshal(data, &spec); err != nil {
+		return nil, fmt.Errorf("invalid agent spec: %w", err)
+	}
+	return &spec, nil
+}
+
+// WriteAgentSpec persists the agent spec into a server data directory. The
+// file carries the agent token, so it is not group/world readable.
+func WriteAgentSpec(dataDir string, spec *AgentSpec) error {
+	if err := os.MkdirAll(filepath.Join(dataDir, StateDir), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(AgentPath(dataDir), data, 0600)
 }
 
 func ManifestPath(dataDir string) string {

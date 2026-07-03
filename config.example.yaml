@@ -33,6 +33,7 @@ docker:
   network_name: "discopanel-network"
   registry_url: ""
   runtime_image: ""  # Override the discopanel-runtime image repository (default: nickheyer/discopanel-runtime)
+  agent_url: ""  # URL server containers use to reach the panel for live telemetry (auto-detected when empty)
   sync_interval: 5  # Seconds between docker state sync
   # Can be configure like labels: {"your.label.key": "your_label_value", "other.label.key": "other_label_value"}
   # or

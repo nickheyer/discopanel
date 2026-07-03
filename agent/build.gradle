@@ -1,0 +1,26 @@
+// disco-agent: DiscoPanel's server-side telemetry agent, built as a shared
+// core plus thin per-loader shims. The core speaks length-prefixed protobuf
+// (generated from proto/discopanel/agent/v1 via `make gen`) over a loopback
+// socket to the discopanel-runtime supervisor; the shims wire loader events
+// into it. Shim jars are baked into the runtime images (docker/Dockerfile.runtime)
+// and installed by the supervisor at boot.
+subprojects {
+    apply plugin: 'java'
+
+    group = 'app.discopanel'
+    version = rootProject.property('agentVersion')
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+
+    repositories {
+        mavenCentral()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
+}

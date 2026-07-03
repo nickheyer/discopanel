@@ -81,6 +81,7 @@ export default defineConfig({
 										{ label: 'Provisioning', slug: 'development/provisioning' },
 										{ label: 'Runtime Image', slug: 'development/runtime-image' },
 										{ label: 'Lifecycle & Health', slug: 'development/lifecycle' },
+										{ label: 'Runtime Agent', slug: 'development/agent' },
 									],
 								},
 								{ label: 'API Reference', slug: 'api' },

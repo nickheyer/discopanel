@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "disco-agent",
+  "version": "${version}",
+  "name": "DiscoAgent",
+  "description": "DiscoPanel server telemetry agent: reports real TPS, player events, and JVM health to the panel.",
+  "authors": ["DiscoPanel"],
+  "contact": {
+    "homepage": "https://github.com/nickheyer/discopanel",
+    "sources": "https://github.com/nickheyer/discopanel"
+  },
+  "license": "MIT",
+  "environment": "server",
+  "entrypoints": {
+    "server": ["app.discopanel.agent.fabric.DiscoAgentFabric"]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": ">=1.21 <1.22"
+  }
+}

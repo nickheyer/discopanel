@@ -61,6 +61,7 @@
 	import ServerRouting from '$lib/components/server-routing.svelte';
 	import ServerTasks from '$lib/components/server-tasks.svelte';
 	import ServerModules from '$lib/components/server/ServerModules.svelte';
+	import ServerPerformance from '$lib/components/server-performance.svelte';
 
 	let server = $state<Server | null>(null);
 	let loading = $state(true);
@@ -1106,6 +1107,7 @@
 
 			<div class="min-h-0 flex-1 overflow-hidden">
 				<TabsContent value="overview" class="h-full space-y-4">
+					<ServerPerformance {server} />
 					<Card class="border-border/50 shadow-sm">
 						<CardHeader class="pb-4">
 							<CardTitle class="text-xl">Server Settings</CardTitle>

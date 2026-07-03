@@ -1,0 +1,22 @@
+plugins {
+    id 'java-library'
+}
+
+// The core targets Java 8 bytecode so future shims for legacy servers can
+// reuse it unchanged; current shims all run 17+.
+tasks.withType(JavaCompile).configureEach {
+    options.release = 8
+}
+
+sourceSets {
+    main {
+        java {
+            // buf-generated javalite messages (make gen)
+            srcDir 'src/generated/java'
+        }
+    }
+}
+
+dependencies {
+    api "com.google.protobuf:protobuf-javalite:${rootProject.property('protobufJavaliteVersion')}"
+}

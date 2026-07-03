@@ -12,10 +12,19 @@ import (
 	rcon "github.com/nickheyer/discopanel/internal/rcon"
 )
 
+// ConsoleAgent is the runtime agent hub's console path: commands written
+// straight to the java process stdin. Used when RCON cannot serve a command
+// (disabled, or the server is still booting).
+type ConsoleAgent interface {
+	Connected(serverID string) bool
+	SendConsole(ctx context.Context, serverID, command string) error
+}
+
 type Sender struct {
 	store  *storage.Store
 	docker *docker.Client
 	config *config.Config
+	agent  ConsoleAgent
 }
 
 func NewSender(store *storage.Store, dockerClient *docker.Client, cfg *config.Config) *Sender {
@@ -24,6 +33,21 @@ func NewSender(store *storage.Store, dockerClient *docker.Client, cfg *config.Co
 		docker: dockerClient,
 		config: cfg,
 	}
+}
+
+// SetAgent wires the runtime agent hub (registered after construction, the
+// hub depends on the metrics collector which depends on this sender).
+func (s *Sender) SetAgent(agent ConsoleAgent) {
+	s.agent = agent
+}
+
+// sendViaAgent falls back to the agent console channel. Stdin commands have
+// no captured response; their output lands in the server console stream.
+func (s *Sender) sendViaAgent(ctx context.Context, serverID, command string) (string, error) {
+	if err := s.agent.SendConsole(ctx, serverID, command); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 func (s *Sender) SendCommand(ctx context.Context, serverID string, command string) (string, error) {
@@ -41,7 +65,12 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 		return "", fmt.Errorf("failed to load server config: %w", err)
 	}
 
+	agentAvailable := s.agent != nil && s.agent.Connected(serverID)
+
 	if serverCfg.EnableRCON != nil && !*serverCfg.EnableRCON {
+		if agentAvailable {
+			return s.sendViaAgent(ctx, serverID, command)
+		}
 		return "", fmt.Errorf("rcon is disabled for this server")
 	}
 
@@ -85,6 +114,9 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 
 	ip, err := s.docker.ContainerIP(ctx, server.ContainerID)
 	if err != nil {
+		if agentAvailable {
+			return s.sendViaAgent(ctx, serverID, command)
+		}
 		return "", fmt.Errorf("failed to resolve container ip: %w", err)
 	}
 
@@ -93,6 +125,11 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 	defer cancel()
 	output, err := rcon.SendCommand(rconCtx, ip, rconPort, rconPassword, command)
 	if err != nil {
+		// RCON is preferred for its captured response, but a booting or
+		// RCON-less server still accepts commands over the agent's stdin.
+		if agentAvailable {
+			return s.sendViaAgent(ctx, serverID, command)
+		}
 		return "", fmt.Errorf("rcon command failed: %w", err)
 	}
 

@@ -7,13 +7,34 @@
 #     -t nickheyer/discopanel-runtime:java21 .
 ARG JAVA_VERSION=21
 
+# Generated protobuf code (Go for the entrypoint, javalite for the disco-agent
+# mod), produced in-image with the same recipe as `make proto` so builds work
+# from a clean checkout. Generated code is never committed or in the context.
+FROM bufbuild/buf:latest AS proto-builder
+
+WORKDIR /app
+COPY buf.yaml buf.gen.yaml buf.gen.agent.yaml buf.lock ./
+COPY proto/ ./proto/
+RUN buf generate \
+    && buf generate --template buf.gen.agent.yaml --path proto/discopanel/agent
+
 FROM golang:alpine AS builder
 
 WORKDIR /build
 COPY go.mod go.sum ./
 COPY pkg/runtimespec ./pkg/runtimespec
+COPY --from=proto-builder /app/pkg/proto ./pkg/proto
 COPY cmd/runtime ./cmd/runtime
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /runtime-entrypoint ./cmd/runtime
+
+# disco-agent mod jars (shared core + per-loader shims, see agent/). The
+# supervisor installs the loader-matched jar into mods/ or plugins/ at boot.
+FROM gradle:9-jdk21 AS agent-builder
+
+WORKDIR /agent
+COPY agent/ ./
+COPY --from=proto-builder /app/agent/core/src/generated ./core/src/generated
+RUN gradle --no-daemon build
 
 FROM eclipse-temurin:${JAVA_VERSION}-jre
 
@@ -22,6 +43,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /runtime-entrypoint /usr/local/bin/discopanel-runtime
+
+COPY --from=agent-builder /agent/fabric/build/libs/disco-agent-fabric.jar \
+    /agent/neoforge/build/libs/disco-agent-neoforge.jar \
+    /agent/forge/build/libs/disco-agent-forge.jar \
+    /agent/paper/build/libs/disco-agent-paper.jar \
+    /opt/discopanel/agent/
 
 RUN mkdir -p /data && chmod 755 /data
 

@@ -800,6 +800,32 @@ func (c *Client) ContainerIP(ctx context.Context, containerID string) (string, e
 	return "", fmt.Errorf("no IP address found for container")
 }
 
+// PanelAgentURL resolves the URL runtime containers use to reach the panel
+// over the shared bridge network: the panel's own container IP when it runs
+// containerized, else the network gateway (host-published services are
+// reachable from containers via the bridge gateway).
+func (c *Client) PanelAgentURL(ctx context.Context, panelPort string) (string, error) {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		if hostname, err := os.Hostname(); err == nil {
+			if info, err := c.docker.ContainerInspect(ctx, hostname); err == nil {
+				if ep, ok := info.NetworkSettings.Networks[c.config.NetworkName]; ok && ep.IPAddress != "" {
+					return fmt.Sprintf("http://%s:%s", ep.IPAddress, panelPort), nil
+				}
+			}
+		}
+	}
+	nw, err := c.docker.NetworkInspect(ctx, c.config.NetworkName, network.InspectOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect network %s: %w", c.config.NetworkName, err)
+	}
+	for _, ipam := range nw.IPAM.Config {
+		if ipam.Gateway != "" {
+			return fmt.Sprintf("http://%s:%s", ipam.Gateway, panelPort), nil
+		}
+	}
+	return "", fmt.Errorf("no gateway on network %s", c.config.NetworkName)
+}
+
 // Creates the Docker network if it doesn't exist - attaches itself to that network when applicable
 func (c *Client) EnsureNetwork() error {
 	ctx := context.Background()

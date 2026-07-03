@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -79,8 +80,20 @@ func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer
 		log:         log,
 		sender:      sender,
 		upgrader: websocket.Upgrader{
+			// Same-origin only: a cross-site page must not be able to open an
+			// authenticated log/console socket in the victim's browser.
+			// Non-browser clients send no Origin header and pass through;
+			// they authenticate with their own bearer token.
 			CheckOrigin: func(r *http.Request) bool {
-				return true // Allow all origins (CORS handled elsewhere)
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true
+				}
+				u, err := url.Parse(origin)
+				if err != nil {
+					return false
+				}
+				return strings.EqualFold(u.Host, r.Host)
 			},
 		},
 		clients:    make(map[*Client]bool),

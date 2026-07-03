@@ -69,6 +69,45 @@ func NewServerService(store *storage.Store, docker *docker.Client, sender *comma
 }
 
 // dbServerToProto converts a database server model to proto server
+
+// applyMetrics copies the collector's cached runtime stats onto the server
+// row's transient fields (shared by ListServers and GetServer).
+func (s *ServerService) applyMetrics(server *storage.Server) {
+	if s.metricsCollector == nil {
+		return
+	}
+	m := s.metricsCollector.GetMetrics(server.ID)
+	if m == nil {
+		return
+	}
+	server.MemoryUsage = m.MemoryUsage
+	server.CPUPercent = m.CPUPercent
+	server.CPUCores = m.CPUCount
+	server.DiskUsage = m.DiskUsage
+	server.DiskTotal = m.DiskTotal
+	server.WorldSize = m.WorldSize
+	server.PlayersOnline = m.PlayersOnline
+	server.TPS = m.TPS
+
+	// SLP fields
+	server.SLPAvailable = m.SLPAvailable
+	server.SLPLatencyMs = m.SLPLatencyMs
+	server.MOTD = m.MOTD
+	server.ServerVersion = m.ServerVersion
+	server.ProtocolVersion = m.ProtocolVersion
+	server.PlayerSample = m.PlayerSample
+	server.MaxPlayersSLP = m.MaxPlayers
+	server.Favicon = m.Favicon
+
+	// Agent-sourced fields
+	server.AgentConnected = m.AgentConnected
+	server.MSPT = m.MSPT
+	server.HeapUsedMB = m.HeapUsedMB
+	server.HeapMaxMB = m.HeapMaxMB
+	server.CPUThrottlePercent = m.CPUThrottlePercent
+	server.AvailableCommands = m.AvailableCommands
+}
+
 func dbServerToProto(server *storage.Server) *v1.Server {
 	if server == nil {
 		return nil
@@ -116,6 +155,14 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		PlayerSample:    server.PlayerSample,
 		MaxPlayersSlp:   int32(server.MaxPlayersSLP),
 		Favicon:         server.Favicon,
+
+		// Agent fields
+		AgentConnected:     server.AgentConnected,
+		Mspt:               server.MSPT,
+		HeapUsedMb:         server.HeapUsedMB,
+		HeapMaxMb:          server.HeapMaxMB,
+		CpuThrottlePercent: server.CPUThrottlePercent,
+		AvailableCommands:  server.AvailableCommands,
 	}
 
 	// Apply overrides
@@ -277,27 +324,7 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 			}
 
 			// Apply cached metrics from the background collector
-			if s.metricsCollector != nil {
-				if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
-					server.MemoryUsage = m.MemoryUsage
-					server.CPUPercent = m.CPUPercent
-					server.CPUCores = m.CPUCount
-					server.DiskUsage = m.DiskUsage
-					server.DiskTotal = m.DiskTotal
-					server.WorldSize = m.WorldSize
-					server.PlayersOnline = m.PlayersOnline
-					server.TPS = m.TPS
-
-					// SLP fields
-					server.SLPAvailable = m.SLPAvailable
-					server.SLPLatencyMs = m.SLPLatencyMs
-					server.MOTD = m.MOTD
-					server.ServerVersion = m.ServerVersion
-					server.ProtocolVersion = m.ProtocolVersion
-					server.PlayerSample = m.PlayerSample
-					server.MaxPlayersSLP = m.MaxPlayers
-				}
-			}
+			s.applyMetrics(server)
 		}
 	}
 
@@ -336,28 +363,7 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 	}
 
 	// Apply cached metrics from the background collector
-	if s.metricsCollector != nil {
-		if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
-			server.MemoryUsage = m.MemoryUsage
-			server.CPUPercent = m.CPUPercent
-			server.CPUCores = m.CPUCount
-			server.DiskUsage = m.DiskUsage
-			server.DiskTotal = m.DiskTotal
-			server.WorldSize = m.WorldSize
-			server.PlayersOnline = m.PlayersOnline
-			server.TPS = m.TPS
-
-			// SLP fields
-			server.SLPAvailable = m.SLPAvailable
-			server.SLPLatencyMs = m.SLPLatencyMs
-			server.MOTD = m.MOTD
-			server.ServerVersion = m.ServerVersion
-			server.ProtocolVersion = m.ProtocolVersion
-			server.PlayerSample = m.PlayerSample
-			server.MaxPlayersSLP = m.MaxPlayers
-			server.Favicon = m.Favicon
-		}
-	}
+	s.applyMetrics(server)
 
 	return connect.NewResponse(&v1.GetServerResponse{
 		Server: dbServerToProto(server),

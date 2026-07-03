@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nickheyer/discopanel/internal/agent"
 	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -173,6 +174,12 @@ func main() {
 	metricsCollector := metrics.NewCollector(store, dockerClient, sender, cfg, eventBus, log)
 	dockerClient.SetHealthChecker(metricsCollector)
 
+	// Initialize the runtime agent hub: live telemetry sessions from server
+	// containers feed the collector and the event bus, and the command sender
+	// uses the agent console when RCON cannot serve a command
+	agentHub := agent.NewHub(store, metricsCollector, eventBus, log)
+	sender.SetAgent(agentHub)
+
 	// Initialize the provisioner and the lifecycle manager (the single owner
 	// of server start/stop/pause transitions)
 	prov := provisioner.New(store, dockerClient, cfg, log)
@@ -221,11 +228,12 @@ func main() {
 	defer lifecycleManager.StopIdleWatcher()
 
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, lifecycleManager, metricsCollector, moduleManager, eventBus, log)
+	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, lifecycleManager, metricsCollector, moduleManager, eventBus, agentHub, log)
 
 	// Provisioning progress lines land in the server console via the log streamer
 	if streamer := rpcServer.LogStreamer(); streamer != nil {
 		prov.SetProgressSink(streamer.AddSystemEntry)
+		agentHub.SetConsoleSink(streamer.AddSystemEntry)
 	}
 
 	// Print recovery key

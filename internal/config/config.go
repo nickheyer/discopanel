@@ -72,6 +72,7 @@ type DockerConfig struct {
 	NetworkName  string            `mapstructure:"network_name" json:"network_name"`
 	RegistryURL  string            `mapstructure:"registry_url" json:"registry_url"`
 	RuntimeImage string            `mapstructure:"runtime_image" json:"runtime_image"` // discopanel-runtime repository override
+	AgentURL     string            `mapstructure:"agent_url" json:"agent_url"`         // URL runtime containers use to reach the panel (auto-detected when empty)
 	DNS          string            `mapstructure:"dns" json:"dns"`
 	Labels       map[string]string `mapstructure:"labels" json:"labels"`
 }
@@ -204,6 +205,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.network_name", "discopanel-network")
 	v.SetDefault("docker.registry_url", "")
 	v.SetDefault("docker.runtime_image", "")
+	v.SetDefault("docker.agent_url", "")
 	v.SetDefault("docker.dns", "")
 	v.SetDefault("docker.labels", map[string]string{})
 

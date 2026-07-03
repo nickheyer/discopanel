@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules runtime proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules runtime agent proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
 
 DATA_DIR := ./data
 DOCKER_DATA_DIR := /tmp/discopanel
@@ -102,6 +102,16 @@ runtime:
 	done
 	@echo "Runtime builds complete!"
 
+# Build the disco-agent mod jars (shared core + per-loader shims) via a
+# containerized Gradle. Outputs land in agent/*/build/libs/.
+agent:
+	docker run --rm \
+		--volume "$(shell pwd)/agent:/agent" \
+		--workdir /agent \
+		--user "$(shell id -u):$(shell id -g)" \
+		--env GRADLE_USER_HOME=/agent/.gradle-home \
+		gradle:9-jdk21 gradle --no-daemon build
+
 # Build a single runtime image locally without pushing (e.g. make runtime-local-21)
 runtime-local-%:
 	docker build --build-arg JAVA_VERSION=$* \
@@ -185,12 +195,15 @@ check:
 proto:
 	@echo "Generating protocol buffer code (using Docker)..."
 	$(BUF_RUN) generate
+	@echo "Generating disco-agent Java code (using Docker)..."
+	$(BUF_RUN) generate --template buf.gen.agent.yaml --path proto/discopanel/agent
 	@echo "Proto generation complete!"
 
 proto-clean:
 	@echo "Cleaning generated proto files..."
 	rm -rf pkg/proto
 	rm -rf web/discopanel/src/lib/proto
+	rm -rf agent/core/src/generated/java
 	@echo "Proto files cleaned!"
 
 proto-lint:

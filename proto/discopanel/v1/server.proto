@@ -37,6 +37,10 @@ service ServerService {
   rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
   // Upload server logs to mclo.gs
   rpc UploadToMCLogs(UploadToMCLogsRequest) returns (UploadToMCLogsResponse);
+  // Graded performance findings for a server (the autopilot report card)
+  rpc GetServerPerformanceReport(GetServerPerformanceReportRequest) returns (GetServerPerformanceReportResponse);
+  // Apply a one-click fix suggested by a performance finding
+  rpc ApplyPerformanceFix(ApplyPerformanceFixRequest) returns (ApplyPerformanceFixResponse);
 }
 
 // Server list options
@@ -226,4 +230,51 @@ message UploadToMCLogsRequest {
 // mclo.gs upload result
 message UploadToMCLogsResponse {
   string url = 1;
+}
+
+// Server to build a performance report for
+message GetServerPerformanceReportRequest {
+  string id = 1;
+}
+
+// Severity of one performance finding
+enum PerformanceSeverity {
+  PERFORMANCE_SEVERITY_UNSPECIFIED = 0;
+  // Everything checked out
+  PERFORMANCE_SEVERITY_OK = 1;
+  // Informational, no action needed
+  PERFORMANCE_SEVERITY_INFO = 2;
+  // Degrades performance, worth fixing
+  PERFORMANCE_SEVERITY_WARNING = 3;
+  // Actively harming the server (stalls, OOM risk, crash)
+  PERFORMANCE_SEVERITY_CRITICAL = 4;
+}
+
+// One autopilot check result in plain language
+message PerformanceFinding {
+  string id = 1;
+  PerformanceSeverity severity = 2;
+  string title = 3;
+  string detail = 4;
+  string fix_id = 5; // empty when there is no one-click fix
+  string fix_label = 6;
+}
+
+// The performance report card
+message GetServerPerformanceReportResponse {
+  string grade = 1; // A-F
+  repeated PerformanceFinding findings = 2;
+  bool agent_connected = 3;
+}
+
+// A one-click fix to apply (fix_id from a finding)
+message ApplyPerformanceFixRequest {
+  string id = 1;
+  string fix_id = 2;
+}
+
+// Result of applying a fix
+message ApplyPerformanceFixResponse {
+  string message = 1;
+  bool restart_required = 2;
 }

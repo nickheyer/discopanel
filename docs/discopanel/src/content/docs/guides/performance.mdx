@@ -1,7 +1,15 @@
 ---
 title: Server Performance
-description: Memory, the one checkbox worth ticking, and why servers restart fast.
+description: The report card, memory, garbage collectors, and why servers restart fast.
 ---
+
+## The report card
+
+Open a server's Overview tab and the first thing you'll see is its **Performance Report Card**: a letter grade and a short list of findings in plain language, like "CPU throttling detected" or "Heap exceeds the container memory limit". When a finding has an obvious remedy, there's a button right next to it that applies the fix for you. Fixes take effect the next time the server starts.
+
+While the server is stopped, the card grades what it can tell from your settings alone. Start the server and the live measurements join in: tick timing, garbage collector pauses, CPU throttling, memory pressure, and any recent crash (with a pointer to the crash report in the Files tab).
+
+An A doesn't mean your server is fast, it means DiscoPanel found nothing holding it back. A modpack can still be heavy on its own.
 
 ## Memory
 
@@ -9,11 +17,23 @@ Give a server its memory when you create it (you can change it later in Settings
 
 More isn't always better. Java's garbage collector works harder with a huge amount of memory, so don't hand a server 20 GB just because it's available.
 
+**Automatic Memory** (in the configuration tab) sizes the Java heap from the server's memory for you, so the two can never disagree. It's the fix the report card offers when your heap and your memory limit don't fit each other. If you manage the heap yourself and it doesn't fit, DiscoPanel clamps it for that start so the server isn't killed mid-game, and says so in the console.
+
 ## Garbage collector tuning is on by default
 
 **Use Aikar Flags** enables the garbage collector tuning that most serious Minecraft servers run. It reduces lag spikes, especially on busy or modded servers, and it's safe for everything, so DiscoPanel applies it by default. Untick the checkbox if you really want stock JVM behavior.
 
-**Use MeowIce Flags** is a newer, more aggressive set for modern Java versions. Enabling it takes the place of the default Aikar set. Pick one of the two, not both.
+**Use MeowIce Flags** is a newer, more aggressive set for modern Java versions. Enabling it takes the place of the default Aikar set.
+
+**Use ZGC Flags** switches to a different garbage collector entirely (generational ZGC, Java 21 or newer) whose pauses are too short for players to feel. For big modpacks with 12 GB of memory or more it usually beats the other two, and the report card suggests it when your server fits that picture.
+
+Pick one of the three, not a combination.
+
+## Where the numbers come from
+
+Every server runs with a small DiscoPanel agent alongside it, on by default. It's what feeds the report card and the dashboard: tick speed, memory, CPU, who's online, plus crash detection and a console that accepts commands even while the server is still booting. On supported loaders (Fabric, NeoForge, Forge, Paper and friends) it also drops a tiny companion mod called disco-agent into the server, which reads tick timing and player events straight from the game. It has no gameplay footprint.
+
+If you ever need to, untick **Enable DiscoPanel Agent** in the configuration tab. Everything keeps working, DiscoPanel just falls back to slower measuring (server pings and RCON), and boot-time console commands and live tick timing go away.
 
 ## Why restarts are fast
 

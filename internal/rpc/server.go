@@ -9,6 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
+	"github.com/nickheyer/discopanel/internal/agent"
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
@@ -26,6 +27,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/ws"
 	"github.com/nickheyer/discopanel/pkg/download"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1/agentv1connect"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	"github.com/nickheyer/discopanel/pkg/upload"
 	web "github.com/nickheyer/discopanel/web/discopanel"
@@ -53,13 +55,14 @@ type Server struct {
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	bus              *events.Bus
+	agentHub         *agent.Hub
 	uploadManager    *upload.Manager
 	downloadManager  *download.Manager
 	wsHub            *ws.Hub
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, agentHub *agent.Hub, log *logger.Logger) *Server {
 	// Initialize RBAC enforcer
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
@@ -116,6 +119,7 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
 		bus:              bus,
+		agentHub:         agentHub,
 		uploadManager:    uploadManager,
 		downloadManager:  downloadManager,
 		wsHub:            wsHub,
@@ -162,6 +166,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.TaskServiceName,
 		discopanelv1connect.UploadServiceName,
 		discopanelv1connect.UserServiceName,
+		agentv1connect.AgentServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
@@ -251,6 +256,12 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	uploadPath, uploadHandler := discopanelv1connect.NewUploadServiceHandler(uploadService, opts...)
 	mux.Handle(uploadPath, uploadHandler)
+
+	// The agent service authenticates in-handler with per-server tokens (the
+	// interceptors above are unary-only and never see this bidi stream).
+	agentService := services.NewAgentService(s.store, s.agentHub, s.log)
+	agentPath, agentHandler := agentv1connect.NewAgentServiceHandler(agentService)
+	mux.Handle(agentPath, agentHandler)
 }
 
 // The HTTP handler for the server
@@ -403,6 +414,7 @@ func isConnectPath(path string) bool {
 	// Connect paths start with service names
 	connectPrefixes := []string{
 		"/discopanel.v1.",
+		"/discopanel.agent.",
 		"/grpc.reflection.",
 		"/connect.",
 	}

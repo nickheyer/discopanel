@@ -105,6 +105,14 @@ message Server {
   repeated string player_sample = 36;
   int32 max_players_slp = 37;
   string favicon = 38; // Base64 PNG
+
+  // Agent-sourced runtime stats (present when the disco-agent channel is live)
+  bool agent_connected = 41;
+  double mspt = 42; // Mean milliseconds per tick (mod-sourced)
+  double heap_used_mb = 43;
+  double heap_max_mb = 44;
+  double cpu_throttle_percent = 45; // Share of CFS periods throttled (0-100)
+  repeated string available_commands = 46; // Command names for console autocomplete
 }
 
 // Extra port mapping for container

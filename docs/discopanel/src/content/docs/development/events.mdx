@@ -15,9 +15,10 @@ Event types are the proto enum `TriggeredEventType`, so the same values flow thr
 | `SERVER_STOP` | lifecycle manager | graceful stop completed |
 | `SERVER_RESTART` | lifecycle manager | after a restart (in addition to STOP + START) |
 | `SERVER_HEALTHY` | metrics collector | first successful ping this run, or recovery from unhealthy |
-| `PLAYER_JOIN` / `PLAYER_LEAVE` | metrics collector | roster diff between polls, carries `Data["player"]` |
+| `PLAYER_JOIN` / `PLAYER_LEAVE` | agent hub or metrics collector | exact events from the disco-agent mod when connected, roster diff between polls otherwise. Carries `Data["player"]` |
+| `PLAYER_DEATH` / `PLAYER_ADVANCEMENT` / `PLAYER_CHAT` | agent hub | mod-sourced only, so they need the [runtime agent](/development/agent/). `Data["detail"]` carries the death message, advancement title, or chat line |
 
-The collector derives the player events by diffing the player-name roster (from SLP samples or RCON `list`) every 10 seconds, seeding baselines at startup so already-running servers don't emit a storm on panel boot.
+Without the agent, the collector derives join/leave by diffing the player-name roster (from SLP samples or RCON `list`) every 10 seconds, seeding baselines at startup so already-running servers don't emit a storm on panel boot. While an agent session is live the diffing is suppressed - the mod reports the exact events, so diffing too would double-emit.
 
 ## Subscribers
 

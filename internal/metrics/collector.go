@@ -40,6 +40,46 @@ type ServerMetrics struct {
 	MaxPlayers      int
 	Favicon         string // Base64 PNG (data:image/png;base64,...)
 	SLPLastUpdated  time.Time
+
+	// Agent-sourced fields (live only while the runtime agent session is up).
+	// When fresh, these take precedence over the SLP/RCON scraping paths.
+	AgentConnected     bool
+	AgentModActive     bool      // disco-agent mod is feeding game telemetry
+	AgentTickUpdated   time.Time // freshness of TPS/MSPT below
+	AgentRosterUpdated time.Time // freshness of PlayerSample/PlayersOnline
+	MSPT               float64   // mean ms per tick
+	MSPTMax            float64   // worst tick in the sample window
+	HeapUsedMB         float64
+	HeapMaxMB          float64
+	ThreadCount        int
+	CPUQuotaCores      float64 // cgroup CPU quota (0 = unlimited)
+	CPUThrottlePercent float64 // share of CFS periods throttled (0-100)
+	GCPauseCount       int64   // pauses in the last sample window
+	GCPauseTotalMs     float64
+	GCPauseMaxMs       float64
+	TotalEntities      int
+	TotalChunks        int
+	StartupSeconds     float64
+	AvailableCommands  []string
+
+	// Last process exit reported by the agent (crash forensics).
+	LastExitCode        int
+	LastExitCrashed     bool
+	LastCrashReportPath string
+	LastCrashExcerpt    string
+	LastExitedAt        time.Time
+}
+
+// agentTickFresh reports whether agent tick telemetry is recent enough to be
+// authoritative over RCON TPS scraping.
+func (m *ServerMetrics) agentTickFresh() bool {
+	return m != nil && m.AgentConnected && time.Since(m.AgentTickUpdated) < 30*time.Second
+}
+
+// agentRosterFresh reports whether the agent-maintained roster is recent
+// enough to be authoritative over SLP samples and RCON `list` output.
+func (m *ServerMetrics) agentRosterFresh() bool {
+	return m != nil && m.AgentConnected && time.Since(m.AgentRosterUpdated) < 90*time.Second
 }
 
 // Configuration for metrics collector
@@ -319,8 +359,9 @@ func (c *Collector) collectRCONData() {
 			existingMetrics.SLPAvailable &&
 			time.Since(existingMetrics.SLPLastUpdated) < c.collectorConfig.SLPInterval*2
 
-		// Get player count and roster from RCON
-		if !slpHasPlayerData {
+		// Get player count and roster from RCON (skipped while the agent
+		// feeds an authoritative roster)
+		if !slpHasPlayerData && !existingMetrics.agentRosterFresh() {
 			output, err := c.sender.SendCommand(ctx, server.ID, "list")
 			if err == nil && output != "" {
 				count, players := minecraft.ParsePlayerListFromOutput(output)
@@ -336,8 +377,9 @@ func (c *Collector) collectRCONData() {
 			}
 		}
 
-		// Get TPS if configured
-		if server.TPSCommand != "" {
+		// Get TPS if configured (skipped while the agent reports real tick
+		// timing, which beats RCON output scraping)
+		if server.TPSCommand != "" && !existingMetrics.agentTickFresh() {
 			for _, cmd := range strings.Split(server.TPSCommand, " ?? ") {
 				cmd = strings.TrimSpace(cmd)
 				if cmd == "" {
@@ -495,11 +537,15 @@ func (c *Collector) ContainerHealth(containerID string, startedAt time.Time) doc
 	return docker.HealthStarting
 }
 
-// PlayersOnline implements lifecycle.PlayerCounter from fresh SLP data.
+// PlayersOnline implements lifecycle.PlayerCounter from the agent roster
+// when live, else fresh SLP data.
 func (c *Collector) PlayersOnline(serverID string) (int, bool) {
 	m := c.GetMetrics(serverID)
 	if m == nil {
 		return 0, false
+	}
+	if m.agentRosterFresh() {
+		return m.PlayersOnline, true
 	}
 	if m.SLPAvailable && time.Since(m.SLPLastUpdated) < 2*c.collectorConfig.SLPInterval {
 		return m.PlayersOnline, true
@@ -586,16 +632,19 @@ func (c *Collector) collectSLPData() {
 
 		c.recordHealth(server.ContainerID, info.StartedAt, true)
 
-		// Update
+		// Update (the agent roster, when fresh, is authoritative: SLP samples
+		// can truncate and must not clobber it)
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {
 			m.SLPAvailable = true
 			m.SLPLatencyMs = result.LatencyMs
 			m.MOTD = result.MOTD
 			m.ServerVersion = result.Version.Name
 			m.ProtocolVersion = result.Version.Protocol
-			m.PlayerSample = result.PlayerNames
+			if !m.agentRosterFresh() {
+				m.PlayerSample = result.PlayerNames
+				m.PlayersOnline = result.Players.Online
+			}
 			m.MaxPlayers = result.Players.Max
-			m.PlayersOnline = result.Players.Online
 			m.Favicon = result.Favicon
 			m.SLPLastUpdated = time.Now()
 			m.LastUpdated = time.Now()
@@ -682,8 +731,10 @@ func (c *Collector) detectLifecycleEvents() {
 		}
 		next.healthy = healthy
 
-		// Player join/leave - diff the current roster
-		if healthy {
+		// Player join/leave - diff the current roster. Agent-connected servers
+		// get exact join/leave events pushed by the hub instead; diffing the
+		// scraped roster too would double-emit.
+		if healthy && !c.GetMetrics(server.ID).agentRosterFresh() {
 			if roster := c.currentRoster(server.ID); roster != nil {
 				if prev.players != nil {
 					for name := range roster {

@@ -1,16 +1,24 @@
-// discopanel-runtime entrypoint: launches a Minecraft server prepared by the
-// DiscoPanel provisioner. The data directory is provisioned panel-side; this
-// program only assembles the java command line from environment variables and
-// the launch spec, fixes ownership, drops privileges, and execs java as PID 1.
+// discopanel-runtime: supervisor entrypoint for Minecraft server containers.
+// The data directory is provisioned panel-side; this program assembles the
+// java command line, fixes ownership, then runs java as a supervised child
+// (dropping privileges via the child's credentials). Staying resident as PID 1
+// lets it forward signals for graceful shutdown, mirror console output while
+// watching for readiness and crashes, feed console commands to java stdin,
+// sample process/cgroup/GC telemetry, and relay everything to the panel over
+// the agent session (see agent.go). The child's exit code is propagated so
+// docker restart policies keep working.
 package main
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +26,13 @@ import (
 )
 
 const dataDir = "/data"
+
+// runtimeVersion is stamped via -ldflags at build time.
+var runtimeVersion = "dev"
+
+// readyPattern matches the vanilla/Paper/Forge/NeoForge server-done line,
+// e.g. `[Server thread/INFO]: Done (9.418s)! For help, type "help"`.
+var readyPattern = regexp.MustCompile(`Done \([0-9.,]+ ?s(?:econds)?\)`)
 
 func main() {
 	spec, err := runtimespec.ReadLaunchSpec(dataDir)
@@ -29,14 +44,27 @@ func main() {
 	// console must never sit silent.
 	fmt.Printf("[discopanel-runtime] %s %s (%s, MC %s)\n", spec.Kind, launchTarget(spec), spec.Loader, spec.MCVersion)
 
+	agentSpec, err := runtimespec.ReadAgentSpec(dataDir)
+	if err != nil {
+		fmt.Printf("[discopanel-runtime] WARN: agent spec unreadable (%v), telemetry disabled\n", err)
+		agentSpec = nil
+	}
+	agentEnabled := agentSpec != nil && agentSpec.Enabled && agentSpec.PanelURL != "" && agentSpec.Token != ""
+
 	uid := getEnvInt("UID", 1000)
 	gid := getEnvInt("GID", 1000)
+
+	if agentEnabled {
+		installAgentMod(spec)
+	} else {
+		removeAgentMod(spec)
+	}
 
 	if os.Getuid() == 0 && uid > 0 {
 		ensureOwnership(dataDir, uid, gid)
 	}
 
-	args, err := buildJavaArgs(spec)
+	args, err := buildJavaArgs(spec, agentEnabled)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -46,29 +74,259 @@ func main() {
 		fatal("java not found: %v", err)
 	}
 
-	if err := os.Chdir(dataDir); err != nil {
-		fatal("failed to chdir to %s: %v", dataDir, err)
-	}
-
 	fmt.Printf("[discopanel-runtime] exec: java %s\n", strings.Join(args[1:], " "))
 
+	cmd := exec.Command(javaPath, args[1:]...)
+	cmd.Dir = dataDir
+	cmd.Env = os.Environ()
 	if os.Getuid() == 0 && uid > 0 {
-		if err := syscall.Setgroups([]int{gid}); err != nil {
-			fatal("failed to set groups: %v", err)
-		}
-		if err := syscall.Setgid(gid); err != nil {
-			fatal("failed to setgid: %v", err)
-		}
-		if err := syscall.Setuid(uid); err != nil {
-			fatal("failed to setuid: %v", err)
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: []uint32{uint32(gid)}},
 		}
 	}
 
-	// Exec so java becomes PID 1 and receives SIGTERM directly on `docker stop`,
-	// which triggers the server's graceful shutdown hook (world save).
-	if err := syscall.Exec(javaPath, args, os.Environ()); err != nil {
-		fatal("failed to exec java: %v", err)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		fatal("failed to open stdin pipe: %v", err)
 	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		fatal("failed to open stdout pipe: %v", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		fatal("failed to open stderr pipe: %v", err)
+	}
+
+	startedAt := time.Now()
+	if err := cmd.Start(); err != nil {
+		fatal("failed to start java: %v", err)
+	}
+
+	sup := &supervisor{
+		spec:      spec,
+		agentSpec: agentSpec,
+		stdin:     stdin,
+		startedAt: startedAt,
+		pid:       cmd.Process.Pid,
+	}
+
+	// Forward termination signals to java so `docker stop` still triggers the
+	// server's graceful shutdown hook (world save).
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		for sig := range sigCh {
+			sup.send(msgStopping())
+			_ = cmd.Process.Signal(sig)
+		}
+	}()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		sup.mirrorConsole(stdout, os.Stdout)
+	}()
+	go func() {
+		defer wg.Done()
+		sup.mirrorConsole(stderr, os.Stderr)
+	}()
+
+	if agentEnabled {
+		gcTail := newGCLogTail(gcLogPath(), spec.JavaMajor)
+		go gcTail.run(sup.done())
+		go sup.runProcSampler(gcTail)
+		go sup.runLocalListener()
+		go sup.runPanelSession()
+	}
+
+	waitErr := cmd.Wait()
+	wg.Wait()
+
+	exitCode := exitCodeOf(cmd, waitErr)
+	sup.reportExit(exitCode)
+	sup.close()
+
+	if exitCode != 0 {
+		fmt.Printf("[discopanel-runtime] server process exited with code %d\n", exitCode)
+	}
+	os.Exit(exitCode)
+}
+
+// supervisor holds the shared state of a running server process.
+type supervisor struct {
+	spec      *runtimespec.LaunchSpec
+	agentSpec *runtimespec.AgentSpec
+	startedAt time.Time
+	pid       int
+
+	stdinMu sync.Mutex
+	stdin   interface{ Write([]byte) (int, error) }
+
+	mu           sync.Mutex
+	ready        bool
+	readySeconds float64
+	commandList  []string      // cached mod command dump, resent on reconnect
+	session      *panelSession // active panel stream, nil when disconnected
+	modConn      *localModConn // active mod loopback connection
+	closed       chan struct{} // closed once, on process exit
+	closeOnce    sync.Once
+}
+
+func (s *supervisor) done() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed == nil {
+		s.closed = make(chan struct{})
+	}
+	return s.closed
+}
+
+func (s *supervisor) close() {
+	ch := s.done()
+	s.closeOnce.Do(func() { close(ch) })
+}
+
+// writeConsole feeds one command line to the java process stdin.
+func (s *supervisor) writeConsole(line string) error {
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
+	_, err := s.stdin.Write([]byte(line + "\n"))
+	return err
+}
+
+// mirrorConsole copies child output to the container console line by line,
+// watching for the server-ready marker. Long lines fall back to raw copies so
+// output is never lost.
+func (s *supervisor) mirrorConsole(r interface{ Read([]byte) (int, error) }, w *os.File) {
+	buf := make([]byte, 64*1024)
+	var line []byte
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			_, _ = w.Write(chunk)
+			// Accumulate into lines for the ready check only until ready.
+			if !s.isReady() {
+				line = append(line, chunk...)
+				for {
+					idx := indexByte(line, '\n')
+					if idx < 0 {
+						// Cap pathological unterminated lines.
+						if len(line) > 512*1024 {
+							line = line[:0]
+						}
+						break
+					}
+					s.checkReadyLine(string(line[:idx]))
+					line = line[idx+1:]
+				}
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func indexByte(b []byte, c byte) int {
+	for i, v := range b {
+		if v == c {
+			return i
+		}
+	}
+	return -1
+}
+
+func (s *supervisor) isReady() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ready
+}
+
+func (s *supervisor) checkReadyLine(line string) {
+	if !readyPattern.MatchString(line) {
+		return
+	}
+	s.markReady(time.Since(s.startedAt).Seconds())
+}
+
+// markReady records readiness (from the console Done line or the mod's
+// lifecycle hook, whichever fires first) and notifies the panel.
+func (s *supervisor) markReady(startupSeconds float64) {
+	s.mu.Lock()
+	if s.ready {
+		s.mu.Unlock()
+		return
+	}
+	s.ready = true
+	s.readySeconds = startupSeconds
+	s.mu.Unlock()
+	s.send(msgReady(startupSeconds))
+}
+
+// reportExit sends the exit report (with crash forensics) to the panel while
+// the session is still alive.
+func (s *supervisor) reportExit(exitCode int) {
+	crashed := exitCode != 0
+	reportPath, excerpt := findCrashReport(s.startedAt)
+	if reportPath != "" {
+		crashed = true
+	}
+	s.send(msgExited(exitCode, crashed, reportPath, excerpt))
+	// Give the sender goroutine a moment to flush before the process exits.
+	time.Sleep(500 * time.Millisecond)
+}
+
+// findCrashReport locates the newest crash report written after start and
+// returns its data-dir-relative path plus a capped excerpt.
+func findCrashReport(since time.Time) (string, string) {
+	dir := filepath.Join(dataDir, "crash-reports")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", ""
+	}
+	var newest string
+	var newestTime time.Time
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().Before(since) {
+			continue
+		}
+		if info.ModTime().After(newestTime) {
+			newestTime = info.ModTime()
+			newest = e.Name()
+		}
+	}
+	if newest == "" {
+		return "", ""
+	}
+	data, err := os.ReadFile(filepath.Join(dir, newest))
+	if err != nil {
+		return filepath.Join("crash-reports", newest), ""
+	}
+	const maxExcerpt = 4096
+	if len(data) > maxExcerpt {
+		data = data[:maxExcerpt]
+	}
+	return filepath.Join("crash-reports", newest), string(data)
+}
+
+func exitCodeOf(cmd *exec.Cmd, waitErr error) int {
+	if waitErr == nil {
+		return 0
+	}
+	if cmd.ProcessState != nil {
+		if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return 128 + int(status.Signal())
+		}
+		return cmd.ProcessState.ExitCode()
+	}
+	return 1
 }
 
 func launchTarget(spec *runtimespec.LaunchSpec) string {
@@ -82,211 +340,10 @@ func launchTarget(spec *runtimespec.LaunchSpec) string {
 	}
 }
 
-// buildJavaArgs assembles the full argv for java (argv[0] = "java").
-func buildJavaArgs(spec *runtimespec.LaunchSpec) ([]string, error) {
-	args := []string{"java"}
-
-	// Heap sizing: MEMORY sets both bounds, INIT_MEMORY/MAX_MEMORY override individually.
-	memory := strings.TrimSpace(os.Getenv("MEMORY"))
-	initMem := strings.TrimSpace(os.Getenv("INIT_MEMORY"))
-	maxMem := strings.TrimSpace(os.Getenv("MAX_MEMORY"))
-	if initMem == "" {
-		initMem = memory
-	}
-	if maxMem == "" {
-		maxMem = memory
-	}
-	if initMem != "" {
-		args = append(args, "-Xms"+initMem)
-	}
-	if maxMem != "" {
-		args = append(args, "-Xmx"+maxMem)
-	}
-
-	// Aikars tuned GC is the default - mutually exclusive with meowice
-	useAikar := envBool("USE_AIKAR_FLAGS")
-	useMeowice := envBool("USE_MEOWICE_FLAGS")
-	if os.Getenv("USE_AIKAR_FLAGS") == "" && os.Getenv("USE_MEOWICE_FLAGS") == "" {
-		useAikar = true
-	}
-	if useMeowice {
-		args = append(args, meowiceFlags(spec.JavaMajor)...)
-	} else if useAikar {
-		args = append(args, aikarFlags(maxMem)...)
-	}
-	if envBool("USE_FLARE_FLAGS") {
-		args = append(args, "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints")
-	}
-	if envBool("USE_SIMD_FLAGS") && spec.JavaMajor >= 16 {
-		args = append(args, "--add-modules=jdk.incubator.vector")
-	}
-
-	if envBool("ENABLE_JMX") {
-		jmxHost := os.Getenv("JMX_HOST")
-		args = append(args,
-			"-Dcom.sun.management.jmxremote",
-			"-Dcom.sun.management.jmxremote.port=7091",
-			"-Dcom.sun.management.jmxremote.rmi.port=7091",
-			"-Dcom.sun.management.jmxremote.local.only=false",
-			"-Dcom.sun.management.jmxremote.authenticate=false",
-			"-Dcom.sun.management.jmxremote.ssl=false",
-		)
-		if jmxHost != "" {
-			args = append(args, "-Djava.rmi.server.hostname="+jmxHost)
-		}
-	}
-
-	// Log4Shell mitigation; a no-op on patched/modern versions.
-	args = append(args, "-Dlog4j2.formatMsgNoLookups=true")
-
-	if tz := os.Getenv("TZ"); tz != "" {
-		args = append(args, "-Duser.timezone="+tz)
-	}
-
-	args = append(args, strings.Fields(os.Getenv("JVM_OPTS"))...)
-	args = append(args, strings.Fields(os.Getenv("JVM_XX_OPTS"))...)
-	for _, dd := range splitList(os.Getenv("JVM_DD_OPTS")) {
-		args = append(args, "-D"+dd)
-	}
-
-	extraArgs := strings.Fields(os.Getenv("EXTRA_ARGS"))
-
-	switch spec.Kind {
-	case runtimespec.LaunchKindJar:
-		if spec.Jar == "" {
-			return nil, fmt.Errorf("launch spec kind=jar but no jar path set")
-		}
-		args = append(args, "-jar", spec.Jar)
-		args = append(args, extraArgs...)
-		if !spec.NoGui {
-			args = append(args, "nogui")
-		}
-	case runtimespec.LaunchKindArgsFile:
-		if spec.ArgsFile == "" {
-			return nil, fmt.Errorf("launch spec kind=args-file but no args file set")
-		}
-		args = append(args, "@"+spec.ArgsFile)
-		args = append(args, extraArgs...)
-		if !spec.NoGui {
-			args = append(args, "nogui")
-		}
-	case runtimespec.LaunchKindCustom:
-		if spec.Exec == "" {
-			return nil, fmt.Errorf("launch spec kind=custom but no exec command set")
-		}
-		args = append(args, strings.Fields(spec.Exec)...)
-		args = append(args, extraArgs...)
-	default:
-		return nil, fmt.Errorf("unknown launch kind %q", spec.Kind)
-	}
-
-	return args, nil
-}
-
-// aikarFlags returns Aikar's G1GC tuning flags, switching to the large-heap
-// variant at >= 12GB max heap (per https://docs.papermc.io/paper/aikars-flags).
-func aikarFlags(maxMem string) []string {
-	flags := []string{
-		"-XX:+UseG1GC",
-		"-XX:+ParallelRefProcEnabled",
-		"-XX:MaxGCPauseMillis=200",
-		"-XX:+UnlockExperimentalVMOptions",
-		"-XX:+DisableExplicitGC",
-		"-XX:+AlwaysPreTouch",
-		"-XX:G1HeapWastePercent=5",
-		"-XX:G1MixedGCCountTarget=4",
-		"-XX:G1MixedGCLiveThresholdPercent=90",
-		"-XX:G1RSetUpdatingPauseTimePercent=5",
-		"-XX:SurvivorRatio=32",
-		"-XX:+PerfDisableSharedMem",
-		"-XX:MaxTenuringThreshold=1",
-		"-Dusing.aikars.flags=https://mcflags.emc.gs",
-		"-Daikars.new.flags=true",
-	}
-	if parseMemoryMB(maxMem) >= 12288 {
-		flags = append(flags,
-			"-XX:G1NewSizePercent=40",
-			"-XX:G1MaxNewSizePercent=50",
-			"-XX:G1HeapRegionSize=16M",
-			"-XX:G1ReservePercent=15",
-			"-XX:InitiatingHeapOccupancyPercent=20",
-		)
-	} else {
-		flags = append(flags,
-			"-XX:G1NewSizePercent=30",
-			"-XX:G1MaxNewSizePercent=40",
-			"-XX:G1HeapRegionSize=8M",
-			"-XX:G1ReservePercent=20",
-			"-XX:InitiatingHeapOccupancyPercent=15",
-		)
-	}
-	return flags
-}
-
-// meowiceFlags returns MeowIce's G1GC flag set. IgnoreUnrecognizedVMOptions is
-// prepended because parts of the set are only recognized on newer JDKs or
-// GraalVM; the JVM must still boot everywhere.
-func meowiceFlags(javaMajor int) []string {
-	flags := []string{
-		"-XX:+IgnoreUnrecognizedVMOptions",
-		"-XX:+UnlockExperimentalVMOptions",
-		"-XX:+UnlockDiagnosticVMOptions",
-		"-XX:+UseG1GC",
-		"-XX:MaxGCPauseMillis=200",
-		"-XX:+DisableExplicitGC",
-		"-XX:+AlwaysPreTouch",
-		"-XX:G1NewSizePercent=28",
-		"-XX:G1MaxNewSizePercent=50",
-		"-XX:G1HeapRegionSize=16M",
-		"-XX:G1ReservePercent=15",
-		"-XX:G1MixedGCCountTarget=3",
-		"-XX:InitiatingHeapOccupancyPercent=20",
-		"-XX:G1MixedGCLiveThresholdPercent=90",
-		"-XX:SurvivorRatio=32",
-		"-XX:G1HeapWastePercent=5",
-		"-XX:+PerfDisableSharedMem",
-		"-XX:G1SATBBufferEnqueueingThresholdPercent=30",
-		"-XX:G1ConcMarkStepDurationMillis=5",
-		"-XX:G1RSetUpdatingPauseTimePercent=0",
-		"-XX:-DontCompileHugeMethods",
-		"-XX:MaxNodeLimit=240000",
-		"-XX:NodeLimitFudgeFactor=8000",
-		"-XX:ReservedCodeCacheSize=400M",
-		"-XX:NonNMethodCodeHeapSize=12M",
-		"-XX:ProfiledCodeHeapSize=194M",
-		"-XX:NonProfiledCodeHeapSize=194M",
-		"-XX:+UseStringDeduplication",
-		"-XX:+UseFastJNIAccessors",
-		"-XX:+OptimizeStringConcat",
-		"-XX:+UseCompressedOops",
-		"-XX:+UseThreadPriorities",
-		"-XX:+OmitStackTraceInFastThrow",
-		"-XX:+RewriteBytecodes",
-		"-XX:+RewriteFrequentPairs",
-		"-XX:+EliminateLocks",
-		"-XX:+DoEscapeAnalysis",
-		"-XX:+OptimizeFill",
-		"-XX:+UseFPUForSpilling",
-		"-XX:+UseNewLongLShift",
-		"-XX:+UseVectorCmov",
-		"-XX:+UseXMMForArrayCopy",
-		"-XX:+UseXmmI2D",
-		"-XX:+UseXmmI2F",
-		"-XX:+UseXmmLoadAndClearUpper",
-		"-XX:+UseXmmRegToRegMoveAll",
-		"-XX:+UseTransparentHugePages",
-		"-XX:+UseNUMA",
-		"-Djdk.nio.maxCachedBufferSize=262144",
-	}
-	if javaMajor >= 16 {
-		flags = append(flags, "--add-modules=jdk.incubator.vector")
-	}
-	return flags
-}
-
 // ensureOwnership chowns the data tree when it isn't already owned by the
-// target uid, so bind-mounted files written by the panel are writable after
-// the privilege drop. The walk is skipped when the root is already correct.
+// target uid, so bind-mounted files written by the panel are writable by the
+// java child. The walk is skipped when the root is already correct, and the
+// chown calls are spread over a small worker pool for large modpacks.
 func ensureOwnership(dir string, uid, gid int) {
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -297,15 +354,29 @@ func ensureOwnership(dir string, uid, gid int) {
 	}
 	fmt.Printf("[discopanel-runtime] fixing file ownership (%d:%d), this can take a moment on large packs...\n", uid, gid)
 	start := time.Now()
-	files := 0
-	filepath.Walk(dir, func(name string, info os.FileInfo, err error) error {
+
+	paths := make(chan string, 1024)
+	var files int64
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for name := range paths {
+				_ = os.Lchown(name, uid, gid)
+			}
+		}()
+	}
+	_ = filepath.WalkDir(dir, func(name string, _ os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		os.Lchown(name, uid, gid)
+		paths <- name
 		files++
 		return nil
 	})
+	close(paths)
+	wg.Wait()
 	fmt.Printf("[discopanel-runtime] ownership fixed (%d files in %s)\n", files, time.Since(start).Round(time.Millisecond))
 }
 
@@ -332,33 +403,6 @@ func splitList(s string) []string {
 		}
 	}
 	return out
-}
-
-// parseMemoryMB parses values like "4096M", "12G", "2048" (MB assumed) to MB.
-func parseMemoryMB(s string) int {
-	s = strings.ToUpper(strings.TrimSpace(s))
-	if s == "" {
-		return 0
-	}
-	mult := 1
-	switch {
-	case strings.HasSuffix(s, "G"):
-		mult = 1024
-		s = strings.TrimSuffix(s, "G")
-	case strings.HasSuffix(s, "M"):
-		s = strings.TrimSuffix(s, "M")
-	case strings.HasSuffix(s, "K"):
-		s = strings.TrimSuffix(s, "K")
-		if v, err := strconv.Atoi(s); err == nil {
-			return v / 1024
-		}
-		return 0
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		return 0
-	}
-	return v * mult
 }
 
 func fatal(format string, args ...any) {

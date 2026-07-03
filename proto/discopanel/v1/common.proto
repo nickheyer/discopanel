@@ -83,10 +83,11 @@ message Server {
   int64 memory_usage = 21;
   double cpu_percent = 22;
   int32 cpu_cores = 40;
-  int64 disk_usage = 23;
-  int64 disk_total = 24;
+  int64 disk_usage = 23; // Bytes this server's data dir occupies
+  int64 disk_total = 24; // Bytes the volume holds in total
+  int64 disk_used = 47; // Bytes used on the volume by everything
   int32 players_online = 25;
-  int64 world_size = 39;
+  int64 world_size = 39; // Bytes of the world directories alone
   double tps = 26;
 
   // Additional configuration

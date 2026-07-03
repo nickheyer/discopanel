@@ -37,7 +37,7 @@ service ServerService {
   rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
   // Upload server logs to mclo.gs
   rpc UploadToMCLogs(UploadToMCLogsRequest) returns (UploadToMCLogsResponse);
-  // Graded performance findings for a server (the autopilot report card)
+  // Performance findings for a server (the autopilot health check)
   rpc GetServerPerformanceReport(GetServerPerformanceReportRequest) returns (GetServerPerformanceReportResponse);
   // Apply a one-click fix suggested by a performance finding
   rpc ApplyPerformanceFix(ApplyPerformanceFixRequest) returns (ApplyPerformanceFixResponse);
@@ -260,11 +260,10 @@ message PerformanceFinding {
   string fix_label = 6;
 }
 
-// The performance report card
+// The health check findings
 message GetServerPerformanceReportResponse {
-  string grade = 1; // A-F
-  repeated PerformanceFinding findings = 2;
-  bool agent_connected = 3;
+  repeated PerformanceFinding findings = 1;
+  bool agent_connected = 2;
 }
 
 // A one-click fix to apply (fix_id from a finding)

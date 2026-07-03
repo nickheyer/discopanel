@@ -41,9 +41,6 @@ func TestAnalyzeHeapVsLimit(t *testing.T) {
 	if !hasFinding(findings, "heap_headroom", v1.PerformanceSeverity_PERFORMANCE_SEVERITY_CRITICAL) {
 		t.Fatalf("expected critical heap_headroom finding, got %+v", findings)
 	}
-	if Grade(findings) == "A" {
-		t.Fatal("critical finding must not grade A")
-	}
 
 	// Auto memory silences the check.
 	cfg.AutoMemory = boolPtr(true)
@@ -75,9 +72,6 @@ func TestAnalyzeThrottlingAndGC(t *testing.T) {
 	if !hasFinding(findings, "tick_health", v1.PerformanceSeverity_PERFORMANCE_SEVERITY_CRITICAL) {
 		t.Errorf("expected critical tick_health, got %+v", findings)
 	}
-	if Grade(findings) != "F" {
-		t.Errorf("expected grade F, got %s", Grade(findings))
-	}
 
 	// The GC finding on Java 21 without ZGC offers the ZGC fix.
 	for _, f := range findings {
@@ -97,8 +91,10 @@ func TestAnalyzeHealthyServer(t *testing.T) {
 		GCPauseMaxMs:   40,
 	}
 	findings := Analyze(server, cfg, m)
-	if Grade(findings) != "A" {
-		t.Errorf("healthy server should grade A, got %s (%+v)", Grade(findings), findings)
+	for _, f := range findings {
+		if f.Severity >= v1.PerformanceSeverity_PERFORMANCE_SEVERITY_WARNING {
+			t.Errorf("healthy server should have no problems, got %+v", f)
+		}
 	}
 }
 

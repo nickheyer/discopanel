@@ -75,11 +75,11 @@ The degradation ladder, worst case being exactly the pre-agent behavior:
 
 ## The autopilot
 
-`internal/autopilot` turns the telemetry plus the server's configuration into the **performance report card**: a letter grade and plain-language findings, each with a one-click fix where one exists. It is pure analysis - reads the collector's cached state, and fixes just mutate a `ServerConfig` for the caller to persist. Served by `GetServerPerformanceReport` and `ApplyPerformanceFix` on the server service, rendered as a card on the server overview tab.
+`internal/autopilot` turns the telemetry plus the server's configuration into the **health check**: plain-language findings, each with a one-click fix where one exists. It is pure analysis - reads the collector's cached state, and fixes just mutate a `ServerConfig` for the caller to persist. Served by `GetServerPerformanceReport` and `ApplyPerformanceFix` on the server service, rendered as the health strip of the Server Status card on the server dashboard.
 
 The checks: heap vs container limit (warning when headroom is thin, critical when the heap can't fit), Aikar/MeowIce both enabled, ZGC suggestion for 12 GB+ heaps on Java 21+, CPU throttling (warning at 5% of CFS periods, critical at 20%), GC pauses (warning at 200 ms, critical at 1 s), tick health from MSPT (warning at 40 ms, critical at 50), heap over 92% full, and a crash within the last 24 hours.
 
 Two enforcement points back the report up at start time:
 
-- The **memory guardrail** (`lifecycle/guardrail.go`) clamps a heap that can't fit the container limit for that start only, logging to the server console. The stored config is untouched - the report card points at the real fix.
+- The **memory guardrail** (`lifecycle/guardrail.go`) clamps a heap that can't fit the container limit for that start only, logging to the server console. The stored config is untouched - the health check points at the real fix.
 - `-XX:ActiveProcessorCount` is pinned to the CFS quota by the supervisor, so GC and compiler thread pools stop being sized for the host's cores.

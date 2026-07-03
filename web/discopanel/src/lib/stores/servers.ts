@@ -47,10 +47,6 @@ export const runningServers = derived(serversStore, ($servers) =>
 	$servers.filter((server) => server.status === ServerStatus.RUNNING)
 );
 
-export const stoppedServers = derived(serversStore, ($servers) =>
-	$servers.filter((server) => server.status === ServerStatus.STOPPED)
-);
-
 function getTimestampMs(ts: { seconds: bigint } | undefined): number {
 	if (!ts) return 0;
 	return Number(ts.seconds) * 1000;

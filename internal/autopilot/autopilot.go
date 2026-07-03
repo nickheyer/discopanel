@@ -1,5 +1,5 @@
 // Package autopilot turns runtime telemetry and server configuration into a
-// graded performance report with plain-language findings and one-click fixes.
+// performance report with plain-language findings and one-click fixes.
 // It is pure analysis: reading happens over the metrics collector's cached
 // state, fixes mutate a ServerConfig for the caller to persist.
 package autopilot
@@ -67,25 +67,6 @@ func Analyze(server *storage.Server, cfg *storage.ServerConfig, m *metrics.Serve
 		})
 	}
 	return findings
-}
-
-// Grade maps findings to a letter grade: each warning costs one step, each
-// critical costs two.
-func Grade(findings []Finding) string {
-	score := 0
-	for _, f := range findings {
-		switch f.Severity {
-		case v1.PerformanceSeverity_PERFORMANCE_SEVERITY_WARNING:
-			score++
-		case v1.PerformanceSeverity_PERFORMANCE_SEVERITY_CRITICAL:
-			score += 2
-		}
-	}
-	grades := []string{"A", "B", "C", "D", "F"}
-	if score >= len(grades) {
-		score = len(grades) - 1
-	}
-	return grades[score]
 }
 
 // ApplyFix mutates cfg according to a finding's fix. The caller persists the

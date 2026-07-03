@@ -9,8 +9,7 @@ import (
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
-// GetServerPerformanceReport runs the autopilot checks against a server's
-// configuration and latest telemetry and returns the graded report card.
+// Runs autopilot checks and returns the health check findings
 func (s *ServerService) GetServerPerformanceReport(ctx context.Context, req *connect.Request[v1.GetServerPerformanceReportRequest]) (*connect.Response[v1.GetServerPerformanceReportResponse], error) {
 	server, err := s.store.GetServer(ctx, req.Msg.Id)
 	if err != nil {
@@ -46,7 +45,6 @@ func (s *ServerService) GetServerPerformanceReport(ctx context.Context, req *con
 	}
 
 	return connect.NewResponse(&v1.GetServerPerformanceReportResponse{
-		Grade:          autopilot.Grade(findings),
 		Findings:       protoFindings,
 		AgentConnected: agentConnected,
 	}), nil

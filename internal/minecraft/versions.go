@@ -126,23 +126,6 @@ func GetLatestVersion() string {
 	return "0"
 }
 
-// Returns a list of all Minecraft release versions
-func GetVersions() []string {
-	manifest, err := fetchVersionManifest()
-	if err != nil {
-		return []string{}
-	}
-
-	var versions []string
-	for _, version := range manifest.Versions {
-		if version.Type == "release" {
-			versions = append(versions, version.ID)
-		}
-	}
-
-	return versions
-}
-
 // Returns all versions including snapshots
 func GetAllVersions() []string {
 	manifest, err := fetchVersionManifest()
@@ -156,38 +139,6 @@ func GetAllVersions() []string {
 	}
 
 	return versions
-}
-
-// Checks if a given version string is a valid Minecraft version
-func IsValidVersion(version string) bool {
-	manifest, err := fetchVersionManifest()
-	if err != nil {
-		return false
-	}
-
-	for _, v := range manifest.Versions {
-		if v.ID == version {
-			return true
-		}
-	}
-
-	return false
-}
-
-// Returns the release date of a Minecraft version
-func GetVersionDate(version string) (time.Time, error) {
-	manifest, err := fetchVersionManifest()
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	for _, v := range manifest.Versions {
-		if v.ID == version {
-			return v.ReleaseTime, nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("version %s not found", version)
 }
 
 // Returns detailed information about a specific version
@@ -204,32 +155,6 @@ func GetVersionInfo(version string) (*Version, error) {
 	}
 
 	return nil, fmt.Errorf("version %s not found", version)
-}
-
-// Returns the latest snapshot version
-func GetLatestSnapshot() string {
-	manifest, err := fetchVersionManifest()
-	if err != nil {
-		return ""
-	}
-
-	return manifest.Latest.Snapshot
-}
-
-// Checks if a version is a snapshot
-func IsSnapshot(version string) bool {
-	manifest, err := fetchVersionManifest()
-	if err != nil {
-		return false
-	}
-
-	for _, v := range manifest.Versions {
-		if v.ID == version {
-			return v.Type == "snapshot"
-		}
-	}
-
-	return false
 }
 
 // Fetches the full metadata document for a specific Minecraft version

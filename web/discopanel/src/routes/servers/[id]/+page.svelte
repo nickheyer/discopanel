@@ -389,46 +389,46 @@
 			class="mb-6 grid shrink-0 grid-cols-1 gap-4 sm:mb-8 sm:grid-cols-2 sm:gap-5 xl:grid-cols-4"
 		>
 			<Card
-				class="group relative overflow-hidden border-0 bg-linear-to-br from-background via-background/95 to-background/90 shadow-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl"
+				class="group relative overflow-hidden border-0 bg-linear-to-br from-background via-background/95 to-background/90 pb-0 shadow-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl"
 			>
 				{#if server.status === ServerStatus.RUNNING}
 					<div
-						class="absolute inset-0 bg-linear-to-br from-green-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+						class="pointer-events-none absolute inset-0 bg-linear-to-br from-green-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 					<div
 						class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-green-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 				{:else if server.status === ServerStatus.UNHEALTHY}
 					<div
-						class="absolute inset-0 bg-linear-to-br from-purple-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+						class="pointer-events-none absolute inset-0 bg-linear-to-br from-purple-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 					<div
 						class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-purple-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 				{:else if server.status === ServerStatus.STOPPED}
 					<div
-						class="absolute inset-0 bg-linear-to-br from-gray-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+						class="pointer-events-none absolute inset-0 bg-linear-to-br from-gray-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 					<div
 						class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-gray-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 				{:else if server.status === ServerStatus.STARTING}
 					<div
-						class="absolute inset-0 bg-linear-to-br from-yellow-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+						class="pointer-events-none absolute inset-0 bg-linear-to-br from-yellow-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 					<div
 						class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-yellow-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 				{:else if server.status === ServerStatus.CREATING}
 					<div
-						class="absolute inset-0 bg-linear-to-br from-blue-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+						class="pointer-events-none absolute inset-0 bg-linear-to-br from-blue-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 					<div
 						class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-blue-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 				{:else}
 					<div
-						class="absolute inset-0 bg-linear-to-br from-orange-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+						class="pointer-events-none absolute inset-0 bg-linear-to-br from-orange-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 					></div>
 					<div
 						class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-orange-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
@@ -504,7 +504,7 @@
 						{/if}
 					</div>
 				</CardHeader>
-				<CardContent class="pt-1">
+				<CardContent class="flex-1 pt-1">
 					<div class="space-y-4">
 						<div class="relative">
 							<div
@@ -589,7 +589,7 @@
 							</div>
 							<p class="text-xs text-muted-foreground/70">
 								{#if server.status === ServerStatus.RUNNING}
-									Server healthy and responding
+									Online and accepting players
 								{:else if server.status === ServerStatus.UNHEALTHY}
 									Server temporarily unresponsive
 								{:else if server.status === ServerStatus.STOPPED}
@@ -615,174 +615,87 @@
 						</div>
 					</div>
 				</CardContent>
+
+				<!-- Health Check Section (bottom strip) -->
+				<ServerPerformance {server} />
 			</Card>
 
 			<Card
-				class="group relative overflow-hidden border-0 bg-linear-to-br from-background via-background/95 to-background/90 shadow-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl"
+				class="group relative flex flex-col overflow-hidden border-0 bg-linear-to-br from-background via-background/95 to-background/90 pb-0 shadow-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl"
 			>
 				<div
-					class="absolute inset-0 bg-linear-to-br from-blue-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+					class="pointer-events-none absolute inset-0 bg-linear-to-br from-blue-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 				></div>
 				<div
 					class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-blue-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 				></div>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
-					<div class="space-y-1">
-						<CardTitle class="text-xs font-bold tracking-widest text-muted-foreground/70 uppercase"
-							>Connection</CardTitle
-						>
-						<p class="text-xs text-muted-foreground/50">Server address</p>
-					</div>
-					<div class="relative">
-						<div
-							class="absolute inset-0 rounded-2xl bg-linear-to-br from-blue-500/20 to-blue-600/20 opacity-0 blur-xl transition-opacity duration-500 group-hover:opacity-100"
-						></div>
-						<div
-							class="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-blue-500/10 to-blue-600/10 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3"
-						>
-							<ExternalLink class="h-7 w-7 text-blue-500 group-hover:animate-pulse" />
-						</div>
-					</div>
-				</CardHeader>
-				<CardContent class="pt-1">
-					<div class="group/copy relative">
-						<div
-							class="absolute inset-0 rounded-xl bg-linear-to-r from-blue-500/10 to-purple-500/10 opacity-0 blur-xl transition-opacity duration-500 group-hover/copy:opacity-100"
-						></div>
-						<div
-							class="relative flex items-center justify-between rounded-xl border border-border/50 bg-linear-to-r from-muted/50 to-muted/30 p-3 backdrop-blur-sm transition-all duration-300 group-hover/copy:border-primary/30"
-						>
-							<div class="min-w-0 flex-1">
-								<span class="block truncate font-mono text-sm font-bold text-foreground/90">
-									{#if server.proxyHostname}
-										{server.proxyHostname}
-									{:else}
-										localhost:{server.port}
-									{/if}
-								</span>
-								<span class="mt-1 block text-xs text-muted-foreground/60">Click to copy</span>
-							</div>
-							<Button
-								size="icon"
-								variant="ghost"
-								onclick={() => {
-									if (!server) return;
-									const connectionString = server.proxyHostname || `localhost:${server.port}`;
-									copyToClipboard(connectionString);
-								}}
-								class="transition-all duration-300 hover:scale-110 hover:bg-primary/20 hover:text-primary"
-							>
-								<Copy class="h-4 w-4" />
-							</Button>
-						</div>
-					</div>
-				</CardContent>
-			</Card>
 
-			<Card
-				class="group relative flex flex-col overflow-hidden border-0 bg-linear-to-br from-background via-background/95 to-background/90 shadow-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl"
-			>
-				<div
-					class="absolute inset-0 bg-linear-to-br from-purple-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-				></div>
-				<div
-					class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-purple-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-				></div>
-
-				<!-- Server Info Section (2/3) -->
-				<div class="flex min-h-0 flex-2 flex-col">
-					<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
+				<!-- Connection Section (top half) -->
+				<div class="flex min-h-0 flex-1 flex-col">
+					<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-3">
 						<div class="space-y-1">
 							<CardTitle
 								class="text-xs font-bold tracking-widest text-muted-foreground/70 uppercase"
-								>Server Info</CardTitle
+								>Connection</CardTitle
 							>
-							<p class="text-xs text-muted-foreground/50">Details & versions</p>
+							<p class="text-xs text-muted-foreground/50">Server address</p>
 						</div>
 						<div class="relative">
 							<div
-								class="absolute inset-0 rounded-2xl bg-linear-to-br from-purple-500/20 to-purple-600/20 opacity-0 blur-xl transition-opacity duration-500 group-hover:opacity-100"
+								class="absolute inset-0 rounded-2xl bg-linear-to-br from-blue-500/20 to-blue-600/20 opacity-0 blur-xl transition-opacity duration-500 group-hover:opacity-100"
 							></div>
 							<div
-								class="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-purple-500/10 to-purple-600/10 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3"
+								class="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-blue-500/10 to-blue-600/10 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3"
 							>
-								<Info class="h-6 w-6 text-purple-500 group-hover:animate-pulse" />
+								<ExternalLink class="h-7 w-7 text-blue-500 group-hover:animate-pulse" />
 							</div>
 						</div>
 					</CardHeader>
-					<CardContent class="flex-1 scrollbar-thin overflow-y-auto pt-0 pb-2">
-						<div class="space-y-1.5">
-							<div class="flex items-center justify-between">
-								<span class="text-[10px] text-muted-foreground/60">Minecraft</span>
-								<span class="font-mono text-[11px] font-semibold text-purple-500"
-									>{server.mcVersion}</span
-								>
-							</div>
-							{#if server.javaVersion}
-								<div class="flex items-center justify-between">
-									<span class="text-[10px] text-muted-foreground/60">Java</span>
-									<span class="font-mono text-[11px] font-semibold text-purple-400"
-										>Java {server.javaVersion}</span
-									>
-								</div>
-							{/if}
-							<div class="flex items-center justify-between">
-								<span class="text-[10px] text-muted-foreground/60">Mod Loader</span>
-								{#if server.modLoader === ModLoader.VANILLA}
-									<Badge
-										variant="secondary"
-										class="h-4 border-yellow-500/20 bg-yellow-500/10 px-1.5 py-0 text-[10px]"
-									>
-										Vanilla
-									</Badge>
-								{:else if server.modLoader === ModLoader.FORGE || server.modLoader === ModLoader.NEOFORGE}
-									<Badge
-										variant="secondary"
-										class="h-4 border-orange-500/20 bg-orange-500/10 px-1.5 py-0 text-[10px]"
-									>
-										{server.modLoader === ModLoader.FORGE ? 'Forge' : 'NeoForge'}
-									</Badge>
-								{:else if server.modLoader === ModLoader.FABRIC}
-									<Badge
-										variant="secondary"
-										class="h-4 border-blue-500/20 bg-blue-500/10 px-1.5 py-0 text-[10px]"
-									>
-										Fabric
-									</Badge>
-								{:else}
-									<Badge variant="secondary" class="h-4 px-1.5 py-0 text-[10px] capitalize">
-										{ModLoader[server.modLoader]}
-									</Badge>
-								{/if}
-							</div>
+					<CardContent class="flex-1 pt-1 pb-6">
+						<div class="group/copy relative">
 							<div
-								class="group/copy flex cursor-pointer items-center justify-between"
-								onclick={() => copyToClipboard(server?.id)}
+								class="absolute inset-0 rounded-xl bg-linear-to-r from-blue-500/10 to-purple-500/10 opacity-0 blur-xl transition-opacity duration-500 group-hover/copy:opacity-100"
+							></div>
+							<div
+								class="relative flex items-center justify-between rounded-xl border border-border/50 bg-linear-to-r from-muted/50 to-muted/30 p-3 backdrop-blur-sm transition-all duration-300 group-hover/copy:border-primary/30"
 							>
-								<span class="text-[10px] text-muted-foreground/60">Server ID</span>
-								<div class="flex items-center gap-1">
-									<span class="max-w-20 truncate font-mono text-[10px] text-muted-foreground/70">
-										{server.id}
+								<div class="min-w-0 flex-1">
+									<span class="block truncate font-mono text-sm font-bold text-foreground/90">
+										{#if server.proxyHostname}
+											{server.proxyHostname}
+										{:else}
+											localhost:{server.port}
+										{/if}
 									</span>
-									<Copy
-										class="h-2.5 w-2.5 text-muted-foreground/40 opacity-0 transition-opacity group-hover/copy:opacity-100"
-									/>
+									<span class="mt-1 block text-xs text-muted-foreground/60">Click to copy</span>
 								</div>
+								<Button
+									size="icon"
+									variant="ghost"
+									onclick={() => {
+										if (!server) return;
+										const connectionString = server.proxyHostname || `localhost:${server.port}`;
+										copyToClipboard(connectionString);
+									}}
+									class="transition-all duration-300 hover:scale-110 hover:bg-primary/20 hover:text-primary"
+								>
+									<Copy class="h-4 w-4" />
+								</Button>
 							</div>
 						</div>
 					</CardContent>
 				</div>
 
-				<!-- Players Section (1/3) -->
+				<!-- Players Section (bottom strip) -->
 				{#if server.playersOnline !== undefined}
 					{@const maxPlayers = server.maxPlayersSlp || server.maxPlayers}
 					{@const playersPercent = (server.playersOnline / maxPlayers) * 100}
 					{@const colors = getPlayerCountColors(playersPercent)}
 					<div
-						class="flex-1 border-t border-border/30 transition-colors duration-500"
+						class="mt-auto border-t border-border/30 transition-colors duration-500"
 						style="background: linear-gradient(to bottom, rgb({colors.bg} / 0.05), transparent);"
 					>
-						<div class="px-6 py-3">
+						<div class="px-6 pt-3 pb-4">
 							<div class="mb-2 flex items-center justify-between">
 								<span
 									class="text-[10px] font-bold tracking-widest text-muted-foreground/70 uppercase"
@@ -835,9 +748,9 @@
 					</div>
 				{:else}
 					<div
-						class="flex-1 border-t border-border/30 bg-linear-to-b from-gray-500/5 to-transparent"
+						class="mt-auto border-t border-border/30 bg-linear-to-b from-gray-500/5 to-transparent"
 					>
-						<div class="px-6 py-3">
+						<div class="px-6 pt-3 pb-4">
 							<div class="mb-2 flex items-center justify-between">
 								<span
 									class="text-[10px] font-bold tracking-widest text-muted-foreground/70 uppercase"
@@ -852,10 +765,101 @@
 			</Card>
 
 			<Card
+				class="group relative flex flex-col overflow-hidden border-0 bg-linear-to-br from-background via-background/95 to-background/90 shadow-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl"
+			>
+				<div
+					class="pointer-events-none absolute inset-0 bg-linear-to-br from-purple-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+				></div>
+				<div
+					class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-purple-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+				></div>
+
+				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
+					<div class="space-y-1">
+						<CardTitle class="text-xs font-bold tracking-widest text-muted-foreground/70 uppercase"
+							>Server Info</CardTitle
+						>
+						<p class="text-xs text-muted-foreground/50">Details & versions</p>
+					</div>
+					<div class="relative">
+						<div
+							class="absolute inset-0 rounded-2xl bg-linear-to-br from-purple-500/20 to-purple-600/20 opacity-0 blur-xl transition-opacity duration-500 group-hover:opacity-100"
+						></div>
+						<div
+							class="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-purple-500/10 to-purple-600/10 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3"
+						>
+							<Info class="h-6 w-6 text-purple-500 group-hover:animate-pulse" />
+						</div>
+					</div>
+				</CardHeader>
+				<CardContent class="flex-1 scrollbar-thin overflow-y-auto pt-0 pb-2">
+					<div class="space-y-1.5">
+						<div class="flex items-center justify-between">
+							<span class="text-[10px] text-muted-foreground/60">Minecraft</span>
+							<span class="font-mono text-[11px] font-semibold text-purple-500"
+								>{server.mcVersion}</span
+							>
+						</div>
+						{#if server.javaVersion}
+							<div class="flex items-center justify-between">
+								<span class="text-[10px] text-muted-foreground/60">Java</span>
+								<span class="font-mono text-[11px] font-semibold text-purple-400"
+									>Java {server.javaVersion}</span
+								>
+							</div>
+						{/if}
+						<div class="flex items-center justify-between">
+							<span class="text-[10px] text-muted-foreground/60">Mod Loader</span>
+							{#if server.modLoader === ModLoader.VANILLA}
+								<Badge
+									variant="secondary"
+									class="h-4 border-yellow-500/20 bg-yellow-500/10 px-1.5 py-0 text-[10px]"
+								>
+									Vanilla
+								</Badge>
+							{:else if server.modLoader === ModLoader.FORGE || server.modLoader === ModLoader.NEOFORGE}
+								<Badge
+									variant="secondary"
+									class="h-4 border-orange-500/20 bg-orange-500/10 px-1.5 py-0 text-[10px]"
+								>
+									{server.modLoader === ModLoader.FORGE ? 'Forge' : 'NeoForge'}
+								</Badge>
+							{:else if server.modLoader === ModLoader.FABRIC}
+								<Badge
+									variant="secondary"
+									class="h-4 border-blue-500/20 bg-blue-500/10 px-1.5 py-0 text-[10px]"
+								>
+									Fabric
+								</Badge>
+							{:else}
+								<Badge variant="secondary" class="h-4 px-1.5 py-0 text-[10px] capitalize">
+									{ModLoader[server.modLoader]}
+								</Badge>
+							{/if}
+						</div>
+						<div
+							class="group/copy flex cursor-pointer items-center justify-between"
+							onclick={() => copyToClipboard(server?.id)}
+						>
+							<span class="text-[10px] text-muted-foreground/60">Server ID</span>
+							<div class="flex items-center gap-1">
+								<span class="max-w-20 truncate font-mono text-[10px] text-muted-foreground/70">
+									{server.id}
+								</span>
+								<Copy
+									class="h-2.5 w-2.5 text-muted-foreground/40 opacity-0 transition-opacity group-hover/copy:opacity-100"
+								/>
+							</div>
+						</div>
+					</div>
+				</CardContent>
+			</Card>
+
+			<Card
 				class="group relative overflow-hidden border-0 bg-linear-to-br from-background via-background/95 to-background/90 shadow-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl"
 			>
 				<div
-					class="absolute inset-0 bg-linear-to-br from-orange-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+					class="pointer-events-none absolute inset-0 bg-linear-to-br from-orange-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
 				></div>
 				<div
 					class="absolute top-0 right-0 left-0 h-1 bg-linear-to-r from-transparent via-orange-500/50 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
@@ -943,7 +947,7 @@
 									class="flex h-3 {server.cpuCores > 16 ? 'gap-px' : 'gap-0.5'}"
 									title="{server.cpuPercent.toFixed(0)}% total across {server.cpuCores} cores"
 								>
-									{#each Array.from({ length: server.cpuCores }) as _, i}
+									{#each Array.from({ length: server.cpuCores }) as _, i (i)}
 										{@const fill = Math.min(Math.max(server.cpuPercent - i * 100, 0), 100)}
 										<div
 											class="relative h-full flex-1 overflow-hidden rounded-full bg-linear-to-r from-muted/50 to-muted/30"
@@ -988,9 +992,9 @@
 						<div>
 							<div class="mb-1.5 flex items-center justify-between">
 								<span class="text-xs font-semibold text-muted-foreground/70">STORAGE</span>
-								{#if server.diskUsage !== undefined && Number(server.diskUsage) > 0}
+								{#if Number(server.diskUsage) > 0}
 									<span class="font-mono text-xs text-purple-500"
-										>{formatBytes(Number(server.diskUsage))} (world)</span
+										>{formatBytes(Number(server.diskUsage))}</span
 									>
 								{:else}
 									<span class="font-mono text-xs text-muted-foreground/50">--</span>
@@ -998,30 +1002,58 @@
 							</div>
 							<div
 								class="relative h-3 overflow-hidden rounded-full bg-linear-to-r from-muted/50 to-muted/30"
+								title={Number(server.diskTotal) > 0
+									? `this server ${formatBytes(Number(server.diskUsage))}, disk ${formatBytes(
+											Number(server.diskUsed)
+										)} of ${formatBytes(Number(server.diskTotal))} used`
+									: 'measuring disk usage'}
 							>
-								{#if server.diskUsage !== undefined && Number(server.diskUsage) > 0 && server.diskTotal}
-									{@const diskPercent = (Number(server.diskUsage) / Number(server.diskTotal)) * 100}
+								{#if Number(server.diskTotal) > 0}
+									<!-- everything used on the volume -->
 									<div
-										class="relative h-full rounded-full bg-linear-to-r from-purple-500 to-pink-500 transition-all duration-700"
-										style="width: {Math.min(diskPercent, 100)}%"
-									>
+										class="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/25 transition-all duration-700"
+										style="width: {Math.min(
+											(Number(server.diskUsed) / Number(server.diskTotal)) * 100,
+											100
+										)}%"
+									></div>
+									<!-- server slice, min width stays visible on huge disks -->
+									{#if Number(server.diskUsage) > 0}
 										<div
-											class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"
-										></div>
-									</div>
-								{:else}
-									<div class="h-full bg-muted/50"></div>
+											class="absolute inset-y-0 left-0 rounded-full bg-linear-to-r from-purple-500 to-pink-500 transition-all duration-700"
+											style="width: {Math.min(
+												Math.max((Number(server.diskUsage) / Number(server.diskTotal)) * 100, 2),
+												100
+											)}%"
+										>
+											<div
+												class="absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent"
+											></div>
+										</div>
+									{/if}
 								{/if}
 							</div>
-							{#if server.diskUsage !== undefined && Number(server.diskUsage) > 0}
-								<p class="mt-1 text-[10px] text-muted-foreground/50">
-									{#if server.diskTotal}
-										{((Number(server.diskUsage) / Number(server.diskTotal)) * 100).toFixed(1)}% of {formatBytes(
-											Number(server.diskTotal)
-										)} used
+							<p
+								class="mt-1 flex items-center justify-between text-[10px] text-muted-foreground/50"
+							>
+								<span>
+									{#if Number(server.worldSize) > 0}
+										world {formatBytes(Number(server.worldSize))}
+									{:else if Number(server.diskUsage) > 0}
+										no world saved yet
+									{:else}
+										measuring server data...
 									{/if}
-								</p>
-							{/if}
+								</span>
+								{#if Number(server.diskTotal) > 0}
+									<span
+										>{formatBytes(Number(server.diskTotal) - Number(server.diskUsed), 1)} free of {formatBytes(
+											Number(server.diskTotal),
+											1
+										)}</span
+									>
+								{/if}
+							</p>
 						</div>
 
 						<!-- TPS -->
@@ -1107,7 +1139,6 @@
 
 			<div class="min-h-0 flex-1 overflow-hidden">
 				<TabsContent value="overview" class="h-full space-y-4">
-					<ServerPerformance {server} />
 					<Card class="border-border/50 shadow-sm">
 						<CardHeader class="pb-4">
 							<CardTitle class="text-xl">Server Settings</CardTitle>

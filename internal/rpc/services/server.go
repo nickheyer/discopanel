@@ -85,6 +85,7 @@ func (s *ServerService) applyMetrics(server *storage.Server) {
 	server.CPUCores = m.CPUCount
 	server.DiskUsage = m.DiskUsage
 	server.DiskTotal = m.DiskTotal
+	server.DiskUsed = m.DiskUsed
 	server.WorldSize = m.WorldSize
 	server.PlayersOnline = m.PlayersOnline
 	server.TPS = m.TPS
@@ -139,6 +140,7 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		CpuCores:        int32(server.CPUCores),
 		DiskUsage:       server.DiskUsage,
 		DiskTotal:       server.DiskTotal,
+		DiskUsed:        server.DiskUsed,
 		WorldSize:       server.WorldSize,
 		PlayersOnline:   int32(server.PlayersOnline),
 		Tps:             server.TPS,

@@ -64,7 +64,6 @@ type ModpackRef struct {
 	Source    string `json:"source"` // "curseforge" | "modrinth" | "zip"
 	ID        string `json:"id"`
 	VersionID string `json:"version_id,omitempty"`
-	FileHash  string `json:"file_hash,omitempty"`
 }
 
 // Manifest records the provisioned state of a server data directory.

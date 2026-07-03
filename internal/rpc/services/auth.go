@@ -133,7 +133,7 @@ func (s *AuthService) Register(ctx context.Context, req *connect.Request[v1.Regi
 			}
 		}
 	} else if !isFirstUser && !s.authManager.IsRegistrationAllowed() {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("registration is disabled"))
+		return nil, connect.NewError(connect.CodePermissionDenied, auth.ErrRegistrationDisabled)
 	}
 
 	if msg.Username == "" || msg.Password == "" {

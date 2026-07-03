@@ -75,7 +75,6 @@ func main() {
 	dockerClient, err := docker.NewClient(cfg.Docker.Host, log, docker.ClientConfig{
 		APIVersion:   cfg.Docker.Version,
 		NetworkName:  cfg.Docker.NetworkName,
-		RegistryURL:  cfg.Docker.RegistryURL,
 		RuntimeImage: cfg.Docker.RuntimeImage,
 		DNS:          cfg.Docker.DNS,
 		Labels:       cfg.Docker.Labels,
@@ -350,13 +349,12 @@ func main() {
 		}
 	}()
 
-	// Setup HTTP server
+	// No body deadlines, agent streams stay open for hours
 	srv := &http.Server{
-		Addr:         fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),
-		Handler:      rpcServer.Handler(),
-		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
-		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
-		IdleTimeout:  time.Duration(cfg.Server.IdleTimeout) * time.Second,
+		Addr:              fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),
+		Handler:           rpcServer.Handler(),
+		ReadHeaderTimeout: time.Duration(cfg.Server.ReadHeaderTimeout) * time.Second,
+		IdleTimeout:       time.Duration(cfg.Server.IdleTimeout) * time.Second,
 	}
 
 	// Start server in goroutine

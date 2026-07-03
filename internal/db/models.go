@@ -105,6 +105,7 @@ type Server struct {
 	CPUCores      int     `json:"cpu_cores" gorm:"-"`      // CPU cores visible to the container
 	DiskUsage     int64   `json:"disk_usage" gorm:"-"`     // Total server data size in bytes
 	DiskTotal     int64   `json:"disk_total" gorm:"-"`     // Total disk space available in bytes
+	DiskUsed      int64   `json:"disk_used" gorm:"-"`      // Volume used bytes across all data
 	WorldSize     int64   `json:"world_size" gorm:"-"`     // World directory size in bytes
 	PlayersOnline int     `json:"players_online" gorm:"-"` // Current players online
 	TPS           float64 `json:"tps" gorm:"-"`            // Current TPS (20 is optimal)

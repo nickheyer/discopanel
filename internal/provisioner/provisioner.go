@@ -83,13 +83,6 @@ type desiredModpack struct {
 	versionID string // empty means "whatever is installed / latest on install"
 }
 
-func (d *desiredModpack) key() string {
-	if d == nil {
-		return ""
-	}
-	return d.source + ":" + d.id
-}
-
 // Ensure brings the server data directory to the desired provisioned state and
 // guarantees a valid launch spec and configuration files exist. It is
 // idempotent: matching manifests skip installation, and configuration files
@@ -306,13 +299,6 @@ func strVal(s *string) string {
 
 func boolVal(b *bool) bool {
 	return b != nil && *b
-}
-
-func intVal(i *int) int {
-	if i == nil {
-		return 0
-	}
-	return *i
 }
 
 func fileExists(path string) bool {

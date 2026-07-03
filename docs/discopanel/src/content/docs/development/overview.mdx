@@ -48,7 +48,7 @@ The design rule that shapes everything: **containers hold nothing but Java and a
 | `internal/proxy` | Hostname routing, listeners, sleep and wake handling. See [Proxy & Networking](/development/proxy/). |
 | `internal/metrics` | SLP, RCON, docker-stats and disk polling, plus the intake for agent-pushed telemetry. Doubles as the health source and the player counter. |
 | `internal/agent` | Panel-side hub for live runtime agent sessions. Routes telemetry into the collector and the bus. See [Runtime Agent](/development/agent/). |
-| `internal/autopilot` | The performance report card: graded findings with one-click fixes, computed from telemetry and config. |
+| `internal/autopilot` | The health check: findings with one-click fixes, computed from telemetry and config. |
 | `internal/events` | The synchronous event bus every subsystem publishes to. See [Events & Automation](/development/events/). |
 | `internal/scheduler` | Scheduled and event-triggered tasks: commands, backups, restarts, scripts, webhooks. |
 | `internal/webhook` | Webhook payload building, HMAC signing, delivery with retries. |

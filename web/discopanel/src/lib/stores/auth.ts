@@ -328,7 +328,6 @@ export const authStore = createAuthStore();
 // Derived stores for convenience
 export const isAuthenticated = derived(authStore, ($auth) => $auth.isAuthenticated);
 export const currentUser = derived(authStore, ($auth) => $auth.user);
-export const userPermissions = derived(authStore, ($auth) => $auth.permissions);
 export const authEnabled = derived(
 	authStore,
 	($auth) => $auth.localAuthEnabled || $auth.oidcEnabled
@@ -364,15 +363,6 @@ export const canReadSettings = derived(authStore, ($auth) =>
 );
 export const canUpdateSettings = derived(authStore, ($auth) =>
 	checkPermission($auth.permissions, 'settings', 'update')
-);
-export const canReadServers = derived(authStore, ($auth) =>
-	checkPermission($auth.permissions, 'servers', 'read')
-);
-export const canCreateServers = derived(authStore, ($auth) =>
-	checkPermission($auth.permissions, 'servers', 'create')
-);
-export const canReadModpacks = derived(authStore, ($auth) =>
-	checkPermission($auth.permissions, 'modpacks', 'read')
 );
 
 // Check if user has any settings-adjacent permission (for sidebar visibility)

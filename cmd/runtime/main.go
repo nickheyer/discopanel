@@ -117,6 +117,9 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		for sig := range sigCh {
+			sup.mu.Lock()
+			sup.stopRequested = true
+			sup.mu.Unlock()
 			sup.send(msgStopping())
 			_ = cmd.Process.Signal(sig)
 		}
@@ -164,14 +167,15 @@ type supervisor struct {
 	stdinMu sync.Mutex
 	stdin   interface{ Write([]byte) (int, error) }
 
-	mu           sync.Mutex
-	ready        bool
-	readySeconds float64
-	commandList  []string      // cached mod command dump, resent on reconnect
-	session      *panelSession // active panel stream, nil when disconnected
-	modConn      *localModConn // active mod loopback connection
-	closed       chan struct{} // closed once, on process exit
-	closeOnce    sync.Once
+	mu            sync.Mutex
+	ready         bool
+	readySeconds  float64
+	stopRequested bool          // termination signal was forwarded to java
+	commandList   []string      // cached mod command dump, resent on reconnect
+	session       *panelSession // active panel stream, nil when disconnected
+	modConn       *localModConn // active mod loopback connection
+	closed        chan struct{} // closed once, on process exit
+	closeOnce     sync.Once
 }
 
 func (s *supervisor) done() chan struct{} {
@@ -269,14 +273,22 @@ func (s *supervisor) markReady(startupSeconds float64) {
 // reportExit sends the exit report (with crash forensics) to the panel while
 // the session is still alive.
 func (s *supervisor) reportExit(exitCode int) {
-	crashed := exitCode != 0
+	s.mu.Lock()
+	requested := s.stopRequested
+	s.mu.Unlock()
 	reportPath, excerpt := findCrashReport(s.startedAt)
-	if reportPath != "" {
-		crashed = true
-	}
+	crashed := isCrash(exitCode, requested, reportPath)
 	s.send(msgExited(exitCode, crashed, reportPath, excerpt))
 	// Give the sender goroutine a moment to flush before the process exits.
 	time.Sleep(500 * time.Millisecond)
+}
+
+// Decides crash, requested stops never count without a crash report
+func isCrash(exitCode int, stopRequested bool, reportPath string) bool {
+	if reportPath != "" {
+		return true
+	}
+	return exitCode != 0 && !stopRequested
 }
 
 // findCrashReport locates the newest crash report written after start and

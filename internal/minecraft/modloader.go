@@ -11,14 +11,13 @@ import (
 
 // ModLoaderInfo contains information about a specific mod loader
 type ModLoaderInfo struct {
-	Name              string
-	DisplayName       string
-	Description       string
-	Category          string
-	ModsDirectory     string
-	ConfigDirectory   string
-	SupportedVersions []string
-	FileExtensions    []string
+	Name            string
+	DisplayName     string
+	Description     string
+	Category        string
+	ModsDirectory   string
+	ConfigDirectory string
+	FileExtensions  []string
 }
 
 // GetModLoaderInfo returns information about a specific mod loader

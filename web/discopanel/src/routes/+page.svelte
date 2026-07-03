@@ -87,15 +87,13 @@
 		avgTps: dashboardServers
 			.filter((s) => s.tps && s.tps > 0)
 			.reduce((acc, s, _, arr) => acc + (s.tps || 0) / arr.length, 0),
-		totalDiskUsage: dashboardServers.reduce((acc, s) => acc + Number(s.diskUsage || 0), 0),
-		totalDiskSize:
-			dashboardServers.length > 0
-				? ` / ${dashboardServers?.[0]?.diskTotal && formatBytes(Number(dashboardServers[0].diskTotal))}`
-				: '',
 		avgCpu: dashboardServers
 			.filter((s) => s.cpuPercent && s.cpuPercent > 0)
 			.reduce((acc, s, _, arr) => acc + (s.cpuPercent || 0) / arr.length, 0)
 	});
+
+	// Any sampled server carries the shared volume numbers
+	let hostDisk = $derived(dashboardServers.find((s) => Number(s.diskTotal) > 0));
 
 	let recentActivity = $derived(
 		dashboardServers
@@ -691,10 +689,13 @@
 						<div class="flex items-center justify-between">
 							<span class="text-sm text-muted-foreground">Storage</span>
 							<div class="flex items-center gap-1">
-								{#if stats.totalDiskUsage > 0}
+								{#if hostDisk}
 									<Database class="h-4 w-4 text-blue-500" />
 									<span class="text-sm font-medium"
-										>{formatBytes(stats.totalDiskUsage)}{stats.totalDiskSize}</span
+										>{formatBytes(Number(hostDisk.diskUsed), 1)} / {formatBytes(
+											Number(hostDisk.diskTotal),
+											1
+										)} disk used</span
 									>
 								{:else}
 									<Database class="h-4 w-4 text-gray-400" />

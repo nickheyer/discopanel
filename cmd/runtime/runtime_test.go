@@ -73,6 +73,29 @@ func TestParseMemoryMB(t *testing.T) {
 	}
 }
 
+func TestIsCrash(t *testing.T) {
+	cases := []struct {
+		exitCode      int
+		stopRequested bool
+		reportPath    string
+		want          bool
+	}{
+		{0, false, "", false},
+		{1, false, "", true},
+		{143, false, "", true},
+		{143, true, "", false},
+		{130, true, "", false},
+		{0, true, "crash-reports/crash.txt", true},
+		{143, true, "crash-reports/crash.txt", true},
+	}
+	for _, c := range cases {
+		if got := isCrash(c.exitCode, c.stopRequested, c.reportPath); got != c.want {
+			t.Errorf("isCrash(%d, %v, %q) = %v, want %v",
+				c.exitCode, c.stopRequested, c.reportPath, got, c.want)
+		}
+	}
+}
+
 func TestReadyPattern(t *testing.T) {
 	ready := []string{
 		`[12:34:56] [Server thread/INFO]: Done (9.418s)! For help, type "help"`,

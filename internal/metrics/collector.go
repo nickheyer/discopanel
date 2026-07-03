@@ -24,7 +24,8 @@ type ServerMetrics struct {
 	CPUCount      int
 	MemoryUsage   float64 // MB
 	DiskUsage     int64   // bytes (total server data)
-	DiskTotal     int64   // bytes
+	DiskTotal     int64   // bytes (volume total)
+	DiskUsed      int64   // bytes (volume used, all data)
 	WorldSize     int64   // bytes (world directory only)
 	PlayersOnline int
 	TPS           float64
@@ -183,6 +184,11 @@ func (c *Collector) Start() error {
 	c.mu.Unlock()
 
 	c.log.Info("Starting metrics collector")
+
+	// Disk samples refresh on start and stop, not just the ticker
+	if c.bus != nil {
+		c.bus.Subscribe(c.onLifecycleEvent)
+	}
 
 	// Start collection goroutines
 	loopCount := 4 // stats, rcon, disk, lifecycle-events
@@ -412,30 +418,31 @@ func (c *Collector) collectDiskUsage() {
 		return
 	}
 
-	// Get total disk space once
-	diskTotal, err := files.GetDiskSpace(c.config.Storage.DataDir)
-	if err != nil {
-		c.log.Debug("Metrics collector: failed to get disk space: %v", err)
-		diskTotal = 0
+	for _, server := range servers {
+		c.sampleDiskUsage(server.ID, server.DataPath)
+	}
+}
+
+// Samples one server data dir and the volume it lives on
+func (c *Collector) sampleDiskUsage(serverID, dataPath string) {
+	if dataPath == "" {
+		return
 	}
 
-	for _, server := range servers {
-		if server.DataPath == "" {
-			continue
-		}
+	diskTotal, diskUsed, err := files.GetDiskSpace(dataPath)
+	if err != nil {
+		c.log.Debug("Metrics collector: failed to get disk space: %v", err)
+		diskTotal, diskUsed = 0, 0
+	}
 
-		totalSize, err := files.CalculateDirSize(server.DataPath)
-		if err != nil {
-			continue
-		}
+	totalSize, err := files.CalculateDirSize(dataPath)
+	if err != nil {
+		return
+	}
 
-		// Calculate world directory size, including dimension worlds
-		worldPaths, err := files.FindWorldDirs(server.DataPath)
-		if err != nil {
-			continue
-		}
-
-		var totalWorldSize int64
+	// A missing world means zero, other data still counts
+	var totalWorldSize int64
+	if worldPaths, err := files.FindWorldDirs(dataPath); err == nil {
 		for _, worldPath := range worldPaths {
 			size, err := files.CalculateDirSize(worldPath)
 			if err != nil {
@@ -443,14 +450,35 @@ func (c *Collector) collectDiskUsage() {
 			}
 			totalWorldSize += size
 		}
-
-		c.updateMetrics(server.ID, func(m *ServerMetrics) {
-			m.DiskUsage = totalSize
-			m.DiskTotal = diskTotal
-			m.WorldSize = totalWorldSize
-			m.LastUpdated = time.Now()
-		})
 	}
+
+	c.updateMetrics(serverID, func(m *ServerMetrics) {
+		m.DiskUsage = totalSize
+		m.DiskTotal = diskTotal
+		m.DiskUsed = diskUsed
+		m.WorldSize = totalWorldSize
+		m.LastUpdated = time.Now()
+	})
+}
+
+// Refreshes disk usage promptly after provisioning and world saves
+func (c *Collector) onLifecycleEvent(ctx context.Context, e events.Event) {
+	switch e.Type {
+	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START,
+		v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP,
+		v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_RESTART:
+	default:
+		return
+	}
+	go func() {
+		lookupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		server, err := c.store.GetServer(lookupCtx, e.ServerID)
+		if err != nil {
+			return
+		}
+		c.sampleDiskUsage(server.ID, server.DataPath)
+	}()
 }
 
 // Updates metrics for a server

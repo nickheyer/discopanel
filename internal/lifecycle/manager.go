@@ -255,19 +255,22 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 }
 
 // ensureContainer creates the container if missing, or recreates it when the
-// desired runtime image changed (e.g. new Java requirement after MC upgrade).
+// desired runtime image changed (a rebuilt tag or a new Java requirement).
 func (m *Manager) ensureContainer(ctx context.Context, server *storage.Server, serverCfg *storage.ServerConfig) error {
 	desired := m.docker.DesiredImage(server)
 	progress := func(line string) { m.console(server.ID, "%s", line) }
 
 	if server.ContainerID != "" {
-		current, err := m.docker.ContainerImage(ctx, server.ContainerID)
-		if err == nil && current == desired {
+		current, upToDate, err := m.docker.ContainerImageState(ctx, server.ContainerID, desired)
+		if err == nil && upToDate {
 			return nil
 		}
 		if err == nil && current != desired {
 			m.log.Info("lifecycle: %s image changed (%s -> %s), recreating container", server.Name, current, desired)
 			m.console(server.ID, "runtime image changed (%s -> %s), recreating container", current, desired)
+		} else if err == nil {
+			m.log.Info("lifecycle: %s runtime image %s was updated, recreating container", server.Name, desired)
+			m.console(server.ID, "runtime image updated, recreating container")
 		}
 		result, err := m.docker.RecreateContainer(ctx, server.ContainerID, server, serverCfg, progress)
 		if err != nil {

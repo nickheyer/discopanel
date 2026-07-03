@@ -189,8 +189,7 @@
 	}
 
 	function getCompatibleModLoaders(_mcVersion: string) {
-		// The proto doesn't include version compatibility info, so all loaders are shown
-		// Backend has SupportedVersions field but it's not populated or sent via proto
+		// The proto has no version compatibility info, all loaders shown
 		return modLoaders?.modloaders || [];
 	}
 </script>

@@ -87,7 +87,6 @@ type HealthChecker interface {
 type ClientConfig struct {
 	APIVersion   string
 	NetworkName  string
-	RegistryURL  string
 	RuntimeImage string
 	DNS          string
 	Labels       map[string]string
@@ -562,13 +561,22 @@ func (c *Client) IsContainerPaused(ctx context.Context, containerID string) (boo
 	return inspect.State.Status == "paused", nil
 }
 
-// ContainerImage returns the image reference a container was created from.
-func (c *Client) ContainerImage(ctx context.Context, containerID string) (string, error) {
+// Reports container image name and desired build match
+func (c *Client) ContainerImageState(ctx context.Context, containerID, desired string) (string, bool, error) {
 	inspect, err := c.docker.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return inspect.Config.Image, nil
+	name := inspect.Config.Image
+	if name != desired {
+		return name, false, nil
+	}
+	img, err := c.docker.ImageInspect(ctx, desired)
+	if err != nil {
+		// Tag missing locally, keep the container
+		return name, true, nil
+	}
+	return name, img.ID == inspect.Image, nil
 }
 
 // ContainerRunInfo is the raw run state used by the panel-side health tracker.

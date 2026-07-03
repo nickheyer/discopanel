@@ -18,7 +18,6 @@ var (
 	ErrSessionExpired   = errors.New("upload session expired")
 	ErrSessionCompleted = errors.New("upload session already completed")
 	ErrInvalidChunk     = errors.New("invalid chunk index")
-	ErrChunkExists      = errors.New("chunk already received")
 	ErrFileTooLarge     = errors.New("file exceeds maximum allowed size")
 )
 

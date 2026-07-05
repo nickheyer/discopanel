@@ -1,7 +1,7 @@
 import { browser } from '$app/environment';
 import { get } from 'svelte/store';
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
-import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
+import type { LogEntry, MetricsSample } from '$lib/proto/discopanel/v1/server_pb';
 import {
 	WSMessageType,
 	WebSocketClientMessageSchema,
@@ -13,6 +13,7 @@ import {
 	type WebSocketServerMessage,
 	type LogsMessage,
 	type LogMessage,
+	type MetricsMessage,
 	type CommandResultMessage
 } from '$lib/proto/discopanel/v1/websocket_pb';
 import { authStore } from '$lib/stores/auth';
@@ -28,14 +29,29 @@ type MessageHandler = (message: WebSocketServerMessage) => void;
 type LogHandler = (serverId: string, logs: LogEntry[]) => void;
 type LogEntryHandler = (serverId: string, logs: LogEntry[]) => void;
 type CommandResultHandler = (result: CommandResultMessage) => void;
+type MetricsHandler = (serverId: string, sample: MetricsSample) => void;
 
 class WebSocketClient {
 	private socket: WebSocket | null = null;
 	private reconnectAttempts = 0;
-	private maxReconnectAttempts = 5;
 	private reconnectDelay = 1000;
+	private static readonly MAX_RECONNECT_DELAY_MS = 30000;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private pingTimer: ReturnType<typeof setInterval> | null = null;
+	private shouldReconnect = false;
+
+	constructor() {
+		if (browser) {
+			// Recover promptly after network loss or tab sleep instead of
+			// waiting out the backoff timer
+			window.addEventListener('online', () => this.reconnectNow());
+			document.addEventListener('visibilitychange', () => {
+				if (document.visibilityState === 'visible') {
+					this.reconnectNow();
+				}
+			});
+		}
+	}
 
 	// Log batching
 	private static readonly LOG_FLUSH_INTERVAL_MS = 100;
@@ -53,12 +69,17 @@ class WebSocketClient {
 	private logHandlers = new Set<LogHandler>();
 	private logEntryHandlers = new Set<LogEntryHandler>();
 	private commandResultHandlers = new Set<CommandResultHandler>();
+	private metricsHandlers = new Set<MetricsHandler>();
 
 	// Active subscriptions (serverId -> true)
 	private subscriptions = new Map<string, boolean>();
 
+	// Active metrics subscriptions (serverId -> refcount)
+	private metricsSubscriptions = new Map<string, number>();
+
 	connect(): void {
 		if (!browser) return;
+		this.shouldReconnect = true;
 		if (this.socket?.readyState === WebSocket.OPEN) return;
 		if (this.state.connectionState === 'connecting') return;
 
@@ -114,6 +135,7 @@ class WebSocketClient {
 	}
 
 	disconnect(): void {
+		this.shouldReconnect = false;
 		if (this.socket) {
 			this.socket.close(1000, 'Client disconnect');
 			this.socket = null;
@@ -158,19 +180,30 @@ class WebSocketClient {
 	}
 
 	private scheduleReconnect(): void {
-		if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-			console.log('[WS] Max reconnect attempts reached');
-			this.state.error = 'Unable to connect. Please refresh the page.';
-			return;
-		}
+		if (!this.shouldReconnect || this.reconnectTimer) return;
 
-		const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
+		const delay = Math.min(
+			this.reconnectDelay * Math.pow(2, this.reconnectAttempts),
+			WebSocketClient.MAX_RECONNECT_DELAY_MS
+		);
 		this.reconnectAttempts++;
 
 		console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 		this.reconnectTimer = setTimeout(() => {
+			this.reconnectTimer = null;
 			this.connect();
 		}, delay);
+	}
+
+	private reconnectNow(): void {
+		if (!this.shouldReconnect) return;
+		if (this.socket?.readyState === WebSocket.OPEN) return;
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		this.reconnectAttempts = 0;
+		this.connect();
 	}
 
 	private startPingTimer(): void {
@@ -235,6 +268,17 @@ class WebSocketClient {
 					if (msg.payload.case === 'commandResult') {
 						const result = msg.payload.value as CommandResultMessage;
 						this.commandResultHandlers.forEach((handler) => handler(result));
+					}
+					break;
+
+				case WSMessageType.WS_MESSAGE_TYPE_METRICS:
+					if (msg.payload.case === 'metrics') {
+						const metricsMsg = msg.payload.value as MetricsMessage;
+						if (metricsMsg.sample) {
+							this.metricsHandlers.forEach((handler) =>
+								handler(metricsMsg.serverId, metricsMsg.sample!)
+							);
+						}
 					}
 					break;
 
@@ -308,6 +352,46 @@ class WebSocketClient {
 		this.send(toBinary(WebSocketClientMessageSchema, msg));
 	}
 
+	subscribeMetrics(serverId: string): void {
+		const count = this.metricsSubscriptions.get(serverId) || 0;
+		this.metricsSubscriptions.set(serverId, count + 1);
+
+		if (count > 0 || this.state.connectionState !== 'authenticated') {
+			return;
+		}
+
+		const msg = create(WebSocketClientMessageSchema, {
+			type: WSMessageType.WS_MESSAGE_TYPE_SUBSCRIBE,
+			payload: {
+				case: 'subscribe',
+				value: create(SubscribeMessageSchema, { serverId, metrics: true })
+			}
+		});
+		this.send(toBinary(WebSocketClientMessageSchema, msg));
+	}
+
+	unsubscribeMetrics(serverId: string): void {
+		const count = this.metricsSubscriptions.get(serverId) || 0;
+		if (count > 1) {
+			this.metricsSubscriptions.set(serverId, count - 1);
+			return;
+		}
+		this.metricsSubscriptions.delete(serverId);
+
+		if (this.state.connectionState !== 'authenticated') {
+			return;
+		}
+
+		const msg = create(WebSocketClientMessageSchema, {
+			type: WSMessageType.WS_MESSAGE_TYPE_UNSUBSCRIBE,
+			payload: {
+				case: 'unsubscribe',
+				value: create(UnsubscribeMessageSchema, { serverId, metrics: true })
+			}
+		});
+		this.send(toBinary(WebSocketClientMessageSchema, msg));
+	}
+
 	sendCommand(serverId: string, command: string): void {
 		if (this.state.connectionState !== 'authenticated') {
 			return;
@@ -349,6 +433,16 @@ class WebSocketClient {
 			});
 			this.send(toBinary(WebSocketClientMessageSchema, msg));
 		}
+		for (const serverId of this.metricsSubscriptions.keys()) {
+			const msg = create(WebSocketClientMessageSchema, {
+				type: WSMessageType.WS_MESSAGE_TYPE_SUBSCRIBE,
+				payload: {
+					case: 'subscribe',
+					value: create(SubscribeMessageSchema, { serverId, metrics: true })
+				}
+			});
+			this.send(toBinary(WebSocketClientMessageSchema, msg));
+		}
 	}
 
 	// Event handler registration
@@ -370,6 +464,11 @@ class WebSocketClient {
 	onCommandResult(handler: CommandResultHandler): () => void {
 		this.commandResultHandlers.add(handler);
 		return () => this.commandResultHandlers.delete(handler);
+	}
+
+	onMetrics(handler: MetricsHandler): () => void {
+		this.metricsHandlers.add(handler);
+		return () => this.metricsHandlers.delete(handler);
 	}
 
 	// Check if connected and authenticated

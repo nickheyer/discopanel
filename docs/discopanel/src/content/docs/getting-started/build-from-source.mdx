@@ -43,8 +43,10 @@ The `//go:embed` directives bake the frontend build into the binary so it serves
 
 All config options can also be set via environment variables with the `DISCOPANEL_` prefix. For example, `server.port` becomes `DISCOPANEL_SERVER_PORT`. Environment variables take precedence over the config file.
 
+Building to hack on DiscoPanel rather than just run it? The [Contributing](/contributing/) page covers the development workflow - live-reload dev servers, the protobuf pipeline, and tests.
+
 :::tip[Host path mapping]
-When running the binary directly on a host (not in a Docker container), do **not** set `DISCOPANEL_DATA_DIR` or `DISCOPANEL_HOST_DATA_PATH` — those are only for container path translation.
+When running the binary directly on a host (not in a Docker container), do **not** set `DISCOPANEL_DATA_DIR` or `DISCOPANEL_HOST_DATA_PATH` - those are only for container path translation.
 
 To change where DiscoPanel stores its database and server data, set `DISCOPANEL_STORAGE_DATA_DIR` or configure it in your config file:
 

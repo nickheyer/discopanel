@@ -8,26 +8,46 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/internal/docker"
 	rcon "github.com/nickheyer/discopanel/internal/rcon"
 )
 
-type DockerExecutor interface {
-	ExecCommand(ctx context.Context, containerID string, command string) (string, error)
+// ConsoleAgent is the runtime agent hub's console path: commands written
+// straight to the java process stdin. Used when RCON cannot serve a command
+// (disabled, or the server is still booting).
+type ConsoleAgent interface {
+	Connected(serverID string) bool
+	SendConsole(ctx context.Context, serverID, command string) error
 }
 
 type Sender struct {
 	store  *storage.Store
+	docker *docker.Client
 	config *config.Config
-	docker DockerExecutor
+	agent  ConsoleAgent
 }
 
-func NewSender(store *storage.Store, cfg *config.Config, docker DockerExecutor) *Sender {
+func NewSender(store *storage.Store, dockerClient *docker.Client, cfg *config.Config) *Sender {
 	return &Sender{
 		store:  store,
+		docker: dockerClient,
 		config: cfg,
-		docker: docker,
 	}
+}
+
+// SetAgent wires the runtime agent hub (registered after construction, the
+// hub depends on the metrics collector which depends on this sender).
+func (s *Sender) SetAgent(agent ConsoleAgent) {
+	s.agent = agent
+}
+
+// sendViaAgent falls back to the agent console channel. Stdin commands have
+// no captured response; their output lands in the server console stream.
+func (s *Sender) sendViaAgent(ctx context.Context, serverID, command string) (string, error) {
+	if err := s.agent.SendConsole(ctx, serverID, command); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 func (s *Sender) SendCommand(ctx context.Context, serverID string, command string) (string, error) {
@@ -40,25 +60,21 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 		return "", fmt.Errorf("server container not found")
 	}
 
-	// old docker exec command
-	dockerExec := func(cause error) (string, error) {
-		output, err := s.docker.ExecCommand(ctx, server.ContainerID, command)
-		if err != nil {
-			return "", fmt.Errorf("rcon path failed: %w; fallback exec failed: %v", cause, err)
-		}
-		return output, nil
-	}
-
 	serverCfg, err := s.store.GetServerConfig(ctx, serverID)
 	if err != nil {
-		return dockerExec(fmt.Errorf("failed to load server config: %w", err))
+		return "", fmt.Errorf("failed to load server config: %w", err)
 	}
 
-	if serverCfg.EnableRCON != nil && *serverCfg.EnableRCON == false {
-		return dockerExec(fmt.Errorf("rcon is disabled for this server"))
+	agentAvailable := s.agent != nil && s.agent.Connected(serverID)
+
+	if serverCfg.EnableRCON != nil && !*serverCfg.EnableRCON {
+		if agentAvailable {
+			return s.sendViaAgent(ctx, serverID, command)
+		}
+		return "", fmt.Errorf("rcon is disabled for this server")
 	}
 
-	var rconPort int
+	rconPort := 25575
 	if v, ok := s.config.Minecraft.GlobalConfig["rconPort"]; ok && v != nil {
 		switch t := v.(type) {
 		case int:
@@ -88,19 +104,33 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 	if serverCfg.RCONPassword != nil {
 		rconPassword = *serverCfg.RCONPassword
 	}
-
-	ip, err := proxy.GetContainerIP(server.ContainerID, s.config.Docker.NetworkName)
-	if err != nil {
-		return dockerExec(fmt.Errorf("failed to resolve container ip: %w", err))
+	if rconPassword == "" {
+		// Mirrors the provisioner's enforced default in server.properties.
+		rconPassword = "discopanel_default"
+		if len(server.ID) >= 8 {
+			rconPassword = "discopanel_" + server.ID[:8]
+		}
 	}
 
-	// run comamand in dedicated context with timeout
-	rconCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	ip, err := s.docker.ContainerIP(ctx, server.ContainerID)
+	if err != nil {
+		if agentAvailable {
+			return s.sendViaAgent(ctx, serverID, command)
+		}
+		return "", fmt.Errorf("failed to resolve container ip: %w", err)
+	}
+
+	// run command in dedicated context with timeout
+	rconCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	output, err := rcon.SendCommand(rconCtx, ip, rconPort, rconPassword, command)
-
 	if err != nil {
-		return dockerExec(fmt.Errorf("rcon command failed: %w", err))
+		// RCON is preferred for its captured response, but a booting or
+		// RCON-less server still accepts commands over the agent's stdin.
+		if agentAvailable {
+			return s.sendViaAgent(ctx, serverID, command)
+		}
+		return "", fmt.Errorf("rcon command failed: %w", err)
 	}
 
 	return output, nil

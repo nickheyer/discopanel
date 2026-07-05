@@ -116,7 +116,10 @@
 			case ServerStatus.STOPPING:
 			case ServerStatus.CREATING:
 			case ServerStatus.RESTARTING:
+			case ServerStatus.PROVISIONING:
 				return 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
+			case ServerStatus.PAUSED:
+				return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
 			case ServerStatus.ERROR:
 			case ServerStatus.UNHEALTHY:
 				return 'bg-red-500/10 text-red-500 border-red-500/20';
@@ -134,7 +137,10 @@
 			case ServerStatus.STOPPING:
 			case ServerStatus.CREATING:
 			case ServerStatus.RESTARTING:
+			case ServerStatus.PROVISIONING:
 				return 'via-yellow-500/50';
+			case ServerStatus.PAUSED:
+				return 'via-blue-500/50';
 			case ServerStatus.ERROR:
 			case ServerStatus.UNHEALTHY:
 				return 'via-red-500/50';
@@ -162,6 +168,10 @@
 				return 'Restarting';
 			case ServerStatus.UNHEALTHY:
 				return 'Unhealthy';
+			case ServerStatus.PROVISIONING:
+				return 'Provisioning';
+			case ServerStatus.PAUSED:
+				return 'Sleeping';
 			default:
 				return 'Unknown';
 		}
@@ -175,7 +185,10 @@
 			case ServerStatus.STOPPING:
 			case ServerStatus.CREATING:
 			case ServerStatus.RESTARTING:
+			case ServerStatus.PROVISIONING:
 				return 'bg-yellow-500 animate-pulse';
+			case ServerStatus.PAUSED:
+				return 'bg-blue-500';
 			case ServerStatus.ERROR:
 			case ServerStatus.UNHEALTHY:
 				return 'bg-red-500 animate-pulse';
@@ -336,7 +349,7 @@
 										<Play class="h-3 w-3" />
 									</button>
 								{/if}
-								{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY || server.status === ServerStatus.STARTING}
+								{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY || server.status === ServerStatus.STARTING || server.status === ServerStatus.PAUSED}
 									<button
 										title="Stop"
 										disabled={loading}
@@ -443,7 +456,7 @@
 														? 'text-red-500'
 														: ''}"
 										>
-											{server.tps ? server.tps.toFixed(1) : '—'}
+											{server.tps ? server.tps.toFixed(1) : '-'}
 										</p>
 									</div>
 								</div>

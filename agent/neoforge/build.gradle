@@ -1,0 +1,34 @@
+plugins {
+    id 'net.neoforged.moddev' version '2.0.141'
+    id 'com.gradleup.shadow' version '9.4.3'
+}
+
+neoForge {
+    version = rootProject.property('neoForgeVersion')
+}
+
+configurations {
+    shade
+    implementation.extendsFrom shade
+}
+
+dependencies {
+    shade project(':core')
+    shade "com.google.protobuf:protobuf-javalite:${rootProject.property('protobufJavaliteVersion')}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand 'version': project.version
+    }
+}
+
+shadowJar {
+    configurations = [project.configurations.shade]
+    relocate 'com.google.protobuf', 'app.discopanel.agent.libs.protobuf'
+    archiveFileName = 'disco-agent-neoforge.jar'
+    archiveClassifier = ''
+}
+
+assemble.dependsOn shadowJar

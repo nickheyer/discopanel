@@ -61,15 +61,6 @@ func Best(query string, candidates []string) (Match, bool) {
 	return best, found
 }
 
-// Best filtered by a minimum score
-func BestAbove(query string, candidates []string, min float64) (Match, bool) {
-	m, ok := Best(query, candidates)
-	if !ok || m.Score < min {
-		return Match{Index: -1}, false
-	}
-	return m, true
-}
-
 // Best for an arbitrary item type
 func BestFunc[T any](query string, items []T, key func(T) string) (best T, score float64, ok bool) {
 	for i, it := range items {

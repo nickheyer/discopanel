@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules runtime agent proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
 
 DATA_DIR := ./data
 DOCKER_DATA_DIR := /tmp/discopanel
@@ -73,12 +73,16 @@ image:
 	@echo "Building and pushing Docker image..."
 	@bash scripts/build.sh
 
+# Java major versions the runtime image is published for.
+# Must stay in sync with docker.SupportedJavaVersions (internal/docker/images.go).
+RUNTIME_JAVA_VERSIONS := 8 11 17 21 25
+
 # Build and push all module Docker images
-modules: gen
+modules: gen runtime
 	@echo "Building and pushing module images..."
 	@for dockerfile in docker/Dockerfile.*; do \
 		name=$$(basename $$dockerfile | sed 's/Dockerfile\.//'); \
-		if [ "$$name" != "discopanel" ]; then \
+		if [ "$$name" != "discopanel" ] && [ "$$name" != "runtime" ]; then \
 			echo "Building nickheyer/discopanel-$$name:latest..."; \
 			docker build -t "nickheyer/discopanel-$$name:latest" -f "$$dockerfile" . && \
 			echo "Pushing nickheyer/discopanel-$$name:latest..." && \
@@ -86,6 +90,32 @@ modules: gen
 		fi \
 	done
 	@echo "Module builds complete!"
+
+# Build and push the discopanel-runtime image for every supported Java version
+runtime:
+	@for java in $(RUNTIME_JAVA_VERSIONS); do \
+		echo "Building nickheyer/discopanel-runtime:java$$java..."; \
+		docker build --build-arg JAVA_VERSION=$$java \
+			-t "nickheyer/discopanel-runtime:java$$java" -f docker/Dockerfile.runtime . && \
+		echo "Pushing nickheyer/discopanel-runtime:java$$java..." && \
+		docker push "nickheyer/discopanel-runtime:java$$java"; \
+	done
+	@echo "Runtime builds complete!"
+
+# Build the disco-agent mod jars (shared core + per-loader shims) via a
+# containerized Gradle. Outputs land in agent/*/build/libs/.
+agent:
+	docker run --rm \
+		--volume "$(shell pwd)/agent:/agent" \
+		--workdir /agent \
+		--user "$(shell id -u):$(shell id -g)" \
+		--env GRADLE_USER_HOME=/agent/.gradle-home \
+		gradle:9-jdk21 gradle --no-daemon build
+
+# Build a single runtime image locally without pushing (e.g. make runtime-local-21)
+runtime-local-%:
+	docker build --build-arg JAVA_VERSION=$* \
+		-t "nickheyer/discopanel-runtime:java$*" -f docker/Dockerfile.runtime .
 
 # Build and push a specific module (e.g., make module-status, make module-geyser)
 module-%: gen
@@ -165,12 +195,15 @@ check:
 proto:
 	@echo "Generating protocol buffer code (using Docker)..."
 	$(BUF_RUN) generate
+	@echo "Generating disco-agent Java code (using Docker)..."
+	$(BUF_RUN) generate --template buf.gen.agent.yaml --path proto/discopanel/agent
 	@echo "Proto generation complete!"
 
 proto-clean:
 	@echo "Cleaning generated proto files..."
 	rm -rf pkg/proto
 	rm -rf web/discopanel/src/lib/proto
+	rm -rf agent/core/src/generated/java
 	@echo "Proto files cleaned!"
 
 proto-lint:

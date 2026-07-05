@@ -64,7 +64,6 @@
 			dockerImage: server.dockerImage,
 			detached: server.detached,
 			autoStart: server.autoStart,
-			tpsCommand: server.tpsCommand || '',
 			modpackId: '', // Not used in this context
 			modpackVersionId: '', // Not used in this context
 			additionalPorts: server.additionalPorts || [],
@@ -83,7 +82,6 @@
 			formData.dockerImage !== server.dockerImage ||
 			formData.detached !== server.detached ||
 			formData.autoStart !== server.autoStart ||
-			formData.tpsCommand !== (server.tpsCommand || '') ||
 			safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
 			safeToString($state.snapshot(formData.dockerOverrides)) !==
 				safeToString(server.dockerOverrides)
@@ -114,7 +112,6 @@
 				dockerImage: server.dockerImage,
 				detached: server.detached,
 				autoStart: server.autoStart,
-				tpsCommand: server.tpsCommand || '',
 				modpackId: '', // Not used in this context
 				modpackVersionId: '', // Not used in this context
 				additionalPorts: server.additionalPorts || [],
@@ -189,8 +186,7 @@
 	}
 
 	function getCompatibleModLoaders(_mcVersion: string) {
-		// The proto doesn't include version compatibility info, so all loaders are shown
-		// Backend has SupportedVersions field but it's not populated or sent via proto
+		// The proto has no version compatibility info, all loaders shown
 		return modLoaders?.modloaders || [];
 	}
 </script>
@@ -336,22 +332,11 @@
 					{/each}
 				</SelectContent>
 			</Select>
-		</div>
-
-		<div class="space-y-2">
-			<Label for="tps_command" class="text-sm font-medium"
-				>TPS Command <span class="text-xs text-muted-foreground">(Optional)</span></Label
-			>
-			<Input
-				id="tps_command"
-				placeholder="Polling TPS command"
-				bind:value={formData.tpsCommand}
-				class="h-10"
-			/>
-			<p class="text-xs text-muted-foreground">
-				Override the TPS monitoring command (empty to disable). Use " ?? " to specify fallback
-				commands (e.g., "forge tps ?? neoforge tps ?? tps")
-			</p>
+			{#if server.runtimeDigest}
+				<p class="text-xs text-muted-foreground">
+					Runtime build: {server.runtimeDigest.split(':').pop()?.slice(0, 12)}
+				</p>
+			{/if}
 		</div>
 
 		<div class="space-y-4">

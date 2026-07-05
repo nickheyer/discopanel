@@ -55,7 +55,7 @@ func NewManager(store *db.Store, enforcer *rbac.Enforcer, cfg *config.AuthConfig
 	ctx := context.Background()
 	var secret []byte
 
-	// Priority: config value → DB-stored value → generate + persist to DB
+	// Priority: config value first, then the DB-stored value, then generate + persist to DB
 	if cfg.JWTSecret != "" {
 		secret = []byte(cfg.JWTSecret)
 	} else {

@@ -33,9 +33,8 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		return "", fmt.Errorf("module template has no Docker image configured")
 	}
 
-	// Try pulling the image
-	if err := c.pullImage(ctx, imageName); err != nil {
-		c.log.Warn("Failed to pull image %s: %v, attempting to use local", imageName, err)
+	if err := c.ensureImage(ctx, imageName, nil); err != nil {
+		return "", err
 	}
 
 	// Build alias context for substitution (needed for env and volumes)

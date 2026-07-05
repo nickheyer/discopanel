@@ -68,7 +68,7 @@ const authInterceptor: Interceptor = (next) => async (req) => {
 					loggingOut = false;
 				});
 			}
-			// Never toast auth errors — the auto-logout redirect handles them
+			// Never toast auth errors - the auto-logout redirect handles them
 			throw error;
 		}
 

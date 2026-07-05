@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -12,10 +13,12 @@ import (
 	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -30,6 +33,9 @@ const (
 
 	// Maximum message size allowed from peer
 	maxMessageSize = 512 * 1024 // 512KB
+
+	// Cadence of live metrics pushes to subscribed clients
+	metricsPushInterval = 5 * time.Second
 )
 
 // Hub manages WebSocket connections and log subscriptions
@@ -41,6 +47,7 @@ type Hub struct {
 	docker      *docker.Client
 	log         *logger.Logger
 	sender      *command.Sender
+	metrics     *metrics.Collector
 
 	upgrader websocket.Upgrader
 
@@ -66,10 +73,13 @@ type Client struct {
 	// Subscriptions: serverId -> log channel
 	subscriptions   map[string]chan *v1.LogEntry
 	subscriptionsMu sync.RWMutex
+
+	// Metrics subscriptions by server id
+	metricsSubs map[string]bool
 }
 
 // NewHub creates a new WebSocket hub
-func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer *rbac.Enforcer, store *storage.Store, docker *docker.Client, sender *command.Sender, log *logger.Logger) *Hub {
+func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer *rbac.Enforcer, store *storage.Store, docker *docker.Client, sender *command.Sender, metricsCollector *metrics.Collector, log *logger.Logger) *Hub {
 	return &Hub{
 		logStreamer: logStreamer,
 		authManager: authManager,
@@ -78,9 +88,22 @@ func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer
 		docker:      docker,
 		log:         log,
 		sender:      sender,
+		metrics:     metricsCollector,
 		upgrader: websocket.Upgrader{
+			// Same-origin only: a cross-site page must not be able to open an
+			// authenticated log/console socket in the victim's browser.
+			// Non-browser clients send no Origin header and pass through;
+			// they authenticate with their own bearer token.
 			CheckOrigin: func(r *http.Request) bool {
-				return true // Allow all origins (CORS handled elsewhere)
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true
+				}
+				u, err := url.Parse(origin)
+				if err != nil {
+					return false
+				}
+				return strings.EqualFold(u.Host, r.Host)
 			},
 		},
 		clients:    make(map[*Client]bool),
@@ -91,6 +114,9 @@ func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer
 
 // Run starts the hub's main loop
 func (h *Hub) Run() {
+	ticker := time.NewTicker(metricsPushInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case client := <-h.register:
@@ -107,8 +133,70 @@ func (h *Hub) Run() {
 			}
 			h.clientsMu.Unlock()
 			h.log.Debug("WebSocket client disconnected")
+
+		case <-ticker.C:
+			h.pushMetrics()
 		}
 	}
+}
+
+// Fans one live sample per subscribed server out to its clients
+func (h *Hub) pushMetrics() {
+	if h.metrics == nil {
+		return
+	}
+	h.clientsMu.RLock()
+	clients := make([]*Client, 0, len(h.clients))
+	for c := range h.clients {
+		clients = append(clients, c)
+	}
+	h.clientsMu.RUnlock()
+
+	encoded := make(map[string][]byte)
+	for _, c := range clients {
+		for _, serverID := range c.metricsSubscriptions() {
+			data, seen := encoded[serverID]
+			if !seen {
+				data = h.encodeMetrics(serverID)
+				encoded[serverID] = data
+			}
+			if data != nil {
+				c.sendRaw(data)
+			}
+		}
+	}
+}
+
+// Marshals the current live sample for one server, nil when down
+func (h *Hub) encodeMetrics(serverID string) []byte {
+	if !h.metrics.ServerAlive(serverID) {
+		return nil
+	}
+	m := h.metrics.GetMetrics(serverID)
+	if m == nil {
+		return nil
+	}
+	msg := &v1.WebSocketServerMessage{
+		Type: v1.WSMessageType_WS_MESSAGE_TYPE_METRICS,
+		Payload: &v1.WebSocketServerMessage_Metrics{Metrics: &v1.MetricsMessage{
+			ServerId: serverID,
+			Sample: &v1.MetricsSample{
+				Timestamp:  timestamppb.Now(),
+				Tps:        m.TPS,
+				Mspt:       m.MSPT,
+				Players:    int32(m.PlayersOnline),
+				CpuPercent: m.CPUPercent,
+				MemoryMb:   m.MemoryUsage,
+				DiskBytes:  m.DiskUsage,
+			},
+		}},
+	}
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		h.log.Error("Failed to marshal metrics message: %v", err)
+		return nil
+	}
+	return data
 }
 
 // ServeHTTP handles WebSocket upgrade requests
@@ -124,6 +212,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		conn:          conn,
 		send:          make(chan []byte, 256),
 		subscriptions: make(map[string]chan *v1.LogEntry),
+		metricsSubs:   make(map[string]bool),
 	}
 
 	h.register <- client
@@ -290,11 +379,23 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 		}
 	}
 
-	// Get server to find container ID
+	// Validate the server exists
 	ctx := context.Background()
 	server, err := c.hub.store.GetServer(ctx, msg.ServerId)
 	if err != nil {
 		c.sendError("server not found")
+		return
+	}
+
+	// A metrics subscription skips the log machinery entirely
+	if msg.Metrics {
+		c.subscriptionsMu.Lock()
+		c.metricsSubs[msg.ServerId] = true
+		c.subscriptionsMu.Unlock()
+		if data := c.hub.encodeMetrics(msg.ServerId); data != nil {
+			c.sendRaw(data)
+		}
+		c.sendSubscribed(msg.ServerId)
 		return
 	}
 
@@ -303,32 +404,26 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 		tail = 500
 	}
 
-	// If server has no container yet (just created, never started),
-	// send empty logs and confirm subscription without starting streaming.
-	// The client will re-subscribe when the server status changes.
-	if server.ContainerID == "" {
-		c.sendLogs(msg.ServerId, nil)
-		c.sendSubscribed(msg.ServerId)
-		return
-	}
-
-	// Ensure log streaming is active for this container
-	if err := c.hub.logStreamer.StartStreaming(server.ContainerID); err != nil {
-		c.hub.log.Warn("Failed to start log streaming for container %s: %v", server.ContainerID, err)
-	}
-
-	// Check if already subscribed
+	// The subscription is keyed by server ID and lives for the connection;
+	// container follows attach underneath as the lifecycle starts containers.
 	c.subscriptionsMu.Lock()
 	if _, exists := c.subscriptions[msg.ServerId]; !exists {
-		// Subscribe to log streamer
-		ch := c.hub.logStreamer.Subscribe(server.ContainerID)
+		ch := c.hub.logStreamer.Subscribe(msg.ServerId)
 		c.subscriptions[msg.ServerId] = ch
 		go c.forwardLogs(msg.ServerId, ch)
 	}
 	c.subscriptionsMu.Unlock()
 
+	// Attach a follow if the server already has a container and none is
+	// active (e.g. panel restarted while the server was running).
+	if server.ContainerID != "" {
+		if err := c.hub.logStreamer.StartStreaming(msg.ServerId, server.ContainerID); err != nil {
+			c.hub.log.Warn("Failed to start log streaming for server %s: %v", msg.ServerId, err)
+		}
+	}
+
 	// Send initial logs
-	logs := c.hub.logStreamer.GetLogs(server.ContainerID, tail)
+	logs := c.hub.logStreamer.GetLogs(msg.ServerId, tail)
 	c.sendLogs(msg.ServerId, logs)
 
 	// Confirm subscription
@@ -342,30 +437,34 @@ func (c *Client) forwardLogs(serverId string, ch chan *v1.LogEntry) {
 	}
 }
 
-// handleUnsubscribe unsubscribes from server logs
+// handleUnsubscribe unsubscribes from server logs or metrics
 func (c *Client) handleUnsubscribe(msg *v1.UnsubscribeMessage) {
 	if msg == nil || msg.ServerId == "" {
 		c.sendError("missing server_id")
 		return
 	}
 
-	// Get server to find container ID
-	ctx := context.Background()
-	server, err := c.hub.store.GetServer(ctx, msg.ServerId)
-
-	// Always clean up the subscription
 	c.subscriptionsMu.Lock()
-	if ch, exists := c.subscriptions[msg.ServerId]; exists {
+	if msg.Metrics {
+		delete(c.metricsSubs, msg.ServerId)
+	} else if ch, exists := c.subscriptions[msg.ServerId]; exists {
 		delete(c.subscriptions, msg.ServerId)
-		if err == nil && server.ContainerID != "" {
-			c.hub.logStreamer.Unsubscribe(server.ContainerID, ch)
-		} else {
-			close(ch) // Close the channel to stop the forwardLogs goroutine
-		}
+		c.hub.logStreamer.Unsubscribe(msg.ServerId, ch)
 	}
 	c.subscriptionsMu.Unlock()
 
 	c.sendUnsubscribed(msg.ServerId)
+}
+
+// Lists the server ids this client wants metrics for
+func (c *Client) metricsSubscriptions() []string {
+	c.subscriptionsMu.RLock()
+	defer c.subscriptionsMu.RUnlock()
+	ids := make([]string, 0, len(c.metricsSubs))
+	for id := range c.metricsSubs {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // handleCommand executes a command on the server
@@ -408,7 +507,7 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 
 	// Check server status
 	status, err := c.hub.docker.GetContainerStatus(ctx, server.ContainerID)
-	if err != nil || status != storage.StatusRunning {
+	if err != nil || (status != storage.StatusRunning && status != storage.StatusUnhealthy) {
 		c.sendCommandResult(msg.ServerId, false, "", "server is not running")
 		return
 	}
@@ -416,7 +515,7 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 	// Add command to log stream if not silent
 	commandTime := time.Now()
 	if !silent {
-		c.hub.logStreamer.AddCommandEntry(server.ContainerID, msg.Command, commandTime)
+		c.hub.logStreamer.AddCommandEntry(server.ID, msg.Command, commandTime)
 	}
 
 	output, err := c.hub.sender.SendCommand(ctx, server.ID, msg.Command)
@@ -424,7 +523,7 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 
 	// Add output to log stream if not silent
 	if !silent && (output != "" || !success) {
-		c.hub.logStreamer.AddCommandOutput(server.ContainerID, output, success, commandTime)
+		c.hub.logStreamer.AddCommandOutput(server.ID, output, success, commandTime)
 	}
 
 	if err != nil {
@@ -440,14 +539,20 @@ func (c *Client) cleanup() {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
 
-	ctx := context.Background()
 	for serverId, ch := range c.subscriptions {
-		server, err := c.hub.store.GetServer(ctx, serverId)
-		if err == nil && server.ContainerID != "" {
-			c.hub.logStreamer.Unsubscribe(server.ContainerID, ch)
-		}
+		c.hub.logStreamer.Unsubscribe(serverId, ch)
 	}
 	c.subscriptions = make(map[string]chan *v1.LogEntry)
+	c.metricsSubs = make(map[string]bool)
+}
+
+// sendRaw queues pre-marshaled bytes, dropping when the client lags
+func (c *Client) sendRaw(data []byte) {
+	select {
+	case c.send <- data:
+	default:
+		// Channel full, skip
+	}
 }
 
 // sendMessage marshals and sends a server message
@@ -458,11 +563,7 @@ func (c *Client) sendMessage(msg *v1.WebSocketServerMessage) {
 		return
 	}
 
-	select {
-	case c.send <- data:
-	default:
-		// Channel full, skip
-	}
+	c.sendRaw(data)
 }
 
 func (c *Client) sendAuthOk() {

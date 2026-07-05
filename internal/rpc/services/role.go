@@ -204,7 +204,7 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 	// Populate available objects for scoped permissions when requested.
 	// Driven entirely by ProcedurePermissions: any resource with a non-empty
 	// ObjectIDField is scopeable, and the field name determines which entity
-	// type provides the objects (e.g. "server_id" → servers).
+	// type provides the objects (e.g. "server_id" provides servers).
 	if req.Msg.IncludeObjects {
 		type idName struct{ id, name string }
 

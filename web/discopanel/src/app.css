@@ -29,6 +29,12 @@
 	--chart-3: oklch(0.398 0.07 227.392);
 	--chart-4: oklch(0.828 0.189 84.429);
 	--chart-5: oklch(0.769 0.188 70.08);
+	/* Metric identity colors, validated for both surfaces */
+	--metric-tps: #2a78d6;
+	--metric-mspt: #1baf7a;
+	--metric-players: #eda100;
+	--metric-cpu: #008300;
+	--metric-memory: #4a3aa7;
 	--sidebar: oklch(0.985 0.001 106.423);
 	--sidebar-foreground: oklch(0.147 0.004 49.25);
 	--sidebar-primary: oklch(0.216 0.006 56.043);
@@ -63,6 +69,11 @@
 	--chart-3: oklch(0.769 0.188 70.08);
 	--chart-4: oklch(0.627 0.265 303.9);
 	--chart-5: oklch(0.645 0.246 16.439);
+	--metric-tps: #3987e5;
+	--metric-mspt: #199e70;
+	--metric-players: #c98500;
+	--metric-cpu: #008300;
+	--metric-memory: #9085e9;
 	--sidebar: oklch(0.216 0.006 56.043);
 	--sidebar-foreground: oklch(0.985 0.001 106.423);
 	--sidebar-primary: oklch(0.488 0.243 264.376);

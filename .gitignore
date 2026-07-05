@@ -8,6 +8,7 @@ build/
 discopanel
 !proto/discopanel
 !docs/discopanel
+!**/app/discopanel
 web/discopanel/src/lib/proto/gnostic/
 !cmd/discopanel
 !web/discopanel
@@ -435,3 +436,7 @@ tmp/
 dev/bug-analysis/
 .direnv/
 result
+TODO.md
+agent/.gradle-home/
+agent/**/.gradle/
+agent/core/src/generated/

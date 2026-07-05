@@ -133,7 +133,7 @@ func (s *AuthService) Register(ctx context.Context, req *connect.Request[v1.Regi
 			}
 		}
 	} else if !isFirstUser && !s.authManager.IsRegistrationAllowed() {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("registration is disabled"))
+		return nil, connect.NewError(connect.CodePermissionDenied, auth.ErrRegistrationDisabled)
 	}
 
 	if msg.Username == "" || msg.Password == "" {
@@ -146,7 +146,7 @@ func (s *AuthService) Register(ctx context.Context, req *connect.Request[v1.Regi
 		return nil, connect.NewError(connect.CodeAlreadyExists, errors.New("registration failed"))
 	}
 
-	// Role assignment: first user → admin; invite with roles → invite roles; else → default roles
+	// Role assignment: the first user gets admin, invited users get the invite roles, everyone else gets the default roles
 	if isFirstUser {
 		_ = s.store.AssignRole(ctx, user.ID, "admin", "local")
 	} else if invite != nil && len(invite.Roles) > 0 {

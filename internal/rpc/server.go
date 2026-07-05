@@ -9,12 +9,14 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
+	"github.com/nickheyer/discopanel/internal/agent"
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/events"
+	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
@@ -25,6 +27,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/ws"
 	"github.com/nickheyer/discopanel/pkg/download"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1/agentv1connect"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	"github.com/nickheyer/discopanel/pkg/upload"
 	web "github.com/nickheyer/discopanel/web/discopanel"
@@ -48,16 +51,18 @@ type Server struct {
 	oidcHandler      *auth.OIDCHandler
 	logStreamer      *logger.LogStreamer
 	scheduler        *scheduler.Scheduler
+	lifecycle        *lifecycle.Manager
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	bus              *events.Bus
+	agentHub         *agent.Hub
 	uploadManager    *upload.Manager
 	downloadManager  *download.Manager
 	wsHub            *ws.Hub
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, agentHub *agent.Hub, log *logger.Logger) *Server {
 	// Initialize RBAC enforcer
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
@@ -84,7 +89,8 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 
 	// Initialize log streamer
 	logStreamer := logger.NewLogStreamer(docker.GetDockerClient(), log, 10000)
-	docker.SetLogStreamer(logStreamer)
+	lifecycleManager.SetLogStreamer(logStreamer)
+	moduleManager.SetLogStreamer(logStreamer)
 
 	// Initialize upload manager
 	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
@@ -94,7 +100,7 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 	downloadManager := download.NewManager(cfg.Storage.TempDir, uploadTTL, log)
 
 	// Initialize WebSocket hub
-	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, docker, sender, log)
+	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, docker, sender, metricsCollector, log)
 	go wsHub.Run()
 
 	s := &Server{
@@ -109,9 +115,11 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 		oidcHandler:      oidcHandler,
 		logStreamer:      logStreamer,
 		scheduler:        sched,
+		lifecycle:        lifecycleManager,
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
 		bus:              bus,
+		agentHub:         agentHub,
 		uploadManager:    uploadManager,
 		downloadManager:  downloadManager,
 		wsHub:            wsHub,
@@ -158,6 +166,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.TaskServiceName,
 		discopanelv1connect.UploadServiceName,
 		discopanelv1connect.UserServiceName,
+		agentv1connect.AgentServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
@@ -191,13 +200,13 @@ func (s *Server) setupHandler() {
 func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
-	configService := services.NewConfigService(s.store, s.config, s.docker, s.log)
+	configService := services.NewConfigService(s.store, s.config, s.docker, s.lifecycle, s.log)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
-	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log)
+	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.lifecycle, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
@@ -247,6 +256,12 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	uploadPath, uploadHandler := discopanelv1connect.NewUploadServiceHandler(uploadService, opts...)
 	mux.Handle(uploadPath, uploadHandler)
+
+	// The agent service authenticates in-handler with per-server tokens (the
+	// interceptors above are unary-only and never see this bidi stream).
+	agentService := services.NewAgentService(s.store, s.agentHub, s.log)
+	agentPath, agentHandler := agentv1connect.NewAgentServiceHandler(agentService)
+	mux.Handle(agentPath, agentHandler)
 }
 
 // The HTTP handler for the server
@@ -316,7 +331,7 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// pollingProcedures lists endpoints that are called frequently and should be excluded from logging.
+// Lists endpoints that are called frequently and should be excluded from logging
 var pollingProcedures = []string{
 	"/discopanel.v1.AuthService/GetAuthStatus",
 	"/discopanel.v1.ServerService/ListServers",
@@ -399,6 +414,7 @@ func isConnectPath(path string) bool {
 	// Connect paths start with service names
 	connectPrefixes := []string{
 		"/discopanel.v1.",
+		"/discopanel.agent.",
 		"/grpc.reflection.",
 		"/connect.",
 	}
@@ -411,8 +427,7 @@ func isConnectPath(path string) bool {
 	return false
 }
 
-// extractObjectID extracts a named string field from a protobuf request message
-// using reflection. Falls back to "*" if the field is missing or empty.
+// Extracts a named string field from a protobuf request message
 func extractObjectID(req connect.AnyRequest, fieldName string) string {
 	msg, ok := req.Any().(proto.Message)
 	if !ok {
@@ -434,7 +449,12 @@ func (s *Server) RecoveryKey() string {
 	return s.authManager.GetRecoveryKey()
 }
 
-// Starts log streaming for a container
-func (s *Server) StartLogStreaming(containerID string) error {
-	return s.logStreamer.StartStreaming(containerID)
+// LogStreamer exposes the streamer for cross-component wiring
+func (s *Server) LogStreamer() *logger.LogStreamer {
+	return s.logStreamer
+}
+
+// Attaches a servers container output to its log stream
+func (s *Server) StartLogStreaming(serverID, containerID string) error {
+	return s.logStreamer.StartStreaming(serverID, containerID)
 }

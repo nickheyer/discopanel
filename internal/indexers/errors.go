@@ -121,27 +121,3 @@ func NewAuthConfigError(indexer string, msg string) *IndexerError {
 		Err:     errors.New(msg),
 	}
 }
-
-// Reports whether the error is a rate-limit error
-func IsRateLimit(err error) bool {
-	var ie *IndexerError
-	return errors.As(err, &ie) && ie.Kind == ErrRateLimit
-}
-
-// Reports whether the error is an auth error
-func IsAuthError(err error) bool {
-	var ie *IndexerError
-	return errors.As(err, &ie) && ie.Kind == ErrAuth
-}
-
-// Reports whether the error is a not-found error
-func IsNotFound(err error) bool {
-	var ie *IndexerError
-	return errors.As(err, &ie) && ie.Kind == ErrNotFound
-}
-
-// Reports whether the error is a network error
-func IsNetworkError(err error) bool {
-	var ie *IndexerError
-	return errors.As(err, &ie) && ie.Kind == ErrNetwork
-}

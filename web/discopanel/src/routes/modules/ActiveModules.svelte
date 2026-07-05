@@ -230,7 +230,7 @@
 									<span class="flex items-center gap-1"
 										><Server class="h-3 w-3" /> {module.serverName || module.serverId}</span
 									>
-									<span>•</span>
+									<span>|</span>
 									<span class="truncate">{module.templateName}</span>
 								</div>
 							</div>

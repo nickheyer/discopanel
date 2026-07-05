@@ -1,0 +1,73 @@
+# discopanel-runtime: minimal Minecraft server runtime.
+# The data directory is fully provisioned by DiscoPanel before start; this
+# image only contains a JRE and the runtime entrypoint (see cmd/runtime).
+#
+# Built per Java major version:
+#   docker build -f docker/Dockerfile.runtime --build-arg JAVA_VERSION=21 \
+#     -t nickheyer/discopanel-runtime:java21 .
+ARG JAVA_VERSION=21
+
+# Build-stage outputs are platform independent (generated code, jars) or
+# cross-compiled (the Go entrypoint), so every build stage is pinned to the
+# builder's native platform: a multi-arch build runs them once at full speed
+# instead of once per target under QEMU, where the forge/neoforge toolchains
+# break (NeoForm cannot resolve its own JVM via ProcessHandle under qemu-user).
+# The default keeps the legacy (pre-BuildKit) builder working; BuildKit
+# overrides it with the real build platform.
+ARG BUILDPLATFORM=linux/amd64
+
+# Generated protobuf code (Go for the entrypoint, javalite for the disco-agent
+# mod), produced in-image with the same recipe as `make proto` so builds work
+# from a clean checkout. Generated code is never committed or in the context.
+FROM --platform=$BUILDPLATFORM bufbuild/buf:latest AS proto-builder
+
+WORKDIR /app
+COPY buf.yaml buf.gen.yaml buf.gen.agent.yaml buf.lock ./
+COPY proto/ ./proto/
+RUN buf generate \
+    && buf generate --template buf.gen.agent.yaml --path proto/discopanel/agent
+
+FROM --platform=$BUILDPLATFORM golang:alpine AS builder
+
+# Empty under the legacy builder (compiles for the host); set by BuildKit.
+ARG TARGETOS TARGETARCH
+
+WORKDIR /build
+COPY go.mod go.sum ./
+COPY pkg/runtimespec ./pkg/runtimespec
+COPY --from=proto-builder /app/pkg/proto ./pkg/proto
+COPY cmd/runtime ./cmd/runtime
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /runtime-entrypoint ./cmd/runtime
+
+# disco-agent mod jars (shared core + per-loader shims, see agent/). The
+# supervisor installs the loader-matched jar into mods/ or plugins/ at boot.
+FROM --platform=$BUILDPLATFORM gradle:9-jdk21 AS agent-builder
+
+WORKDIR /agent
+COPY agent/ ./
+COPY --from=proto-builder /app/agent/core/src/generated ./core/src/generated
+RUN gradle --no-daemon build
+
+FROM eclipse-temurin:${JAVA_VERSION}-jre
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /runtime-entrypoint /usr/local/bin/discopanel-runtime
+
+COPY --from=agent-builder /agent/fabric/build/libs/disco-agent-fabric.jar \
+    /agent/neoforge/build/libs/disco-agent-neoforge.jar \
+    /agent/forge/build/libs/disco-agent-forge.jar \
+    /agent/paper/build/libs/disco-agent-paper.jar \
+    /opt/discopanel/agent/
+
+RUN mkdir -p /data && chmod 755 /data
+
+WORKDIR /data
+
+EXPOSE 25565/tcp 25575/tcp
+
+VOLUME /data
+
+ENTRYPOINT ["/usr/local/bin/discopanel-runtime"]

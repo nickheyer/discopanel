@@ -1,0 +1,235 @@
+syntax = "proto3";
+
+package discopanel.agent.v1;
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1;agentv1";
+option java_package = "app.discopanel.agent.proto";
+option java_outer_classname = "AgentProto";
+
+// AgentService is the machine-facing channel between a discopanel-runtime
+// supervisor (running inside a server container) and the panel. The runtime
+// dials the panel and holds one Session stream per server: telemetry flows
+// up, commands flow down. Authentication is a per-server bearer token minted
+// by the panel and delivered via the provisioned agent spec; it is validated
+// in the handler (this service is not part of the user-facing API surface).
+service AgentService {
+  // Session is the single long-lived bidirectional stream between one
+  // running server container and the panel. The first agent message must be
+  // a Hello identifying the server.
+  rpc Session(stream AgentMessage) returns (stream PanelMessage);
+}
+
+// AgentMessage is the envelope for everything flowing from the container to
+// the panel. The same envelope is used on the in-container loopback link
+// between the disco-agent mod (inside the JVM) and the runtime supervisor,
+// which relays game-sourced messages upstream unchanged.
+message AgentMessage {
+  oneof payload {
+    Hello hello = 1;
+    Ready ready = 2;
+    Stopping stopping = 3;
+    Exited exited = 4;
+    ProcSample proc_sample = 5;
+    TickSample tick_sample = 6;
+    JvmSample jvm_sample = 7;
+    PlayerEvent player_event = 8;
+    WorldStats world_stats = 9;
+    CommandList command_list = 10;
+  }
+}
+
+// PanelMessage is the envelope for everything flowing from the panel to the
+// container. Console commands are consumed by the runtime supervisor (java
+// stdin); chat messages are relayed to the disco-agent mod when present.
+message PanelMessage {
+  oneof payload {
+    ConsoleCommand console_command = 1;
+    ChatMessage chat_message = 2;
+  }
+}
+
+// Hello identifies the connecting party and is the mandatory first message
+// on both the panel session and the in-container loopback link.
+message Hello {
+  // The DiscoPanel server ID this agent belongs to.
+  string server_id = 1;
+  // Source of this hello: the runtime supervisor or the in-JVM mod.
+  HelloSource source = 2;
+  // discopanel-runtime or disco-agent mod version string.
+  string version = 3;
+  // Mod loader from the launch spec (e.g. "fabric", "paper").
+  string loader = 4;
+  // Minecraft version from the launch spec.
+  string mc_version = 5;
+  // Java major version the server runs on.
+  int32 java_major = 6;
+}
+
+// HelloSource distinguishes the supervisor from the in-JVM mod.
+enum HelloSource {
+  HELLO_SOURCE_UNSPECIFIED = 0;
+  // The Go runtime supervisor (PID 1 in the container).
+  HELLO_SOURCE_RUNTIME = 1;
+  // The disco-agent mod/plugin running inside the server JVM.
+  HELLO_SOURCE_MOD = 2;
+}
+
+// Ready signals the server finished starting. Sent by the supervisor when
+// the "Done" console line appears, and by the mod on its server-started
+// lifecycle hook (whichever arrives first counts).
+message Ready {
+  // Seconds from process start to ready, when known (0 when unknown).
+  double startup_seconds = 1;
+}
+
+// Stopping signals the server began an orderly shutdown.
+message Stopping {}
+
+// Exited reports the java process ending. Sent by the supervisor before the
+// container exits, when the session is still connected.
+message Exited {
+  // Process exit code.
+  int32 exit_code = 1;
+  // True when the exit looks like a crash (non-zero exit or crash report).
+  bool crashed = 2;
+  // Data-dir-relative path of the newest crash report for this run, if any.
+  string crash_report_path = 3;
+  // First lines of the crash report, capped, for panel-side display.
+  string crash_report_excerpt = 4;
+}
+
+// ProcSample is supervisor-sourced process and cgroup telemetry. It works on
+// every server, with or without the disco-agent mod.
+message ProcSample {
+  // CPU usage of the java process as a percentage (100 = one core).
+  double cpu_percent = 1;
+  // Resident set size of the java process in MiB.
+  double rss_mb = 2;
+  // Cgroup CPU quota in cores (0 when unlimited).
+  double cpu_quota_cores = 3;
+  // CFS periods elapsed since the previous sample.
+  int64 cfs_periods = 4;
+  // CFS periods in which the cgroup was throttled since the previous sample.
+  int64 cfs_throttled_periods = 5;
+  // Total throttled time since the previous sample, in microseconds.
+  int64 cfs_throttled_usec = 6;
+  // GC pauses since the previous sample, parsed from the JVM GC log.
+  GcWindow gc = 7;
+}
+
+// GcWindow aggregates GC pauses observed during one sample window.
+message GcWindow {
+  // Number of GC pauses in the window.
+  int64 count = 1;
+  // Sum of pause durations in milliseconds.
+  double total_ms = 2;
+  // Longest single pause in milliseconds.
+  double max_ms = 3;
+}
+
+// TickSample is mod-sourced authoritative tick timing.
+message TickSample {
+  // Ticks per second over the sample window (20 is nominal).
+  double tps = 1;
+  // Mean milliseconds per tick over the window.
+  double mspt_avg = 2;
+  // Worst tick in the window, milliseconds.
+  double mspt_max = 3;
+  // 95th percentile tick time in the window, milliseconds.
+  double mspt_p95 = 4;
+  // Per-dimension tick cost, when the platform exposes it.
+  repeated DimensionTick dimensions = 5;
+}
+
+// DimensionTick is the tick cost attributed to one dimension.
+message DimensionTick {
+  // Dimension id (e.g. "minecraft:overworld").
+  string dimension = 1;
+  // Mean milliseconds per tick spent in this dimension.
+  double mspt_avg = 2;
+}
+
+// JvmSample is mod-sourced in-process JVM telemetry.
+message JvmSample {
+  // Used heap in MiB.
+  double heap_used_mb = 1;
+  // Max heap (Xmx) in MiB.
+  double heap_max_mb = 2;
+  // GC pauses since the previous sample, from GarbageCollectorMXBeans.
+  GcWindow gc = 3;
+  // Live thread count.
+  int32 thread_count = 4;
+  // Loaded class count.
+  int32 class_count = 5;
+}
+
+// PlayerEvent is a mod-sourced player lifecycle or activity event.
+message PlayerEvent {
+  // What happened.
+  PlayerEventType type = 1;
+  // Player username.
+  string player = 2;
+  // Player UUID, when known.
+  string uuid = 3;
+  // Event detail: death message, advancement title, or chat line.
+  string detail = 4;
+  // Online player count after this event.
+  int32 players_online = 5;
+}
+
+// PlayerEventType enumerates mod-sourced player events.
+enum PlayerEventType {
+  PLAYER_EVENT_TYPE_UNSPECIFIED = 0;
+  // Player joined the server.
+  PLAYER_EVENT_TYPE_JOIN = 1;
+  // Player left the server.
+  PLAYER_EVENT_TYPE_LEAVE = 2;
+  // Player died; detail carries the death message.
+  PLAYER_EVENT_TYPE_DEATH = 3;
+  // Player completed an advancement; detail carries its title.
+  PLAYER_EVENT_TYPE_ADVANCEMENT = 4;
+  // Player chatted; detail carries the message.
+  PLAYER_EVENT_TYPE_CHAT = 5;
+}
+
+// WorldStats is mod-sourced world state, sampled periodically.
+message WorldStats {
+  // Per-dimension world state.
+  repeated DimensionStats dimensions = 1;
+  // Names of all online players (authoritative roster).
+  repeated string online_players = 2;
+}
+
+// DimensionStats is the world state of one dimension.
+message DimensionStats {
+  // Dimension id (e.g. "minecraft:overworld").
+  string dimension = 1;
+  // Loaded entity count.
+  int32 entities = 2;
+  // Loaded chunk count.
+  int32 chunks = 3;
+  // Players currently in this dimension.
+  int32 players = 4;
+}
+
+// CommandList is the server's known command names, sent once on ready, used
+// for console autocomplete in the panel.
+message CommandList {
+  // Root command names known to the server's dispatcher.
+  repeated string commands = 1;
+}
+
+// ConsoleCommand asks the runtime supervisor to write one line to the java
+// process stdin (works during boot and with RCON disabled).
+message ConsoleCommand {
+  // The command line, without trailing newline.
+  string command = 1;
+}
+
+// ChatMessage asks the disco-agent mod to broadcast a chat message in game.
+message ChatMessage {
+  // Displayed sender name (e.g. "Panel" or a Discord username).
+  string sender = 1;
+  // The chat text.
+  string message = 2;
+}

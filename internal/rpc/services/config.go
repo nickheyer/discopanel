@@ -12,6 +12,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -21,19 +22,21 @@ import (
 var _ discopanelv1connect.ConfigServiceHandler = (*ConfigService)(nil)
 
 type ConfigService struct {
-	store  *storage.Store
-	config *config.Config
-	docker *docker.Client
-	log    *logger.Logger
+	store     *storage.Store
+	config    *config.Config
+	docker    *docker.Client
+	lifecycle *lifecycle.Manager
+	log       *logger.Logger
 }
 
 // Creates new config service
-func NewConfigService(store *storage.Store, cfg *config.Config, docker *docker.Client, log *logger.Logger) *ConfigService {
+func NewConfigService(store *storage.Store, cfg *config.Config, docker *docker.Client, lifecycleManager *lifecycle.Manager, log *logger.Logger) *ConfigService {
 	return &ConfigService{
-		store:  store,
-		config: cfg,
-		docker: docker,
-		log:    log,
+		store:     store,
+		config:    cfg,
+		docker:    docker,
+		lifecycle: lifecycleManager,
+		log:       log,
 	}
 }
 
@@ -105,11 +108,10 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save server configuration"))
 	}
 
-	// If server has a container, we need to recreate it to apply a new env
-	if server.ContainerID != "" && s.docker != nil {
-		if err := s.recreateContainer(ctx, server, config); err != nil {
-			s.log.Error("Config saved but container recreation failed: %v", err)
-		}
+	// Running servers restart (with re-provisioning) to apply the new config;
+	// stopped servers pick it up on next start.
+	if server.ContainerID != "" && s.lifecycle != nil {
+		s.applyConfigToRunningServer(server)
 	}
 
 	// Return updated config
@@ -173,42 +175,20 @@ func (s *ConfigService) UpdateGlobalSettings(ctx context.Context, req *connect.R
 	}), nil
 }
 
-func (s *ConfigService) recreateContainer(ctx context.Context, server *storage.Server, config *storage.ServerConfig) error {
-	oldContainerID := server.ContainerID
-	wasRunning := false
-	if server.Status == storage.StatusRunning {
-		wasRunning = true
-		if _, err := s.docker.StopContainer(ctx, oldContainerID); err != nil {
-			return err
-		}
-		time.Sleep(2 * time.Second)
+// applyConfigToRunningServer re-provisions and restarts a running server so
+// saved configuration takes effect. Stopped servers pick changes up on the
+// next start (the provisioner reapplies config files on every start).
+func (s *ConfigService) applyConfigToRunningServer(server *storage.Server) {
+	switch server.Status {
+	case storage.StatusRunning, storage.StatusStarting, storage.StatusUnhealthy, storage.StatusPaused:
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
+			if err := s.lifecycle.Restart(ctx, server.ID); err != nil {
+				s.log.Error("Failed to restart server %s after config update: %v", server.Name, err)
+			}
+		}()
 	}
-
-	if err := s.docker.RemoveContainer(ctx, oldContainerID); err != nil {
-		return err
-	}
-
-	newContainerID, err := s.docker.CreateContainer(ctx, server, config)
-	if err != nil {
-		return err
-	}
-
-	server.ContainerID = newContainerID
-	if err := s.store.UpdateServer(ctx, server); err != nil {
-		return err
-	}
-
-	if wasRunning {
-		if err := s.docker.StartContainer(ctx, newContainerID); err != nil {
-			return err
-		}
-		server.Status = storage.StatusStarting
-		now := time.Now()
-		server.LastStarted = &now
-		s.store.UpdateServer(ctx, server)
-	}
-	s.log.Info("Container recreated with updated configuration")
-	return nil
 }
 
 // Maps updates w/ reflection
@@ -334,6 +314,10 @@ func buildConfigCategories(config any) ([]*v1.ConfigCategory, error) {
 
 		// Metadata tags
 		envTag := field.Tag.Get("env")
+		if envTag == "" {
+			// server.properties-backed fields display their property key
+			envTag = field.Tag.Get("prop")
+		}
 		defaultTag := field.Tag.Get("default")
 		descTag := field.Tag.Get("desc")
 		inputTag := field.Tag.Get("input")
@@ -407,14 +391,6 @@ func getSelectOptions(key string) []string {
 		return []string{"peaceful", "easy", "normal", "hard"}
 	case "mode":
 		return []string{"creative", "survival", "adventure", "spectator"}
-	case "cfSetLevelFrom":
-		return []string{"", "WORLD_FILE", "OVERRIDES"}
-	case "userApiProvider":
-		return []string{"playerdb", "mojang"}
-	case "existingOpsFile":
-		return []string{"SKIP", "SYNCHRONIZE", "MERGE", "SYNC_FILE_MERGE_LIST"}
-	case "existingWhitelistFile":
-		return []string{"SKIP", "SYNCHRONIZE", "MERGE", "SYNC_FILE_MERGE_LIST"}
 	case "modrinthDownloadDependencies":
 		return []string{"none", "required", "optional"}
 	case "modrinthProjectsDefaultVersionType":
@@ -422,7 +398,7 @@ func getSelectOptions(key string) []string {
 	case "modrinthModpackVersionType":
 		return []string{"release", "beta", "alpha"}
 	case "modrinthLoader":
-		return []string{"forge", "fabric", "quilt"}
+		return []string{"forge", "neoforge", "fabric", "quilt"}
 	default:
 		return []string{}
 	}
@@ -432,15 +408,15 @@ func getSelectOptions(key string) []string {
 func getCategoryIndex(key string) int {
 	switch key {
 	// JVM Configuration (0)
-	case "uid", "gid", "memory", "initMemory", "maxMemory", "tz", "enableRollingLogs",
-		"enableJmx", "jmxHost", "useAikarFlags", "useMeowiceFlags", "useMeowiceGraalvmFlags",
-		"jvmOpts", "jvmXxOpts", "jvmDdOpts", "extraArgs", "logTimestamp":
+	case "uid", "gid", "memory", "initMemory", "maxMemory", "tz",
+		"enableJmx", "jmxHost", "useAikarFlags", "useMeowiceFlags",
+		"useFlareFlags", "useSimdFlags",
+		"jvmOpts", "jvmXxOpts", "jvmDdOpts", "extraArgs":
 		return 0
 
 	// Server Settings (1)
-	case "type", "customServer", "customJarExec", "eula", "version", "motd", "icon", "overrideIcon", "serverName",
-		"serverPort", "console", "gui", "stopDuration", "setupOnly", "execDirectly",
-		"stopServerAnnounceDelay", "proxy", "useFlareFlags", "useSimdFlags",
+	case "customServer", "customJarExec", "eula", "motd", "icon", "overrideIcon", "serverName",
+		"serverPort", "stopDuration", "stopServerAnnounceDelay", "forceProvision",
 		"serverPropertiesEscapeUnicode", "bugReportLink", "customServerProperties":
 		return 1
 
@@ -478,35 +454,30 @@ func getCategoryIndex(key string) int {
 		return 6
 
 	// Ops/Admins (7)
-	case "userApiProvider", "ops", "opsFile", "existingOpsFile":
+	case "ops":
 		return 7
 
 	// Whitelist (8)
-	case "enableWhitelist", "whitelist", "whitelistFile", "overrideWhitelist",
-		"existingWhitelistFile", "enforceWhitelist":
+	case "enableWhitelist", "whitelist", "overrideWhitelist", "enforceWhitelist":
 		return 8
 
 	// Auto-Pause (9)
-	case "enableAutopause", "autopauseTimeoutEst", "autopauseTimeoutInit", "autopauseTimeoutKn",
-		"autopausePeriod", "autopauseKnockInterface", "debugAutopause":
+	case "enableAutopause", "autopauseTimeoutEst", "autopauseTimeoutInit":
 		return 9
 
 	// Auto-Stop (10)
-	case "enableAutostop", "autostopTimeoutEst", "autostopTimeoutInit", "autostopPeriod", "debugAutostop":
+	case "enableAutostop", "autostopTimeoutEst", "autostopTimeoutInit":
 		return 10
 
 	// CurseForge (11)
-	case "cfApiKey", "cfApiKeyFile", "cfPageUrl", "cfSlug", "cfFileId", "cfFilenameMatcher",
-		"cfExcludeIncludeFile", "cfExcludeMods", "cfForceIncludeMods", "cfForceSynchronize",
-		"cfSetLevelFrom", "cfParallelDownloads", "cfOverridesSkipExisting", "cfForceReinstallModloader":
+	case "cfApiKey", "cfPageUrl", "cfSlug", "cfFileId", "cfModpackZip",
+		"cfExcludeMods", "cfForceIncludeMods", "forgeVersion", "forgeInstaller", "forgeInstallerUrl":
 		return 11
 
 	// Modrinth (12)
 	case "modrinthModpack", "modrinthModpackVersionType", "modrinthVersion", "modrinthLoader",
-		"modrinthIgnoreMissingFiles", "modrinthExcludeFiles", "modrinthForceIncludeFiles",
-		"modrinthForceSynchronize", "modrinthDefaultExcludeIncludes", "modrinthOverridesExclusions",
-		"modrinthProjects", "modrinthDownloadDependencies", "modrinthProjectsDefaultVersionType",
-		"versionFromModrinthProjects":
+		"modrinthExcludeFiles", "modrinthForceIncludeFiles",
+		"modrinthProjects", "modrinthDownloadDependencies", "modrinthProjectsDefaultVersionType":
 		return 12
 
 	default:

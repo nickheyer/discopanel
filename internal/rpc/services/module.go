@@ -213,6 +213,19 @@ func dbModuleToProto(m *storage.Module, serverName, templateName, serverProxyHos
 	return protoModule
 }
 
+// Fills live container stats for a running module
+func (s *ModuleService) applyModuleStats(ctx context.Context, m *storage.Module) {
+	if m.ContainerID == "" || m.Status != storage.ModuleStatusRunning {
+		return
+	}
+	stats, err := s.docker.GetContainerStats(ctx, m.ContainerID)
+	if err != nil {
+		return
+	}
+	m.CPUPercent = stats.CPUPercent
+	m.MemoryUsage = stats.MemoryUsage
+}
+
 // resolveCreatedByUsername looks up the username for a module's CreatedBy user ID
 func (s *ModuleService) resolveCreatedByUsername(ctx context.Context, userID string) string {
 	if userID == "" {
@@ -480,6 +493,8 @@ func (s *ModuleService) ListModules(ctx context.Context, req *connect.Request[v1
 			}
 		}
 
+		s.applyModuleStats(ctx, m)
+
 		serverName := ""
 		serverProxyHostname := ""
 		if server, err := s.store.GetServer(ctx, m.ServerID); err == nil {
@@ -520,6 +535,8 @@ func (s *ModuleService) GetModule(ctx context.Context, req *connect.Request[v1.G
 			s.store.UpdateModule(ctx, module)
 		}
 	}
+
+	s.applyModuleStats(ctx, module)
 
 	// Enrich with server and template names
 	serverName := ""
@@ -957,13 +974,6 @@ func (s *ModuleService) GetModuleLogs(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
 
-	if module.ContainerID == "" {
-		return connect.NewResponse(&v1.GetModuleLogsResponse{
-			Logs:  []*v1.LogEntry{},
-			Total: 0,
-		}), nil
-	}
-
 	tail := int(msg.Tail)
 	if tail == 0 {
 		tail = 100
@@ -972,7 +982,12 @@ func (s *ModuleService) GetModuleLogs(ctx context.Context, req *connect.Request[
 	// Get structured log entries from the log streamer if available
 	var protoLogs []*v1.LogEntry
 	if s.logStreamer != nil {
-		protoLogs = s.logStreamer.GetLogs(module.ContainerID, tail)
+		if module.ContainerID != "" {
+			if err := s.logStreamer.StartStreaming(module.ID, module.ContainerID); err != nil {
+				s.log.Warn("Failed to start log streaming for module %s: %v", module.ID, err)
+			}
+		}
+		protoLogs = s.logStreamer.GetLogs(module.ID, tail)
 	}
 
 	return connect.NewResponse(&v1.GetModuleLogsResponse{

@@ -27,6 +27,7 @@ func allModels() []any {
 		&RegistrationInvite{},
 		&ScheduledTask{},
 		&TaskExecution{},
+		&MetricsSample{},
 		&ModuleTemplate{},
 		&Module{},
 		&SystemSetting{},
@@ -116,6 +117,27 @@ func migrations() []*gormigrate.Migration {
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return tx.Where("source = ?", "migration").Delete(&UserRole{}).Error
+			},
+		},
+		{
+			// Stored docker_image values used to be itzg/minecraft-server tags
+			// (java21, stable, latest, ...). They now select discopanel-runtime
+			// tags, so stale values are cleared and re-derived from the MC
+			// version on next start. Server files are re-provisioned on first
+			// start via the missing provision manifest; worlds are untouched.
+			ID: "20260701_001_reset_itzg_image_tags",
+			Migrate: func(tx *gorm.DB) error {
+				result := tx.Model(&Server{}).Where("docker_image != ''").Update("docker_image", "")
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected > 0 {
+					log.Printf("[migrate] Cleared %d legacy itzg image tag(s); runtime images are now derived from the MC version", result.RowsAffected)
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return nil
 			},
 		},
 	}

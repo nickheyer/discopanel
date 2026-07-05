@@ -207,7 +207,7 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 
 	// Start log streaming
 	if m.logStreamer != nil {
-		if err := m.logStreamer.StartStreaming(module.ContainerID); err != nil {
+		if err := m.logStreamer.StartStreaming(module.ID, module.ContainerID); err != nil {
 			m.logger.Warn("Failed to start log streaming for module %s: %v", module.Name, err)
 		}
 	}
@@ -467,7 +467,7 @@ func (m *Manager) StopModule(ctx context.Context, moduleID string) error {
 	}
 
 	// Stop the container
-	if _, err := m.docker.StopContainer(ctx, module.ContainerID); err != nil {
+	if _, err := m.docker.StopContainer(ctx, module.ContainerID, 30); err != nil {
 		m.logger.Error("Failed to stop module container: %v", err)
 	}
 

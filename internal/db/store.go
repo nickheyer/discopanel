@@ -98,6 +98,23 @@ func (s *Store) ListServers(ctx context.Context) ([]*Server, error) {
 	return servers, err
 }
 
+// GetServerByAgentTokenHash resolves the server owning a runtime agent token
+// (stored as a SHA-256 hex digest).
+func (s *Store) GetServerByAgentTokenHash(ctx context.Context, hash string) (*Server, error) {
+	if hash == "" {
+		return nil, fmt.Errorf("server not found")
+	}
+	var server Server
+	err := s.db.WithContext(ctx).First(&server, "agent_token_hash = ?", hash).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("server not found")
+		}
+		return nil, err
+	}
+	return &server, nil
+}
+
 func (s *Store) UpdateServer(ctx context.Context, server *Server) error {
 	if err := s.db.WithContext(ctx).Save(server).Error; err != nil {
 		return err
@@ -119,9 +136,112 @@ func (s *Store) DeleteServer(ctx context.Context, id string) error {
 			return err
 		}
 
+		// Delete metrics history
+		if err := tx.Where("server_id = ?", id).Delete(&MetricsSample{}).Error; err != nil {
+			return err
+		}
+
 		// Delete server
 		return tx.Delete(&Server{}, "id = ?", id).Error
 	})
+}
+
+// Metrics history operations
+
+// AddMetricsSamples inserts one batch of telemetry points
+func (s *Store) AddMetricsSamples(ctx context.Context, samples []*MetricsSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Create(samples).Error
+}
+
+// Metrics timestamps are compared through datetime() because stored text
+// may or may not carry a UTC offset suffix depending on the write path.
+
+// Scan target for bucketed metrics aggregation
+type metricsBucketRow struct {
+	ServerID   string  `gorm:"column:server_id"`
+	Bucket     int64   `gorm:"column:bucket"`
+	TPS        float64 `gorm:"column:tps"`
+	MSPT       float64 `gorm:"column:mspt"`
+	Players    int     `gorm:"column:players"`
+	CPUPercent float64 `gorm:"column:cpu_percent"`
+	MemoryMB   float64 `gorm:"column:memory_mb"`
+	DiskBytes  int64   `gorm:"column:disk_bytes"`
+}
+
+// GetMetricsHistory returns samples for one server ordered oldest first.
+// A positive bucket width aggregates all stored points into fixed buckets.
+// Raw and rollup rows never overlap in time, so both scan cleanly.
+func (s *Store) GetMetricsHistory(ctx context.Context, serverID string, from, to time.Time, bucketSeconds int) ([]*MetricsSample, error) {
+	if bucketSeconds <= 0 {
+		var samples []*MetricsSample
+		err := s.db.WithContext(ctx).
+			Where("server_id = ? AND datetime(timestamp) >= datetime(?) AND datetime(timestamp) <= datetime(?)",
+				serverID, from.UTC(), to.UTC()).
+			Order("datetime(timestamp) ASC").
+			Find(&samples).Error
+		return samples, err
+	}
+	query := `
+		SELECT server_id,
+			(CAST(strftime('%s', timestamp) AS INTEGER) / ?) * ? AS bucket,
+			AVG(tps) AS tps, AVG(mspt) AS mspt, MAX(players) AS players,
+			AVG(cpu_percent) AS cpu_percent, AVG(memory_mb) AS memory_mb, MAX(disk_bytes) AS disk_bytes
+		FROM metrics_samples
+		WHERE server_id = ? AND datetime(timestamp) >= datetime(?) AND datetime(timestamp) <= datetime(?)
+		GROUP BY bucket
+		ORDER BY bucket ASC`
+	var rows []metricsBucketRow
+	err := s.db.WithContext(ctx).
+		Raw(query, bucketSeconds, bucketSeconds, serverID, from.UTC(), to.UTC()).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	samples := make([]*MetricsSample, 0, len(rows))
+	for _, r := range rows {
+		samples = append(samples, &MetricsSample{
+			ServerID:   r.ServerID,
+			Resolution: bucketSeconds,
+			Timestamp:  time.Unix(r.Bucket, 0).UTC(),
+			TPS:        r.TPS,
+			MSPT:       r.MSPT,
+			Players:    r.Players,
+			CPUPercent: r.CPUPercent,
+			MemoryMB:   r.MemoryMB,
+			DiskBytes:  r.DiskBytes,
+		})
+	}
+	return samples, nil
+}
+
+// RollupMetricsSamples folds raw samples older than the cutoff into
+// fixed-second buckets, then removes the raw rows it consumed.
+func (s *Store) RollupMetricsSamples(ctx context.Context, olderThan time.Time, bucketSeconds int) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		insert := `
+			INSERT INTO metrics_samples (server_id, resolution, timestamp, tps, mspt, players, cpu_percent, memory_mb, disk_bytes)
+			SELECT server_id, ?,
+				datetime((CAST(strftime('%s', timestamp) AS INTEGER) / ?) * ?, 'unixepoch'),
+				AVG(tps), AVG(mspt), MAX(players), AVG(cpu_percent), AVG(memory_mb), MAX(disk_bytes)
+			FROM metrics_samples
+			WHERE resolution = 0 AND datetime(timestamp) < datetime(?)
+			GROUP BY server_id, CAST(strftime('%s', timestamp) AS INTEGER) / ?`
+		if err := tx.Exec(insert, bucketSeconds, bucketSeconds, bucketSeconds, olderThan.UTC(), bucketSeconds).Error; err != nil {
+			return err
+		}
+		return tx.Where("resolution = 0 AND datetime(timestamp) < datetime(?)", olderThan.UTC()).
+			Delete(&MetricsSample{}).Error
+	})
+}
+
+// PruneMetricsSamples removes samples of one resolution older than the cutoff
+func (s *Store) PruneMetricsSamples(ctx context.Context, resolution int, olderThan time.Time) error {
+	return s.db.WithContext(ctx).
+		Where("resolution = ? AND datetime(timestamp) < datetime(?)", resolution, olderThan.UTC()).
+		Delete(&MetricsSample{}).Error
 }
 
 func (s *Store) GetServerByPort(ctx context.Context, port int) (*Server, error) {
@@ -184,7 +304,7 @@ func (s *Store) ClearEphemeralConfigFields(ctx context.Context, serverID string)
 	}
 
 	// Clear ephemeral fields
-	config.CFForceReinstallModloader = nil
+	config.ForceProvision = nil
 
 	return s.SaveServerConfig(ctx, config)
 }
@@ -201,10 +321,7 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 		}
 	}
 
-	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
-	config.Type = stringPtr(string(server.ModLoader))
-	config.Version = stringPtr(server.MCVersion)
 	config.ServerPort = intPtr(server.Port)
 	config.MaxPlayers = intPtr(server.MaxPlayers)
 
@@ -229,8 +346,6 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 		EnableRCON:   boolPtr(true),
 		RCONPassword: stringPtr(rconPassword),
 		RCONPort:     intPtr(25575),
-		Version:      stringPtr("LATEST"),
-		Type:         stringPtr("VANILLA"),
 		Difficulty:   stringPtr("easy"),
 		Mode:         stringPtr("survival"),
 		MaxPlayers:   intPtr(20),
@@ -254,8 +369,7 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 			field := configType.Field(i)
 			// Skip these fields as they're server-specific
 			if field.Name == "ID" || field.Name == "ServerID" || field.Name == "UpdatedAt" ||
-				field.Name == "Server" || field.Name == "RCONPassword" ||
-				field.Name == "Type" || field.Name == "Version" || field.Name == "Memory" ||
+				field.Name == "Server" || field.Name == "RCONPassword" || field.Name == "Memory" ||
 				field.Name == "InitMemory" || field.Name == "MaxMemory" || field.Name == "ServerPort" ||
 				field.Name == "MaxPlayers" {
 				continue

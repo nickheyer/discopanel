@@ -26,18 +26,16 @@ type ProxyService struct {
 	proxyManager *proxy.Manager
 	config       *config.Config
 	log          *logger.Logger
-	logStreamer  *logger.LogStreamer
 }
 
 // NewProxyService creates a new proxy service
-func NewProxyService(store *storage.Store, dockerClient *docker.Client, proxyManager *proxy.Manager, cfg *config.Config, logStreamer *logger.LogStreamer, log *logger.Logger) *ProxyService {
+func NewProxyService(store *storage.Store, dockerClient *docker.Client, proxyManager *proxy.Manager, cfg *config.Config, log *logger.Logger) *ProxyService {
 	return &ProxyService{
 		store:        store,
 		docker:       dockerClient,
 		proxyManager: proxyManager,
 		config:       cfg,
 		log:          log,
-		logStreamer:  logStreamer,
 	}
 }
 
@@ -523,7 +521,7 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
 		}
 
-		result, err := s.docker.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
+		result, err := s.docker.RecreateContainer(ctx, server.ContainerID, server, serverConfig, nil)
 		if err != nil {
 			s.log.Error("Failed to recreate container for proxy change: %v", err)
 			if result != nil && result.NewContainerID != "" {

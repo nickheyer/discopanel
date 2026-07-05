@@ -207,3 +207,39 @@ func (c *Client) GetModpackVersions(ctx context.Context, modpackID string) ([]Ve
 
 	return versions, nil
 }
+
+// GetProjectVersionsFiltered retrieves versions for a project, optionally
+// narrowed by loader and game version (server-side filtering).
+func (c *Client) GetProjectVersionsFiltered(ctx context.Context, projectID string, loaders []string, gameVersions []string) ([]Version, error) {
+	params := url.Values{}
+	if len(loaders) > 0 {
+		if f, err := json.Marshal(loaders); err == nil {
+			params.Set("loaders", string(f))
+		}
+	}
+	if len(gameVersions) > 0 {
+		if f, err := json.Marshal(gameVersions); err == nil {
+			params.Set("game_versions", string(f))
+		}
+	}
+
+	endpoint := fmt.Sprintf("%s/project/%s/version", BaseURL, projectID)
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
+
+	var versions []Version
+	if err := c.http.DoJSON(ctx, endpoint, &versions); err != nil {
+		return nil, err
+	}
+	return versions, nil
+}
+
+// GetVersion retrieves a single version by its ID.
+func (c *Client) GetVersion(ctx context.Context, versionID string) (*Version, error) {
+	var version Version
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/version/%s", BaseURL, versionID), &version); err != nil {
+		return nil, err
+	}
+	return &version, nil
+}

@@ -45,7 +45,7 @@ services:
       - DISCOPANEL_HOST_DATA_PATH=/opt/discopanel/data
       - TZ=UTC
 
-      # ── Authentication ──────────────────────────
+      # -- Authentication --------------------------
       # Local auth (username/password) is on by default.
       # You create your first admin account on first login.
       #

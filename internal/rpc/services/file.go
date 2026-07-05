@@ -680,7 +680,7 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stat archive"))
 	}
 
-	// Register download session (temp zip — delete after expiry)
+	// Register download session (temp zip - delete after expiry)
 	session := s.downloadManager.InitSession(tempPath, filename, info.Size(), true)
 
 	return connect.NewResponse(&v1.DownloadArchiveResponse{

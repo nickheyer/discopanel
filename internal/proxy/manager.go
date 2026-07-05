@@ -7,31 +7,51 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/docker/client"
 	"github.com/nickheyer/discopanel/internal/config"
 	db "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
 // Manager handles the lifecycle of the proxy and manages routes
 type Manager struct {
-	proxies     map[int]Proxier // Map of port -> Proxy instance (TCP or UDP)
-	store       *db.Store
-	config      *config.ProxyConfig
-	logger      *logger.Logger
-	mu          sync.Mutex
-	networkName string
+	proxies map[int]Proxier // Map of port -> Proxy instance (TCP or UDP)
+	store   *db.Store
+	docker  *docker.Client
+	config  *config.ProxyConfig
+	logger  *logger.Logger
+	mu      sync.Mutex
+	gate    ServerGate
+}
+
+// SetServerGate registers the wake gate consulted for paused servers. Must be
+// called before Start so every listener proxy picks it up.
+func (m *Manager) SetServerGate(gate ServerGate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gate = gate
+	for _, p := range m.proxies {
+		if mp, ok := p.(*MinecraftProxy); ok {
+			mp.SetGate(gate)
+		}
+	}
 }
 
 // NewManager creates a new proxy manager
-func NewManager(store *db.Store, cfg *config.Config, logger *logger.Logger) *Manager {
+func NewManager(store *db.Store, dockerClient *docker.Client, cfg *config.Config, logger *logger.Logger) *Manager {
 	return &Manager{
-		proxies:     make(map[int]Proxier),
-		store:       store,
-		config:      &cfg.Proxy,
-		logger:      logger,
-		networkName: cfg.Docker.NetworkName,
+		proxies: make(map[int]Proxier),
+		store:   store,
+		docker:  dockerClient,
+		config:  &cfg.Proxy,
+		logger:  logger,
 	}
+}
+
+// containerIP resolves a container's IP on the panel network via the shared
+// docker client.
+func (m *Manager) containerIP(containerID string) (string, error) {
+	return m.docker.ContainerIP(context.Background(), containerID)
 }
 
 // Start initializes and starts the proxy if enabled
@@ -65,6 +85,7 @@ func (m *Manager) Start() error {
 		proxy := NewMinecraftProxy(&Config{
 			ListenAddr: listenAddr,
 			Logger:     m.logger,
+			Gate:       m.gate,
 		})
 
 		m.proxies[listener.Port] = proxy
@@ -101,7 +122,7 @@ func (m *Manager) Start() error {
 			}
 
 			// Get container IP address
-			containerIP, err := GetContainerIP(server.ContainerID, m.networkName)
+			containerIP, err := m.containerIP(server.ContainerID)
 			if err != nil {
 				m.logger.Error("Failed to get container IP for server %s: %v", server.Name, err)
 				continue
@@ -183,11 +204,11 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 	hostname := m.generateHostname(server)
 
 	// Add or update route for servers that are starting or running with proxy hostname
-	if (server.Status == db.StatusRunning || server.Status == db.StatusStarting) && server.ProxyHostname != "" {
+	if (server.Status == db.StatusRunning || server.Status == db.StatusStarting || server.Status == db.StatusPaused) && server.ProxyHostname != "" {
 		// Get the container's IP address on the Docker network
 		containerIP := ""
 		if server.ContainerID != "" {
-			if ip, err := GetContainerIP(server.ContainerID, m.networkName); err == nil {
+			if ip, err := m.containerIP(server.ContainerID); err == nil {
 				containerIP = ip
 			} else {
 				m.logger.Error("Failed to get container IP for %s: %v", server.Name, err)
@@ -329,6 +350,7 @@ func (m *Manager) AddListener(listener *db.ProxyListener) error {
 	proxy := NewMinecraftProxy(&Config{
 		ListenAddr: listenAddr,
 		Logger:     m.logger,
+		Gate:       m.gate,
 	})
 
 	// Start the proxy
@@ -403,7 +425,7 @@ func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
 		return fmt.Errorf("module has no container ID")
 	}
 
-	containerIP, err := GetContainerIP(module.ContainerID, m.networkName)
+	containerIP, err := m.containerIP(module.ContainerID)
 	if err != nil {
 		return fmt.Errorf("failed to get module container IP: %w", err)
 	}
@@ -544,7 +566,7 @@ func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error 
 	}
 
 	// Get the container IP
-	containerIP, err := GetContainerIP(module.ContainerID, m.networkName)
+	containerIP, err := m.containerIP(module.ContainerID)
 	if err != nil {
 		return fmt.Errorf("failed to get module container IP: %w", err)
 	}
@@ -643,35 +665,4 @@ func (m *Manager) ensureDefaultListenerLocked() (*db.ProxyListener, error) {
 
 	m.logger.Info("Created default proxy listener on port %d", port)
 	return defaultListener, nil
-}
-
-// GetContainerIP gets the IP address of a container on the specified network
-func GetContainerIP(containerID string, networkName string) (string, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return "", err
-	}
-	defer cli.Close()
-
-	ctx := context.Background()
-	containerInfo, err := cli.ContainerInspect(ctx, containerID)
-	if err != nil {
-		return "", fmt.Errorf("failed to inspect container: %w", err)
-	}
-
-	// Look for the IP on the specified network
-	if networkName != "" {
-		if network, ok := containerInfo.NetworkSettings.Networks[networkName]; ok && network.IPAddress != "" {
-			return network.IPAddress, nil
-		}
-	}
-
-	// Fallback to any available IP
-	for _, network := range containerInfo.NetworkSettings.Networks {
-		if network.IPAddress != "" {
-			return network.IPAddress, nil
-		}
-	}
-
-	return "", fmt.Errorf("no IP address found for container")
 }

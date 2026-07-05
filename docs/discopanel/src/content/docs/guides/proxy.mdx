@@ -1,0 +1,46 @@
+---
+title: Proxy & Domains
+description: Give every server its own address, share one port for all of them, and let sleeping servers wake on join.
+---
+
+DiscoPanel has a built-in proxy for Minecraft connections. With it, all of your servers share a single port, and players connect by name:
+
+- `survival.mc.example.com` connects to your survival server
+- `creative.mc.example.com` connects to your creative server
+- `modded.mc.example.com` connects to your modded server
+
+Without the proxy, every server needs its own port, and players connect with an address like `203.0.113.5:25566`. Both ways work - the proxy is just much nicer once you run more than one server.
+
+## Setting it up
+
+You need a domain name (any domain works). In your `config.yaml`:
+
+```yaml
+proxy:
+  enabled: true
+  base_url: "mc.example.com"   # your domain for Minecraft servers
+  listen_port: 25565
+```
+
+Then two things outside DiscoPanel:
+
+1. **DNS**: add a wildcard record `*.mc.example.com` pointing at your server's public IP. Every subdomain then resolves to you automatically - no new DNS entry per server. (Individual records per server work too.)
+2. **Port forwarding**: forward port `25565` on your router to the machine running DiscoPanel. Just the one port, no matter how many servers you run.
+
+## Server addresses
+
+Each server gets a default address from its name: a server called "Epic Survival" becomes `epic-survival.mc.example.com`. You can change it in the server's **Routing** tab - type a different name and the rest is filled in for you.
+
+## What the proxy gets you
+
+- **One port for everything.** New servers are instantly reachable, no router changes.
+- **Wake on join.** [Auto-pause](/guides/autopause/) only works behind the proxy: it's the proxy that answers pings for a sleeping server and wakes it when someone actually joins.
+- **No exposed ports per server.** Proxied servers don't open any ports on your machine. The proxy handles all the traffic.
+
+## Without the proxy
+
+Servers not behind the proxy bind their own port directly (DiscoPanel suggests the next free one, counting up from `25565`). Players connect with `your-ip:port`, and each server's port has to be forwarded on your router separately. On a home network your friends need your **public** IP - search "what is my IP" - and people on the same WiFi as you use your local IP instead.
+
+:::note
+Extra ports for things like Simple Voice Chat or map mods aren't routed through the proxy. Expose those with the **Additional Ports** section in the server's overview tab.
+:::

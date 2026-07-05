@@ -15,6 +15,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/events"
+	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -26,6 +27,7 @@ type Scheduler struct {
 	store         *storage.Store
 	docker        *docker.Client
 	sender        *command.Sender
+	lifecycle     *lifecycle.Manager
 	appConfig     *appconfig.Config
 	metrics       *metrics.Collector
 	log           *logger.Logger
@@ -62,7 +64,7 @@ func DefaultConfig() Config {
 }
 
 // NewScheduler creates a new task scheduler
-func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, appCfg *appconfig.Config, metricsCollector *metrics.Collector, log *logger.Logger, config ...Config) *Scheduler {
+func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, lifecycleManager *lifecycle.Manager, appCfg *appconfig.Config, metricsCollector *metrics.Collector, log *logger.Logger, config ...Config) *Scheduler {
 	cfg := DefaultConfig()
 	if len(config) > 0 {
 		cfg = config[0]
@@ -72,6 +74,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 		store:             store,
 		docker:            docker,
 		sender:            sender,
+		lifecycle:         lifecycleManager,
 		appConfig:         appCfg,
 		metrics:           metricsCollector,
 		log:               log,
@@ -263,7 +266,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 		return nil, err
 	}
 
-	// Check if server is online (if required). Webhook tasks always fire —
+	// Check if server is online (if required). Webhook tasks always fire -
 	// they notify, they don't operate on the server, and most useful events
 	// (server_stop, server_restart) happen while the server is not running.
 	if task.RequireOnline && task.TaskType != storage.TaskTypeWebhook && server.Status != storage.StatusRunning {
@@ -476,79 +479,23 @@ func (s *Scheduler) executeCommandTask(ctx context.Context, server *storage.Serv
 }
 
 func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
-	if server.ContainerID == "" {
-		return "", fmt.Errorf("server has no container")
+	if err := s.lifecycle.Restart(ctx, server.ID); err != nil {
+		return "", err
 	}
-
-	// Stop container
-	found, err := s.docker.StopContainer(ctx, server.ContainerID)
-	if err != nil {
-		return "", fmt.Errorf("failed to stop: %w", err)
-	}
-	if !found {
-		server.ContainerID = ""
-		server.Status = storage.StatusStopped
-		s.store.UpdateServer(ctx, server)
-		return "container not found, marked as stopped", nil
-	}
-
-	// Wait a moment
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case <-time.After(2 * time.Second):
-	}
-
-	// Start container
-	if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
-		return "", fmt.Errorf("failed to start: %w", err)
-	}
-
-	// Update server status
-	server.Status = storage.StatusStarting
-	now := time.Now()
-	server.LastStarted = &now
-	s.store.UpdateServer(ctx, server)
-
 	return "server restarted successfully", nil
 }
 
 func (s *Scheduler) executeStartTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
-	if server.ContainerID == "" {
-		return "", fmt.Errorf("server has no container")
+	if err := s.lifecycle.Start(ctx, server.ID); err != nil {
+		return "", err
 	}
-
-	if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
-		return "", fmt.Errorf("failed to start: %w", err)
-	}
-
-	server.Status = storage.StatusStarting
-	now := time.Now()
-	server.LastStarted = &now
-	s.store.UpdateServer(ctx, server)
-
 	return "server started successfully", nil
 }
 
 func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
-	if server.ContainerID == "" {
-		return "", fmt.Errorf("server has no container")
+	if err := s.lifecycle.Stop(ctx, server.ID); err != nil {
+		return "", err
 	}
-
-	found, err := s.docker.StopContainer(ctx, server.ContainerID)
-	if err != nil {
-		return "", fmt.Errorf("failed to stop: %w", err)
-	}
-	if !found {
-		server.ContainerID = ""
-		server.Status = storage.StatusStopped
-		s.store.UpdateServer(ctx, server)
-		return "container not found, marked as stopped", nil
-	}
-
-	server.Status = storage.StatusStopping
-	s.store.UpdateServer(ctx, server)
-
 	return "server stopped successfully", nil
 }
 

@@ -46,79 +46,15 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultMemory:   1024,
 		},
 		{
-			ID:             "builtin-mc-backup",
-			Name:           "MC Backup",
-			Description:    "Automated backup solution for Minecraft server worlds with RCON-coordinated saves and configurable retention policies",
-			Type:           storage.ModuleTemplateTypeBuiltin,
-			DockerImage:    "itzg/mc-backup:latest",
-			Category:       "utilities",
-			SupportsProxy:  false,
-			RequiresServer: true,
-			Icon:           "archive",
-			Ports:          []*v1.ModulePort{},
-			DefaultEnv: `{
-				"RCON_HOST": "discopanel-server-{{server.id}}",
-				"RCON_PORT": "{{server.config.rconPort}}",
-				"RCON_PASSWORD": "{{server.config.rconPassword}}",
-				"SRC_DIR": "/data",
-				"DEST_DIR": "/backups",
-				"BACKUP_NAME": "world",
-				"BACKUP_METHOD": "tar",
-				"BACKUP_INTERVAL": "24h",
-				"INITIAL_DELAY": "2m",
-				"BACKUP_ON_STARTUP": "true",
-				"PRUNE_BACKUPS_DAYS": "7",
-				"PAUSE_IF_NO_PLAYERS": "false",
-				"EXCLUDES": "*.jar,cache,logs,*.tmp",
-				"TZ": "{{server.config.tz}}"
-			}`,
-			DefaultVolumes: `[
-				{"source": "{{server.data_path}}", "target": "/data", "read_only": true},
-				{"source": "{{config.storage.backup_dir}}", "target": "/backups", "read_only": false}
-				]`,
-			Documentation: "Coordinates backups with the Minecraft server via RCON. Automatically flushes data, pauses writes, and resumes after backup. RCON settings are pulled from server config. Backups stored in global backup directory.",
-			DefaultMemory: 256,
-		},
-		{
-			ID:             "builtin-rcon-web",
-			Name:           "RCON Web Admin",
-			Description:    "Web-based RCON client for remote server management with command history and multi-server support",
-			Type:           storage.ModuleTemplateTypeBuiltin,
-			DockerImage:    "itzg/rcon:latest",
-			Category:       "management",
-			SupportsProxy:  true,
-			RequiresServer: true,
-			Icon:           "terminal",
-			Ports: []*v1.ModulePort{
-				{Name: "Web", ContainerPort: 4326, HostPort: 0, Protocol: "http", ProxyEnabled: true},
-				{Name: "WS", ContainerPort: 4327, HostPort: 0, Protocol: "http", ProxyEnabled: true},
-			},
-			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
-			DefaultEnv: `{
-				"RWA_ADMIN": "true",
-				"RWA_PASSWORD": "admin",
-				"RWA_RCON_HOST": "discopanel-server-{{server.id}}",
-				"RWA_RCON_PORT": "{{server.config.rconPort}}",
-				"RWA_RCON_PASSWORD": "{{server.config.rconPassword}}",
-				"RWA_WEBSOCKET_URL": "ws://{{server.proxy_hostname}}:{{module.ports.WS.host_port}}"
-			}`,
-			DefaultVolumes:  `[]`,
-			HealthCheckPath: "/",
-			HealthCheckPort: 4326,
-			Documentation:   "Provides a web interface for RCON commands. RCON settings are pulled from server config. Web UI on port 4326, WebSocket on port 4327 - both need to be accessible.",
-			DefaultMemory:   256,
-		},
-		{
 			ID:             "builtin-minecraft-exporter",
 			Name:           "Prometheus Exporter",
 			Description:    "Exports Minecraft server metrics to Prometheus for monitoring dashboards",
 			Type:           storage.ModuleTemplateTypeBuiltin,
-			DockerImage:    "itzg/mc-monitor:latest",
+			DockerImage:    "nickheyer/discopanel-exporter:latest",
 			Category:       "monitoring",
 			SupportsProxy:  true,
 			RequiresServer: true,
 			Icon:           "chart-bar",
-			DefaultCmd:     "export-for-prometheus",
 			Ports: []*v1.ModulePort{
 				{Name: "Metrics", ContainerPort: 9225, HostPort: 0, Protocol: "http", ProxyEnabled: true},
 			},
@@ -196,6 +132,18 @@ func InitBuiltinTemplates(store *storage.Store) error {
 	for _, template := range templates {
 		if err := store.UpsertModuleTemplate(ctx, &template); err != nil {
 			return err
+		}
+	}
+
+	// Remove obsolete builtin templates (native features replaced them). The
+	// delete is skipped automatically while modules still use a template.
+	for _, id := range []string{"builtin-mc-backup", "builtin-rcon-web"} {
+		if _, err := store.GetModuleTemplate(ctx, id); err != nil {
+			continue
+		}
+		if err := store.DeleteModuleTemplate(ctx, id); err != nil {
+			// Modules still reference it; leave it in place.
+			continue
 		}
 	}
 

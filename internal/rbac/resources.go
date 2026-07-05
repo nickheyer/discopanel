@@ -53,7 +53,7 @@ var AllResources = []string{
 
 // ResourceScopeSource maps each scopeable resource to the resource that
 // provides its scope objects. For example, files are scoped by server_id,
-// so ResourceFiles → ResourceServers. Resources absent from this map
+// so ResourceFiles maps to ResourceServers. Resources absent from this map
 // (users, roles, settings, support, uploads) have no per-object scoping.
 var ResourceScopeSource = map[string]string{
 	ResourceServers:         ResourceServers,

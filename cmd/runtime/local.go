@@ -5,29 +5,21 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"sync"
 
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	"google.golang.org/protobuf/proto"
 )
 
-// maxFrameSize caps loopback frames from the disco-agent mod (1 MiB).
+// maxFrameSize caps loopback frames from the telemetry javaagent (1 MiB).
 const maxFrameSize = 1 << 20
 
-// localModConn is the loopback connection from the disco-agent mod inside the
-// server JVM. Frames are 4-byte big-endian length-prefixed protobuf messages
-// using the same AgentMessage/PanelMessage envelopes as the panel session.
-type localModConn struct {
-	conn    net.Conn
-	writeMu sync.Mutex
-}
-
-// runLocalListener accepts disco-agent mod connections on the container-local
-// loopback port. Only the most recent connection is kept.
+// runLocalListener accepts loopback connections from the telemetry javaagent
+// inside the server JVM. Frames are 4-byte big-endian length-prefixed
+// AgentMessage protobufs, relayed upstream to the panel.
 func (s *supervisor) runLocalListener() {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localAgentPort))
 	if err != nil {
-		fmt.Printf("[discopanel-runtime] WARN: local agent listener failed (%v), mod telemetry disabled\n", err)
+		fmt.Printf("[discopanel-runtime] WARN: local agent listener failed (%v), JVM telemetry disabled\n", err)
 		return
 	}
 	go func() {
@@ -39,79 +31,35 @@ func (s *supervisor) runLocalListener() {
 		if err != nil {
 			return
 		}
-		go s.serveModConn(conn)
+		go s.serveAgentConn(conn)
 	}
 }
 
-func (s *supervisor) serveModConn(conn net.Conn) {
-	mc := &localModConn{conn: conn}
-	s.mu.Lock()
-	old := s.modConn
-	s.modConn = mc
-	s.mu.Unlock()
-	if old != nil {
-		_ = old.conn.Close()
-	}
-	defer func() {
-		s.mu.Lock()
-		if s.modConn == mc {
-			s.modConn = nil
-		}
-		s.mu.Unlock()
-		_ = conn.Close()
-	}()
-
+func (s *supervisor) serveAgentConn(conn net.Conn) {
+	defer conn.Close()
 	for {
 		msg, err := readFrame(conn)
 		if err != nil {
 			if err != io.EOF {
-				fmt.Printf("[discopanel-runtime] disco-agent mod disconnected: %v\n", err)
+				fmt.Printf("[discopanel-runtime] telemetry javaagent disconnected: %v\n", err)
 			}
 			return
 		}
-		s.handleModMessage(msg)
+		s.handleAgentMessage(msg)
 	}
 }
 
-// handleModMessage processes one game-sourced message: readiness and command
-// lists update supervisor state, everything else is relayed upstream as-is.
-func (s *supervisor) handleModMessage(msg *agentv1.AgentMessage) {
+// handleAgentMessage relays one JVM-sourced message upstream. Raw tick
+// thread measurements are consumed here and forwarded as tick samples.
+func (s *supervisor) handleAgentMessage(msg *agentv1.AgentMessage) {
 	switch p := msg.GetPayload().(type) {
 	case *agentv1.AgentMessage_Hello:
-		fmt.Printf("[discopanel-runtime] disco-agent mod connected (%s)\n", p.Hello.GetVersion())
-	case *agentv1.AgentMessage_Ready:
-		// The mod's lifecycle hook can beat the console Done line; markReady
-		// dedupes and notifies the panel itself.
-		s.markReady(p.Ready.GetStartupSeconds())
+		fmt.Printf("[discopanel-runtime] telemetry javaagent connected (%s)\n", p.Hello.GetVersion())
+	case *agentv1.AgentMessage_TickThreadSample:
+		s.emitTickSample(p.TickThreadSample)
 		return
-	case *agentv1.AgentMessage_CommandList:
-		s.mu.Lock()
-		s.commandList = p.CommandList.GetCommands()
-		s.mu.Unlock()
 	}
 	s.send(msg)
-}
-
-// relayToMod forwards a panel message to the connected mod, if any.
-func (s *supervisor) relayToMod(msg *agentv1.PanelMessage) {
-	s.mu.Lock()
-	mc := s.modConn
-	s.mu.Unlock()
-	if mc == nil {
-		return
-	}
-	data, err := proto.Marshal(msg)
-	if err != nil {
-		return
-	}
-	mc.writeMu.Lock()
-	defer mc.writeMu.Unlock()
-	var header [4]byte
-	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
-	if _, err := mc.conn.Write(header[:]); err != nil {
-		return
-	}
-	_, _ = mc.conn.Write(data)
 }
 
 func readFrame(conn net.Conn) (*agentv1.AgentMessage, error) {

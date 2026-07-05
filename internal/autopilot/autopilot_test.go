@@ -55,7 +55,7 @@ func TestAnalyzeThrottlingAndGC(t *testing.T) {
 	cfg := &storage.ServerConfig{MaxMemory: strPtr("4G")}
 	m := &metrics.ServerMetrics{
 		AgentConnected:     true,
-		AgentModActive:     true,
+		AgentJvmActive:     true,
 		CPUThrottlePercent: 42,
 		GCPauseMaxMs:       1500,
 		MSPT:               55,
@@ -86,7 +86,7 @@ func TestAnalyzeHealthyServer(t *testing.T) {
 	cfg := &storage.ServerConfig{MaxMemory: strPtr("4G")}
 	m := &metrics.ServerMetrics{
 		AgentConnected: true,
-		AgentModActive: true,
+		AgentJvmActive: true,
 		MSPT:           12,
 		GCPauseMaxMs:   40,
 	}

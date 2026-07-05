@@ -9,14 +9,14 @@ description: What discopanel-runtime is built from, how tags map to Java version
 
 `docker/Dockerfile.runtime` has four stages:
 
-1. `bufbuild/buf` regenerates the protobuf code (Go for the entrypoint, javalite for the mod) with the same recipe as `make proto`, so image builds work from a clean checkout - no `make gen` first, no generated code in the build context.
+1. `bufbuild/buf` regenerates the protobuf code (Go for the entrypoint, javalite for the javaagent) with the same recipe as `make proto`, so image builds work from a clean checkout - no `make gen` first, no generated code in the build context.
 2. `golang:alpine` compiles `cmd/runtime` (statically linked, `pkg/runtimespec` plus the generated agent protos).
-3. `gradle:9-jdk21` builds the disco-agent mod jars from `agent/`, one per loader family.
-4. `eclipse-temurin:<JAVA_VERSION>-jre` plus `ca-certificates` and `tzdata`, with the compiled binary as the entrypoint and the agent jars at `/opt/discopanel/agent/`. Temurin's Ubuntu base was picked over Alpine because mod natives expect glibc.
+3. `gradle:9-jdk21` builds the disco-agent javaagent jar from `agent/`.
+4. `eclipse-temurin:<JAVA_VERSION>-jre` plus `ca-certificates` and `tzdata`, with the compiled binary as the entrypoint and the javaagent at `/opt/discopanel/agent/disco-agent.jar`. Temurin's Ubuntu base was picked over Alpine because mod natives expect glibc.
 
 The first three stages are pinned to `--platform=$BUILDPLATFORM`: generated code and jars are architecture independent, and the Go entrypoint cross-compiles via `TARGETOS`/`TARGETARCH`. A multi-arch build therefore runs the heavy toolchains once, natively, and only the final JRE stage is per-architecture. This is load-bearing, not just a speedup: the forge and neoforge builds break under QEMU emulation (NeoForm can't resolve its own JVM through `ProcessHandle` there). A default of `linux/amd64` on the `BUILDPLATFORM` arg keeps the Dockerfile buildable on the legacy non-BuildKit builder, where the variable is otherwise undefined.
 
-That's the whole image. The entrypoint reads `/data/.discopanel/launch.json`, installs or removes the loader-matched agent jar, fixes `/data` ownership, builds the java argv from env vars (heap, flag sets, JMX, user options), and runs java as a supervised child under the configured UID/GID. The entrypoint stays PID 1: it forwards SIGTERM so the world saves during the graceful window (the server's Stop Duration setting, 60s by default), propagates java's exit code so docker restart policies keep working, watches the console for readiness and crashes, feeds console commands to java stdin, and streams telemetry to the panel. The supervisor half of the story is on [Runtime Agent](/development/agent/).
+That's the whole image. The entrypoint reads `/data/.discopanel/launch.json`, fixes `/data` ownership, builds the java argv from env vars (heap, flag sets, JMX, user options), and runs java as a supervised child under the configured UID/GID. The entrypoint stays PID 1: it forwards SIGTERM so the world saves during the graceful window (the server's Stop Duration setting, 60s by default), propagates java's exit code so docker restart policies keep working, watches the console for readiness and crashes, feeds console commands to java stdin, and streams telemetry to the panel. The supervisor half of the story is on [Runtime Agent](/development/agent/).
 
 ## The env contract
 

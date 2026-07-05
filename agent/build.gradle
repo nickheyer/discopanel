@@ -1,26 +1,57 @@
-// disco-agent: DiscoPanel's server-side telemetry agent, built as a shared
-// core plus thin per-loader shims. The core speaks length-prefixed protobuf
-// (generated from proto/discopanel/agent/v1 via `make gen`) over a loopback
-// socket to the discopanel-runtime supervisor; the shims wire loader events
-// into it. Shim jars are baked into the runtime images (docker/Dockerfile.runtime)
-// and installed by the supervisor at boot.
-subprojects {
-    apply plugin: 'java'
+// disco-agent: DiscoPanel's server-side telemetry javaagent. One jar for
+// every loader and vanilla, attached by the runtime supervisor via
+// -javaagent. It only touches standard JVM APIs (MX beans plus the vanilla
+// tick stats MBean) and speaks length-prefixed protobuf (generated from
+// proto/discopanel/agent/v1 via `make gen`) over a loopback socket to the
+// supervisor. The jar is baked into the runtime images
+// (docker/Dockerfile.runtime) at /opt/discopanel/agent/disco-agent.jar.
+plugins {
+    id 'java'
+    id 'com.gradleup.shadow' version '9.4.3'
+}
 
-    group = 'app.discopanel'
-    version = rootProject.property('agentVersion')
+group = 'app.discopanel'
+version = property('agentVersion')
 
-    java {
-        toolchain {
-            languageVersion = JavaLanguageVersion.of(21)
-        }
-    }
-
-    repositories {
-        mavenCentral()
-    }
-
-    tasks.withType(JavaCompile).configureEach {
-        options.encoding = 'UTF-8'
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
+
+// Java 8 bytecode so the agent attaches to the oldest supported servers
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 8
+}
+
+repositories {
+    mavenCentral()
+}
+
+sourceSets {
+    main {
+        java {
+            // buf-generated javalite messages (make gen)
+            srcDir 'src/generated/java'
+        }
+    }
+}
+
+dependencies {
+    implementation "com.google.protobuf:protobuf-javalite:${property('protobufJavaliteVersion')}"
+}
+
+shadowJar {
+    archiveFileName = 'disco-agent.jar'
+    archiveClassifier = ''
+    relocate 'com.google.protobuf', 'app.discopanel.agent.libs.protobuf'
+    manifest {
+        attributes(
+                'Premain-Class': 'app.discopanel.agent.DiscoAgent',
+                'Implementation-Version': project.version,
+        )
+    }
+}
+
+assemble.dependsOn shadowJar

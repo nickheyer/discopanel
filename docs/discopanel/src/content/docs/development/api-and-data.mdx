@@ -7,7 +7,7 @@ description: The proto-first API, the ConnectRPC server, auth, and how struct ta
 
 Everything the frontend or an API consumer can do is declared in `proto/discopanel/v1/*.proto` - one file per domain (`server`, `config`, `task`, `module`, `proxy`, `auth`, `user`, `role`, `file`, `upload`, `mod`, `modpack`, `minecraft`, `event`, `websocket`, `support`, `common`). `make gen` regenerates the Go server stubs (`pkg/proto`) and the TypeScript clients (`web/discopanel/src/lib/proto`). Neither is ever edited by hand. If a behavior isn't reachable from a proto, it isn't part of the API.
 
-There is a second proto package, `proto/discopanel/agent/v1`, for the machine-facing channel between runtime supervisors and the panel. It is not part of the user API: its one streaming RPC authenticates in-handler with per-server container tokens instead of the interceptor chain, and `make gen` additionally generates javalite Java classes from it (via `buf.gen.agent.yaml`) for the disco-agent mod. See [Runtime Agent](/development/agent/).
+There is a second proto package, `proto/discopanel/agent/v1`, for the machine-facing channel between runtime supervisors and the panel. It is not part of the user API: its one streaming RPC authenticates in-handler with per-server container tokens instead of the interceptor chain, and `make gen` additionally generates javalite Java classes from it (via `buf.gen.agent.yaml`) for the disco-agent javaagent. See [Runtime Agent](/development/agent/).
 
 An OpenAPI spec is generated from the same protos and served by `internal/rpc/handlers/openapi.go` - that's what the [API Reference](/api/) page renders.
 

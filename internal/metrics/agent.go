@@ -16,17 +16,17 @@ func (c *Collector) SetAgentConnected(serverID string, connected bool) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
 		m.AgentConnected = connected
 		if !connected {
-			m.AgentModActive = false
+			m.AgentJvmActive = false
 			m.AgentReady = false
 		}
 		m.LastUpdated = time.Now()
 	})
 }
 
-// SetAgentModActive records that the disco-agent mod is feeding game telemetry.
-func (c *Collector) SetAgentModActive(serverID string, active bool) {
+// SetAgentJvmActive records that the javaagent is feeding JVM telemetry.
+func (c *Collector) SetAgentJvmActive(serverID string, active bool) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
-		m.AgentModActive = active
+		m.AgentJvmActive = active
 	})
 }
 
@@ -64,7 +64,7 @@ func (c *Collector) ApplyAgentExit(serverID string, exitCode int, crashed bool, 
 	})
 }
 
-// ApplyAgentTick stores mod-sourced tick timing (authoritative TPS/MSPT).
+// ApplyAgentTick stores javaagent-sourced tick timing (authoritative TPS/MSPT).
 func (c *Collector) ApplyAgentTick(serverID string, sample *agentv1.TickSample) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
 		m.TPS = sample.GetTps()
@@ -75,7 +75,7 @@ func (c *Collector) ApplyAgentTick(serverID string, sample *agentv1.TickSample) 
 	})
 }
 
-// ApplyAgentJvm stores mod-sourced in-process JVM telemetry.
+// ApplyAgentJvm stores javaagent-sourced in-process JVM telemetry.
 func (c *Collector) ApplyAgentJvm(serverID string, sample *agentv1.JvmSample) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
 		m.HeapUsedMB = sample.GetHeapUsedMb()
@@ -93,7 +93,7 @@ func (c *Collector) ApplyAgentJvm(serverID string, sample *agentv1.JvmSample) {
 // ApplyAgentProc stores supervisor-sourced cgroup/GC-log telemetry. CPU and
 // memory percentages keep coming from docker stats (whole-container view);
 // this adds what docker stats cannot see: CFS throttling, the CPU quota, and
-// GC pauses on servers without the mod.
+// GC pauses on servers without the javaagent.
 func (c *Collector) ApplyAgentProc(serverID string, sample *agentv1.ProcSample) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
 		m.CPUQuotaCores = sample.GetCpuQuotaCores()
@@ -103,7 +103,7 @@ func (c *Collector) ApplyAgentProc(serverID string, sample *agentv1.ProcSample) 
 			m.CPUThrottlePercent = 0
 		}
 		// The in-process JVM sample is the better GC source when present.
-		if gc := sample.GetGc(); gc != nil && !m.AgentModActive {
+		if gc := sample.GetGc(); gc != nil && !m.AgentJvmActive {
 			m.GCPauseCount = gc.GetCount()
 			m.GCPauseTotalMs = gc.GetTotalMs()
 			m.GCPauseMaxMs = gc.GetMaxMs()
@@ -135,26 +135,12 @@ func (c *Collector) ApplyAgentPlayerChange(serverID, player string, joined bool,
 	})
 }
 
-// ApplyAgentWorldStats stores world state and the authoritative roster.
-func (c *Collector) ApplyAgentWorldStats(serverID string, stats *agentv1.WorldStats) {
+// ApplyAgentRoster stores the authoritative supervisor-tracked player list.
+func (c *Collector) ApplyAgentRoster(serverID string, players []string) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
-		entities, chunks := 0, 0
-		for _, d := range stats.GetDimensions() {
-			entities += int(d.GetEntities())
-			chunks += int(d.GetChunks())
-		}
-		m.TotalEntities = entities
-		m.TotalChunks = chunks
-		m.PlayerSample = stats.GetOnlinePlayers()
-		m.PlayersOnline = len(stats.GetOnlinePlayers())
+		m.PlayerSample = players
+		m.PlayersOnline = len(players)
 		m.AgentRosterUpdated = time.Now()
 		m.LastUpdated = time.Now()
-	})
-}
-
-// ApplyAgentCommands stores the server's command names for console autocomplete.
-func (c *Collector) ApplyAgentCommands(serverID string, commands []string) {
-	c.updateMetrics(serverID, func(m *ServerMetrics) {
-		m.AvailableCommands = commands
 	})
 }

@@ -10,6 +10,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -53,12 +56,6 @@ func main() {
 
 	uid := getEnvInt("UID", 1000)
 	gid := getEnvInt("GID", 1000)
-
-	if agentEnabled {
-		installAgentMod(spec)
-	} else {
-		removeAgentMod(spec)
-	}
 
 	if os.Getuid() == 0 && uid > 0 {
 		ensureOwnership(dataDir, uid, gid)
@@ -110,6 +107,7 @@ func main() {
 		startedAt: startedAt,
 		pid:       cmd.Process.Pid,
 	}
+	sup.events = newConsoleEvents(sup)
 
 	// Forward termination signals to java so `docker stop` still triggers the
 	// server's graceful shutdown hook (world save).
@@ -142,6 +140,7 @@ func main() {
 		go sup.runProcSampler(gcTail)
 		go sup.runLocalListener()
 		go sup.runPanelSession()
+		go sup.runRosterTicker()
 	}
 
 	waitErr := cmd.Wait()
@@ -163,6 +162,7 @@ type supervisor struct {
 	agentSpec *runtimespec.AgentSpec
 	startedAt time.Time
 	pid       int
+	events    *consoleEvents
 
 	stdinMu sync.Mutex
 	stdin   interface{ Write([]byte) (int, error) }
@@ -171,9 +171,7 @@ type supervisor struct {
 	ready         bool
 	readySeconds  float64
 	stopRequested bool          // termination signal was forwarded to java
-	commandList   []string      // cached mod command dump, resent on reconnect
 	session       *panelSession // active panel stream, nil when disconnected
-	modConn       *localModConn // active mod loopback connection
 	closed        chan struct{} // closed once, on process exit
 	closeOnce     sync.Once
 }
@@ -200,9 +198,18 @@ func (s *supervisor) writeConsole(line string) error {
 	return err
 }
 
+// broadcastChat shows a chat line in game via tellraw (any loader, 1.7.2+).
+func (s *supervisor) broadcastChat(sender, message string) error {
+	component, err := json.Marshal(map[string]string{"text": "<" + sender + "> " + message})
+	if err != nil {
+		return err
+	}
+	return s.writeConsole("tellraw @a " + string(component))
+}
+
 // mirrorConsole copies child output to the container console line by line,
-// watching for the server-ready marker. Long lines fall back to raw copies so
-// output is never lost.
+// feeding each line to the event parser. Overlong lines are dropped from
+// parsing (never from output) so memory stays bounded.
 func (s *supervisor) mirrorConsole(r interface{ Read([]byte) (int, error) }, w *os.File) {
 	buf := make([]byte, 64*1024)
 	var line []byte
@@ -211,21 +218,17 @@ func (s *supervisor) mirrorConsole(r interface{ Read([]byte) (int, error) }, w *
 		if n > 0 {
 			chunk := buf[:n]
 			_, _ = w.Write(chunk)
-			// Accumulate into lines for the ready check only until ready.
-			if !s.isReady() {
-				line = append(line, chunk...)
-				for {
-					idx := indexByte(line, '\n')
-					if idx < 0 {
-						// Cap pathological unterminated lines.
-						if len(line) > 512*1024 {
-							line = line[:0]
-						}
-						break
+			line = append(line, chunk...)
+			for {
+				idx := bytes.IndexByte(line, '\n')
+				if idx < 0 {
+					if len(line) > 512*1024 {
+						line = line[:0]
 					}
-					s.checkReadyLine(string(line[:idx]))
-					line = line[idx+1:]
+					break
 				}
+				s.events.handleLine(string(line[:idx]))
+				line = line[idx+1:]
 			}
 		}
 		if err != nil {
@@ -234,27 +237,33 @@ func (s *supervisor) mirrorConsole(r interface{ Read([]byte) (int, error) }, w *
 	}
 }
 
-func indexByte(b []byte, c byte) int {
-	for i, v := range b {
-		if v == c {
-			return i
-		}
-	}
-	return -1
-}
-
 func (s *supervisor) isReady() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ready
 }
 
-func (s *supervisor) checkReadyLine(line string) {
-	if !readyPattern.MatchString(line) {
-		return
-	}
-	s.markReady(time.Since(s.startedAt).Seconds())
+// sendRoster pushes the authoritative online player list to the panel.
+func (s *supervisor) sendRoster() {
+	s.send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Roster{
+		Roster: &agentv1.Roster{OnlinePlayers: s.events.roster()},
+	}})
 }
+
+// runRosterTicker keeps the panel-side roster freshness window alive.
+func (s *supervisor) runRosterTicker() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.done():
+			return
+		case <-ticker.C:
+			s.sendRoster()
+		}
+	}
+}
+
 
 // markReady records readiness (from the console Done line or the mod's
 // lifecycle hook, whichever fires first) and notifies the panel.

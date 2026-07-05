@@ -10,15 +10,14 @@ ARG JAVA_VERSION=21
 # Build-stage outputs are platform independent (generated code, jars) or
 # cross-compiled (the Go entrypoint), so every build stage is pinned to the
 # builder's native platform: a multi-arch build runs them once at full speed
-# instead of once per target under QEMU, where the forge/neoforge toolchains
-# break (NeoForm cannot resolve its own JVM via ProcessHandle under qemu-user).
-# The default keeps the legacy (pre-BuildKit) builder working; BuildKit
-# overrides it with the real build platform.
+# instead of once per target under QEMU. The default keeps the legacy
+# (pre-BuildKit) builder working; BuildKit overrides it with the real
+# build platform.
 ARG BUILDPLATFORM=linux/amd64
 
 # Generated protobuf code (Go for the entrypoint, javalite for the disco-agent
-# mod), produced in-image with the same recipe as `make proto` so builds work
-# from a clean checkout. Generated code is never committed or in the context.
+# javaagent), produced in-image with the same recipe as `make proto` so builds
+# work from a clean checkout. Generated code is never committed or in the context.
 FROM --platform=$BUILDPLATFORM bufbuild/buf:latest AS proto-builder
 
 WORKDIR /app
@@ -39,13 +38,13 @@ COPY --from=proto-builder /app/pkg/proto ./pkg/proto
 COPY cmd/runtime ./cmd/runtime
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /runtime-entrypoint ./cmd/runtime
 
-# disco-agent mod jars (shared core + per-loader shims, see agent/). The
-# supervisor installs the loader-matched jar into mods/ or plugins/ at boot.
+# disco-agent telemetry javaagent (see agent/). One jar for every loader
+# and vanilla, attached by the supervisor via -javaagent.
 FROM --platform=$BUILDPLATFORM gradle:9-jdk21 AS agent-builder
 
 WORKDIR /agent
 COPY agent/ ./
-COPY --from=proto-builder /app/agent/core/src/generated ./core/src/generated
+COPY --from=proto-builder /app/agent/src/generated ./src/generated
 RUN gradle --no-daemon build
 
 FROM eclipse-temurin:${JAVA_VERSION}-jre
@@ -56,11 +55,7 @@ RUN apt-get update \
 
 COPY --from=builder /runtime-entrypoint /usr/local/bin/discopanel-runtime
 
-COPY --from=agent-builder /agent/fabric/build/libs/disco-agent-fabric.jar \
-    /agent/neoforge/build/libs/disco-agent-neoforge.jar \
-    /agent/forge/build/libs/disco-agent-forge.jar \
-    /agent/paper/build/libs/disco-agent-paper.jar \
-    /opt/discopanel/agent/
+COPY --from=agent-builder /agent/build/libs/disco-agent.jar /opt/discopanel/agent/
 
 RUN mkdir -p /data && chmod 755 /data
 

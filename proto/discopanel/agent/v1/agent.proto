@@ -21,8 +21,8 @@ service AgentService {
 
 // AgentMessage is the envelope for everything flowing from the container to
 // the panel. The same envelope is used on the in-container loopback link
-// between the disco-agent mod (inside the JVM) and the runtime supervisor,
-// which relays game-sourced messages upstream unchanged.
+// between the telemetry javaagent (inside the server JVM) and the runtime
+// supervisor, which relays JVM-sourced messages upstream unchanged.
 message AgentMessage {
   oneof payload {
     Hello hello = 1;
@@ -33,14 +33,14 @@ message AgentMessage {
     TickSample tick_sample = 6;
     JvmSample jvm_sample = 7;
     PlayerEvent player_event = 8;
-    WorldStats world_stats = 9;
-    CommandList command_list = 10;
+    Roster roster = 9;
+    TickThreadSample tick_thread_sample = 10;
   }
 }
 
 // PanelMessage is the envelope for everything flowing from the panel to the
-// container. Console commands are consumed by the runtime supervisor (java
-// stdin); chat messages are relayed to the disco-agent mod when present.
+// container. Both payloads are consumed by the runtime supervisor: console
+// commands go to java stdin, chat messages are broadcast via tellraw.
 message PanelMessage {
   oneof payload {
     ConsoleCommand console_command = 1;
@@ -53,9 +53,9 @@ message PanelMessage {
 message Hello {
   // The DiscoPanel server ID this agent belongs to.
   string server_id = 1;
-  // Source of this hello: the runtime supervisor or the in-JVM mod.
+  // Source of this hello: the runtime supervisor or the in-JVM agent.
   HelloSource source = 2;
-  // discopanel-runtime or disco-agent mod version string.
+  // discopanel-runtime or javaagent version string.
   string version = 3;
   // Mod loader from the launch spec (e.g. "fabric", "paper").
   string loader = 4;
@@ -65,18 +65,17 @@ message Hello {
   int32 java_major = 6;
 }
 
-// HelloSource distinguishes the supervisor from the in-JVM mod.
+// HelloSource distinguishes the supervisor from the in-JVM agent.
 enum HelloSource {
   HELLO_SOURCE_UNSPECIFIED = 0;
   // The Go runtime supervisor (PID 1 in the container).
   HELLO_SOURCE_RUNTIME = 1;
-  // The disco-agent mod/plugin running inside the server JVM.
-  HELLO_SOURCE_MOD = 2;
+  // The telemetry javaagent attached to the server JVM.
+  HELLO_SOURCE_JVM = 2;
 }
 
-// Ready signals the server finished starting. Sent by the supervisor when
-// the "Done" console line appears, and by the mod on its server-started
-// lifecycle hook (whichever arrives first counts).
+// Ready signals the server finished starting, detected by the supervisor
+// from the "Done" console line.
 message Ready {
   // Seconds from process start to ready, when known (0 when unknown).
   double startup_seconds = 1;
@@ -99,7 +98,7 @@ message Exited {
 }
 
 // ProcSample is supervisor-sourced process and cgroup telemetry. It works on
-// every server, with or without the disco-agent mod.
+// every server, with or without the in-JVM agent.
 message ProcSample {
   // CPU usage of the java process as a percentage (100 = one core).
   double cpu_percent = 1;
@@ -127,29 +126,31 @@ message GcWindow {
   double max_ms = 3;
 }
 
-// TickSample is mod-sourced authoritative tick timing.
+// TickSample is tick timing assembled by the supervisor from the javaagent's
+// thread cadence measurement plus the server's own overload console lines.
+// Works on every version and loader because it never touches game code.
 message TickSample {
-  // Ticks per second over the sample window (20 is nominal).
+  // Ticks per second over the window (20 is nominal).
   double tps = 1;
   // Mean milliseconds per tick over the window.
   double mspt_avg = 2;
   // Worst tick in the window, milliseconds.
   double mspt_max = 3;
-  // 95th percentile tick time in the window, milliseconds.
-  double mspt_p95 = 4;
-  // Per-dimension tick cost, when the platform exposes it.
-  repeated DimensionTick dimensions = 5;
 }
 
-// DimensionTick is the tick cost attributed to one dimension.
-message DimensionTick {
-  // Dimension id (e.g. "minecraft:overworld").
-  string dimension = 1;
-  // Mean milliseconds per tick spent in this dimension.
-  double mspt_avg = 2;
+// TickThreadSample is the javaagent's raw measurement of the server tick
+// thread over one telemetry window: the thread has alternated between tick
+// work and waiting out each 50ms slot on every Minecraft version ever, so
+// its busy share against that fixed cadence is the mean tick cost. Sent on
+// the loopback link only; the supervisor folds it into TickSample.
+message TickThreadSample {
+  // Share of the window the tick thread spent running (0-1).
+  double busy_fraction = 1;
+  // Longest uninterrupted busy run in the window, milliseconds.
+  double longest_busy_ms = 2;
 }
 
-// JvmSample is mod-sourced in-process JVM telemetry.
+// JvmSample is javaagent-sourced in-process JVM telemetry.
 message JvmSample {
   // Used heap in MiB.
   double heap_used_mb = 1;
@@ -163,7 +164,8 @@ message JvmSample {
   int32 class_count = 5;
 }
 
-// PlayerEvent is a mod-sourced player lifecycle or activity event.
+// PlayerEvent is a player lifecycle or activity event, parsed by the
+// supervisor from the vanilla console lines every loader prints.
 message PlayerEvent {
   // What happened.
   PlayerEventType type = 1;
@@ -177,7 +179,7 @@ message PlayerEvent {
   int32 players_online = 5;
 }
 
-// PlayerEventType enumerates mod-sourced player events.
+// PlayerEventType enumerates supervisor-sourced player events.
 enum PlayerEventType {
   PLAYER_EVENT_TYPE_UNSPECIFIED = 0;
   // Player joined the server.
@@ -192,31 +194,11 @@ enum PlayerEventType {
   PLAYER_EVENT_TYPE_CHAT = 5;
 }
 
-// WorldStats is mod-sourced world state, sampled periodically.
-message WorldStats {
-  // Per-dimension world state.
-  repeated DimensionStats dimensions = 1;
-  // Names of all online players (authoritative roster).
-  repeated string online_players = 2;
-}
-
-// DimensionStats is the world state of one dimension.
-message DimensionStats {
-  // Dimension id (e.g. "minecraft:overworld").
-  string dimension = 1;
-  // Loaded entity count.
-  int32 entities = 2;
-  // Loaded chunk count.
-  int32 chunks = 3;
-  // Players currently in this dimension.
-  int32 players = 4;
-}
-
-// CommandList is the server's known command names, sent once on ready, used
-// for console autocomplete in the panel.
-message CommandList {
-  // Root command names known to the server's dispatcher.
-  repeated string commands = 1;
+// Roster is the authoritative online player list the supervisor tracks from
+// console join/leave lines. Sent on every change and on session (re)connect.
+message Roster {
+  // Names of all online players.
+  repeated string online_players = 1;
 }
 
 // ConsoleCommand asks the runtime supervisor to write one line to the java
@@ -226,7 +208,8 @@ message ConsoleCommand {
   string command = 1;
 }
 
-// ChatMessage asks the disco-agent mod to broadcast a chat message in game.
+// ChatMessage asks the runtime supervisor to broadcast a chat line in game
+// via a tellraw console command (works on every loader, 1.7.2+).
 message ChatMessage {
   // Displayed sender name (e.g. "Panel" or a Discord username).
   string sender = 1;

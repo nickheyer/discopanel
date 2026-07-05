@@ -438,5 +438,5 @@ dev/bug-analysis/
 result
 TODO.md
 agent/.gradle-home/
-agent/**/.gradle/
-agent/core/src/generated/
+agent/.gradle/
+agent/src/generated/

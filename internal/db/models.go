@@ -121,12 +121,11 @@ type Server struct {
 	Favicon         string   `json:"favicon" gorm:"-"`         // Base64 PNG from SLP
 
 	// Agent-sourced runtime stats (not persisted to DB)
-	AgentConnected     bool     `json:"agent_connected" gorm:"-"`
-	MSPT               float64  `json:"mspt" gorm:"-"`                 // Mean ms per tick (mod-sourced)
-	HeapUsedMB         float64  `json:"heap_used_mb" gorm:"-"`         // JVM used heap
-	HeapMaxMB          float64  `json:"heap_max_mb" gorm:"-"`          // JVM max heap
-	CPUThrottlePercent float64  `json:"cpu_throttle_percent" gorm:"-"` // Share of CFS periods throttled
-	AvailableCommands  []string `json:"available_commands" gorm:"-"`   // Command names for console autocomplete
+	AgentConnected     bool    `json:"agent_connected" gorm:"-"`
+	MSPT               float64 `json:"mspt" gorm:"-"`                 // Mean ms per tick (agent-sourced)
+	HeapUsedMB         float64 `json:"heap_used_mb" gorm:"-"`         // JVM used heap
+	HeapMaxMB          float64 `json:"heap_max_mb" gorm:"-"`          // JVM max heap
+	CPUThrottlePercent float64 `json:"cpu_throttle_percent" gorm:"-"` // Share of CFS periods throttled
 }
 
 // One telemetry point sampled from the live collector
@@ -157,7 +156,7 @@ type ServerConfig struct {
 	MaxMemory       *string `json:"maxMemory" env:"MAX_MEMORY" default:"3120M" desc:"Independently sets the max heap size" input:"text" label:"Maximum Memory" system:"true"`
 	TZ              *string `json:"tz" env:"TZ" default:"UTC" desc:"Timezone configuration" input:"text" label:"Timezone"`
 	EnableJMX       *bool   `json:"enableJmx" env:"ENABLE_JMX" default:"false" desc:"Enable remote JMX for profiling (port 7091)" input:"checkbox" label:"Enable JMX"`
-	EnableAgent     *bool   `json:"enableAgent" default:"true" desc:"Enable the DiscoPanel agent (live telemetry, console during boot, crash reporting; installs the disco-agent mod on supported loaders)" input:"checkbox" label:"Enable DiscoPanel Agent"`
+	EnableAgent     *bool   `json:"enableAgent" default:"true" desc:"Enable the DiscoPanel agent (live telemetry, console during boot, crash reporting; attaches a telemetry javaagent to the server JVM, any loader or version)" input:"checkbox" label:"Enable DiscoPanel Agent"`
 	JMXHost         *string `json:"jmxHost" env:"JMX_HOST" default:"" desc:"IP/host running the Docker container for JMX" input:"text" label:"JMX Host"`
 	UseAikarFlags   *bool   `json:"useAikarFlags" env:"USE_AIKAR_FLAGS" default:"true" desc:"Use Aikar's optimized JVM flags for GC tuning (applied by default unless disabled or MeowIce flags are enabled)" input:"checkbox" label:"Use Aikar Flags"`
 	UseMeowiceFlags *bool   `json:"useMeowiceFlags" env:"USE_MEOWICE_FLAGS" default:"false" desc:"Use MeowIce's JVM flags optimized for Java 17+" input:"checkbox" label:"Use MeowIce Flags"`

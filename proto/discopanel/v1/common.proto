@@ -110,11 +110,10 @@ message Server {
 
   // Agent-sourced runtime stats (present when the disco-agent channel is live)
   bool agent_connected = 41;
-  double mspt = 42; // Mean milliseconds per tick (mod-sourced)
+  double mspt = 42; // Mean milliseconds per tick (agent-sourced)
   double heap_used_mb = 43;
   double heap_max_mb = 44;
   double cpu_throttle_percent = 45; // Share of CFS periods throttled (0-100)
-  repeated string available_commands = 46; // Command names for console autocomplete
 
   // Runtime image digest recorded at container create
   string runtime_digest = 48;

@@ -1,4 +1,4 @@
-package app.discopanel.agent.core;
+package app.discopanel.agent;
 
 import app.discopanel.agent.proto.AgentProto;
 
@@ -11,10 +11,9 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Loopback link to the discopanel-runtime supervisor: 4-byte big-endian
- * length-prefixed protobuf frames, reconnecting with a fixed backoff. All IO
- * runs on daemon threads; enqueue never blocks the game thread (messages are
- * dropped when the queue is full or the supervisor is away).
+ * Loopback link to the runtime supervisor. Frames are 4-byte big-endian
+ * length-prefixed protobuf. Reconnects with fixed backoff, drops messages
+ * when the supervisor is away, never blocks a server thread.
  */
 final class AgentConnection {
     private static final int MAX_FRAME_SIZE = 1 << 20;
@@ -23,17 +22,15 @@ final class AgentConnection {
 
     private final int port;
     private final AgentProto.Hello hello;
-    private final PlatformAdapter adapter;
     private final LinkedBlockingQueue<AgentProto.AgentMessage> queue =
             new LinkedBlockingQueue<AgentProto.AgentMessage>(QUEUE_CAPACITY);
 
     private volatile boolean running = true;
     private Thread thread;
 
-    AgentConnection(int port, AgentProto.Hello hello, PlatformAdapter adapter) {
+    AgentConnection(int port, AgentProto.Hello hello) {
         this.port = port;
         this.hello = hello;
-        this.adapter = adapter;
     }
 
     void start() {
@@ -63,7 +60,7 @@ final class AgentConnection {
             try {
                 runSession();
             } catch (IOException e) {
-                // Supervisor away or restarting; retry quietly.
+                // Supervisor away, retry quietly
             } catch (InterruptedException e) {
                 return;
             }
@@ -87,7 +84,7 @@ final class AgentConnection {
 
             writeFrame(out, AgentProto.AgentMessage.newBuilder().setHello(hello).build());
 
-            // Reader runs on its own daemon thread; this thread writes.
+            // Reader drains inbound frames so socket close is noticed
             final Socket readerSocket = socket;
             Thread reader = new Thread(new Runnable() {
                 @Override
@@ -130,19 +127,7 @@ final class AgentConnection {
             }
             byte[] data = new byte[length];
             in.readFully(data);
-            AgentProto.PanelMessage message = AgentProto.PanelMessage.parseFrom(data);
-            dispatch(message);
-        }
-    }
-
-    private void dispatch(AgentProto.PanelMessage message) {
-        if (message.hasChatMessage()) {
-            AgentProto.ChatMessage chat = message.getChatMessage();
-            try {
-                adapter.broadcastChat(chat.getSender(), chat.getMessage());
-            } catch (RuntimeException e) {
-                // A misbehaving platform hook must not kill the IO thread.
-            }
+            // Nothing addresses the JVM agent, frames are drained
         }
     }
 

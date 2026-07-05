@@ -1,4 +1,4 @@
-package app.discopanel.agent.core;
+package app.discopanel.agent;
 
 import app.discopanel.agent.proto.AgentProto;
 

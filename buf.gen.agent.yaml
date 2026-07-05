@@ -1,9 +1,9 @@
-# Java (lite) codegen for the disco-agent mod. Only the agent protos are
-# generated (see the proto-agent Makefile target, which passes --path); the
+# Java (lite) codegen for the disco-agent javaagent. Only the agent protos
+# are generated (see the proto Makefile target, which passes --path); the
 # panel-facing discopanel.v1 protos have no Java consumer.
 version: v2
 plugins:
   - remote: buf.build/protocolbuffers/java
-    out: agent/core/src/generated/java
+    out: agent/src/generated/java
     opt:
       - lite

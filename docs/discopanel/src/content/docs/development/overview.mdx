@@ -29,7 +29,7 @@ The design rule that shapes everything: **containers hold nothing but Java and a
 | `proto/discopanel/agent/v1` | The machine-facing agent channel between runtime supervisors and the panel. Same source-of-truth rule. |
 | `pkg/proto`, `web/discopanel/src/lib/proto` | Generated Go and TypeScript code. Produced by `make gen`, never edited by hand. |
 | `internal/` | The panel implementation. Package map below. |
-| `agent/` | The disco-agent mod: a Gradle multi-project, shared core plus per-loader shims, baked into the runtime images. See [Runtime Agent](/development/agent/). |
+| `agent/` | The disco-agent javaagent: one loader-agnostic telemetry jar, baked into the runtime images. See [Runtime Agent](/development/agent/). |
 | `pkg/` | Reusable helpers: `runtimespec` (the panel-to-container contract), `logger`, `upload`, `download`, `files`, `utils`, `strmatch`. |
 | `web/discopanel` | The SvelteKit frontend, baked into the binary with `go:embed`. |
 | `docker/` | Dockerfiles for every image above. |
@@ -82,7 +82,7 @@ The bus subscribers are the module manager, the scheduler, and the lifecycle man
 2. Ensure compares `.discopanel/manifest.json` against the desired loader, Minecraft version and pack pin. If they match, nothing is downloaded. Otherwise it installs the difference and rewrites `launch.json` and the manifest.
 3. Config files (`server.properties`, `eula.txt`, ops, whitelist, icon) are regenerated from the DB on every start, matched or not. So is `agent.json`, the runtime agent's connection spec with a fresh token. A heap that can't fit the container memory limit is clamped for this start.
 4. The container is created if missing, or recreated if its image no longer matches the required Java version.
-5. Docker starts it. The entrypoint reads `launch.json`, installs the disco-agent mod on supported loaders, and runs java as a supervised child. `SERVER_START` goes out on the event bus.
+5. Docker starts it. The entrypoint reads `launch.json`, attaches the disco-agent javaagent, and runs java as a supervised child. `SERVER_START` goes out on the event bus.
 6. The agent's ready report (or the collector's pings, whichever lands first) flips the status to running. See [Lifecycle & Health](/development/lifecycle/).
 
 Every path that starts or stops a server (RPC handlers, scheduler tasks, boot auto-start, idle policies, config apply) goes through the lifecycle manager. Don't drive `internal/docker` directly for lifecycle work.

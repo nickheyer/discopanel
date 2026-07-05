@@ -210,7 +210,7 @@ func checkGCPressure(cfg *storage.ServerConfig, m *metrics.ServerMetrics, javaMa
 }
 
 func checkTickHealth(m *metrics.ServerMetrics) []Finding {
-	if !m.AgentModActive || m.MSPT < 40 {
+	if !m.AgentJvmActive || m.MSPT < 40 {
 		return nil
 	}
 	severity := v1.PerformanceSeverity_PERFORMANCE_SEVERITY_WARNING
@@ -224,7 +224,7 @@ func checkTickHealth(m *metrics.ServerMetrics) []Finding {
 		Severity: severity,
 		Title:    title,
 		Detail: fmt.Sprintf(
-			"Average tick time is %.1f ms (worst %.1f ms); the budget for 20 TPS is 50 ms. Heavy mods, huge farms, and too many loaded chunks are the usual causes. Entity counts per dimension are on the server overview.",
+			"Average tick time is %.1f ms (worst %.1f ms); the budget for 20 TPS is 50 ms. Heavy mods, huge farms, and too many loaded chunks are the usual causes.",
 			m.MSPT, m.MSPTMax),
 	}}
 }

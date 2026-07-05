@@ -11,9 +11,12 @@ import (
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
-// localAgentPort is the loopback port the disco-agent mod connects to. It is
-// container-internal only and advertised to the JVM via a system property.
+// localAgentPort is the loopback port the telemetry javaagent connects to.
+// Container-internal only, advertised to the JVM via a system property.
 const localAgentPort = 25585
+
+// agentJarPath is where the runtime image ships the telemetry javaagent.
+const agentJarPath = "/opt/discopanel/agent/disco-agent.jar"
 
 // gcLogPath is where the JVM writes its unified GC log, tailed for pause
 // telemetry and kept for crash forensics (rotated and size-capped).
@@ -115,8 +118,14 @@ func buildJavaArgs(spec *runtimespec.LaunchSpec, agentEnabled bool) ([]string, e
 	// Log4Shell mitigation; a no-op on patched/modern versions.
 	args = append(args, "-Dlog4j2.formatMsgNoLookups=true")
 
+	// One loader-agnostic javaagent covers TPS and JVM telemetry everywhere
 	if agentEnabled {
 		args = append(args, fmt.Sprintf("-Ddiscopanel.agent.port=%d", localAgentPort))
+		if _, err := os.Stat(agentJarPath); err == nil {
+			args = append(args, "-javaagent:"+agentJarPath)
+		} else {
+			fmt.Printf("[discopanel-runtime] WARN: %s missing from image, JVM telemetry disabled\n", agentJarPath)
+		}
 	}
 
 	if tz := os.Getenv("TZ"); tz != "" {

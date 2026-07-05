@@ -102,8 +102,8 @@ runtime:
 	done
 	@echo "Runtime builds complete!"
 
-# Build the disco-agent mod jars (shared core + per-loader shims) via a
-# containerized Gradle. Outputs land in agent/*/build/libs/.
+# Build the disco-agent javaagent jar via a containerized Gradle.
+# Output lands in agent/build/libs/disco-agent.jar.
 agent:
 	docker run --rm \
 		--volume "$(shell pwd)/agent:/agent" \
@@ -203,7 +203,7 @@ proto-clean:
 	@echo "Cleaning generated proto files..."
 	rm -rf pkg/proto
 	rm -rf web/discopanel/src/lib/proto
-	rm -rf agent/core/src/generated/java
+	rm -rf agent/src/generated/java
 	@echo "Proto files cleaned!"
 
 proto-lint:

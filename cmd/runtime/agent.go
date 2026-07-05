@@ -38,8 +38,7 @@ func (s *supervisor) send(msg *agentv1.AgentMessage) {
 	}
 }
 
-// runPanelSession dials the panel and holds the telemetry stream open for the
-// life of the server process, reconnecting with capped backoff.
+// Dials panel and holds telemetry stream open for server lifetime
 func (s *supervisor) runPanelSession() {
 	backoff := time.Second
 	for {
@@ -109,7 +108,6 @@ func (s *supervisor) panelSessionOnce() error {
 	s.mu.Lock()
 	s.session = sess
 	ready, readySeconds := s.ready, s.readySeconds
-	commands := s.commandList
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
@@ -119,18 +117,12 @@ func (s *supervisor) panelSessionOnce() error {
 		s.mu.Unlock()
 	}()
 
-	// Re-establish panel-visible state lost by the reconnect.
+	// Reconnect loses panel-visible state, resend it
 	if ready {
 		if err := stream.Send(msgReady(readySeconds)); err != nil {
 			return err
 		}
-	}
-	if len(commands) > 0 {
-		if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_CommandList{
-			CommandList: &agentv1.CommandList{Commands: commands},
-		}}); err != nil {
-			return err
-		}
+		s.sendRoster()
 	}
 
 	errCh := make(chan error, 2)
@@ -179,8 +171,7 @@ func (s *supervisor) panelSessionOnce() error {
 	return err
 }
 
-// handlePanelMessage dispatches a panel-to-agent message: console commands go
-// to java stdin, chat messages are relayed to the disco-agent mod.
+// Routes panel messages to java stdin or tellraw chat
 func (s *supervisor) handlePanelMessage(msg *agentv1.PanelMessage) {
 	switch p := msg.GetPayload().(type) {
 	case *agentv1.PanelMessage_ConsoleCommand:
@@ -188,7 +179,9 @@ func (s *supervisor) handlePanelMessage(msg *agentv1.PanelMessage) {
 			fmt.Printf("[discopanel-runtime] failed to write console command: %v\n", err)
 		}
 	case *agentv1.PanelMessage_ChatMessage:
-		s.relayToMod(msg)
+		if err := s.broadcastChat(p.ChatMessage.GetSender(), p.ChatMessage.GetMessage()); err != nil {
+			fmt.Printf("[discopanel-runtime] failed to broadcast chat: %v\n", err)
+		}
 	}
 }
 
@@ -201,6 +194,41 @@ func (s *supervisor) msgHello() *agentv1.AgentMessage {
 		McVersion: s.spec.MCVersion,
 		JavaMajor: int32(s.spec.JavaMajor),
 	}}}
+}
+
+// saturatedBusyFraction marks the tick thread as pegged for the window.
+const saturatedBusyFraction = 0.98
+
+// assembleTickSample turns the javaagent's thread cadence measurement into
+// the panel tick sample. Below saturation the game's fixed 50ms cadence
+// makes the busy share the mean tick cost. A pegged thread hides tick
+// boundaries, so there the lag-line debt rate quantifies the slowdown.
+func assembleTickSample(busyFraction, longestBusyMs, debtMs, intervalSec float64, lagKnown bool) *agentv1.TickSample {
+	msptAvg := 50 * busyFraction
+	msptMax := longestBusyMs
+	tps := 20.0
+	if busyFraction >= saturatedBusyFraction {
+		if lagKnown {
+			debtRate := min(debtMs/(intervalSec*1000), 0.95)
+			tps = 20 * (1 - debtRate)
+			msptAvg = 1000 / tps
+		} else {
+			msptAvg = 50
+		}
+		msptMax = msptAvg
+	}
+	if msptMax < msptAvg {
+		msptMax = msptAvg
+	}
+	return &agentv1.TickSample{Tps: tps, MsptAvg: msptAvg, MsptMax: msptMax}
+}
+
+// emitTickSample sends the assembled tick sample upstream.
+func (s *supervisor) emitTickSample(t *agentv1.TickThreadSample) {
+	debtMs, intervalSec, lagKnown := s.events.lagDebt()
+	s.send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_TickSample{
+		TickSample: assembleTickSample(t.GetBusyFraction(), t.GetLongestBusyMs(), debtMs, intervalSec, lagKnown),
+	}})
 }
 
 func msgReady(startupSeconds float64) *agentv1.AgentMessage {

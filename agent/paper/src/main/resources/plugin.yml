@@ -1,7 +1,0 @@
-name: DiscoAgent
-version: "${version}"
-main: app.discopanel.agent.paper.DiscoAgentPaper
-api-version: "1.13"
-author: DiscoPanel
-description: DiscoPanel server telemetry agent - reports real TPS, player events, and JVM health to the panel.
-website: https://github.com/nickheyer/discopanel

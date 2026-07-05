@@ -153,7 +153,7 @@ func (h *Hub) SendConsole(ctx context.Context, serverID, command string) error {
 	}})
 }
 
-// SendChat broadcasts a chat message in game via the disco-agent mod.
+// SendChat broadcasts a chat message in game via the supervisor's tellraw.
 func (h *Hub) SendChat(ctx context.Context, serverID, sender, message string) error {
 	_ = ctx
 	return h.sendToAgent(serverID, &agentv1.PanelMessage{Payload: &agentv1.PanelMessage_ChatMessage{
@@ -166,10 +166,10 @@ func (h *Hub) SendChat(ctx context.Context, serverID, sender, message string) er
 func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.AgentMessage) {
 	switch p := msg.GetPayload().(type) {
 	case *agentv1.AgentMessage_Hello:
-		// A second hello on an open session is the disco-agent mod coming up.
-		if p.Hello.GetSource() == agentv1.HelloSource_HELLO_SOURCE_MOD {
-			h.collector.SetAgentModActive(serverID, true)
-			h.console(serverID, "disco-agent mod active (%s)", p.Hello.GetVersion())
+		// A second hello on an open session is the javaagent coming up.
+		if p.Hello.GetSource() == agentv1.HelloSource_HELLO_SOURCE_JVM {
+			h.collector.SetAgentJvmActive(serverID, true)
+			h.console(serverID, "JVM telemetry active (disco-agent %s)", p.Hello.GetVersion())
 		}
 
 	case *agentv1.AgentMessage_Ready:
@@ -204,11 +204,8 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 	case *agentv1.AgentMessage_PlayerEvent:
 		h.handlePlayerEvent(ctx, serverID, p.PlayerEvent)
 
-	case *agentv1.AgentMessage_WorldStats:
-		h.collector.ApplyAgentWorldStats(serverID, p.WorldStats)
-
-	case *agentv1.AgentMessage_CommandList:
-		h.collector.ApplyAgentCommands(serverID, p.CommandList.GetCommands())
+	case *agentv1.AgentMessage_Roster:
+		h.collector.ApplyAgentRoster(serverID, p.Roster.GetOnlinePlayers())
 	}
 }
 

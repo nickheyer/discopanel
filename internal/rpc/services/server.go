@@ -106,7 +106,6 @@ func (s *ServerService) applyMetrics(server *storage.Server) {
 	server.HeapUsedMB = m.HeapUsedMB
 	server.HeapMaxMB = m.HeapMaxMB
 	server.CPUThrottlePercent = m.CPUThrottlePercent
-	server.AvailableCommands = m.AvailableCommands
 }
 
 func dbServerToProto(server *storage.Server) *v1.Server {
@@ -164,7 +163,6 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		HeapUsedMb:         server.HeapUsedMB,
 		HeapMaxMb:          server.HeapMaxMB,
 		CpuThrottlePercent: server.CPUThrottlePercent,
-		AvailableCommands:  server.AvailableCommands,
 	}
 
 	// Apply overrides

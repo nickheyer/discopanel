@@ -43,7 +43,7 @@ type ServerMetrics struct {
 	// Agent-sourced fields (live only while the runtime agent session is up).
 	// When fresh, these take precedence over the SLP sampling paths.
 	AgentConnected     bool
-	AgentModActive     bool      // disco-agent mod is feeding game telemetry
+	AgentJvmActive     bool      // javaagent is feeding JVM/tick telemetry
 	AgentReady         bool      // agent reported server ready this run
 	AgentTickUpdated   time.Time // freshness of TPS/MSPT below
 	AgentRosterUpdated time.Time // freshness of PlayerSample/PlayersOnline
@@ -57,10 +57,7 @@ type ServerMetrics struct {
 	GCPauseCount       int64   // pauses in the last sample window
 	GCPauseTotalMs     float64
 	GCPauseMaxMs       float64
-	TotalEntities      int
-	TotalChunks        int
 	StartupSeconds     float64
-	AvailableCommands  []string
 
 	// Last process exit reported by the agent (crash forensics).
 	LastExitCode        int

@@ -31,9 +31,9 @@ Pick one of the three, not a combination.
 
 ## Where the numbers come from
 
-Every server runs with a small DiscoPanel agent alongside it, on by default. It's what feeds the health check and the dashboard: tick speed, memory, CPU, who's online, plus crash detection and a console that accepts commands even while the server is still booting. On supported loaders (Fabric, NeoForge, Forge, Paper and friends) it also drops a tiny companion mod called disco-agent into the server, which reads tick timing and player events straight from the game. It has no gameplay footprint.
+Every server runs with a small DiscoPanel agent alongside it, on by default. It's what feeds the health check and the dashboard: tick speed, memory, CPU, who's online, plus crash detection and a console that accepts commands even while the server is still booting. It works the same on every server type and version, vanilla included, doesn't touch your mods or plugins folders, and has no gameplay footprint.
 
-If you ever need to, untick **Enable DiscoPanel Agent** in the configuration tab. Everything keeps working, DiscoPanel just falls back to slower measuring (server pings and RCON), and boot-time console commands and live tick timing go away.
+If you ever need to, untick **Enable DiscoPanel Agent** in the configuration tab. Everything keeps working, DiscoPanel just falls back to slower measuring (server pings), and boot-time console commands and live tick timing go away.
 
 ## Performance history
 

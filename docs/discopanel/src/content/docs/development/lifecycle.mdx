@@ -32,7 +32,7 @@ On start, if the existing container's image doesn't match the required runtime i
 The runtime image has no Docker HEALTHCHECK. Health is computed by the panel:
 
 - The metrics collector pings every running container with a real Server List Ping (every 15s by default) and records the results per container run, keyed to the container's StartedAt so restarts reset cleanly.
-- The runtime agent's ready report counts too: when the supervisor sees the "Done" console line (or the mod's server-started hook fires), the server is recorded healthy immediately instead of waiting out a ping cycle. Slow-loading modpacks stop reading as unhealthy during boot.
+- The runtime agent's ready report counts too: when the supervisor sees the "Done" console line, the server is recorded healthy immediately instead of waiting out a ping cycle. Slow-loading modpacks stop reading as unhealthy during boot.
 - A live agent session that has reported ready keeps vouching when SLP pings fail. This matters for mods that firewall unknown status pings (the classic Connectivity mod false-unhealthy): SLP can be blocked while the server is perfectly playable.
 - `GetContainerStatus` consults the record through the `docker.HealthChecker` interface:
 

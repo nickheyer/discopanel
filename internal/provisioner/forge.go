@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -246,6 +247,39 @@ func (p *Provisioner) fetchChecksumSidecar(ctx context.Context, artifactURL, alg
 		return nil, fmt.Errorf("empty checksum sidecar")
 	}
 	return &checksum{algo: algo, value: value[0]}, nil
+}
+
+// detectServerPackLoader reads a pack start script for its loader version.
+// Generated Forge and NeoForge server packs pin the version in a shell
+// variable and download the installer at first run.
+func detectServerPackLoader(dataPath, mc string) (string, string) {
+	for _, name := range []string{"startserver.sh", "startserver.bat", "start.sh", "run.sh"} {
+		data, err := os.ReadFile(filepath.Join(dataPath, name))
+		if err != nil {
+			continue
+		}
+		s := string(data)
+		if v := scriptVar(s, "NEOFORGE_VERSION"); v != "" {
+			return "neoforge", v
+		}
+		if v := scriptVar(s, "FORGE_VERSION"); v != "" {
+			return "forge", strings.TrimPrefix(v, mc+"-")
+		}
+	}
+	return "", ""
+}
+
+// scriptVar returns the value assigned to a shell variable.
+func scriptVar(s, key string) string {
+	i := strings.Index(s, key+"=")
+	if i < 0 {
+		return ""
+	}
+	rest := s[i+len(key)+1:]
+	if end := strings.IndexAny(rest, " \t\r\n\"'"); end >= 0 {
+		rest = rest[:end]
+	}
+	return strings.TrimSpace(rest)
 }
 
 // detectForgeLaunch locates the launch entry produced by a Forge-family

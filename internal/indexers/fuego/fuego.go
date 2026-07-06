@@ -126,6 +126,7 @@ type File struct {
 	SortableGameVersions []SortableGameVersion `json:"sortableGameVersions"`
 	Dependencies         []Dependency          `json:"dependencies"`
 	AlternateFileID      int                   `json:"alternateFileId"`
+	IsServerPack         bool                  `json:"isServerPack"`
 	ServerPackFileID     *int                  `json:"serverPackFileId"`
 }
 
@@ -322,4 +323,12 @@ func (c *Client) GetFileDownloadURL(ctx context.Context, modID, fileID int) (str
 		return "", nil
 	}
 	return *result.Data, nil
+}
+
+// CDNDownloadURL builds Forge CDN url for an API-withheld file
+func CDNDownloadURL(fileID int, fileName string) string {
+	if fileID <= 0 || fileName == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://edge.forgecdn.net/files/%d/%d/%s", fileID/1000, fileID%1000, url.PathEscape(fileName))
 }

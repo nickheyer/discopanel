@@ -57,7 +57,7 @@ func writeServerMetrics(w io.Writer, addr string, timeout time.Duration) {
 
 func splitServers(s string) []string {
 	var out []string
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		if part = strings.TrimSpace(part); part != "" {
 			if !strings.Contains(part, ":") {
 				part += ":25565"

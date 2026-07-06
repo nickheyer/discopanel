@@ -5,12 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -39,34 +37,6 @@ type cfManifest struct {
 		FileID    int  `json:"fileID"`
 		Required  bool `json:"required"`
 	} `json:"files"`
-}
-
-// BlockedMod describes a mod whose author disallows automated downloads.
-type BlockedMod struct {
-	Name     string `json:"name"`
-	FileName string `json:"file_name"`
-	URL      string `json:"url"`
-}
-
-// BlockedModsError is returned when a CurseForge pack contains mods that must
-// be downloaded manually. Uploading the listed files into the mods folder and
-// starting again resolves it.
-type BlockedModsError struct {
-	Mods []BlockedMod
-}
-
-func (e *BlockedModsError) Error() string {
-	names := make([]string, 0, len(e.Mods))
-	for _, m := range e.Mods {
-		entry := m.FileName
-		if m.URL != "" {
-			entry += " (" + m.URL + ")"
-		}
-		names = append(names, entry)
-	}
-	return fmt.Sprintf(
-		"%d mod(s) cannot be downloaded automatically because their authors disabled API distribution. Download them manually and upload them to the mods folder, then start the server again: %s",
-		len(e.Mods), strings.Join(names, ", "))
 }
 
 // installCurseForgePack installs a CurseForge modpack from the API or a local zip.
@@ -101,15 +71,8 @@ func (p *Provisioner) installCurseForgePack(ctx context.Context, server *storage
 	}
 	desired.versionID = strconv.Itoa(file.ID)
 
-	// Prefer the author-curated server pack when one exists.
-	dlFile := file
-	if file.ServerPackFileID != nil && *file.ServerPackFileID > 0 {
-		serverFile, err := client.GetFile(ctx, pack.ID, *file.ServerPackFileID)
-		if err == nil {
-			dlFile = serverFile
-			p.progress(server, "using server pack %s", serverFile.FileName)
-		}
-	}
+	// Prefer author server pack over the client files
+	dlFile := p.resolveServerPack(ctx, client, pack, server, file)
 
 	dlURL := dlFile.DownloadURL
 	if dlURL == "" {
@@ -118,8 +81,12 @@ func (p *Provisioner) installCurseForgePack(ctx context.Context, server *storage
 			return nil, err
 		}
 	}
+	// API withholds url when author disables distribution
 	if dlURL == "" {
-		return nil, fmt.Errorf("the modpack file %q is not distributable via the CurseForge API; download it manually and upload it as a modpack zip", dlFile.FileName)
+		dlURL = fuego.CDNDownloadURL(dlFile.ID, dlFile.FileName)
+	}
+	if dlURL == "" {
+		return nil, fmt.Errorf("could not resolve a download url for modpack file %q", dlFile.FileName)
 	}
 
 	p.progress(server, "downloading %s (%s)...", pack.Name, dlFile.FileName)
@@ -175,6 +142,34 @@ func (p *Provisioner) resolveCurseForgeFile(ctx context.Context, client *fuego.C
 	return &newest, nil
 }
 
+// resolveServerPack prefers a ready-made server pack over the client file
+func (p *Provisioner) resolveServerPack(ctx context.Context, client *fuego.Client, pack *fuego.Modpack, server *storage.Server, file *fuego.File) *fuego.File {
+	// Official CurseForge server pack linkage
+	if file.ServerPackFileID != nil && *file.ServerPackFileID > 0 {
+		if sp, err := client.GetFile(ctx, pack.ID, *file.ServerPackFileID); err == nil {
+			p.progress(server, "using server pack %s", sp.FileName)
+			return sp
+		}
+	}
+	// Some authors ship the server pack as the alternate file
+	if file.AlternateFileID > 0 {
+		if alt, err := client.GetFile(ctx, pack.ID, file.AlternateFileID); err == nil && isServerPack(alt) {
+			p.progress(server, "using server pack %s", alt.FileName)
+			return alt
+		}
+	}
+	return file
+}
+
+// Reports whether a file is a ready-made server pack
+func isServerPack(f *fuego.File) bool {
+	if f.IsServerPack {
+		return true
+	}
+	name := strings.ToLower(f.FileName + " " + f.DisplayName)
+	return strings.Contains(name, "server")
+}
+
 // installCurseForgeZip installs a pack zip: manifest-driven when manifest.json
 // exists, otherwise treated as a ready-made server pack.
 func (p *Provisioner) installCurseForgeZip(ctx context.Context, server *storage.Server, cfg *storage.ServerConfig, zipPath string, client *fuego.Client, force bool) (*Result, error) {
@@ -194,7 +189,7 @@ func (p *Provisioner) installCurseForgeZip(ctx context.Context, server *storage.
 	if err := p.extractServerPack(reader, server.DataPath, !force); err != nil {
 		return nil, err
 	}
-	return p.completeServerPack(ctx, server, cfg)
+	return p.completeServerPack(ctx, server, cfg, force)
 }
 
 // readCFManifest finds manifest.json at the zip root or under one top-level dir.
@@ -316,11 +311,7 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 		})
 	}
 
-	var (
-		blockedMu sync.Mutex
-		blocked   []BlockedMod
-		done      atomic.Int64
-	)
+	var done atomic.Int64
 	done.Store(int64(total - len(pending)))
 	if len(pending) > 0 {
 		p.progress(server, "downloading %d mods (%d already present)...", len(pending), total-len(pending))
@@ -341,15 +332,12 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 					return err
 				}
 			}
+			// API withholds url when author disables distribution
 			if dlURL == "" {
-				blockedMu.Lock()
-				blocked = append(blocked, BlockedMod{
-					Name:     dl.mod.Name,
-					FileName: dl.file.FileName,
-					URL:      modFileURL(&dl.mod, dl.fileID),
-				})
-				blockedMu.Unlock()
-				return nil
+				dlURL = fuego.CDNDownloadURL(dl.fileID, dl.file.FileName)
+			}
+			if dlURL == "" {
+				return fmt.Errorf("could not resolve a download url for %s", dl.file.FileName)
 			}
 
 			err := retryTransient(gctx, func() error {
@@ -370,12 +358,6 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 	if len(pending) > 0 {
 		p.progress(server, "mod downloads complete (%d/%d)", done.Load(), total)
 	}
-
-	if len(blocked) > 0 {
-		p.writeBlockedMods(server, blocked)
-		return nil, &BlockedModsError{Mods: blocked}
-	}
-	os.Remove(filepath.Join(server.DataPath, runtimespec.StateDir, "blocked-mods.json"))
 
 	// Install the loader the manifest declares.
 	loaderID := ""
@@ -460,24 +442,6 @@ func cfChecksum(file *fuego.File) *checksum {
 	return nil
 }
 
-func modFileURL(mod *fuego.Modpack, fileID int) string {
-	if mod.Links.WebsiteURL == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s/files/%d", strings.TrimSuffix(mod.Links.WebsiteURL, "/"), fileID)
-}
-
-// writeBlockedMods records the blocked mods list for later inspection.
-func (p *Provisioner) writeBlockedMods(server *storage.Server, blocked []BlockedMod) {
-	data, err := json.MarshalIndent(blocked, "", "  ")
-	if err != nil {
-		return
-	}
-	path := filepath.Join(server.DataPath, runtimespec.StateDir, "blocked-mods.json")
-	os.MkdirAll(filepath.Dir(path), 0755)
-	os.WriteFile(path, data, 0644)
-}
-
 // extractServerPack extracts a full server pack zip into the data dir,
 // stripping a single wrapping directory when present.
 func (p *Provisioner) extractServerPack(reader *zip.ReadCloser, dataPath string, skipExisting bool) error {
@@ -518,7 +482,7 @@ func commonZipRoot(reader *zip.Reader) string {
 
 // completeServerPack derives a launch spec from an extracted server pack,
 // running any bundled loader installer when required.
-func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Server, cfg *storage.ServerConfig) (*Result, error) {
+func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Server, cfg *storage.ServerConfig, force bool) (*Result, error) {
 	dataPath := server.DataPath
 
 	detect := func() *runtimespec.LaunchSpec {
@@ -552,6 +516,16 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Se
 		if spec := detect(); spec != nil {
 			return p.finishLaunch(server, spec, server.ModLoader, "", server.MCVersion)
 		}
+	}
+
+	// Some packs install the loader at first run via a start script
+	if loader, version := detectServerPackLoader(dataPath, server.MCVersion); loader != "" {
+		p.progress(server, "server pack ships no loader, installing %s %s", loader, version)
+		index := &mrpackIndex{Dependencies: map[string]string{
+			"minecraft": server.MCVersion,
+			loader:      version,
+		}}
+		return p.installPackLoader(ctx, server, cfg, index, force)
 	}
 
 	return nil, fmt.Errorf("could not determine how to launch this server pack: no known server jar, args file, or bundled installer found")

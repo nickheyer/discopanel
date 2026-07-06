@@ -76,7 +76,7 @@ final class AgentConnection {
     }
 
     private void runSession() throws IOException, InterruptedException {
-        Socket socket = new Socket(InetAddress.getLoopbackAddress(), port);
+        Socket socket = new Socket(InetAddress.getByName("127.0.0.1"), port);
         try {
             socket.setTcpNoDelay(true);
             final DataOutputStream out = new DataOutputStream(socket.getOutputStream());

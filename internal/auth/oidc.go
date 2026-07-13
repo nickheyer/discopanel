@@ -204,7 +204,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// Enforce required claim if configured
 	if h.config.RequiredClaim != "" && len(h.config.RequiredValues) > 0 {
 		if !h.checkRequiredClaim(claims) {
-			h.log.Warn("OIDC: login rejected — required claim %q not satisfied", h.config.RequiredClaim)
+			h.log.Warn("OIDC: login rejected - required claim %q not satisfied", h.config.RequiredClaim)
 			http.Redirect(w, r, "/login?error=access_denied", http.StatusFound)
 			return
 		}
@@ -224,10 +224,10 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		username = sub
 	}
 
-	// Resolve roles before creating user to avoid orphaned records on rejection
+	// Resolves roles before creating user to avoid orphans
 	resolvedRoles := h.resolveClaimRoles(claims)
 	if len(resolvedRoles) == 0 && h.config.RejectUnmapped {
-		h.log.Warn("OIDC: login rejected — no mapped roles for user %s", username)
+		h.log.Warn("OIDC: login rejected - no mapped roles for user %s", username)
 		http.Redirect(w, r, "/login?error=no_mapped_roles", http.StatusFound)
 		return
 	}
@@ -278,12 +278,9 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/login?token=%s", token), http.StatusFound)
 }
 
-// findOrCreateOIDCUser looks up a user by OIDC subject (returning user),
-// or creates a new OIDC user. Local users with the same username are not
-// affected — the composite unique constraint (username, auth_provider)
-// allows both to coexist.
+// Finds or creates OIDC user, same username can coexist
 func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, email string) (*db.User, error) {
-	// Step 1: try to find by OIDC subject (returning user)
+	// Tries to find by OIDC subject, for returning users
 	if user, err := h.store.GetUserByOIDCSubject(ctx, sub); err == nil {
 		if !user.IsActive {
 			return nil, ErrUserNotActive
@@ -298,7 +295,7 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, e
 		return user, nil
 	}
 
-	// Step 2: create a new OIDC user
+	// Creates a new OIDC user
 	var emailPtr *string
 	if email != "" {
 		emailPtr = &email
@@ -367,16 +364,14 @@ func (h *OIDCHandler) resolveClaimRoles(claims map[string]any) []string {
 			}
 		}
 	} else if !h.config.RejectUnmapped {
-		// No mapping configured and not rejecting unmapped — use claim values directly
+		// Uses claim values directly when no mapping and not rejecting
 		resolvedRoles = claimValues
 	}
 
 	return resolvedRoles
 }
 
-// Calls the configured extra claims URL with the access token.
-// Uses ExtraClaimsKey (gjson path) to extract a value from the response,
-// and stores it under ExtraClaimsName in the claims map.
+// Fetches extra claim from configured URL using gjson path
 func (h *OIDCHandler) fetchExtraClaims(ctx context.Context, accessToken string) (map[string]any, error) {
 	client := http.DefaultClient
 	if h.httpClient != nil {
@@ -414,7 +409,7 @@ func (h *OIDCHandler) fetchExtraClaims(ctx context.Context, accessToken string) 
 		name = "extra"
 	}
 
-	// If no key path configured, parse the whole response as the claim value
+	// Parses whole response as claim value if no key path
 	if h.config.ExtraClaimsKey == "" {
 		var parsed any
 		if err := json.Unmarshal(body, &parsed); err != nil {
@@ -431,7 +426,7 @@ func (h *OIDCHandler) fetchExtraClaims(ctx context.Context, accessToken string) 
 	return map[string]any{name: gjsonToAny(result)}, nil
 }
 
-// gjsonToAny converts a gjson.Result to a native Go type for use in claims.
+// Converts gjson.Result to native Go type for claims
 func gjsonToAny(r gjson.Result) any {
 	if r.IsArray() {
 		var out []any
@@ -452,7 +447,7 @@ func gjsonToAny(r gjson.Result) any {
 	return r.Value()
 }
 
-// Returns true if the claims contain the required claim == value match
+// True if claims satisfy required claim value match
 func (h *OIDCHandler) checkRequiredClaim(claims map[string]any) bool {
 	value, ok := claims[h.config.RequiredClaim]
 	if !ok {

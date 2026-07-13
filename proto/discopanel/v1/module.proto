@@ -8,46 +8,46 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
-// ModuleService manages module templates and module instances attached to servers.
+// Manages module templates and instances on servers
 service ModuleService {
-  // ListModuleTemplates returns all module templates, optionally filtered by type or category.
+  // Lists module templates with optional filters
   rpc ListModuleTemplates(ListModuleTemplatesRequest) returns (ListModuleTemplatesResponse);
-  // GetModuleTemplate retrieves a single module template by ID.
+  // Gets one module template by ID
   rpc GetModuleTemplate(GetModuleTemplateRequest) returns (GetModuleTemplateResponse);
-  // CreateModuleTemplate creates a new custom module template.
+  // Creates a custom module template
   rpc CreateModuleTemplate(CreateModuleTemplateRequest) returns (CreateModuleTemplateResponse);
-  // UpdateModuleTemplate modifies an existing custom module template.
+  // Updates a custom module template
   rpc UpdateModuleTemplate(UpdateModuleTemplateRequest) returns (UpdateModuleTemplateResponse);
-  // DeleteModuleTemplate removes a custom module template.
+  // Deletes a custom module template
   rpc DeleteModuleTemplate(DeleteModuleTemplateRequest) returns (DeleteModuleTemplateResponse);
 
-  // ListModules returns all module instances, optionally filtered by server or template.
+  // Lists module instances with optional filters
   rpc ListModules(ListModulesRequest) returns (ListModulesResponse);
-  // GetModule retrieves a single module instance by ID.
+  // Gets one module instance by ID
   rpc GetModule(GetModuleRequest) returns (GetModuleResponse);
-  // CreateModule creates a new module instance from a template and attaches it to a server.
+  // Creates a module from a template on a server
   rpc CreateModule(CreateModuleRequest) returns (CreateModuleResponse);
-  // UpdateModule modifies an existing module instance configuration.
+  // Updates a module instance configuration
   rpc UpdateModule(UpdateModuleRequest) returns (UpdateModuleResponse);
-  // DeleteModule removes a module instance and its associated container.
+  // Deletes a module and its container
   rpc DeleteModule(DeleteModuleRequest) returns (DeleteModuleResponse);
 
-  // StartModule starts a stopped module's container.
+  // Starts a stopped module container
   rpc StartModule(StartModuleRequest) returns (StartModuleResponse);
-  // StopModule stops a running module's container.
+  // Stops a running module container
   rpc StopModule(StopModuleRequest) returns (StopModuleResponse);
-  // RestartModule stops and then starts a module's container.
+  // Restarts a module container
   rpc RestartModule(RestartModuleRequest) returns (RestartModuleResponse);
-  // RecreateModule destroys and recreates a module's container with current configuration.
+  // Recreates a module container with current config
   rpc RecreateModule(RecreateModuleRequest) returns (RecreateModuleResponse);
 
-  // GetModuleLogs retrieves recent log lines from a module's container.
+  // Fetches recent module container logs
   rpc GetModuleLogs(GetModuleLogsRequest) returns (GetModuleLogsResponse);
-  // GetNextAvailableModulePort finds the next unused port for module allocation.
+  // Finds next unused module port
   rpc GetNextAvailableModulePort(GetNextAvailableModulePortRequest) returns (GetNextAvailableModulePortResponse);
-  // GetAvailableAliases returns all template aliases with optional context-resolved example values.
+  // Lists template aliases with example values
   rpc GetAvailableAliases(GetAvailableAliasesRequest) returns (GetAvailableAliasesResponse);
-  // GetResolvedAliases returns all aliases with their resolved values for a given context.
+  // Resolves all aliases for a given context
   rpc GetResolvedAliases(GetResolvedAliasesRequest) returns (GetResolvedAliasesResponse);
 }
 

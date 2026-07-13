@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Skeleton } from '$lib/components/ui/skeleton';
+	import { EmptyState, ConfirmDialog } from '$lib/components/app';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import type { Module } from '$lib/proto/discopanel/v1/module_pb';
 	import { ModuleStatus } from '$lib/proto/discopanel/v1/module_pb';
+	import { TONE_BADGE, TONE_BG } from '$lib/server-status';
+	import { moduleStatusMeta } from '$lib/module-status';
+	import { cn } from '$lib/utils';
 	import {
 		Loader2,
 		Play,
@@ -16,40 +20,66 @@
 		Terminal,
 		Cpu,
 		Server,
-		ExternalLink,
 		Package,
 		RefreshCw
 	} from '@lucide/svelte';
 	import ModuleDialog from '$lib/components/server/ModuleDialog.svelte';
 	import ModuleLogsDialog from '$lib/components/server/ModuleLogsDialog.svelte';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
+
+	interface Props {
+		active?: boolean;
+	}
+
+	let { active = true }: Props = $props();
 
 	let modules = $state<Module[]>([]);
 	let loading = $state(true);
 	let actionLoading = $state<string | null>(null);
 
-	// Dialog state
 	let editDialogOpen = $state(false);
 	let logsDialogOpen = $state(false);
 	let selectedModule = $state<Module | null>(null);
+	let deleteTarget = $state<Module | null>(null);
+	let deleteOpen = $state(false);
 
-	let pollingInterval: ReturnType<typeof setInterval> | null = null;
+	// Feeds the logs dialog fresh status from polling
+	let liveSelectedModule = $derived(
+		modules.find((m) => m.id === selectedModule?.id) ?? selectedModule
+	);
+
+	let hasLoaded = $state(false);
+	let pageVisible = $state(true);
 
 	onMount(() => {
-		loadModules();
-		pollingInterval = setInterval(() => loadModules(true), 5000);
+		pageVisible = document.visibilityState === 'visible';
 	});
 
-	onDestroy(() => {
-		if (pollingInterval) {
-			clearInterval(pollingInterval);
+	// Loads once when tab first activates
+	$effect(() => {
+		if (active && !hasLoaded) {
+			hasLoaded = true;
+			loadModules();
 		}
 	});
+
+	// Polls while tab active and page visible
+	$effect(() => {
+		if (!active || !hasLoaded || !pageVisible) return;
+		const interval = setInterval(() => loadModules(true), 5000);
+		return () => clearInterval(interval);
+	});
+
+	// Refreshes once the page turns visible again
+	function handleVisibilityChange() {
+		pageVisible = document.visibilityState === 'visible';
+		if (pageVisible && active && hasLoaded) loadModules(true);
+	}
 
 	async function loadModules(silent = false) {
 		try {
 			if (!silent) loading = true;
-			// Without serverId, it fetches all modules
+			// Empty request fetches modules across all servers
 			const response = await rpcClient.module.listModules(
 				{},
 				silent ? silentCallOptions : undefined
@@ -107,12 +137,14 @@
 		}
 	}
 
-	async function handleDeleteModule(module: Module) {
-		const confirmed = confirm(
-			`Are you sure you want to delete "${module.name}"?\n\nThis will stop and remove the container and all module data.`
-		);
-		if (!confirmed) return;
+	function requestDelete(module: Module) {
+		deleteTarget = module;
+		deleteOpen = true;
+	}
 
+	async function confirmDelete() {
+		if (!deleteTarget) return;
+		const module = deleteTarget;
 		actionLoading = module.id;
 		try {
 			await rpcClient.module.deleteModule({ id: module.id });
@@ -136,224 +168,191 @@
 		selectedModule = module;
 		logsDialogOpen = true;
 	}
-
-	function getStatusBadgeVariant(
-		status: ModuleStatus
-	): 'default' | 'secondary' | 'destructive' | 'outline' {
-		switch (status) {
-			case ModuleStatus.RUNNING:
-				return 'default';
-			case ModuleStatus.STARTING:
-			case ModuleStatus.STOPPING:
-			case ModuleStatus.CREATING:
-				return 'secondary';
-			case ModuleStatus.ERROR:
-				return 'destructive';
-			default:
-				return 'outline';
-		}
-	}
-
-	function getStatusLabel(status: ModuleStatus): string {
-		switch (status) {
-			case ModuleStatus.RUNNING:
-				return 'Running';
-			case ModuleStatus.STOPPED:
-				return 'Stopped';
-			case ModuleStatus.STARTING:
-				return 'Starting';
-			case ModuleStatus.STOPPING:
-				return 'Stopping';
-			case ModuleStatus.ERROR:
-				return 'Error';
-			case ModuleStatus.CREATING:
-				return 'Creating';
-			default:
-				return 'Unknown';
-		}
-	}
 </script>
 
+<svelte:document onvisibilitychange={handleVisibilityChange} />
+
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
-		<div>
-			<h3 class="text-lg font-medium">Active Instances</h3>
-			<p class="text-sm text-muted-foreground">All modules running across all your servers.</p>
-		</div>
-		<Button variant="outline" size="sm" onclick={() => loadModules()} disabled={loading}>
-			{#if loading}
-				<Loader2 class="h-4 w-4 animate-spin" />
-			{:else}
-				<RefreshCw class="h-4 w-4" />
-			{/if}
+	<div class="flex flex-wrap items-center justify-between gap-3">
+		<span class="tabular text-xs text-muted-foreground">
+			{modules.length}
+			{modules.length === 1 ? 'instance' : 'instances'}
+		</span>
+		<Button
+			variant="ghost"
+			size="icon"
+			class="size-8"
+			onclick={() => loadModules()}
+			disabled={loading}
+			title="Refresh"
+		>
+			<RefreshCw class="size-4 {loading ? 'animate-spin' : ''}" />
 		</Button>
 	</div>
 
 	{#if loading && modules.length === 0}
-		<div class="flex items-center justify-center py-12">
-			<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+		<div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+			{#each Array(3) as _, i (i)}
+				<Skeleton class="h-32 rounded-lg" />
+			{/each}
 		</div>
 	{:else if modules.length === 0}
-		<div
-			class="flex flex-col items-center justify-center rounded-lg border bg-card py-12 text-center"
-		>
-			<Package class="mb-4 h-12 w-12 text-muted-foreground/50" />
-			<h3 class="mb-1 text-lg font-medium">No Active Modules</h3>
-			<p class="max-w-sm text-sm text-muted-foreground">
-				You don't have any modules running on any of your servers right now.
-			</p>
+		<div class="rounded-lg border bg-card">
+			<EmptyState
+				icon={Package}
+				title="No active modules"
+				description="You don't have any modules running on any of your servers right now."
+			/>
 		</div>
 	{:else}
-		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+		<div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
 			{#each modules as module (module.id)}
-				{@const isLoading = actionLoading === module.id}
-				<Card
-					class="group relative overflow-hidden border shadow-sm transition-all hover:shadow-md"
+				{@const busy = actionLoading === module.id}
+				{@const meta = moduleStatusMeta(module.status)}
+				<div
+					class="group flex flex-col rounded-lg border bg-card p-4 transition-colors hover:border-primary/20"
 				>
-					<div
-						class="absolute top-0 right-0 left-0 h-1 {module.status === ModuleStatus.RUNNING
-							? 'bg-green-500'
-							: module.status === ModuleStatus.ERROR
-								? 'bg-red-500'
-								: 'bg-gray-300'}"
-					></div>
-					<CardContent class="p-4">
-						<div class="mb-3 flex items-start justify-between">
-							<div class="min-w-0 flex-1">
-								<div class="mb-1 flex items-center gap-2">
-									<h3 class="truncate font-semibold">{module.name}</h3>
-									<Badge variant={getStatusBadgeVariant(module.status)} class="text-xs">
-										{getStatusLabel(module.status)}
-									</Badge>
-								</div>
-								<div class="flex items-center gap-2 truncate text-xs text-muted-foreground">
-									<span class="flex items-center gap-1"
-										><Server class="h-3 w-3" /> {module.serverName || module.serverId}</span
-									>
-									<span>•</span>
-									<span class="truncate">{module.templateName}</span>
-								</div>
+					<div class="flex items-start justify-between gap-2">
+						<div class="min-w-0 flex-1">
+							<div class="flex items-center gap-2">
+								<h3 class="truncate text-sm font-medium">{module.name}</h3>
+								<span
+									class={cn(
+										'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium',
+										TONE_BADGE[meta.tone]
+									)}
+								>
+									<span
+										class={cn(
+											'size-1.5 rounded-full',
+											TONE_BG[meta.tone],
+											meta.transitional && 'animate-pulse'
+										)}
+									></span>
+									{meta.label}
+								</span>
 							</div>
-							<div class="ml-2 flex items-center gap-1">
-								{#if module.status === ModuleStatus.STOPPED}
-									<Button
-										size="icon"
-										variant="ghost"
-										onclick={() => handleStartModule(module)}
-										disabled={isLoading}
-										title="Start module"
-										class="h-8 w-8"
-									>
-										{#if isLoading}
-											<Loader2 class="h-4 w-4 animate-spin" />
-										{:else}
-											<Play class="h-4 w-4 text-green-500" />
-										{/if}
-									</Button>
-								{:else if module.status === ModuleStatus.RUNNING}
-									<Button
-										size="icon"
-										variant="ghost"
-										onclick={() => handleStopModule(module)}
-										disabled={isLoading}
-										title="Stop module"
-										class="h-8 w-8"
-									>
-										{#if isLoading}
-											<Loader2 class="h-4 w-4 animate-spin" />
-										{:else}
-											<Square class="h-4 w-4 text-red-500" />
-										{/if}
-									</Button>
-									<Button
-										size="icon"
-										variant="ghost"
-										onclick={() => handleRestartModule(module)}
-										disabled={isLoading}
-										title="Restart module"
-										class="h-8 w-8"
-									>
-										<RotateCw class="h-4 w-4" />
-									</Button>
-								{:else if module.status === ModuleStatus.STARTING || module.status === ModuleStatus.STOPPING || module.status === ModuleStatus.CREATING}
-									<Button size="icon" variant="ghost" disabled class="h-8 w-8">
-										<Loader2 class="h-4 w-4 animate-spin" />
-									</Button>
-								{:else if module.status === ModuleStatus.ERROR}
-									<Button
-										size="icon"
-										variant="ghost"
-										onclick={() => handleStartModule(module)}
-										disabled={isLoading}
-										title="Start module"
-										class="h-8 w-8"
-									>
-										{#if isLoading}
-											<Loader2 class="h-4 w-4 animate-spin" />
-										{:else}
-											<Play class="h-4 w-4 text-green-500" />
-										{/if}
-									</Button>
-								{/if}
+							<div class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+								<span class="flex min-w-0 items-center gap-1">
+									<Server class="size-3 shrink-0" />
+									<span class="truncate">{module.serverName || module.serverId}</span>
+								</span>
+								<span>·</span>
+								<span class="truncate">{module.templateName}</span>
 							</div>
 						</div>
-
-						<div class="mb-3 space-y-1 text-xs">
-							{#if module.status === ModuleStatus.RUNNING && module.memoryUsage > 0}
-								<div class="flex items-center gap-3 text-muted-foreground">
-									<span><Cpu class="mr-1 inline h-3 w-3" />{module.memoryUsage.toFixed(0)} MB</span>
-									<span>CPU: {module.cpuPercent.toFixed(1)}%</span>
-								</div>
-							{:else}
-								<div class="invisible flex items-center gap-3 text-muted-foreground/60">
-									<span><Cpu class="mr-1 inline h-3 w-3" />0 MB</span>
-								</div>
+						<div class="flex shrink-0 items-center gap-1">
+							{#if module.status === ModuleStatus.STOPPED || module.status === ModuleStatus.ERROR}
+								<Button
+									size="icon"
+									variant="ghost"
+									class="size-8 text-status-ok hover:bg-status-ok/10 hover:text-status-ok"
+									onclick={() => handleStartModule(module)}
+									disabled={busy}
+									title="Start module"
+								>
+									{#if busy}
+										<Loader2 class="size-4 animate-spin" />
+									{:else}
+										<Play class="size-4" />
+									{/if}
+								</Button>
+							{:else if module.status === ModuleStatus.RUNNING}
+								<Button
+									size="icon"
+									variant="ghost"
+									class="size-8 text-status-danger hover:bg-status-danger/10 hover:text-status-danger"
+									onclick={() => handleStopModule(module)}
+									disabled={busy}
+									title="Stop module"
+								>
+									{#if busy}
+										<Loader2 class="size-4 animate-spin" />
+									{:else}
+										<Square class="size-4" />
+									{/if}
+								</Button>
+								<Button
+									size="icon"
+									variant="ghost"
+									class="size-8"
+									onclick={() => handleRestartModule(module)}
+									disabled={busy}
+									title="Restart module"
+								>
+									<RotateCw class="size-4" />
+								</Button>
+							{:else if meta.transitional}
+								<Button size="icon" variant="ghost" class="size-8" disabled>
+									<Loader2 class="size-4 animate-spin" />
+								</Button>
 							{/if}
 						</div>
+					</div>
 
-						<div class="flex items-center justify-between border-t pt-2">
-							<div class="flex items-center gap-1">
-								{#if module.autoStart}
-									<Badge variant="secondary" class="px-1.5 py-0 text-[10px]">Auto-start</Badge>
-								{/if}
-							</div>
-							<div class="flex items-center gap-1">
-								<Button
-									size="icon"
-									variant="ghost"
-									onclick={() => openLogsDialog(module)}
-									title="View logs"
-									class="h-7 w-7"
-								>
-									<Terminal class="h-3.5 w-3.5" />
-								</Button>
-								<Button
-									size="icon"
-									variant="ghost"
-									onclick={() => openEditDialog(module)}
-									title="Edit module"
-									class="h-7 w-7"
-								>
-									<Settings class="h-3.5 w-3.5" />
-								</Button>
-								<Button
-									size="icon"
-									variant="ghost"
-									onclick={() => handleDeleteModule(module)}
-									disabled={isLoading}
-									title="Delete module"
-									class="h-7 w-7 text-destructive hover:text-destructive"
-								>
-									<Trash2 class="h-3.5 w-3.5" />
-								</Button>
-							</div>
+					<div class="mt-3 flex h-4 items-center gap-3 text-xs text-muted-foreground">
+						{#if module.status === ModuleStatus.RUNNING && module.memoryUsage > 0}
+							<span class="flex items-center gap-1">
+								<Cpu class="size-3" />
+								<span class="tabular">{module.memoryUsage.toFixed(0)} MB</span>
+							</span>
+							<span class="tabular">CPU: {module.cpuPercent.toFixed(1)}%</span>
+						{/if}
+					</div>
+
+					<div class="mt-3 flex items-center justify-between gap-2 border-t pt-2.5">
+						<div class="flex min-w-0 items-center gap-1">
+							{#if module.autoStart}
+								<Badge variant="secondary">Auto-start</Badge>
+							{/if}
 						</div>
-					</CardContent>
-				</Card>
+						<div
+							class="flex shrink-0 items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100"
+						>
+							<Button
+								size="icon"
+								variant="ghost"
+								class="size-7"
+								onclick={() => openLogsDialog(module)}
+								title="View logs"
+							>
+								<Terminal class="size-3.5" />
+							</Button>
+							<Button
+								size="icon"
+								variant="ghost"
+								class="size-7"
+								onclick={() => openEditDialog(module)}
+								title="Edit module"
+							>
+								<Settings class="size-3.5" />
+							</Button>
+							<Button
+								size="icon"
+								variant="ghost"
+								class="size-7 text-status-danger hover:bg-status-danger/10 hover:text-status-danger"
+								onclick={() => requestDelete(module)}
+								disabled={busy}
+								title="Delete module"
+							>
+								<Trash2 class="size-3.5" />
+							</Button>
+						</div>
+					</div>
+				</div>
 			{/each}
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog
+	bind:open={deleteOpen}
+	title="Delete {deleteTarget?.name ?? 'module'}?"
+	description="This will stop and remove the container and all module data."
+	confirmLabel="Delete module"
+	destructive
+	onConfirm={confirmDelete}
+/>
 
 {#if selectedModule}
 	<ModuleDialog
@@ -363,5 +362,5 @@
 		onSuccess={() => loadModules(true)}
 	/>
 
-	<ModuleLogsDialog bind:open={logsDialogOpen} module={selectedModule} />
+	<ModuleLogsDialog bind:open={logsDialogOpen} module={liveSelectedModule ?? selectedModule} />
 {/if}

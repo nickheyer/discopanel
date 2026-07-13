@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -15,7 +14,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
-// HTTPProxy handles HTTP reverse proxying with Host header based routing
+// Handles HTTP reverse proxying keyed by Host header
 type HTTPProxy struct {
 	server       *http.Server
 	routes       map[string]*Route
@@ -26,7 +25,7 @@ type HTTPProxy struct {
 	runningMutex sync.RWMutex
 }
 
-// NewHTTPProxy creates a new HTTP reverse proxy instance
+// Creates a new HTTP reverse proxy instance
 func NewHTTPProxy(cfg *Config) *HTTPProxy {
 	p := &HTTPProxy{
 		routes:     make(map[string]*Route),
@@ -42,12 +41,12 @@ func NewHTTPProxy(cfg *Config) *HTTPProxy {
 	return p
 }
 
-// isWebSocketRequest checks if this is a WebSocket upgrade request
+// Checks if this is a WebSocket upgrade request
 func isWebSocketRequest(r *http.Request) bool {
 	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 }
 
-// ServeHTTP implements http.Handler for routing requests
+// Implements http.Handler for routing requests
 func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Extract hostname from Host header
 	hostname := strings.ToLower(strings.Split(r.Host, ":")[0])
@@ -91,7 +90,7 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r)
 }
 
-// handleWebSocket handles WebSocket upgrade requests
+// Handles WebSocket upgrade requests
 func (p *HTTPProxy) handleWebSocket(w http.ResponseWriter, r *http.Request, route *Route) {
 	// Hijack the client connection
 	hijacker, ok := w.(http.Hijacker)
@@ -101,7 +100,7 @@ func (p *HTTPProxy) handleWebSocket(w http.ResponseWriter, r *http.Request, rout
 		return
 	}
 
-	clientConn, _, err := hijacker.Hijack()
+	clientConn, clientRW, err := hijacker.Hijack()
 	if err != nil {
 		p.logger.Error("WebSocket: Failed to hijack connection: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -125,28 +124,21 @@ func (p *HTTPProxy) handleWebSocket(w http.ResponseWriter, r *http.Request, rout
 		return
 	}
 
+	// Flush client bytes buffered ahead of the raw relay
+	if buffered := clientRW.Reader.Buffered(); buffered > 0 {
+		pending, _ := clientRW.Reader.Peek(buffered)
+		if _, err := backendConn.Write(pending); err != nil {
+			p.logger.Error("WebSocket: Failed to flush buffered client data: %v", err)
+			return
+		}
+		clientRW.Reader.Discard(buffered)
+	}
+
 	p.logger.Debug("WebSocket connection established: %s -> %s", r.RemoteAddr, backendAddr)
-
-	// Bidirectional copy
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		io.Copy(backendConn, clientConn)
-		backendConn.Close()
-	}()
-
-	go func() {
-		defer wg.Done()
-		io.Copy(clientConn, backendConn)
-		clientConn.Close()
-	}()
-
-	wg.Wait()
+	relay(clientConn, backendConn)
 }
 
-// AddRoute adds a new routing rule
+// Adds a new routing rule
 func (p *HTTPProxy) AddRoute(serverID, hostname, backendHost string, backendPort int) {
 	p.routesMutex.Lock()
 	defer p.routesMutex.Unlock()
@@ -164,7 +156,7 @@ func (p *HTTPProxy) AddRoute(serverID, hostname, backendHost string, backendPort
 	p.logger.Info("HTTP proxy added route: hostname=%s backend=%s:%d", hostname, backendHost, backendPort)
 }
 
-// RemoveRoute removes a routing rule
+// Removes a routing rule
 func (p *HTTPProxy) RemoveRoute(hostname string) {
 	p.routesMutex.Lock()
 	defer p.routesMutex.Unlock()
@@ -175,7 +167,7 @@ func (p *HTTPProxy) RemoveRoute(hostname string) {
 	p.logger.Info("HTTP proxy removed route: hostname=%s", hostname)
 }
 
-// UpdateRoute updates the backend for a route
+// Updates the backend for a route
 func (p *HTTPProxy) UpdateRoute(hostname, backendHost string, backendPort int) {
 	p.routesMutex.Lock()
 	defer p.routesMutex.Unlock()
@@ -188,7 +180,7 @@ func (p *HTTPProxy) UpdateRoute(hostname, backendHost string, backendPort int) {
 	}
 }
 
-// GetRoutes returns a copy of all current routes
+// Returns a copy of all current routes
 func (p *HTTPProxy) GetRoutes() map[string]*Route {
 	p.routesMutex.RLock()
 	defer p.routesMutex.RUnlock()
@@ -201,7 +193,7 @@ func (p *HTTPProxy) GetRoutes() map[string]*Route {
 	return routes
 }
 
-// Start starts the HTTP proxy server
+// Starts the HTTP proxy server
 func (p *HTTPProxy) Start() error {
 	p.runningMutex.Lock()
 	defer p.runningMutex.Unlock()
@@ -227,7 +219,7 @@ func (p *HTTPProxy) Start() error {
 	return nil
 }
 
-// Stop stops the HTTP proxy server
+// Stops the HTTP proxy server
 func (p *HTTPProxy) Stop() error {
 	p.runningMutex.Lock()
 	defer p.runningMutex.Unlock()
@@ -246,7 +238,7 @@ func (p *HTTPProxy) Stop() error {
 	return nil
 }
 
-// IsRunning returns whether the proxy is running
+// Returns whether the proxy is running
 func (p *HTTPProxy) IsRunning() bool {
 	p.runningMutex.RLock()
 	defer p.runningMutex.RUnlock()

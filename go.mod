@@ -1,6 +1,6 @@
 module github.com/nickheyer/discopanel
 
-go 1.24.6
+go 1.25.0
 
 require (
 	connectrpc.com/connect v1.19.1
@@ -19,14 +19,16 @@ require (
 	github.com/mholt/archives v0.1.5
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.20.1
+	github.com/tidwall/gjson v1.18.0
 	golang.org/x/crypto v0.46.0
+	golang.org/x/image v0.44.0
 	golang.org/x/oauth2 v0.35.0
+	golang.org/x/sync v0.22.0
 	google.golang.org/protobuf v1.36.10
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
-	github.com/tidwall/gjson v1.18.0
 )
 
 require (
@@ -54,7 +56,6 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
-	golang.org/x/sync v0.19.0 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
 	gorm.io/driver/sqlserver v1.6.3 // indirect
@@ -99,7 +100,7 @@ require (
 	github.com/nwaples/rardecode/v2 v2.2.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
+	github.com/pelletier/go-toml/v2 v2.2.3
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sagikazarmark/locafero v0.7.0 // indirect
@@ -120,9 +121,9 @@ require (
 	go.uber.org/multierr v1.9.0 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	golang.org/x/net v0.47.0
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
-	golang.org/x/time v0.12.0 // indirect
+	golang.org/x/sys v0.39.0
+	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/time v0.12.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20251111163417-95abcf5c77ba // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251111163417-95abcf5c77ba // indirect
 	gotest.tools/v3 v3.5.2 // indirect

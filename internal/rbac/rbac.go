@@ -10,19 +10,19 @@ import (
 	"gorm.io/gorm"
 )
 
-// Permission represents a single resource/action/object permission tuple.
+// Single resource/action/object permission tuple
 type Permission struct {
 	Resource string
 	Action   string
 	ObjectID string
 }
 
-// Enforcer wraps a Casbin enforcer with convenience methods for RBAC.
+// Wraps Casbin enforcer with convenience methods for RBAC
 type Enforcer struct {
 	enforcer *casbin.Enforcer
 }
 
-// NewEnforcer creates a new Casbin RBAC enforcer backed by the given GORM database.
+// Creates Casbin RBAC enforcer backed by GORM database
 func NewEnforcer(db *gorm.DB) (*Enforcer, error) {
 	adapter, err := gormadapter.NewAdapterByDB(db)
 	if err != nil {
@@ -74,7 +74,7 @@ func (e *Enforcer) SeedDefaultPolicies(anonymousEnabled bool) error {
 			{"user", ResourceServers, ActionStop, "*"},
 			{"user", ResourceServers, ActionRestart, "*"},
 			{"user", ResourceServers, ActionCommand, "*"},
-			{"user", ResourceServerConfig, ActionRead, "*"},
+			{"user", ResourceServerProperties, ActionRead, "*"},
 			{"user", ResourceMods, ActionRead, "*"},
 			{"user", ResourceModpacks, ActionRead, "*"},
 			{"user", ResourceModules, ActionRead, "*"},
@@ -85,7 +85,7 @@ func (e *Enforcer) SeedDefaultPolicies(anonymousEnabled bool) error {
 		},
 		"anonymous": {
 			{"anonymous", ResourceServers, ActionRead, "*"},
-			{"anonymous", ResourceServerConfig, ActionRead, "*"},
+			{"anonymous", ResourceServerProperties, ActionRead, "*"},
 			{"anonymous", ResourceMods, ActionRead, "*"},
 			{"anonymous", ResourceModpacks, ActionRead, "*"},
 			{"anonymous", ResourceModules, ActionRead, "*"},
@@ -115,8 +115,7 @@ func (e *Enforcer) SeedDefaultPolicies(anonymousEnabled bool) error {
 	return e.enforcer.SavePolicy()
 }
 
-// Enforce checks if any of the given roles allows the specified action on a
-// resource with the given object ID. Returns true on the first matching role.
+// True if any role allows action on resource/object
 func (e *Enforcer) Enforce(roles []string, resource, action, objectID string) (bool, error) {
 	for _, role := range roles {
 		allowed, err := e.enforcer.Enforce(role, resource, action, objectID)
@@ -130,7 +129,7 @@ func (e *Enforcer) Enforce(roles []string, resource, action, objectID string) (b
 	return false, nil
 }
 
-// GetPermissionsForRole returns all permissions currently assigned to the role.
+// Returns all permissions currently assigned to role
 func (e *Enforcer) GetPermissionsForRole(role string) []Permission {
 	policies, err := e.enforcer.GetFilteredPolicy(0, role)
 	if err != nil {
@@ -149,8 +148,7 @@ func (e *Enforcer) GetPermissionsForRole(role string) []Permission {
 	return perms
 }
 
-// SetPermissionsForRole replaces all permissions for a role atomically.
-// The admin role cannot be modified.
+// Replaces all permissions for a role, admin role blocked
 func (e *Enforcer) SetPermissionsForRole(role string, perms []Permission) error {
 	// Don't modify admin role
 	if strings.ToLower(role) == "admin" {
@@ -175,8 +173,7 @@ func (e *Enforcer) SetPermissionsForRole(role string, perms []Permission) error 
 	return e.enforcer.SavePolicy()
 }
 
-// GetPermissionMatrix returns a map of role names to their permission slices,
-// covering all roles that have any policy defined.
+// Maps each role to its permission slices
 func (e *Enforcer) GetPermissionMatrix() map[string][]Permission {
 	policies, err := e.enforcer.GetPolicy()
 	if err != nil {

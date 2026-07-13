@@ -7,34 +7,54 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/docker/client"
 	"github.com/nickheyer/discopanel/internal/config"
 	db "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
-// Manager handles the lifecycle of the proxy and manages routes
+// Handles proxy lifecycle and manages routes
 type Manager struct {
-	proxies     map[int]Proxier // Map of port -> Proxy instance (TCP or UDP)
-	store       *db.Store
-	config      *config.ProxyConfig
-	logger      *logger.Logger
-	mu          sync.Mutex
-	networkName string
+	proxies       map[int]Proxier // Map of port -> Proxy instance (TCP or UDP)
+	listenerPorts map[int]bool    // Ports serving hostname-routed server listeners
+	store         *db.Store
+	docker        *docker.Client
+	config        *config.ProxyConfig
+	logger        *logger.Logger
+	mu            sync.Mutex
+	gate          ServerGate
 }
 
-// NewManager creates a new proxy manager
-func NewManager(store *db.Store, cfg *config.Config, logger *logger.Logger) *Manager {
-	return &Manager{
-		proxies:     make(map[int]Proxier),
-		store:       store,
-		config:      &cfg.Proxy,
-		logger:      logger,
-		networkName: cfg.Docker.NetworkName,
+// Registers the wake gate, must be called before Start
+func (m *Manager) SetServerGate(gate ServerGate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gate = gate
+	for _, p := range m.proxies {
+		if mp, ok := p.(*MinecraftProxy); ok {
+			mp.SetGate(gate)
+		}
 	}
 }
 
-// Start initializes and starts the proxy if enabled
+// Creates a new proxy manager
+func NewManager(store *db.Store, dockerClient *docker.Client, cfg *config.Config, logger *logger.Logger) *Manager {
+	return &Manager{
+		proxies:       make(map[int]Proxier),
+		listenerPorts: make(map[int]bool),
+		store:         store,
+		docker:        dockerClient,
+		config:        &cfg.Proxy,
+		logger:        logger,
+	}
+}
+
+// Resolves a container IP on the panel network
+func (m *Manager) containerIP(containerID string) (string, error) {
+	return m.docker.ContainerIP(context.Background(), containerID)
+}
+
+// Initializes and starts the proxy if enabled
 func (m *Manager) Start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -65,9 +85,11 @@ func (m *Manager) Start() error {
 		proxy := NewMinecraftProxy(&Config{
 			ListenAddr: listenAddr,
 			Logger:     m.logger,
+			Gate:       m.gate,
 		})
 
 		m.proxies[listener.Port] = proxy
+		m.listenerPorts[listener.Port] = true
 		m.logger.Info("Created Minecraft proxy for listener %s on port %d", listener.Name, listener.Port)
 	}
 
@@ -84,37 +106,30 @@ func (m *Manager) Start() error {
 	}
 
 	for _, server := range servers {
-		// Add routes for servers with proxy hostname that are either running or have a container
-		if server.ProxyHostname != "" && server.ContainerID != "" && server.ProxyListenerID != "" {
-			// Find which listener this server uses
-			listener, ok := listenerMap[server.ProxyListenerID]
-			if !ok || !listener.Enabled {
-				m.logger.Error("Server %s has invalid or disabled listener %s", server.Name, server.ProxyListenerID)
-				continue
-			}
+		// Registers routes even for stopped wakeable servers
+		if server.ProxyHostname == "" || server.ProxyListenerID == "" {
+			continue
+		}
 
-			// Get the proxy instance for this listener's port
-			proxy, ok := m.proxies[listener.Port]
-			if !ok {
-				m.logger.Error("No proxy instance for port %d", listener.Port)
-				continue
-			}
+		listener, ok := listenerMap[server.ProxyListenerID]
+		if !ok || !listener.Enabled {
+			m.logger.Error("Server %s has invalid or disabled listener %s", server.Name, server.ProxyListenerID)
+			continue
+		}
 
-			// Get container IP address
-			containerIP, err := GetContainerIP(server.ContainerID, m.networkName)
-			if err != nil {
-				m.logger.Error("Failed to get container IP for server %s: %v", server.Name, err)
-				continue
-			}
+		mp, ok := m.proxies[listener.Port].(*MinecraftProxy)
+		if !ok {
+			m.logger.Error("No proxy instance for port %d", listener.Port)
+			continue
+		}
 
-			proxy.AddRoute(
-				server.ID,
-				server.ProxyHostname,
-				containerIP, // Use IP address instead of container name
-				25565,       // Internal Minecraft port
-			)
-			m.logger.Info("Added proxy route for server %s: %s -> %s:25565 on listener port %d",
-				server.Name, server.ProxyHostname, containerIP, listener.Port)
+		route, want, err := m.desiredRoute(server, m.generateHostname(server))
+		if err != nil {
+			m.logger.Error("Failed to build route for server %s: %v", server.Name, err)
+			continue
+		}
+		if want {
+			mp.UpsertServerRoute(route)
 		}
 	}
 
@@ -129,7 +144,7 @@ func (m *Manager) Start() error {
 	return nil
 }
 
-// Stop stops all proxy instances
+// Stops all proxy instances
 func (m *Manager) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -151,7 +166,7 @@ func (m *Manager) Stop() error {
 	return lastErr
 }
 
-// UpdateServerRoute updates or creates a route for a server
+// Reconciles a server route with its current status
 func (m *Manager) UpdateServerRoute(server *db.Server) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -175,45 +190,112 @@ func (m *Manager) UpdateServerRoute(server *db.Server) error {
 	}
 
 	// Get the proxy instance for this listener's port
-	proxy, ok := m.proxies[listener.Port]
+	mp, ok := m.proxies[listener.Port].(*MinecraftProxy)
 	if !ok {
 		return fmt.Errorf("no proxy instance for port %d", listener.Port)
 	}
 
 	hostname := m.generateHostname(server)
-
-	// Add or update route for servers that are starting or running with proxy hostname
-	if (server.Status == db.StatusRunning || server.Status == db.StatusStarting) && server.ProxyHostname != "" {
-		// Get the container's IP address on the Docker network
-		containerIP := ""
-		if server.ContainerID != "" {
-			if ip, err := GetContainerIP(server.ContainerID, m.networkName); err == nil {
-				containerIP = ip
-			} else {
-				m.logger.Error("Failed to get container IP for %s: %v", server.Name, err)
-				return fmt.Errorf("failed to get container IP: %w", err)
-			}
-		} else {
-			m.logger.Error("Server %s has no container ID", server.Name)
-			return fmt.Errorf("server has no container")
-		}
-
-		routes := proxy.GetRoutes()
-		if _, exists := routes[hostname]; exists {
-			proxy.UpdateRoute(hostname, containerIP, 25565)
-		} else {
-			proxy.AddRoute(server.ID, hostname, containerIP, 25565)
-		}
-		m.logger.Info("Updated route for server %s on port %d", server.Name, listener.Port)
-	} else if server.Status == db.StatusStopped || server.Status == db.StatusStopping {
-		// Remove route if server is stopped or stopping
-		proxy.RemoveRoute(hostname)
+	route, want, err := m.desiredRoute(server, hostname)
+	if err != nil {
+		return err
 	}
-
+	if !want {
+		mp.RemoveRoute(hostname)
+		return nil
+	}
+	mp.UpsertServerRoute(route)
 	return nil
 }
 
-// RemoveServerRoute removes a route for a server
+// Derives the route a server should serve right now
+func (m *Manager) desiredRoute(server *db.Server, hostname string) (route Route, want bool, err error) {
+	ctx := context.Background()
+	cfg, cfgErr := m.store.GetServerProperties(ctx, server.ID)
+	if cfgErr != nil {
+		cfg = nil
+	}
+
+	route = Route{
+		ServerID:      server.ID,
+		Hostname:      hostname,
+		BackendPort:   docker.DefaultMinecraftPort,
+		ProxyProtocol: propEnabled(cfg, func(c *db.ServerProperties) *bool { return c.EnableProxyProtocol }),
+		PreserveHost:  propEnabled(cfg, func(c *db.ServerProperties) *bool { return c.ProxyPreserveHostname }),
+		MaxPlayers:    server.MaxPlayers,
+	}
+	wakeable := propEnabled(cfg, func(c *db.ServerProperties) *bool { return c.EnableWakeOnConnect })
+
+	switch server.Status {
+	case db.StatusRunning, db.StatusPaused, db.StatusUnhealthy:
+		if server.ContainerID == "" {
+			return Route{}, false, fmt.Errorf("server %s has no container", server.Name)
+		}
+		ip, ipErr := m.containerIP(server.ContainerID)
+		if ipErr != nil {
+			return Route{}, false, fmt.Errorf("failed to get container IP: %w", ipErr)
+		}
+		route.State = RouteOnline
+		route.BackendHost = ip
+		return route, true, nil
+
+	case db.StatusProvisioning, db.StatusCreating, db.StatusStarting:
+		route.State = RouteStarting
+		route.MOTD = bootMOTD(server, cfg)
+		if server.ContainerID != "" {
+			if ip, ipErr := m.containerIP(server.ContainerID); ipErr == nil {
+				route.BackendHost = ip
+			}
+		}
+		return route, true, nil
+
+	case db.StatusStopped, db.StatusStopping, db.StatusError:
+		if !wakeable {
+			return Route{}, false, nil
+		}
+		route.State = RouteOffline
+		route.Wakeable = true
+		route.MOTD = offlineMOTD(server, cfg)
+		return route, true, nil
+
+	default:
+		return Route{}, false, nil
+	}
+}
+
+// Reads an optional bool off possibly-nil properties
+func propEnabled(cfg *db.ServerProperties, field func(*db.ServerProperties) *bool) bool {
+	if cfg == nil {
+		return false
+	}
+	v := field(cfg)
+	return v != nil && *v
+}
+
+// Builds the joinable-while-stopped status line
+func offlineMOTD(server *db.Server, cfg *db.ServerProperties) string {
+	if cfg != nil && cfg.MOTD != nil && *cfg.MOTD != "" {
+		return *cfg.MOTD + " (offline - join to start it up)"
+	}
+	return server.Name + " is offline - join to start it up"
+}
+
+// Builds the status line shown while a server boots
+func bootMOTD(server *db.Server, cfg *db.ServerProperties) string {
+	phase := "starting up"
+	switch server.Status {
+	case db.StatusProvisioning:
+		phase = "installing server files"
+	case db.StatusCreating:
+		phase = "preparing the container"
+	}
+	if cfg != nil && cfg.MOTD != nil && *cfg.MOTD != "" {
+		return fmt.Sprintf("%s (%s - join in a moment)", *cfg.MOTD, phase)
+	}
+	return fmt.Sprintf("%s is %s - join in a moment", server.Name, phase)
+}
+
+// Removes a route for a server
 func (m *Manager) RemoveServerRoute(serverID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -229,7 +311,7 @@ func (m *Manager) RemoveServerRoute(serverID string) error {
 
 	hostname := m.generateHostname(server)
 
-	// Remove from all proxies (in case it was moved between listeners)
+	// Remove from all proxies since listener may have changed
 	for _, proxy := range m.proxies {
 		proxy.RemoveRoute(hostname)
 	}
@@ -267,7 +349,7 @@ func (m *Manager) RemoveRouteByHostname(hostname string, listenerID string) erro
 	return nil
 }
 
-// generateHostname generates the hostname for a server
+// Generates the hostname for a server
 func (m *Manager) generateHostname(server *db.Server) string {
 	// Use custom hostname if set
 	if server.ProxyHostname != "" {
@@ -283,7 +365,7 @@ func (m *Manager) generateHostname(server *db.Server) string {
 	return fmt.Sprintf("server-%s.minecraft.mc", server.ID)
 }
 
-// GetRoutes returns all current proxy routes from all proxies
+// Returns all current routes from all proxies
 func (m *Manager) GetRoutes() map[string]*Route {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -296,7 +378,7 @@ func (m *Manager) GetRoutes() map[string]*Route {
 	return allRoutes
 }
 
-// IsRunning returns whether any proxy is running
+// Returns whether any proxy is running
 func (m *Manager) IsRunning() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -310,7 +392,7 @@ func (m *Manager) IsRunning() bool {
 	return false
 }
 
-// AddListener creates and starts a proxy instance for a new listener
+// Creates and starts a proxy for a new listener
 func (m *Manager) AddListener(listener *db.ProxyListener) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -329,6 +411,7 @@ func (m *Manager) AddListener(listener *db.ProxyListener) error {
 	proxy := NewMinecraftProxy(&Config{
 		ListenAddr: listenAddr,
 		Logger:     m.logger,
+		Gate:       m.gate,
 	})
 
 	// Start the proxy
@@ -337,12 +420,13 @@ func (m *Manager) AddListener(listener *db.ProxyListener) error {
 	}
 
 	m.proxies[listener.Port] = proxy
+	m.listenerPorts[listener.Port] = true
 	m.logger.Info("Added and started Minecraft proxy for listener %s on port %d", listener.Name, listener.Port)
 
 	return nil
 }
 
-// RemoveListener stops and removes a proxy instance for a listener
+// Stops and removes a proxy instance for a listener
 func (m *Manager) RemoveListener(port int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -358,12 +442,13 @@ func (m *Manager) RemoveListener(port int) error {
 	}
 
 	delete(m.proxies, port)
+	delete(m.listenerPorts, port)
 	m.logger.Info("Removed proxy for port %d", port)
 
 	return nil
 }
 
-// AllocateProxyPort allocates a proxy port for a server
+// Allocates a proxy port for a server
 func (m *Manager) AllocateProxyPort(serverID string) (int, error) {
 	// Get all servers to find used proxy ports
 	servers, err := m.store.ListServers(context.Background())
@@ -388,8 +473,7 @@ func (m *Manager) AllocateProxyPort(serverID string) (int, error) {
 	return 0, fmt.Errorf("no available proxy ports in range %d-%d", m.config.PortRangeMin, m.config.PortRangeMax)
 }
 
-// AddModuleRoute adds a proxy route for a module's ports
-// Modules use their own ports on the same hostname as their parent server
+// Adds proxy routes for a module's ports
 func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -403,7 +487,7 @@ func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
 		return fmt.Errorf("module has no container ID")
 	}
 
-	containerIP, err := GetContainerIP(module.ContainerID, m.networkName)
+	containerIP, err := m.containerIP(module.ContainerID)
 	if err != nil {
 		return fmt.Errorf("failed to get module container IP: %w", err)
 	}
@@ -429,7 +513,7 @@ func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
 	return nil
 }
 
-// addPortRouteUnlocked adds a single port route (must be called with lock held)
+// Adds a single port route, caller must hold lock
 func (m *Manager) addPortRouteUnlocked(routeID, hostname, containerIP string, hostPort, containerPort int, protocol, moduleName, portName string) error {
 	if containerPort == 0 {
 		containerPort = 8081
@@ -477,7 +561,7 @@ func (m *Manager) addPortRouteUnlocked(routeID, hostname, containerIP string, ho
 	return nil
 }
 
-// RemoveModuleRoute removes proxy routes for a module's ports
+// Removes proxy routes for a module's ports
 func (m *Manager) RemoveModuleRoute(moduleID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -509,7 +593,7 @@ func (m *Manager) RemoveModuleRoute(moduleID string) error {
 	return nil
 }
 
-// removePortRouteUnlocked removes a single port route and cleans up empty proxies (must be called with lock held)
+// Removes a port route, prunes empty proxies, lock held
 func (m *Manager) removePortRouteUnlocked(hostPort int, hostname, moduleName, portName string) {
 	proxy, exists := m.proxies[hostPort]
 	if !exists {
@@ -533,7 +617,7 @@ func (m *Manager) removePortRouteUnlocked(hostPort int, hostname, moduleName, po
 	}
 }
 
-// UpdateModuleRoute updates proxy routes for a module's ports
+// Updates proxy routes for a module's ports
 func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error {
 	if !m.config.Enabled || server.ProxyHostname == "" {
 		return nil
@@ -544,7 +628,7 @@ func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error 
 	}
 
 	// Get the container IP
-	containerIP, err := GetContainerIP(module.ContainerID, m.networkName)
+	containerIP, err := m.containerIP(module.ContainerID)
 	if err != nil {
 		return fmt.Errorf("failed to get module container IP: %w", err)
 	}
@@ -581,23 +665,38 @@ func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error 
 	return nil
 }
 
-// GetModuleRoutes returns all module proxy routes
+// Returns all module proxy routes
 func (m *Manager) GetModuleRoutes() map[int]map[string]*Route {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	moduleRoutes := make(map[int]map[string]*Route)
 
-	// Module proxies use ports outside the standard MC port range (e.g., 8100+)
+	// Non-listener ports all belong to modules
 	for port, proxy := range m.proxies {
-		// Skip standard Minecraft proxy ports
-		if port >= 25565 && port <= 25665 {
+		if m.listenerPorts[port] {
 			continue
 		}
 		moduleRoutes[port] = proxy.GetRoutes()
 	}
 
 	return moduleRoutes
+}
+
+// Aggregates per-server route counters from every listener
+func (m *Manager) GetRouteStats() map[string]RouteStatsSnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stats := make(map[string]RouteStatsSnapshot)
+	for _, proxy := range m.proxies {
+		mp, ok := proxy.(*MinecraftProxy)
+		if !ok {
+			continue
+		}
+		maps.Copy(stats, mp.StatsSnapshots())
+	}
+	return stats
 }
 
 // Creates default proxy listener if proxy is enabled
@@ -643,35 +742,4 @@ func (m *Manager) ensureDefaultListenerLocked() (*db.ProxyListener, error) {
 
 	m.logger.Info("Created default proxy listener on port %d", port)
 	return defaultListener, nil
-}
-
-// GetContainerIP gets the IP address of a container on the specified network
-func GetContainerIP(containerID string, networkName string) (string, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return "", err
-	}
-	defer cli.Close()
-
-	ctx := context.Background()
-	containerInfo, err := cli.ContainerInspect(ctx, containerID)
-	if err != nil {
-		return "", fmt.Errorf("failed to inspect container: %w", err)
-	}
-
-	// Look for the IP on the specified network
-	if networkName != "" {
-		if network, ok := containerInfo.NetworkSettings.Networks[networkName]; ok && network.IPAddress != "" {
-			return network.IPAddress, nil
-		}
-	}
-
-	// Fallback to any available IP
-	for _, network := range containerInfo.NetworkSettings.Networks {
-		if network.IPAddress != "" {
-			return network.IPAddress, nil
-		}
-	}
-
-	return "", fmt.Errorf("no IP address found for container")
 }

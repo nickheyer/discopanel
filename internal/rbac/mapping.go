@@ -1,13 +1,13 @@
 package rbac
 
-// ProcedurePermission maps an RPC procedure to a resource and action.
+// Maps RPC procedure to a resource and action
 type ProcedurePermission struct {
 	Resource      string
 	Action        string
-	ObjectIDField string // Protobuf field name to extract for per-object RBAC (empty = "*")
+	ObjectIDField string // Protobuf field for per-object RBAC, empty means all
 }
 
-// PublicProcedures lists RPC procedures that require no authentication.
+// Lists RPC procedures that require no authentication
 var PublicProcedures = map[string]bool{
 	"/discopanel.v1.AuthService/GetAuthStatus":   true,
 	"/discopanel.v1.AuthService/Login":           true,
@@ -17,8 +17,7 @@ var PublicProcedures = map[string]bool{
 	"/discopanel.v1.AuthService/UseRecoveryKey":  true,
 }
 
-// AuthenticatedOnlyProcedures lists RPC procedures that require authentication
-// but no specific resource permission.
+// Lists RPC procedures needing auth but no resource permission
 var AuthenticatedOnlyProcedures = map[string]bool{
 	// AuthService - authenticated user operations
 	"/discopanel.v1.AuthService/GetCurrentUser": true,
@@ -34,25 +33,31 @@ var AuthenticatedOnlyProcedures = map[string]bool{
 	"/discopanel.v1.MinecraftService/GetDockerImages":      true,
 }
 
-// ProcedurePermissions maps each RPC procedure path to the resource and action
-// required to invoke it, plus an optional ObjectIDField for per-object scoping.
+// Maps RPC procedure to resource, action, and object field
 var ProcedurePermissions = map[string]ProcedurePermission{
-	// ── ServerService ──────────────────────────────────────────────────
-	"/discopanel.v1.ServerService/ListServers":          {Resource: ResourceServers, Action: ActionRead},
-	"/discopanel.v1.ServerService/GetServer":            {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/GetServerLogs":        {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/ClearServerLogs":      {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/GetNextAvailablePort": {Resource: ResourceServers, Action: ActionRead},
-	"/discopanel.v1.ServerService/CreateServer":         {Resource: ResourceServers, Action: ActionCreate},
-	"/discopanel.v1.ServerService/UpdateServer":         {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/DeleteServer":         {Resource: ResourceServers, Action: ActionDelete, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/StartServer":          {Resource: ResourceServers, Action: ActionStart, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/StopServer":           {Resource: ResourceServers, Action: ActionStop, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/RestartServer":        {Resource: ResourceServers, Action: ActionRestart, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/RecreateServer":       {Resource: ResourceServers, Action: ActionRestart, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/SendCommand":          {Resource: ResourceServers, Action: ActionCommand, ObjectIDField: "id"},
+	// -- ServerService --------------------------------------------------
+	"/discopanel.v1.ServerService/ListServers":                {Resource: ResourceServers, Action: ActionRead},
+	"/discopanel.v1.ServerService/GetServer":                  {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/GetServerLogs":              {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/ClearServerLogs":            {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/GetNextAvailablePort":       {Resource: ResourceServers, Action: ActionRead},
+	"/discopanel.v1.ServerService/GetHostMemory":              {Resource: ResourceServers, Action: ActionRead},
+	"/discopanel.v1.ServerService/CreateServer":               {Resource: ResourceServers, Action: ActionCreate},
+	"/discopanel.v1.ServerService/UpdateServer":               {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/UploadServerIcon":           {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/DeleteServer":               {Resource: ResourceServers, Action: ActionDelete, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/StartServer":                {Resource: ResourceServers, Action: ActionStart, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/StopServer":                 {Resource: ResourceServers, Action: ActionStop, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/RestartServer":              {Resource: ResourceServers, Action: ActionRestart, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/RecreateServer":             {Resource: ResourceServers, Action: ActionRestart, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/SendCommand":                {Resource: ResourceServers, Action: ActionCommand, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/GetServerPerformanceReport": {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/GetServerMetricsHistory":    {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/ApplyPerformanceFix":        {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/DismissPerformanceFinding":  {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/GetServerActions":           {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
 
-	// ── AuthService (admin) ───────────────────────────────────────────
+	// -- AuthService (admin) -------------------------------------------
 	"/discopanel.v1.AuthService/GetAuthConfig":      {Resource: ResourceSettings, Action: ActionRead},
 	"/discopanel.v1.AuthService/UpdateAuthSettings": {Resource: ResourceSettings, Action: ActionUpdate},
 	"/discopanel.v1.AuthService/CreateInvite":       {Resource: ResourceUsers, Action: ActionCreate},
@@ -60,13 +65,13 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.AuthService/GetInvite":          {Resource: ResourceUsers, Action: ActionRead},
 	"/discopanel.v1.AuthService/DeleteInvite":       {Resource: ResourceUsers, Action: ActionDelete},
 
-	// ── ConfigService ──────────────────────────────────────────────────
-	"/discopanel.v1.ConfigService/GetServerConfig":      {Resource: ResourceServerConfig, Action: ActionRead, ObjectIDField: "server_id"},
-	"/discopanel.v1.ConfigService/UpdateServerConfig":   {Resource: ResourceServerConfig, Action: ActionUpdate, ObjectIDField: "server_id"},
-	"/discopanel.v1.ConfigService/GetGlobalSettings":    {Resource: ResourceSettings, Action: ActionRead},
-	"/discopanel.v1.ConfigService/UpdateGlobalSettings": {Resource: ResourceSettings, Action: ActionUpdate},
+	// -- PropertiesService --------------------------------------------------
+	"/discopanel.v1.PropertiesService/GetServerProperties":    {Resource: ResourceServerProperties, Action: ActionRead, ObjectIDField: "server_id"},
+	"/discopanel.v1.PropertiesService/UpdateServerProperties": {Resource: ResourceServerProperties, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/discopanel.v1.PropertiesService/GetGlobalSettings":      {Resource: ResourceSettings, Action: ActionRead},
+	"/discopanel.v1.PropertiesService/UpdateGlobalSettings":   {Resource: ResourceSettings, Action: ActionUpdate},
 
-	// ── FileService ────────────────────────────────────────────────────
+	// -- FileService ----------------------------------------------------
 	"/discopanel.v1.FileService/ListFiles":           {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
 	"/discopanel.v1.FileService/GetFile":             {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
 	"/discopanel.v1.FileService/SaveUploadedFile":    {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
@@ -82,14 +87,14 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.FileService/InitFileDownload":    {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
 	"/discopanel.v1.FileService/GetExtractionStatus": {Resource: ResourceFiles, Action: ActionRead},
 
-	// ── ModService ─────────────────────────────────────────────────────
+	// -- ModService -----------------------------------------------------
 	"/discopanel.v1.ModService/ListMods":          {Resource: ResourceMods, Action: ActionRead, ObjectIDField: "server_id"},
 	"/discopanel.v1.ModService/GetMod":            {Resource: ResourceMods, Action: ActionRead, ObjectIDField: "server_id"},
 	"/discopanel.v1.ModService/ImportUploadedMod": {Resource: ResourceMods, Action: ActionCreate, ObjectIDField: "server_id"},
 	"/discopanel.v1.ModService/UpdateMod":         {Resource: ResourceMods, Action: ActionUpdate, ObjectIDField: "server_id"},
 	"/discopanel.v1.ModService/DeleteMod":         {Resource: ResourceMods, Action: ActionDelete, ObjectIDField: "server_id"},
 
-	// ── ModpackService ─────────────────────────────────────────────────
+	// -- ModpackService -------------------------------------------------
 	"/discopanel.v1.ModpackService/SearchModpacks":        {Resource: ResourceModpacks, Action: ActionRead},
 	"/discopanel.v1.ModpackService/GetModpack":            {Resource: ResourceModpacks, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.ModpackService/GetModpackBySlug":      {Resource: ResourceModpacks, Action: ActionRead},
@@ -105,7 +110,7 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.ModpackService/GetModpackVersions":    {Resource: ResourceModpacks, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.ModpackService/SyncModpackFiles":      {Resource: ResourceModpacks, Action: ActionUpdate, ObjectIDField: "id"},
 
-	// ── ModuleService ──────────────────────────────────────────────────
+	// -- ModuleService --------------------------------------------------
 	"/discopanel.v1.ModuleService/ListModuleTemplates":        {Resource: ResourceModuleTemplates, Action: ActionRead},
 	"/discopanel.v1.ModuleService/GetModuleTemplate":          {Resource: ResourceModuleTemplates, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.ModuleService/CreateModuleTemplate":       {Resource: ResourceModuleTemplates, Action: ActionCreate},
@@ -125,7 +130,7 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.ModuleService/GetAvailableAliases":        {Resource: ResourceModules, Action: ActionRead},
 	"/discopanel.v1.ModuleService/GetResolvedAliases":         {Resource: ResourceModules, Action: ActionRead},
 
-	// ── ProxyService ───────────────────────────────────────────────────
+	// -- ProxyService ---------------------------------------------------
 	"/discopanel.v1.ProxyService/GetProxyRoutes":      {Resource: ResourceProxy, Action: ActionRead},
 	"/discopanel.v1.ProxyService/GetProxyStatus":      {Resource: ResourceProxy, Action: ActionRead},
 	"/discopanel.v1.ProxyService/UpdateProxyConfig":   {Resource: ResourceProxy, Action: ActionUpdate},
@@ -136,7 +141,7 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.ProxyService/GetServerRouting":    {Resource: ResourceProxy, Action: ActionRead, ObjectIDField: "server_id"},
 	"/discopanel.v1.ProxyService/UpdateServerRouting": {Resource: ResourceProxy, Action: ActionUpdate, ObjectIDField: "server_id"},
 
-	// ── TaskService ────────────────────────────────────────────────────
+	// -- TaskService ----------------------------------------------------
 	"/discopanel.v1.TaskService/ListTasks":            {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "server_id"},
 	"/discopanel.v1.TaskService/GetTask":              {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.TaskService/CreateTask":           {Resource: ResourceTasks, Action: ActionCreate, ObjectIDField: "server_id"},
@@ -150,14 +155,14 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.TaskService/CancelExecution":      {Resource: ResourceTasks, Action: ActionUpdate, ObjectIDField: "id"},
 	"/discopanel.v1.TaskService/GetSchedulerStatus":   {Resource: ResourceTasks, Action: ActionRead},
 
-	// ── UserService ────────────────────────────────────────────────────
+	// -- UserService ----------------------------------------------------
 	"/discopanel.v1.UserService/ListUsers":  {Resource: ResourceUsers, Action: ActionRead},
 	"/discopanel.v1.UserService/GetUser":    {Resource: ResourceUsers, Action: ActionRead},
 	"/discopanel.v1.UserService/CreateUser": {Resource: ResourceUsers, Action: ActionCreate},
 	"/discopanel.v1.UserService/UpdateUser": {Resource: ResourceUsers, Action: ActionUpdate},
 	"/discopanel.v1.UserService/DeleteUser": {Resource: ResourceUsers, Action: ActionDelete},
 
-	// ── RoleService ────────────────────────────────────────────────────
+	// -- RoleService ----------------------------------------------------
 	"/discopanel.v1.RoleService/ListRoles":           {Resource: ResourceRoles, Action: ActionRead},
 	"/discopanel.v1.RoleService/GetRole":             {Resource: ResourceRoles, Action: ActionRead},
 	"/discopanel.v1.RoleService/CreateRole":          {Resource: ResourceRoles, Action: ActionCreate},
@@ -169,13 +174,13 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.RoleService/UnassignRole":        {Resource: ResourceRoles, Action: ActionDelete},
 	"/discopanel.v1.RoleService/GetUserRoles":        {Resource: ResourceRoles, Action: ActionRead},
 
-	// ── SupportService ─────────────────────────────────────────────────
+	// -- SupportService -------------------------------------------------
 	"/discopanel.v1.SupportService/GenerateSupportBundle": {Resource: ResourceSupport, Action: ActionCreate},
 	"/discopanel.v1.SupportService/DownloadSupportBundle": {Resource: ResourceSupport, Action: ActionRead},
 	"/discopanel.v1.SupportService/UploadSupportBundle":   {Resource: ResourceSupport, Action: ActionCreate},
 	"/discopanel.v1.SupportService/GetApplicationLogs":    {Resource: ResourceSupport, Action: ActionRead},
 
-	// ── UploadService ──────────────────────────────────────────────────
+	// -- UploadService --------------------------------------------------
 	"/discopanel.v1.UploadService/GetUploadStatus": {Resource: ResourceUploads, Action: ActionRead},
 	"/discopanel.v1.UploadService/InitUpload":      {Resource: ResourceUploads, Action: ActionCreate},
 	"/discopanel.v1.UploadService/UploadChunk":     {Resource: ResourceUploads, Action: ActionCreate},

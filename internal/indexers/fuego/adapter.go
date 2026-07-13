@@ -33,31 +33,34 @@ func NewIndexer(apiKey string, cfg *config.Config) *FuegoIndexer {
 	}
 }
 
-// GetIndexerName returns the name of this indexer
+// Returns the name of this indexer
 func (f *FuegoIndexer) GetIndexerName() string {
 	return "fuego"
 }
 
-// Search for modpacks
-func (f *FuegoIndexer) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*indexers.SearchResult, error) {
-	// Convert mod loader string to Fuego type
-	modLoaderType := ModLoaderAny
+// Maps a loader name onto the CurseForge loader type
+func loaderType(modLoader string) ModLoaderType {
 	switch strings.ToLower(modLoader) {
 	case "forge":
-		modLoaderType = ModLoaderForge
+		return ModLoaderForge
 	case "fabric":
-		modLoaderType = ModLoaderFabric
+		return ModLoaderFabric
 	case "neoforge":
-		modLoaderType = ModLoaderNeoForge
+		return ModLoaderNeoForge
 	case "quilt":
-		modLoaderType = ModLoaderQuilt
+		return ModLoaderQuilt
+	default:
+		return ModLoaderAny
 	}
+}
 
+// Search for modpacks
+func (f *FuegoIndexer) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*indexers.SearchResult, error) {
 	// Calculate page index from offset
 	pageIndex := offset / limit
 
 	// Search using Fuego API
-	resp, err := f.client.SearchModpacks(ctx, query, gameVersion, modLoaderType, pageIndex, limit)
+	resp, err := f.client.SearchModpacks(ctx, query, gameVersion, loaderType(modLoader), pageIndex, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -94,14 +97,14 @@ func (f *FuegoIndexer) GetModpack(ctx context.Context, modpackID string) (*index
 }
 
 // Get files for a modpack
-func (f *FuegoIndexer) GetModpackFiles(ctx context.Context, modpackID string) ([]indexers.ModpackFile, error) {
+func (f *FuegoIndexer) GetModpackFiles(ctx context.Context, modpackID string, gameVersion string, modLoader string) ([]indexers.ModpackFile, error) {
 	// Convert string ID to int
 	id, err := strconv.Atoi(modpackID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid modpack ID: %s", modpackID)
 	}
 
-	files, err := f.client.GetModpackFiles(ctx, id)
+	files, err := f.client.GetModpackFiles(ctx, id, gameVersion, loaderType(modLoader))
 	if err != nil {
 		return nil, err
 	}

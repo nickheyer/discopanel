@@ -33,7 +33,7 @@ import (
 // Compile-time check that ModpackService implements the interface
 var _ discopanelv1connect.ModpackServiceHandler = (*ModpackService)(nil)
 
-// ModpackService implements the Modpack service
+// Implements the Modpack service
 type ModpackService struct {
 	store         *storage.Store
 	config        *config.Config
@@ -41,7 +41,7 @@ type ModpackService struct {
 	uploadManager *upload.Manager
 }
 
-// NewModpackService creates a new modpack service
+// Creates a new modpack service
 func NewModpackService(store *storage.Store, cfg *config.Config, uploadManager *upload.Manager, log *logger.Logger) *ModpackService {
 	return &ModpackService{
 		store:         store,
@@ -51,7 +51,7 @@ func NewModpackService(store *storage.Store, cfg *config.Config, uploadManager *
 	}
 }
 
-// getIndexer creates an indexer by name, looking up the fuego API key from settings when needed.
+// Creates indexer by name, fetching fuego key if needed
 func (s *ModpackService) getIndexer(ctx context.Context, name string) (indexers.ModpackIndexer, error) {
 	apiKey := ""
 	if name == "fuego" {
@@ -73,7 +73,7 @@ func (s *ModpackService) getIndexer(ctx context.Context, name string) (indexers.
 	return idx, nil
 }
 
-// mapIndexerError maps IndexerError kinds to appropriate connect error codes.
+// Maps IndexerError kinds to connect error codes
 func mapIndexerError(err error, msg string) *connect.Error {
 	var ie *indexers.IndexerError
 	if errors.As(err, &ie) {
@@ -91,7 +91,7 @@ func mapIndexerError(err error, msg string) *connect.Error {
 	return connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", msg, err))
 }
 
-// SearchModpacks searches for modpacks
+// Searches for modpacks
 func (s *ModpackService) SearchModpacks(ctx context.Context, req *connect.Request[v1.SearchModpacksRequest]) (*connect.Response[v1.SearchModpacksResponse], error) {
 	msg := req.Msg
 
@@ -154,7 +154,7 @@ func (s *ModpackService) SearchModpacks(ctx context.Context, req *connect.Reques
 	}), nil
 }
 
-// GetModpack gets a specific modpack
+// Gets a specific modpack
 func (s *ModpackService) GetModpack(ctx context.Context, req *connect.Request[v1.GetModpackRequest]) (*connect.Response[v1.GetModpackResponse], error) {
 	modpack, err := s.store.GetIndexedModpack(ctx, req.Msg.Id)
 	if err != nil {
@@ -196,7 +196,7 @@ func (s *ModpackService) GetModpack(ctx context.Context, req *connect.Request[v1
 	}), nil
 }
 
-// GetModpackBySlug gets a modpack by its slug
+// Gets a modpack by its slug
 func (s *ModpackService) GetModpackBySlug(ctx context.Context, req *connect.Request[v1.GetModpackBySlugRequest]) (*connect.Response[v1.GetModpackBySlugResponse], error) {
 	modpack, err := s.store.GetModpackBySlug(ctx, req.Msg.Slug)
 	if err != nil {
@@ -239,7 +239,7 @@ func (s *ModpackService) GetModpackBySlug(ctx context.Context, req *connect.Requ
 	}), nil
 }
 
-// GetModpackByURL gets a modpack by its website URL
+// Gets a modpack by its website URL
 func (s *ModpackService) GetModpackByURL(ctx context.Context, req *connect.Request[v1.GetModpackByURLRequest]) (*connect.Response[v1.GetModpackByURLResponse], error) {
 	modpack, err := s.store.GetModpackByWebsiteURL(ctx, req.Msg.Url)
 	if err != nil {
@@ -281,7 +281,7 @@ func (s *ModpackService) GetModpackByURL(ctx context.Context, req *connect.Reque
 	}), nil
 }
 
-// GetModpackConfig gets modpack configuration
+// Gets modpack configuration
 func (s *ModpackService) GetModpackConfig(ctx context.Context, req *connect.Request[v1.GetModpackConfigRequest]) (*connect.Response[v1.GetModpackConfigResponse], error) {
 	modpack, err := s.store.GetIndexedModpack(ctx, req.Msg.Id)
 	if err != nil {
@@ -291,7 +291,7 @@ func (s *ModpackService) GetModpackConfig(ctx context.Context, req *connect.Requ
 	modLoader := modpack.Indexer
 	switch modpack.Indexer {
 	case "manual":
-		// For manual uploads, use the actual mod loader from the modpack
+		// Manual uploads use actual mod loader from modpack
 		var modLoaders []string
 		if err := json.Unmarshal([]byte(modpack.ModLoaders), &modLoaders); err == nil && len(modLoaders) > 0 {
 			// Use first mod loader from the list
@@ -316,7 +316,7 @@ func (s *ModpackService) GetModpackConfig(ctx context.Context, req *connect.Requ
 	}), nil
 }
 
-// GetModpackFiles gets modpack files
+// Gets modpack files
 func (s *ModpackService) GetModpackFiles(ctx context.Context, req *connect.Request[v1.GetModpackFilesRequest]) (*connect.Response[v1.GetModpackFilesResponse], error) {
 	files, err := s.store.GetIndexedModpackFiles(ctx, req.Msg.Id)
 	if err != nil {
@@ -351,7 +351,7 @@ func (s *ModpackService) GetModpackFiles(ctx context.Context, req *connect.Reque
 	}), nil
 }
 
-// GetModpackVersions gets modpack versions
+// Gets modpack versions
 func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Request[v1.GetModpackVersionsRequest]) (*connect.Response[v1.GetModpackVersionsResponse], error) {
 	// Get the modpack to determine its type
 	modpack, err := s.store.GetIndexedModpack(ctx, req.Msg.Id)
@@ -371,8 +371,8 @@ func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Re
 		return nil, err
 	}
 
-	// Get files from the indexer
-	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerID)
+	// Get files from the indexer, honoring the request filters
+	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerID, req.Msg.GameVersion, req.Msg.ModLoader)
 	if err != nil {
 		s.log.Error("Failed to get modpack files from %s: %v", modpack.Indexer, err)
 		return nil, mapIndexerError(err, "failed to get modpack versions")
@@ -391,7 +391,7 @@ func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Re
 		})
 	}
 
-	// Sort by SortIndex to maintain API order (lower index = newer version)
+	// Sorts by SortIndex, lower index is newer
 	sort.Slice(versions, func(i, j int) bool {
 		return versions[i].SortIndex < versions[j].SortIndex
 	})
@@ -401,7 +401,7 @@ func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Re
 	}), nil
 }
 
-// SyncModpacks syncs modpacks
+// Syncs modpacks
 func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[v1.SyncModpacksRequest]) (*connect.Response[v1.SyncModpacksResponse], error) {
 	msg := req.Msg
 
@@ -431,7 +431,7 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 		gameVersionsJSON, _ := json.Marshal(modpack.GameVersions)
 		modLoadersJSON, _ := json.Marshal(modpack.ModLoaders)
 
-		// Find the most recent Minecraft version from the game versions list
+		// Finds most recent Minecraft version from game versions
 		mcVersion := minecraft.FindMostRecentMinecraftVersion(modpack.GameVersions)
 
 		modLoader := storage.ModLoaderVanilla
@@ -440,7 +440,7 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 		}
 
 		javaVersion := docker.GetRequiredJavaVersion(mcVersion, modLoader)
-		dockerImage := docker.GetOptimalDockerTag(mcVersion, modLoader, false)
+		dockerImage := docker.OptimalRuntimeTag(mcVersion)
 
 		dbModpack := &storage.IndexedModpack{
 			ID:            modpack.ID,
@@ -480,7 +480,7 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 	}), nil
 }
 
-// ImportUploadedModpack imports a modpack from a completed chunked upload session
+// Imports a modpack from a completed chunked upload session
 func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect.Request[v1.ImportUploadedModpackRequest]) (*connect.Response[v1.ImportUploadedModpackResponse], error) {
 	msg := req.Msg
 
@@ -592,7 +592,7 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 	}
 
 	javaVersion := docker.GetRequiredJavaVersion(manifest.Minecraft.Version, modLoader)
-	dockerImage := docker.GetOptimalDockerTag(manifest.Minecraft.Version, modLoader, false)
+	dockerImage := docker.OptimalRuntimeTag(manifest.Minecraft.Version)
 
 	// Create database entry
 	gameVersionsJSON, _ := json.Marshal([]string{manifest.Minecraft.Version})
@@ -628,7 +628,7 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to store modpack"))
 	}
 
-	// Store zip and create directory for manual modpacks if it doesn't exist
+	// Creates manual modpacks dir, stores zip there
 	manualDir := filepath.Join(s.config.Storage.DataDir, "modpacks", "manual")
 	if err := os.MkdirAll(manualDir, 0755); err != nil {
 		s.log.Error("Failed to create manual modpacks directory: %v", err)
@@ -716,11 +716,11 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 	}), nil
 }
 
-// DeleteModpack deletes a modpack
+// Deletes a modpack
 func (s *ModpackService) DeleteModpack(ctx context.Context, req *connect.Request[v1.DeleteModpackRequest]) (*connect.Response[v1.DeleteModpackResponse], error) {
 	modpackID := req.Msg.Id
 
-	// Get the modpack to verify it exists and is a manual modpack
+	// Verifies modpack exists and is manual
 	modpack, err := s.store.GetIndexedModpack(ctx, modpackID)
 	if err != nil {
 		s.log.Error("Failed to get modpack: %v", err)
@@ -777,7 +777,7 @@ func (s *ModpackService) DeleteModpack(ctx context.Context, req *connect.Request
 	}), nil
 }
 
-// ToggleFavorite toggles modpack favorite status
+// Toggles modpack favorite status
 func (s *ModpackService) ToggleFavorite(ctx context.Context, req *connect.Request[v1.ToggleFavoriteRequest]) (*connect.Response[v1.ToggleFavoriteResponse], error) {
 	modpackID := req.Msg.Id
 
@@ -805,7 +805,7 @@ func (s *ModpackService) ToggleFavorite(ctx context.Context, req *connect.Reques
 	}), nil
 }
 
-// ListFavorites lists favorite modpacks
+// Lists favorite modpacks
 func (s *ModpackService) ListFavorites(ctx context.Context, req *connect.Request[v1.ListFavoritesRequest]) (*connect.Response[v1.ListFavoritesResponse], error) {
 	modpacks, err := s.store.ListFavoriteModpacks(ctx)
 	if err != nil {
@@ -848,7 +848,7 @@ func (s *ModpackService) ListFavorites(ctx context.Context, req *connect.Request
 	}), nil
 }
 
-// GetIndexerStatus gets indexer status
+// Gets indexer status
 func (s *ModpackService) GetIndexerStatus(ctx context.Context, req *connect.Request[v1.GetIndexerStatusRequest]) (*connect.Response[v1.GetIndexerStatusResponse], error) {
 	// Get global settings to check API key
 	globalSettings, _, err := s.store.GetGlobalSettings(ctx)
@@ -893,7 +893,7 @@ func (s *ModpackService) GetIndexerStatus(ctx context.Context, req *connect.Requ
 	}), nil
 }
 
-// SyncModpackFiles syncs modpack files
+// Syncs modpack files
 func (s *ModpackService) SyncModpackFiles(ctx context.Context, req *connect.Request[v1.SyncModpackFilesRequest]) (*connect.Response[v1.SyncModpackFilesResponse], error) {
 	modpackID := req.Msg.Id
 
@@ -908,8 +908,8 @@ func (s *ModpackService) SyncModpackFiles(ctx context.Context, req *connect.Requ
 		return nil, err
 	}
 
-	// Get files from the indexer
-	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerID)
+	// Get all files from the indexer
+	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerID, "", "")
 	if err != nil {
 		s.log.Error("Failed to get modpack files: %v", err)
 		return nil, mapIndexerError(err, "failed to get modpack files")

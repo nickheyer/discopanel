@@ -15,7 +15,7 @@ let loggingOut = false;
 
 // SERVICES
 import { AuthService } from '$lib/proto/discopanel/v1/auth_pb';
-import { ConfigService } from '$lib/proto/discopanel/v1/config_pb';
+import { PropertiesService } from '$lib/proto/discopanel/v1/properties_pb';
 import { FileService } from '$lib/proto/discopanel/v1/file_pb';
 import { MinecraftService } from '$lib/proto/discopanel/v1/minecraft_pb';
 import { ModService } from '$lib/proto/discopanel/v1/mod_pb';
@@ -68,7 +68,7 @@ const authInterceptor: Interceptor = (next) => async (req) => {
 					loggingOut = false;
 				});
 			}
-			// Never toast auth errors — the auto-logout redirect handles them
+			// Never toast auth errors - the auto-logout redirect handles them
 			throw error;
 		}
 
@@ -93,7 +93,7 @@ const transport = createConnectTransport({
 // Clients for each service
 export class RpcClient {
 	public readonly auth: Client<typeof AuthService>;
-	public readonly config: Client<typeof ConfigService>;
+	public readonly properties: Client<typeof PropertiesService>;
 	public readonly file: Client<typeof FileService>;
 	public readonly minecraft: Client<typeof MinecraftService>;
 	public readonly mod: Client<typeof ModService>;
@@ -109,7 +109,7 @@ export class RpcClient {
 
 	constructor() {
 		this.auth = createClient(AuthService, transport);
-		this.config = createClient(ConfigService, transport);
+		this.properties = createClient(PropertiesService, transport);
 		this.file = createClient(FileService, transport);
 		this.minecraft = createClient(MinecraftService, transport);
 		this.mod = createClient(ModService, transport);
@@ -125,5 +125,5 @@ export class RpcClient {
 	}
 }
 
-// singleton
+// Singleton
 export const rpcClient = new RpcClient();

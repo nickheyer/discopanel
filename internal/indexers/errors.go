@@ -6,7 +6,7 @@ import (
 	"net"
 )
 
-// indexer errors
+// Indexer error kinds
 type ErrorKind int
 
 const (
@@ -68,7 +68,7 @@ func (e *IndexerError) Unwrap() error {
 	return e.Err
 }
 
-// It automatically classifies 401/403 as Auth, 404 as NotFound, 429 as RateLimit.
+// Classifies status code into an error kind
 func NewAPIError(indexer string, statusCode int, url string, body string) *IndexerError {
 	kind := ErrAPI
 	switch {
@@ -103,7 +103,7 @@ func NewNetworkError(indexer string, url string, err error) *IndexerError {
 	}
 }
 
-// JSON decode failures.
+// JSON decode failures
 func NewDecodeError(indexer string, url string, err error) *IndexerError {
 	return &IndexerError{
 		Kind:    ErrDecode,
@@ -120,28 +120,4 @@ func NewAuthConfigError(indexer string, msg string) *IndexerError {
 		Indexer: indexer,
 		Err:     errors.New(msg),
 	}
-}
-
-// Reports whether the error is a rate-limit error
-func IsRateLimit(err error) bool {
-	var ie *IndexerError
-	return errors.As(err, &ie) && ie.Kind == ErrRateLimit
-}
-
-// Reports whether the error is an auth error
-func IsAuthError(err error) bool {
-	var ie *IndexerError
-	return errors.As(err, &ie) && ie.Kind == ErrAuth
-}
-
-// Reports whether the error is a not-found error
-func IsNotFound(err error) bool {
-	var ie *IndexerError
-	return errors.As(err, &ie) && ie.Kind == ErrNotFound
-}
-
-// Reports whether the error is a network error
-func IsNetworkError(err error) bool {
-	var ie *IndexerError
-	return errors.As(err, &ie) && ie.Kind == ErrNetwork
 }

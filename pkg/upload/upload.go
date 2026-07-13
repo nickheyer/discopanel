@@ -18,11 +18,10 @@ var (
 	ErrSessionExpired   = errors.New("upload session expired")
 	ErrSessionCompleted = errors.New("upload session already completed")
 	ErrInvalidChunk     = errors.New("invalid chunk index")
-	ErrChunkExists      = errors.New("chunk already received")
 	ErrFileTooLarge     = errors.New("file exceeds maximum allowed size")
 )
 
-// Session represents an active upload session
+// Represents an active upload session
 type Session struct {
 	ID             string
 	Filename       string
@@ -38,7 +37,7 @@ type Session struct {
 	file           *os.File
 }
 
-// Manager handles upload sessions
+// Handles upload sessions
 type Manager struct {
 	sessions      map[string]*Session
 	mu            sync.RWMutex
@@ -49,7 +48,7 @@ type Manager struct {
 	stopCh        chan struct{}
 }
 
-// NewManager creates a new upload manager
+// Creates a new upload manager
 func NewManager(tempDir string, sessionTTL time.Duration, maxUploadSize int64, log *logger.Logger) *Manager {
 	m := &Manager{
 		sessions:      make(map[string]*Session),
@@ -71,7 +70,7 @@ func NewManager(tempDir string, sessionTTL time.Duration, maxUploadSize int64, l
 	return m
 }
 
-// InitSession creates a new upload session
+// Creates a new upload session
 func (m *Manager) InitSession(filename string, totalSize int64, chunkSize int32) (*Session, error) {
 	// Validate max upload size
 	if m.maxUploadSize > 0 && totalSize > m.maxUploadSize {
@@ -126,7 +125,7 @@ func (m *Manager) InitSession(filename string, totalSize int64, chunkSize int32)
 	return session, nil
 }
 
-// GetSession retrieves a session by ID
+// Retrieves a session by ID
 func (m *Manager) GetSession(id string) (*Session, error) {
 	m.mu.RLock()
 	session, exists := m.sessions[id]
@@ -144,7 +143,7 @@ func (m *Manager) GetSession(id string) (*Session, error) {
 	return session, nil
 }
 
-// WriteChunk writes a chunk to the session's temp file
+// Writes a chunk to the session's temp file
 func (m *Manager) WriteChunk(sessionID string, chunkIndex int32, data []byte) (completed bool, err error) {
 	session, err := m.GetSession(sessionID)
 	if err != nil {
@@ -199,7 +198,7 @@ func (m *Manager) WriteChunk(sessionID string, chunkIndex int32, data []byte) (c
 	return session.Completed, nil
 }
 
-// Writes data from a reader to the session file starting at the given offset
+// Writes reader data to session file at offset
 func (m *Manager) WriteStream(sessionID string, r io.Reader, offset int64) (bytesWritten int64, completed bool, err error) {
 	session, err := m.GetSession(sessionID)
 	if err != nil {
@@ -263,7 +262,7 @@ func (m *Manager) WriteStream(sessionID string, r io.Reader, offset int64) (byte
 	return pos - offset, session.Completed, nil
 }
 
-// GetMissingChunks returns the list of chunk indices that haven't been received
+// Lists chunk indices that haven't been received
 func (m *Manager) GetMissingChunks(sessionID string) ([]int32, error) {
 	session, err := m.GetSession(sessionID)
 	if err != nil {
@@ -283,7 +282,7 @@ func (m *Manager) GetMissingChunks(sessionID string) ([]int32, error) {
 	return missing, nil
 }
 
-// GetTempPath returns the temp file path for a completed session
+// Returns the temp file path for a completed session
 func (m *Manager) GetTempPath(sessionID string) (string, string, error) {
 	session, err := m.GetSession(sessionID)
 	if err != nil {
@@ -300,7 +299,7 @@ func (m *Manager) GetTempPath(sessionID string) (string, string, error) {
 	return session.TempPath, session.Filename, nil
 }
 
-// GetSessionStatus returns the status of a session
+// Returns the status of a session
 func (m *Manager) GetSessionStatus(sessionID string) (bytesReceived int64, totalBytes int64, chunksReceived int32, totalChunks int32, completed bool, tempPath string, err error) {
 	session, err := m.GetSession(sessionID)
 	if err != nil {
@@ -318,7 +317,7 @@ func (m *Manager) GetSessionStatus(sessionID string) (bytesReceived int64, total
 	return session.BytesReceived, session.TotalSize, int32(len(session.ReceivedChunks)), session.TotalChunks, session.Completed, tempPathResult, nil
 }
 
-// Cancel cancels an upload session and cleans up
+// Cancels an upload session and cleans up
 func (m *Manager) Cancel(sessionID string) error {
 	m.mu.Lock()
 	session, exists := m.sessions[sessionID]
@@ -349,7 +348,7 @@ func (m *Manager) Cancel(sessionID string) error {
 	return nil
 }
 
-// CleanupSession removes a session after the file has been moved to its destination
+// Removes session after file moved to destination
 func (m *Manager) CleanupSession(sessionID string) error {
 	m.mu.Lock()
 	session, exists := m.sessions[sessionID]
@@ -371,12 +370,12 @@ func (m *Manager) CleanupSession(sessionID string) error {
 		session.file = nil
 	}
 
-	// Note: Don't remove temp file here - it should be moved by the caller
+	// Caller moves temp file, this does not remove it
 	m.log.Info("Upload session cleaned up: %s", sessionID)
 	return nil
 }
 
-// Stop stops the manager and cleans up all sessions
+// Stops the manager and cleans up all sessions
 func (m *Manager) Stop() {
 	close(m.stopCh)
 
@@ -396,7 +395,7 @@ func (m *Manager) Stop() {
 	}
 }
 
-// cleanupLoop periodically cleans up expired sessions
+// Periodically cleans up expired sessions
 func (m *Manager) cleanupLoop() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -411,7 +410,7 @@ func (m *Manager) cleanupLoop() {
 	}
 }
 
-// cleanupExpired removes all expired sessions
+// Removes all expired sessions
 func (m *Manager) cleanupExpired() {
 	m.mu.Lock()
 	var expired []string
@@ -432,7 +431,7 @@ func (m *Manager) cleanupExpired() {
 	}
 }
 
-// cleanupSession removes a single session
+// Removes a single session
 func (m *Manager) cleanupSession(id string) {
 	m.mu.Lock()
 	session, exists := m.sessions[id]
@@ -458,7 +457,7 @@ func (m *Manager) cleanupSession(id string) {
 	}
 }
 
-// sanitizeFilename removes potentially dangerous characters from filename
+// Removes potentially dangerous characters from filename
 func sanitizeFilename(filename string) string {
 	// Replace path separators and other potentially dangerous characters
 	result := make([]byte, 0, len(filename))

@@ -17,6 +17,8 @@ enum ServerStatus {
   SERVER_STATUS_RESTARTING = 6;
   SERVER_STATUS_ERROR = 7;
   SERVER_STATUS_UNHEALTHY = 8;
+  SERVER_STATUS_PROVISIONING = 9;
+  SERVER_STATUS_PAUSED = 10;
 }
 
 // Minecraft server software type
@@ -39,6 +41,19 @@ enum ModLoader {
   MOD_LOADER_MODRINTH = 15;
   MOD_LOADER_NEOFORGE = 16;
   MOD_LOADER_FOLIA = 17;
+  MOD_LOADER_CUSTOM = 18;
+  MOD_LOADER_PUFFERFISH = 19;
+  MOD_LOADER_MAGMA = 20;
+  MOD_LOADER_MAGMA_MAINTAINED = 21;
+  MOD_LOADER_KETTING = 22;
+  MOD_LOADER_YOUER = 23;
+  MOD_LOADER_BANNER = 24;
+  MOD_LOADER_LIMBO = 25;
+  MOD_LOADER_NANO_LIMBO = 26;
+  MOD_LOADER_CRUCIBLE = 27;
+  MOD_LOADER_GLOWSTONE = 28;
+  MOD_LOADER_FTBA = 29;
+  MOD_LOADER_CURSEFORGE = 30;
 }
 
 // System user account
@@ -67,7 +82,9 @@ message Server {
   string proxy_listener_id = 9;
   int32 proxy_port = 10;
   int32 max_players = 11;
-  int32 memory = 12;
+  int32 memory = 12; // Container memory limit in MB
+  int32 memory_min = 49; // JVM initial heap (Xms) in MB
+  int32 memory_max = 50; // JVM max heap (Xmx) in MB
   string data_path = 13;
   string container_id = 14;
   optional google.protobuf.Timestamp last_started = 15;
@@ -75,18 +92,21 @@ message Server {
   string docker_image = 17;
   bool auto_start = 18;
   bool detached = 19;
-  string tps_command = 20;
+  reserved 20;
+  reserved "tps_command";
 
   // Runtime stats
   int64 memory_usage = 21;
   double cpu_percent = 22;
-  int64 disk_usage = 23;
-  int64 disk_total = 24;
+  int32 cpu_cores = 40;
+  int64 disk_usage = 23; // Bytes this server's data dir occupies
+  int64 disk_total = 24; // Bytes the volume holds in total
+  int64 disk_used = 47; // Bytes used on the volume by everything
   int32 players_online = 25;
-  int64 world_size = 39;
+  int64 world_size = 39; // Bytes of the world directories alone
   double tps = 26;
 
-  // Additional configuration
+  // Additional container settings
   repeated AdditionalPort additional_ports = 27;
   DockerOverrides docker_overrides = 28;
 
@@ -102,6 +122,16 @@ message Server {
   repeated string player_sample = 36;
   int32 max_players_slp = 37;
   string favicon = 38; // Base64 PNG
+
+  // Agent-sourced runtime stats (present when the disco-agent channel is live)
+  bool agent_connected = 41;
+  double mspt = 42; // Mean milliseconds per tick (agent-sourced)
+  double heap_used_mb = 43;
+  double heap_max_mb = 44;
+  double cpu_throttle_percent = 45; // Share of CFS periods throttled (0-100)
+
+  // Runtime image digest recorded at container create
+  string runtime_digest = 48;
 }
 
 // Extra port mapping for container
@@ -109,7 +139,7 @@ message AdditionalPort {
   string name = 1; // User-friendly name for the port (e.g., "BlueMap Web")
   int32 container_port = 2; // Port inside the container
   int32 host_port = 3; // Port on the host machine
-  string protocol = 4; // Protocol: "tcp" or "udp" (defaults to "tcp" if empty)
+  string protocol = 4; // One of "tcp" or "udp", defaults to "tcp"
 }
 
 // Volume mount configuration for container
@@ -117,7 +147,7 @@ message VolumeMount {
   string source = 1; // Host path or volume name
   string target = 2; // Container path
   bool read_only = 3; // Mount as read-only
-  string type = 4; // Mount type: "bind" or "volume" (defaults to "bind")
+  string type = 4; // One of "bind" or "volume", defaults to "bind"
   bool create_dir = 5; // Pre-create source dir
 }
 
@@ -132,7 +162,7 @@ message DockerOverrides {
   map<string, string> labels = 7; // Additional labels
   repeated string cap_add = 8; // Linux capabilities to add
   repeated string cap_drop = 9; // Linux capabilities to drop
-  repeated string devices = 10; // Device mappings (e.g., "/dev/ttyUSB0:/dev/ttyUSB0")
+  repeated string devices = 10; // Device mappings, e.g. "/dev/ttyUSB0" to "/dev/ttyUSB0"
   repeated string extra_hosts = 11; // Extra entries for /etc/hosts
   bool privileged = 12; // Run container in privileged mode
   bool read_only = 13; // Mount root filesystem as read-only
@@ -166,14 +196,14 @@ message ProxyConfig {
   google.protobuf.Timestamp updated_at = 5;
 }
 
-// Permission entry for RBAC
+// One RBAC permission entry
 message Permission {
   string resource = 1;
   string action = 2;
   string object_id = 3;
 }
 
-// Role definition
+// A set of permissions and metadata
 message Role {
   string id = 1;
   string name = 2;

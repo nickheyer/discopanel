@@ -8,6 +8,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/alias"
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/config"
@@ -32,6 +33,7 @@ type ModuleService struct {
 	proxyManager  *proxy.Manager
 	authManager   *auth.Manager
 	config        *config.Config
+	rec           *activity.Recorder
 	log           *logger.Logger
 	logStreamer   *logger.LogStreamer
 }
@@ -45,6 +47,7 @@ func NewModuleService(
 	authManager *auth.Manager,
 	cfg *config.Config,
 	logStreamer *logger.LogStreamer,
+	rec *activity.Recorder,
 	log *logger.Logger,
 ) *ModuleService {
 	return &ModuleService{
@@ -55,6 +58,7 @@ func NewModuleService(
 		authManager:   authManager,
 		config:        cfg,
 		logStreamer:   logStreamer,
+		rec:           rec,
 		log:           log,
 	}
 }
@@ -211,6 +215,19 @@ func dbModuleToProto(m *storage.Module, serverName, templateName, serverProxyHos
 	}
 
 	return protoModule
+}
+
+// Fills live container stats for a running module
+func (s *ModuleService) applyModuleStats(ctx context.Context, m *storage.Module) {
+	if m.ContainerID == "" || m.Status != storage.ModuleStatusRunning {
+		return
+	}
+	stats, err := s.docker.GetContainerStats(ctx, m.ContainerID)
+	if err != nil {
+		return
+	}
+	m.CPUPercent = stats.CPUPercent
+	m.MemoryUsage = stats.MemoryUsage
 }
 
 // resolveCreatedByUsername looks up the username for a module's CreatedBy user ID
@@ -480,6 +497,8 @@ func (s *ModuleService) ListModules(ctx context.Context, req *connect.Request[v1
 			}
 		}
 
+		s.applyModuleStats(ctx, m)
+
 		serverName := ""
 		serverProxyHostname := ""
 		if server, err := s.store.GetServer(ctx, m.ServerID); err == nil {
@@ -520,6 +539,8 @@ func (s *ModuleService) GetModule(ctx context.Context, req *connect.Request[v1.G
 			s.store.UpdateModule(ctx, module)
 		}
 	}
+
+	s.applyModuleStats(ctx, module)
 
 	// Enrich with server and template names
 	serverName := ""
@@ -683,10 +704,11 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 	if err := s.store.CreateModule(ctx, module); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create module: %w", err))
 	}
+	s.rec.Record(ctx, module.ServerID, "module.create", activity.Attrs{"module": module.Name, "template": template.Name}, "created module %s", module.Name)
 
 	// Create container in background
+	bgCtx := detach(ctx)
 	go func() {
-		bgCtx := context.Background()
 		if err := s.moduleManager.CreateAndStartModule(bgCtx, module.ID, msg.StartImmediately); err != nil {
 			s.log.Error("Failed to create module container: %v", err)
 		}
@@ -862,9 +884,13 @@ func (s *ModuleService) DeleteModule(ctx context.Context, req *connect.Request[v
 	if msg.Id == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
 	}
+	module, _ := s.store.GetModule(ctx, msg.Id)
 
 	if err := s.moduleManager.DeleteModule(ctx, msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete module: %w", err))
+	}
+	if module != nil {
+		s.rec.Record(ctx, module.ServerID, "module.delete", activity.Attrs{"module": module.Name}, "deleted module %s", module.Name)
 	}
 
 	return connect.NewResponse(&v1.DeleteModuleResponse{}), nil
@@ -894,6 +920,8 @@ func (s *ModuleService) StartModule(ctx context.Context, req *connect.Request[v1
 		}
 	}
 
+	s.rec.Record(ctx, module.ServerID, "module.start", activity.Attrs{"module": module.Name}, "started module %s", module.Name)
+
 	return connect.NewResponse(&v1.StartModuleResponse{
 		Status: "started",
 	}), nil
@@ -907,6 +935,9 @@ func (s *ModuleService) StopModule(ctx context.Context, req *connect.Request[v1.
 
 	if err := s.moduleManager.StopModule(ctx, msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop module: %w", err))
+	}
+	if module, err := s.store.GetModule(ctx, msg.Id); err == nil {
+		s.rec.Record(ctx, module.ServerID, "module.stop", activity.Attrs{"module": module.Name}, "stopped module %s", module.Name)
 	}
 
 	return connect.NewResponse(&v1.StopModuleResponse{
@@ -922,6 +953,9 @@ func (s *ModuleService) RestartModule(ctx context.Context, req *connect.Request[
 
 	if err := s.moduleManager.RestartModule(ctx, msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart module: %w", err))
+	}
+	if module, err := s.store.GetModule(ctx, msg.Id); err == nil {
+		s.rec.Record(ctx, module.ServerID, "module.restart", activity.Attrs{"module": module.Name}, "restarted module %s", module.Name)
 	}
 
 	return connect.NewResponse(&v1.RestartModuleResponse{
@@ -957,13 +991,6 @@ func (s *ModuleService) GetModuleLogs(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
 
-	if module.ContainerID == "" {
-		return connect.NewResponse(&v1.GetModuleLogsResponse{
-			Logs:  []*v1.LogEntry{},
-			Total: 0,
-		}), nil
-	}
-
 	tail := int(msg.Tail)
 	if tail == 0 {
 		tail = 100
@@ -972,7 +999,12 @@ func (s *ModuleService) GetModuleLogs(ctx context.Context, req *connect.Request[
 	// Get structured log entries from the log streamer if available
 	var protoLogs []*v1.LogEntry
 	if s.logStreamer != nil {
-		protoLogs = s.logStreamer.GetLogs(module.ContainerID, tail)
+		if module.ContainerID != "" {
+			if err := s.logStreamer.StartStreaming(module.ID, module.ContainerID); err != nil {
+				s.log.Warn("Failed to start log streaming for module %s: %v", module.ID, err)
+			}
+		}
+		protoLogs = s.logStreamer.GetLogs(module.ID, tail)
 	}
 
 	return connect.NewResponse(&v1.GetModuleLogsResponse{
@@ -1019,8 +1051,8 @@ func (s *ModuleService) GetAvailableAliases(ctx context.Context, req *connect.Re
 		if server, err := s.store.GetServer(ctx, *msg.ServerId); err == nil {
 			aliasCtx.Server = server
 			// Also get server config for server.config.* aliases
-			if serverConfig, err := s.store.GetServerConfig(ctx, *msg.ServerId); err == nil {
-				aliasCtx.ServerConfig = serverConfig
+			if serverConfig, err := s.store.GetServerProperties(ctx, *msg.ServerId); err == nil {
+				aliasCtx.ServerProperties = serverConfig
 			}
 		}
 	}
@@ -1060,8 +1092,8 @@ func (s *ModuleService) GetResolvedAliases(ctx context.Context, req *connect.Req
 	if msg.ServerId != nil && *msg.ServerId != "" {
 		if server, err := s.store.GetServer(ctx, *msg.ServerId); err == nil {
 			aliasCtx.Server = server
-			if serverConfig, err := s.store.GetServerConfig(ctx, *msg.ServerId); err == nil {
-				aliasCtx.ServerConfig = serverConfig
+			if serverConfig, err := s.store.GetServerProperties(ctx, *msg.ServerId); err == nil {
+				aliasCtx.ServerProperties = serverConfig
 			}
 		}
 	}

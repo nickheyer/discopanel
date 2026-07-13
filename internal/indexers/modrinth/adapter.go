@@ -25,8 +25,7 @@ type ModrinthIndexer struct {
 	client *Client
 }
 
-// Creates a new Modrinth indexer
-// Note: Modrinth API does not require an API key for public operations
+// Creates a new Modrinth indexer, no API key needed
 func NewIndexer(cfg *config.Config) *ModrinthIndexer {
 	return &ModrinthIndexer{
 		client: NewClient(cfg),
@@ -73,15 +72,20 @@ func (m *ModrinthIndexer) GetModpack(ctx context.Context, modpackID string) (*in
 }
 
 // Get files for a modpack
-func (m *ModrinthIndexer) GetModpackFiles(ctx context.Context, modpackID string) ([]indexers.ModpackFile, error) {
-	versions, err := m.client.GetModpackVersions(ctx, modpackID)
+func (m *ModrinthIndexer) GetModpackFiles(ctx context.Context, modpackID string, gameVersion string, modLoader string) ([]indexers.ModpackFile, error) {
+	var loaders, gameVersions []string
+	if modLoader != "" {
+		loaders = []string{strings.ToLower(modLoader)}
+	}
+	if gameVersion != "" {
+		gameVersions = []string{gameVersion}
+	}
+	versions, err := m.client.GetProjectVersionsFiltered(ctx, modpackID, loaders, gameVersions)
 	if err != nil {
 		return nil, err
 	}
 
-	// Convert Modrinth versions to generic files
-	// Each version can have multiple files, but we treat the primary file as the main one
-	// IMPORTANT: Modrinth API returns versions in newest-first order, we preserve this ordering
+	// Converts versions to files, keeps newest-first order
 	result := make([]indexers.ModpackFile, 0, len(versions))
 	for versionIndex, version := range versions {
 		if len(version.Files) > 0 {
@@ -218,8 +222,7 @@ func (m *ModrinthIndexer) convertVersionToFile(version Version, file File, modpa
 		modLoader = strings.ToLower(version.Loaders[0])
 	}
 
-	// Modrinth doesn't have separate server pack files in the same way CurseForge does
-	// But versions can have multiple files - we're using the primary one
+	// No separate server pack files, uses the primary file
 	var serverPackID *string
 
 	return indexers.ModpackFile{

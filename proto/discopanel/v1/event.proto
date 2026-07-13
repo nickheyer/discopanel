@@ -19,4 +19,10 @@ enum TriggeredEventType {
   TRIGGERED_EVENT_TYPE_PLAYER_LEAVE = 5;
   // The parent server was restarted
   TRIGGERED_EVENT_TYPE_SERVER_RESTART = 6;
+  // A player died, agent-sourced, data carries death message
+  TRIGGERED_EVENT_TYPE_PLAYER_DEATH = 7;
+  // A player completed an advancement (agent-sourced)
+  TRIGGERED_EVENT_TYPE_PLAYER_ADVANCEMENT = 8;
+  // A player sent a chat message (agent-sourced)
+  TRIGGERED_EVENT_TYPE_PLAYER_CHAT = 9;
 }

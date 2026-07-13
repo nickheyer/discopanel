@@ -1,42 +1,48 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle
-	} from '$lib/components/ui/card';
+	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Label } from '$lib/components/ui/label';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Switch } from '$lib/components/ui/switch';
-	import { Separator } from '$lib/components/ui/separator';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { PageHeader, ServerAvatar } from '$lib/components/app';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import { ArrowLeft, Loader2, Package, Settings, HardDrive } from '@lucide/svelte';
+	import {
+		ArrowLeft,
+		ArrowRight,
+		Camera,
+		Container,
+		Loader2,
+		Network,
+		Package,
+		Sparkles,
+		Users,
+		X,
+		ChevronDown,
+		ChevronUp,
+		Zap,
+		MemoryStick,
+		Cable,
+		Globe,
+		RefreshCw,
+		Rocket
+	} from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import type { CreateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import { ModLoader, type ProxyListener } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ModLoaderInfo, DockerImage } from '$lib/proto/discopanel/v1/minecraft_pb';
 	import type { IndexedModpack, Version } from '$lib/proto/discopanel/v1/modpack_pb';
-	import { Badge } from '$lib/components/ui/badge';
-	import {
-		Dialog,
-		DialogContent,
-		DialogDescription,
-		DialogHeader,
-		DialogTitle
-	} from '$lib/components/ui/dialog';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
+	import MemorySlider from '$lib/components/memory-slider.svelte';
 	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
-	import { resolve } from '$app/paths';
-	import * as _ from 'lodash-es';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
@@ -49,11 +55,21 @@
 	let proxyListeners = $state<ProxyListener[]>([]);
 	let usedPorts = $state<Record<number, boolean>>({});
 	let portError = $state('');
-	let useProxyMode = $state(false); // Track connection mode separately
+	let useProxyMode = $state(false);
+	let showAdvanced = $state(false);
+	let hostTotalMb = $state(0);
+	let occupiedMb = $state(0);
+
+	// Icon picked now, uploaded right after create
+	let iconFile = $state<File | null>(null);
+	let iconPreview = $state('');
+	let iconInput = $state<HTMLInputElement | null>(null);
 
 	// Modpack selection
-	let showModpackDialog = $state(false);
+	let sourceMode = $state<'blank' | 'modpack'>('blank');
 	let selectedModpack = $state<IndexedModpack | null>(null);
+	// Pack art previews as the icon until upload wins
+	let avatarPreview = $derived(iconPreview || selectedModpack?.logoUrl || '');
 	let favoriteModpacks = $state<IndexedModpack[]>([]);
 	let modpackVersions = $state<Version[]>([]);
 	let selectedVersionId = $state<string>('');
@@ -68,6 +84,8 @@
 			port: 25565,
 			maxPlayers: 20,
 			memory: 2048,
+			memoryMin: 1024,
+			memoryMax: 1536,
 			dockerImage: '',
 			autoStart: false,
 			detached: false,
@@ -84,15 +102,16 @@
 
 	onMount(async () => {
 		try {
-			// Settle independently - otherwise perm rejection fails all
-			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners] =
+			// Settle independently so one permission rejection cannot fail all
+			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners, hostMemory] =
 				await Promise.allSettled([
 					rpcClient.minecraft.getMinecraftVersions({}),
 					rpcClient.minecraft.getModLoaders({}),
 					rpcClient.minecraft.getDockerImages({}),
 					rpcClient.proxy.getProxyStatus({}),
 					rpcClient.server.getNextAvailablePort({}),
-					rpcClient.proxy.getProxyListeners({})
+					rpcClient.proxy.getProxyListeners({}),
+					rpcClient.server.getHostMemory({})
 				]);
 
 			if (versionsData.status === 'fulfilled') {
@@ -124,7 +143,6 @@
 					.map((l) => l.listener)
 					.filter((l): l is ProxyListener => l !== undefined && l.enabled);
 
-				// Set default listener if available
 				const defaultListener = proxyListeners.find((l) => l?.isDefault);
 				if (defaultListener) {
 					formData.proxyListenerId = defaultListener.id;
@@ -136,7 +154,6 @@
 			}
 
 			if (portData.status === 'fulfilled') {
-				// Set the default port to the next available port
 				formData.port = portData.value.port;
 				usedPorts = Object.fromEntries(
 					portData.value.usedPorts?.map((p) => [p.port, p.inUse]) || []
@@ -145,21 +162,26 @@
 				console.error('Failed to load next available port:', portData.reason);
 			}
 
+			if (hostMemory.status === 'fulfilled') {
+				hostTotalMb = Number(hostMemory.value.totalMb);
+				occupiedMb = hostMemory.value.allocations.reduce((sum, a) => sum + a.memory, 0);
+			} else {
+				console.error('Failed to load host memory:', hostMemory.reason);
+			}
+
 			if (!formData.mcVersion && latestVersion) {
 				formData.mcVersion = latestVersion;
 			}
 
-			// Load favorite modpacks
 			await loadFavoriteModpacks();
 
-			// Check if modpack was passed in URL
 			const urlParams = new URLSearchParams(window.location.search);
 			const modpackId = urlParams.get('modpack');
 			if (modpackId) {
-				// Load and select the modpack
 				try {
 					const response = await rpcClient.modpack.getModpack({ id: modpackId });
 					if (response.modpack) {
+						sourceMode = 'modpack';
 						await selectModpack(response.modpack);
 					}
 				} catch (error) {
@@ -205,17 +227,18 @@
 
 	async function selectModpack(modpack: IndexedModpack) {
 		selectedModpack = modpack;
-		showModpackDialog = false;
 
 		try {
-			// Get configuration from the server
 			const cfg = await rpcClient.modpack.getModpackConfig({ id: modpack.id });
+			const config = cfg.config ?? {};
+			const loaderKey = (config['mod_loader'] || '').toUpperCase();
 			formData.name = modpack.name || '';
 			formData.description = modpack.summary || '';
-			formData.modLoader = _.get(cfg, 'mod_loader', 0); // Will be set based on modpack data
-			formData.mcVersion = modpack.mcVersion || '';
-			formData.memory = _.get(cfg, 'memory', modpack.recommendedRam || 2048);
-			formData.dockerImage = modpack.dockerImage || '';
+			formData.modLoader = ModLoader[loaderKey as keyof typeof ModLoader] ?? ModLoader.UNSPECIFIED;
+			formData.mcVersion = config['mc_version'] || modpack.mcVersion || '';
+			// Backend floors modpack memory at 4 GB
+			formData.memory = Math.max(Number(config['memory']) || modpack.recommendedRam || 0, 4096);
+			formData.dockerImage = config['docker_image'] || modpack.dockerImage || '';
 			await loadModpackVersions(modpack.id);
 		} catch (error) {
 			toast.error('Failed to load modpack configuration');
@@ -228,10 +251,37 @@
 		selectedModpack = null;
 		modpackVersions = [];
 		selectedVersionId = '';
-		formData.modLoader = 0; // VANILLA
+		formData.modLoader = ModLoader.UNSPECIFIED;
 		formData.mcVersion = latestVersion || '';
 		formData.dockerImage = '';
 		formData.memory = 2048;
+	}
+
+	function setSourceMode(mode: 'blank' | 'modpack') {
+		sourceMode = mode;
+		if (mode === 'blank' && selectedModpack) {
+			removeModpack();
+		}
+	}
+
+	function handleIconSelect(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
+		if (file.size > 4 * 1024 * 1024) {
+			toast.error('Icon images must be under 4 MB');
+			return;
+		}
+		iconFile = file;
+		const reader = new FileReader();
+		reader.onload = () => (iconPreview = String(reader.result));
+		reader.readAsDataURL(file);
+	}
+
+	function clearIcon() {
+		iconFile = null;
+		iconPreview = '';
 	}
 
 	function parseJsonArray(jsonStr: string): string[] {
@@ -269,6 +319,34 @@
 		}
 	}
 
+	let installableLoaders = $derived(modLoaders.filter((l) => l.provisionable));
+	let selectedLoaderInfo = $derived(modLoaders.find((l) => l.loader === formData.modLoader));
+	let selectedLoaderName = $derived(selectedLoaderInfo?.name ?? '');
+	let selectedListener = $derived(proxyListeners.find((l) => l.id === formData.proxyListenerId));
+
+	// Address preview mirrored in the summary rail
+	let addressPreview = $derived.by(() => {
+		if (proxyEnabled && useProxyMode) {
+			const host = formData.proxyHostname.trim() || 'your-hostname';
+			const full = formData.useBaseUrl && proxyBaseURL ? `${host}.${proxyBaseURL}` : host;
+			const listenPort = selectedListener?.port ?? 25565;
+			return listenPort === 25565 ? full : `${full}:${listenPort}`;
+		}
+		return `localhost:${formData.port}`;
+	});
+
+	let hostnameMissing = $derived(
+		proxyEnabled && useProxyMode && formData.proxyHostname.trim().length === 0
+	);
+
+	let canSubmit = $derived(
+		!loading &&
+			!loadingVersions &&
+			formData.name.trim().length > 0 &&
+			!portError &&
+			!hostnameMissing
+	);
+
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 
@@ -277,16 +355,19 @@
 			return;
 		}
 
-		// Validate port only if not using proxy mode
 		if (!useProxyMode && !validatePort(formData.port)) {
 			toast.error('Please select a valid port');
 			return;
 		}
 
+		if (hostnameMissing) {
+			toast.error('Please enter a hostname for the proxy route');
+			return;
+		}
+
 		loading = true;
 		try {
-			// Add modpack ID and version to the request if selected
-			// For Modrinth, we need to send versionNumber instead of ID for better compatibility
+			// Modrinth installs want the version number over the id
 			const selectedVersion = modpackVersions.find((v) => v.id === selectedVersionId);
 			const versionToSend =
 				selectedModpack?.indexer === 'modrinth' && selectedVersion?.versionNumber
@@ -297,14 +378,22 @@
 				...formData,
 				modpackId: selectedModpack?.id || '',
 				modpackVersionId: versionToSend || '',
-				// When using proxy with hostname, set port to 0 to indicate proxy usage
+				// Port zero routes through the proxy hostname
 				port: useProxyMode ? 0 : formData.port
 			};
 
-			// Create the server
 			const response = await rpcClient.server.createServer(createRequest);
-			toast.success(`Server "${response.server?.name}" created successfully!`);
-			goto(resolve(`/servers/${response.server?.id}`));
+			const created = response.server;
+			if (iconFile && created) {
+				try {
+					const image = new Uint8Array(await iconFile.arrayBuffer());
+					await rpcClient.server.uploadServerIcon({ id: created.id, image });
+				} catch {
+					toast.warning('Server created, but the icon upload failed');
+				}
+			}
+			toast.success(`Server "${created?.name}" created!`);
+			goto(resolve(`/servers/${created?.id}`));
 		} catch (error) {
 			toast.error(
 				`Failed to create server: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -315,207 +404,335 @@
 	}
 </script>
 
-<div class="h-full overflow-y-auto bg-linear-to-br from-background to-muted/10">
-	<div class="space-y-8 p-4 pt-4 sm:p-6 sm:pt-6 lg:p-8">
-		<div class="flex items-center gap-4 border-b-2 border-border/50 pb-6">
-			<Button
-				variant="ghost"
-				size="icon"
-				href="/servers"
-				class="h-12 w-12 shrink-0 rounded-xl hover:bg-muted"
-			>
-				<ArrowLeft class="h-5 w-5" />
-			</Button>
-			<div class="flex items-center gap-4">
-				<div
-					class="flex h-16 w-16 items-center justify-center rounded-2xl bg-linear-to-br from-primary/20 to-primary/10 shadow-lg"
-				>
-					<Package class="h-8 w-8 text-primary" />
-				</div>
-				<div class="space-y-1">
-					<h2
-						class="bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-4xl font-bold tracking-tight text-transparent"
-					>
-						Create New Server
-					</h2>
-					<p class="text-base text-muted-foreground">
-						Set up a new Minecraft server instance with your preferred configuration
-					</p>
-				</div>
-			</div>
+<svelte:head>
+	<title>New server · DiscoPanel</title>
+</svelte:head>
+
+{#snippet sectionHeader(title: string, desc: string)}
+	<header class="border-b bg-muted/30 px-4 py-3">
+		<h3 class="text-sm font-semibold">{title}</h3>
+		<p class="mt-0.5 text-xs text-muted-foreground">{desc}</p>
+	</header>
+{/snippet}
+
+{#snippet pathNode(icon: typeof Users, title: string, sub: string, tone: 'active' | 'muted')}
+	{@const Icon = icon}
+	<div
+		class="flex min-w-0 flex-1 basis-40 items-center gap-2.5 rounded-lg border px-3 py-2 {tone ===
+		'active'
+			? 'border-primary/30 bg-primary/5'
+			: 'bg-muted/30'}"
+	>
+		<Icon class="size-4 shrink-0 {tone === 'active' ? 'text-primary' : 'text-muted-foreground'}" />
+		<div class="min-w-0">
+			<p class="truncate text-xs font-medium">{title}</p>
+			<p class="truncate font-mono text-[11px] text-muted-foreground">{sub}</p>
 		</div>
+	</div>
+{/snippet}
 
-		<form onsubmit={handleSubmit}>
-			<div class="grid gap-6 lg:grid-cols-2">
-				<Card
-					class="border-2 bg-linear-to-br from-card to-card/90 shadow-xl transition-colors hover:border-primary/30"
-				>
-					<CardHeader class="pb-6">
-						<div class="flex items-center gap-3">
-							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-								<Settings class="h-5 w-5 text-primary" />
+{#snippet portField()}
+	<div class="space-y-2">
+		<Label for="port">Server port</Label>
+		<div class="flex items-center gap-2">
+			<Input
+				id="port"
+				type="number"
+				min="1"
+				max="65535"
+				bind:value={formData.port}
+				oninput={(e) => validatePort(Number(e.currentTarget.value))}
+				disabled={loading}
+				class="flex-1 {portError ? 'border-destructive' : ''}"
+			/>
+			<Button
+				type="button"
+				variant="outline"
+				class="shrink-0"
+				onclick={refreshAvailablePort}
+				disabled={loading}
+			>
+				<RefreshCw class="size-3.5" />
+				Auto-assign
+			</Button>
+		</div>
+		{#if portError}
+			<p class="text-xs text-destructive">{portError}</p>
+		{:else}
+			<p class="text-xs text-muted-foreground">
+				Pre-filled with a free port, the Minecraft default is 25565
+			</p>
+		{/if}
+	</div>
+{/snippet}
+
+{#snippet createButton(fullWidth: boolean)}
+	<Button
+		type="submit"
+		form="create-server-form"
+		disabled={!canSubmit}
+		class="glow-primary {fullWidth ? 'w-full' : 'min-w-36'}"
+	>
+		{#if loading}
+			<Loader2 class="size-4 animate-spin" />
+			Creating...
+		{:else}
+			<Rocket class="size-4" />
+			Create server
+		{/if}
+	</Button>
+{/snippet}
+
+<div class="mx-auto w-full max-w-6xl space-y-5 p-4 sm:p-6 2xl:max-w-7xl">
+	<div class="flex items-center gap-3">
+		<Button variant="ghost" size="icon" href={resolve('/servers')} class="size-8 shrink-0">
+			<ArrowLeft class="size-4" />
+			<span class="sr-only">Back to servers</span>
+		</Button>
+		<PageHeader
+			title="Create a server"
+			description="Spin up a new Minecraft server in a couple of minutes"
+		/>
+	</div>
+
+	<div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]">
+		<form id="create-server-form" onsubmit={handleSubmit} class="min-w-0 space-y-4">
+			<section class="overflow-hidden rounded-xl border bg-card">
+				{@render sectionHeader(
+					'Source',
+					'Start from scratch or from one of your favorite modpacks'
+				)}
+				<div class="space-y-4 p-4">
+					<div class="grid grid-cols-2 gap-3">
+						<button
+							type="button"
+							class="rounded-lg border p-4 text-left transition-colors {sourceMode === 'blank'
+								? 'border-primary bg-primary/5'
+								: 'hover:bg-accent/40'}"
+							onclick={() => setSourceMode('blank')}
+							disabled={loading}
+						>
+							<div class="flex items-center gap-2 text-sm font-medium">
+								<Sparkles class="size-4 text-primary" />
+								Start fresh
 							</div>
-							<div>
-								<CardTitle class="text-2xl">Basic Information</CardTitle>
-								<CardDescription class="text-base"
-									>Configure your server's basic settings and metadata</CardDescription
-								>
+							<p class="mt-1 text-xs text-muted-foreground">Pick a version and loader yourself</p>
+						</button>
+						<button
+							type="button"
+							class="rounded-lg border p-4 text-left transition-colors {sourceMode === 'modpack'
+								? 'border-primary bg-primary/5'
+								: 'hover:bg-accent/40'}"
+							onclick={() => setSourceMode('modpack')}
+							disabled={loading}
+						>
+							<div class="flex items-center gap-2 text-sm font-medium">
+								<Package class="size-4 text-primary" />
+								From a modpack
 							</div>
-						</div>
-					</CardHeader>
-					<CardContent class="space-y-6">
-						<div class="space-y-3">
-							<Label class="text-sm font-medium">Configuration Method</Label>
-							<div class="grid grid-cols-2 gap-3">
-								<Button
-									type="button"
-									variant={selectedModpack ? 'outline' : 'default'}
-									onclick={() => (selectedModpack = null)}
-									class="h-auto justify-start px-4 py-3 transition-all hover:scale-[1.02]"
-								>
-									<div class="text-left">
-										<div class="font-medium">Manual Configuration</div>
-										<div class="mt-0.5 text-xs text-muted-foreground">Start from scratch</div>
-									</div>
-								</Button>
-								<Button
-									type="button"
-									variant={selectedModpack ? 'default' : 'outline'}
-									onclick={() => (showModpackDialog = true)}
-									disabled={loading || favoriteModpacks.length === 0}
-									class="h-auto justify-start px-4 py-3 transition-all hover:scale-[1.02]"
-								>
-									<Package class="mr-2 h-4 w-4 shrink-0" />
-									<div class="text-left">
-										<div class="font-medium">
-											{favoriteModpacks.length === 0 ? 'No Favorites' : 'From Modpack'}
+							<p class="mt-1 text-xs text-muted-foreground">
+								Version, loader, and memory come preset
+							</p>
+						</button>
+					</div>
+
+					{#if sourceMode === 'modpack'}
+						{#if selectedModpack}
+							<div class="rounded-lg border border-primary/30 bg-primary/5 p-4">
+								<div class="flex items-start gap-3">
+									{#if selectedModpack.logoUrl}
+										<img
+											src={selectedModpack.logoUrl}
+											alt=""
+											class="size-12 shrink-0 rounded-md object-cover"
+										/>
+									{/if}
+									<div class="min-w-0 flex-1">
+										<div class="flex items-center gap-2">
+											<h4 class="truncate font-semibold">{selectedModpack.name}</h4>
+											<Badge variant="secondary" class="text-xs capitalize">
+												{selectedModpack.indexer}
+											</Badge>
 										</div>
-										<div class="mt-0.5 text-xs text-muted-foreground">Use preset configuration</div>
-									</div>
-								</Button>
-							</div>
-
-							{#if selectedModpack}
-								<Card
-									class="border-2 border-primary/30 bg-linear-to-br from-primary/10 to-primary/5 shadow-lg"
-								>
-									<CardContent class="p-5">
-										<div class="flex items-start gap-3">
-											{#if selectedModpack.logoUrl}
-												<img
-													src={selectedModpack.logoUrl}
-													alt={selectedModpack.name}
-													class="h-12 w-12 rounded-md object-cover"
-												/>
+										<p class="mt-0.5 line-clamp-2 text-sm text-muted-foreground">
+											{selectedModpack.summary}
+										</p>
+										<div class="mt-2 flex flex-wrap gap-2">
+											{#if parseJsonArray(selectedModpack.gameVersions).length > 0}
+												<Badge variant="outline" class="text-xs">
+													MC {parseJsonArray(selectedModpack.gameVersions)[0]}
+												</Badge>
 											{/if}
-											<div class="min-w-0 flex-1">
-												<h4 class="font-semibold">{selectedModpack.name}</h4>
-												<p class="line-clamp-2 text-sm text-muted-foreground">
-													{selectedModpack.summary}
-												</p>
-												<div class="mt-2 flex gap-2">
-													{#if parseJsonArray(selectedModpack.gameVersions).length > 0}
-														<Badge variant="secondary" class="text-xs">
-															MC {parseJsonArray(selectedModpack.gameVersions)[0]}
-														</Badge>
-													{/if}
-													{#if parseJsonArray(selectedModpack.modLoaders).length > 0}
-														<Badge variant="secondary" class="text-xs">
-															{parseJsonArray(selectedModpack.modLoaders)[0]}
-														</Badge>
-													{/if}
-												</div>
-
-												{#if modpackVersions.length > 0}
-													<div class="mt-3">
-														<Label
-															for="modpack_version"
-															class="text-xs font-medium text-muted-foreground"
-															>Version (optional)</Label
-														>
-														<Select
-															type="single"
-															value={selectedVersionId}
-															onValueChange={(v) => (selectedVersionId = v || '')}
-															disabled={loading || loadingModpackVersions}
-														>
-															<SelectTrigger id="modpack_version" class="mt-1 h-8">
-																<span class="text-sm">
-																	{selectedVersionId
-																		? modpackVersions.find((v) => v.id === selectedVersionId)
-																				?.displayName || 'Latest'
-																		: 'Latest version'}
-																</span>
-															</SelectTrigger>
-															<SelectContent>
-																<SelectItem value="">Latest version</SelectItem>
-																{#each modpackVersions as version (version.id)}
-																	<SelectItem value={version.id}>
-																		{version.displayName}
-																		{#if version.releaseType}
-																			<Badge
-																				variant={version.releaseType === 'release'
-																					? 'default'
-																					: version.releaseType === 'beta'
-																						? 'secondary'
-																						: 'outline'}
-																				class="ml-2 text-xs"
-																			>
-																				{version.releaseType}
-																			</Badge>
-																		{/if}
-																	</SelectItem>
-																{/each}
-															</SelectContent>
-														</Select>
-													</div>
-												{:else if loadingModpackVersions}
-													<div class="mt-3 text-xs text-muted-foreground">
-														<Loader2 class="mr-1 inline h-3 w-3 animate-spin" />
-														Loading versions...
-													</div>
-												{/if}
-											</div>
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												onclick={removeModpack}
-												disabled={loading}
-											>
-												Remove
-											</Button>
+											{#if parseJsonArray(selectedModpack.modLoaders).length > 0}
+												<Badge variant="outline" class="text-xs capitalize">
+													{parseJsonArray(selectedModpack.modLoaders)[0]}
+												</Badge>
+											{/if}
 										</div>
-									</CardContent>
-								</Card>
-							{:else if favoriteModpacks.length === 0}
-								<p class="text-sm text-muted-foreground">
-									Visit the <a href={resolve('/modpacks')} class="underline">Modpacks</a> page to browse
-									and favorite modpacks
-								</p>
-							{/if}
-						</div>
 
-						<Separator />
+										{#if modpackVersions.length > 0}
+											<div class="mt-3 max-w-xs space-y-1">
+												<Label for="modpack_version" class="text-xs text-muted-foreground">
+													Modpack version
+												</Label>
+												<Select
+													type="single"
+													value={selectedVersionId}
+													onValueChange={(v) => (selectedVersionId = v || '')}
+													disabled={loading || loadingModpackVersions}
+												>
+													<SelectTrigger id="modpack_version" class="h-8 w-full">
+														<span class="truncate text-sm">
+															{selectedVersionId
+																? modpackVersions.find((v) => v.id === selectedVersionId)
+																		?.displayName || 'Latest'
+																: 'Latest version'}
+														</span>
+													</SelectTrigger>
+													<SelectContent>
+														<SelectItem value="">Latest version</SelectItem>
+														{#each modpackVersions as version (version.id)}
+															<SelectItem value={version.id}>
+																{version.displayName}
+																{#if version.releaseType && version.releaseType !== 'release'}
+																	({version.releaseType})
+																{/if}
+															</SelectItem>
+														{/each}
+													</SelectContent>
+												</Select>
+											</div>
+										{:else if loadingModpackVersions}
+											<div class="mt-3 text-xs text-muted-foreground">
+												<Loader2 class="mr-1 inline size-3 animate-spin" />
+												Loading versions...
+											</div>
+										{/if}
+									</div>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										class="size-7 shrink-0"
+										onclick={removeModpack}
+										disabled={loading}
+										title="Remove modpack"
+									>
+										<X class="size-4" />
+									</Button>
+								</div>
+							</div>
+						{:else if favoriteModpacks.length > 0}
+							<div class="grid gap-2 sm:grid-cols-2">
+								{#each favoriteModpacks as modpack (modpack.id)}
+									<button
+										type="button"
+										class="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/40"
+										onclick={() => selectModpack(modpack)}
+										disabled={loading}
+									>
+										{#if modpack.logoUrl}
+											<img
+												src={modpack.logoUrl}
+												alt=""
+												class="size-10 shrink-0 rounded-md object-cover"
+											/>
+										{:else}
+											<div
+												class="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted"
+											>
+												<Package class="size-5 text-muted-foreground" />
+											</div>
+										{/if}
+										<div class="min-w-0">
+											<p class="truncate text-sm font-medium">{modpack.name}</p>
+											<p class="line-clamp-2 text-xs text-muted-foreground">{modpack.summary}</p>
+										</div>
+									</button>
+								{/each}
+							</div>
+							<p class="text-xs text-muted-foreground">
+								Only favorites show here. Find more on the
+								<a href={resolve('/modpacks')} class="text-primary hover:underline">Modpacks</a> page.
+							</p>
+						{:else}
+							<p class="text-sm text-muted-foreground">
+								No favorite modpacks yet. Browse the
+								<a href={resolve('/modpacks')} class="text-primary hover:underline">Modpacks</a>
+								page and star the ones you like, then they show up here.
+							</p>
+						{/if}
+					{/if}
+				</div>
+			</section>
 
-						<div class="space-y-2">
-							<Label for="name" class="text-sm font-medium"
-								>Server Name <span class="text-destructive">*</span></Label
+			<section class="overflow-hidden rounded-xl border bg-card">
+				{@render sectionHeader('Basics', 'Pick an icon and a name your friends will recognize')}
+				<div class="flex flex-col gap-5 p-4 sm:flex-row">
+					<div class="flex shrink-0 flex-col items-center gap-1.5">
+						<button
+							type="button"
+							class="group relative shrink-0 rounded-xl outline-offset-2"
+							onclick={() => iconInput?.click()}
+							disabled={loading}
+							title="Choose server icon"
+						>
+							<ServerAvatar name={formData.name.trim() || '?'} favicon={avatarPreview} size="xl" />
+							<span
+								class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/55 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
 							>
-							<Input
-								id="name"
-								placeholder="My Awesome Server"
-								bind:value={formData.name}
-								required
+								<Camera class="size-5 text-white" />
+							</span>
+						</button>
+						<span class="text-[11px] text-muted-foreground">Server icon</span>
+						{#if iconFile}
+							<button
+								type="button"
+								class="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+								onclick={clearIcon}
 								disabled={loading}
-								class="h-10"
-							/>
+							>
+								Remove
+							</button>
+						{/if}
+					</div>
+					<input
+						bind:this={iconInput}
+						type="file"
+						accept="image/png,image/jpeg,image/webp,image/gif"
+						class="hidden"
+						onchange={handleIconSelect}
+					/>
+					<div class="grid min-w-0 flex-1 content-start gap-4">
+						<div class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
+							<div class="space-y-2">
+								<Label for="name">Server name <span class="text-destructive">*</span></Label>
+								<Input
+									id="name"
+									placeholder="My Awesome Server"
+									bind:value={formData.name}
+									required
+									disabled={loading}
+								/>
+							</div>
+
+							<div class="space-y-2">
+								<Label for="max_players">Max players</Label>
+								<Input
+									id="max_players"
+									type="number"
+									min="1"
+									max="1000"
+									bind:value={formData.maxPlayers}
+									disabled={loading}
+								/>
+							</div>
 						</div>
 
 						<div class="space-y-2">
-							<Label for="description" class="text-sm font-medium"
-								>Description <span class="text-xs text-muted-foreground">(optional)</span></Label
-							>
+							<Label for="description">
+								Description <span class="text-xs text-muted-foreground">(optional)</span>
+							</Label>
 							<Textarea
 								id="description"
 								placeholder="A fun server for friends..."
@@ -524,348 +741,391 @@
 								class="min-h-20 resize-none"
 							/>
 						</div>
+					</div>
+				</div>
+			</section>
 
-						<Separator />
-
-						<div class="space-y-2">
-							<Label for="mcVersion" class="text-sm font-medium">Minecraft Version</Label>
-							{#if loadingVersions}
-								<div class="flex items-center justify-center p-4">
-									<Loader2 class="h-4 w-4 animate-spin" />
-								</div>
-							{:else}
-								<Select
-									type="single"
-									value={formData.mcVersion}
-									onValueChange={(v: string | undefined) => (formData.mcVersion = v ?? '')}
-									disabled={loading}
-								>
-									<SelectTrigger id="mcVersion">
-										<span>{formData.mcVersion || 'Select a version'}</span>
-									</SelectTrigger>
-									<SelectContent>
-										{#each minecraftVersions as version (version)}
-											<SelectItem value={version}>
-												{version}
-												{version === latestVersion ? '(Latest)' : ''}
-											</SelectItem>
-										{/each}
-									</SelectContent>
-								</Select>
-							{/if}
-						</div>
-
-						<div class="space-y-2">
-							<Label for="modLoader" class="text-sm font-medium">Mod Loader</Label>
+			<section class="overflow-hidden rounded-xl border bg-card">
+				{@render sectionHeader(
+					'Version & loader',
+					selectedModpack ? 'Preset by the modpack' : 'What flavor of Minecraft to run'
+				)}
+				<div class="grid gap-4 p-4 sm:grid-cols-2">
+					<div class="space-y-2">
+						<Label for="mcVersion">Minecraft version</Label>
+						{#if loadingVersions}
+							<div class="flex h-9 items-center">
+								<Loader2 class="size-4 animate-spin text-muted-foreground" />
+							</div>
+						{:else}
 							<Select
 								type="single"
-								value={formData.modLoader.toString()}
-								onValueChange={(v: string | undefined) => {
-									// Convert string name to enum value
-									const loaderName = v ?? 'VANILLA';
-									formData.modLoader =
-										ModLoader[loaderName.toUpperCase() as keyof typeof ModLoader] ??
-										ModLoader.VANILLA;
-								}}
+								value={formData.mcVersion}
+								onValueChange={(v: string | undefined) => (formData.mcVersion = v ?? '')}
 								disabled={loading || !!selectedModpack}
 							>
-								<SelectTrigger id="modLoader">
-									<span
-										>{modLoaders.find(
-											(l) =>
-												l.name.toLowerCase() ===
-												Object.keys(ModLoader)
-													.find(
-														(k) => ModLoader[k as keyof typeof ModLoader] === formData.modLoader
-													)
-													?.toLowerCase()
-										)?.displayName || 'Select a mod loader'}</span
-									>
+								<SelectTrigger id="mcVersion" class="w-full">
+									<span>
+										{formData.mcVersion || 'Select a version'}
+										{formData.mcVersion === latestVersion ? ' (latest)' : ''}
+									</span>
 								</SelectTrigger>
 								<SelectContent>
-									{#each modLoaders as loader (loader.name)}
-										<SelectItem value={loader.name}>
-											{loader.displayName}
+									{#each minecraftVersions as version (version)}
+										<SelectItem value={version}>
+											{version}
+											{version === latestVersion ? '(latest)' : ''}
 										</SelectItem>
 									{/each}
 								</SelectContent>
 							</Select>
-							{#if selectedModpack}
-								<p class="text-sm text-muted-foreground">Mod loader auto-determined from modpack</p>
-							{:else if formData.modLoader === ModLoader.VANILLA}
-								<p class="text-sm text-muted-foreground">
-									No mod support - vanilla Minecraft server
-								</p>
-							{:else if modLoaders.find((l) => l.name.toLowerCase() === Object.keys(ModLoader)
-										.find((k) => ModLoader[k as keyof typeof ModLoader] === formData.modLoader)
-										?.toLowerCase())?.supportsMods}
-								<p class="text-sm text-muted-foreground">This mod loader supports mods</p>
-							{/if}
-						</div>
-					</CardContent>
-				</Card>
+						{/if}
+					</div>
 
-				<Card
-					class="border-2 bg-linear-to-br from-card to-card/90 shadow-xl transition-colors hover:border-primary/30"
-				>
-					<CardHeader class="pb-6">
-						<div class="flex items-center gap-3">
-							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-								<HardDrive class="h-5 w-5 text-primary" />
-							</div>
-							<div>
-								<CardTitle class="text-2xl">Server Configuration</CardTitle>
-								<CardDescription class="text-base"
-									>Fine-tune your server's performance and network settings</CardDescription
-								>
-							</div>
+					<div class="space-y-2">
+						<Label for="modLoader">Mod loader</Label>
+						<Select
+							type="single"
+							value={selectedLoaderName}
+							onValueChange={(v: string | undefined) => {
+								formData.modLoader =
+									installableLoaders.find((l) => l.name === v)?.loader ?? ModLoader.VANILLA;
+							}}
+							disabled={loading || !!selectedModpack}
+						>
+							<SelectTrigger id="modLoader" class="w-full">
+								<span>{selectedLoaderInfo?.displayName || 'Select a mod loader'}</span>
+							</SelectTrigger>
+							<SelectContent>
+								{#each installableLoaders as loader (loader.name)}
+									<SelectItem value={loader.name}>
+										{loader.displayName}
+									</SelectItem>
+								{/each}
+							</SelectContent>
+						</Select>
+						{#if selectedModpack}
+							<p class="text-xs text-muted-foreground">Mod loader comes from the modpack</p>
+						{:else if formData.modLoader === ModLoader.VANILLA}
+							<p class="text-xs text-muted-foreground">Plain Minecraft, no mod support</p>
+						{:else if selectedLoaderInfo?.supportsMods}
+							<p class="text-xs text-muted-foreground">This loader supports mods</p>
+						{/if}
+					</div>
+				</div>
+			</section>
+
+			<section class="overflow-hidden rounded-xl border bg-card">
+				{@render sectionHeader('Connectivity', 'How players will reach the server')}
+				<div class="space-y-4 p-4">
+					{#if proxyEnabled}
+						<div class="grid gap-3 sm:grid-cols-2">
+							<button
+								type="button"
+								class="rounded-lg border p-4 text-left transition-colors {!useProxyMode
+									? 'border-primary bg-primary/5'
+									: 'hover:bg-accent/40'}"
+								onclick={() => {
+									useProxyMode = false;
+									formData.proxyHostname = '';
+									portError = '';
+								}}
+								disabled={loading}
+							>
+								<div class="flex items-center gap-2 text-sm font-medium">
+									<Cable class="size-4 text-primary" />
+									Direct port
+								</div>
+								<p class="mt-1 text-xs text-muted-foreground">
+									Players join with this machine's address and a port number
+								</p>
+							</button>
+							<button
+								type="button"
+								class="rounded-lg border p-4 text-left transition-colors {useProxyMode
+									? 'border-primary bg-primary/5'
+									: 'hover:bg-accent/40'}"
+								onclick={() => {
+									useProxyMode = true;
+									if (!formData.proxyHostname) {
+										formData.proxyHostname =
+											formData.name.toLowerCase().replace(/\s+/g, '-') || 'minecraft-server';
+									}
+									portError = '';
+								}}
+								disabled={loading}
+							>
+								<div class="flex items-center gap-2 text-sm font-medium">
+									<Globe class="size-4 text-primary" />
+									Proxy hostname
+								</div>
+								<p class="mt-1 text-xs text-muted-foreground">
+									Players join with a memorable address like {proxyBaseURL
+										? `survival.${proxyBaseURL}`
+										: 'play.example.com'}
+								</p>
+							</button>
 						</div>
-					</CardHeader>
-					<CardContent class="space-y-6">
-						{#if proxyEnabled}
-							<div class="space-y-4">
+
+						{#if useProxyMode}
+							<div
+								class="grid gap-4 {proxyListeners.length > 1
+									? 'sm:grid-cols-[minmax(0,1fr)_20rem]'
+									: ''}"
+							>
 								<div class="space-y-2">
-									<Label class="text-sm font-medium">Connection Method</Label>
-									<div class="grid grid-cols-2 gap-3">
-										<Button
-											type="button"
-											variant={!useProxyMode ? 'default' : 'outline'}
-											onclick={() => {
-												useProxyMode = false;
-												formData.proxyHostname = '';
-												// Reset port error when switching to direct port
-												portError = '';
-											}}
-											class="h-auto justify-start px-4 py-3"
-										>
-											<div class="text-left">
-												<div class="font-medium">Direct Port</div>
-												<div class="mt-0.5 text-xs text-muted-foreground">
-													Connect via port number
-												</div>
+									<Label for="proxy_hostname">Hostname</Label>
+									<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+										<Input
+											id="proxy_hostname"
+											placeholder={proxyBaseURL ? 'survival' : 'survival.example.com'}
+											bind:value={formData.proxyHostname}
+											disabled={loading}
+											class="min-w-48 flex-1 {hostnameMissing ? 'border-destructive' : ''}"
+										/>
+										{#if proxyBaseURL}
+											<div class="flex shrink-0 items-center gap-2">
+												<Checkbox id="use_base_url" bind:checked={formData.useBaseUrl} />
+												<Label for="use_base_url" class="font-normal">
+													Append base domain ({proxyBaseURL})
+												</Label>
 											</div>
-										</Button>
-										<Button
-											type="button"
-											variant={useProxyMode ? 'default' : 'outline'}
-											onclick={() => {
-												useProxyMode = true;
-												if (!formData.proxyHostname) {
-													formData.proxyHostname =
-														formData.name.toLowerCase().replace(/\s+/g, '-') || 'minecraft-server';
-												}
-												// Clear port error when using proxy
-												portError = '';
-											}}
-											class="h-auto justify-start px-4 py-3"
-										>
-											<div class="text-left">
-												<div class="font-medium">Custom Hostname</div>
-												<div class="mt-0.5 text-xs text-muted-foreground">
-													Connect via domain name
-												</div>
-											</div>
-										</Button>
+										{/if}
 									</div>
+									{#if hostnameMissing}
+										<p class="text-xs text-destructive">A hostname is required for proxy routing</p>
+									{/if}
 								</div>
 
-								{#if useProxyMode}
-									<div class="space-y-4">
-										<!-- Listener Selection -->
-										{#if proxyListeners.length > 0}
-											<div class="space-y-2">
-												<Label for="proxy_listener" class="text-sm font-medium"
-													>Proxy Listener</Label
-												>
-												<Select
-													type="single"
-													value={formData.proxyListenerId}
-													onValueChange={(v) => (formData.proxyListenerId = v || '')}
-													disabled={loading}
-												>
-													<SelectTrigger id="proxy_listener">
-														<span>
-															{proxyListeners.find((l) => l.id === formData.proxyListenerId)
-																?.name || 'Select a listener'}
-														</span>
-													</SelectTrigger>
-													<SelectContent>
-														{#each proxyListeners as listener (listener.id)}
-															<SelectItem value={listener.id}>
-																{listener.name} (Port {listener.port})
-																{#if listener.isDefault}
-																	<span class="ml-2 text-xs text-muted-foreground">[Default]</span>
-																{/if}
-															</SelectItem>
-														{/each}
-													</SelectContent>
-												</Select>
-												<p class="text-xs text-muted-foreground">
-													Select which proxy port players will connect through
-												</p>
-											</div>
-										{/if}
-
-										<!-- Hostname Input -->
-										<div class="space-y-2">
-											<Label for="proxy_hostname" class="text-sm font-medium">Server Hostname</Label
-											>
-											<Input
-												id="proxy_hostname"
-												placeholder={proxyBaseURL ? 'survival' : 'survival.example.com'}
-												bind:value={formData.proxyHostname}
-												disabled={loading}
-												class="h-10"
-											/>
-
-											<!-- Base URL Checkbox -->
-											{#if proxyBaseURL}
-												<div class="flex items-center gap-2">
-													<input
-														type="checkbox"
-														id="use_base_url"
-														bind:checked={formData.useBaseUrl}
-														class="h-4 w-4"
-													/>
-													<Label for="use_base_url" class="text-sm font-medium">
-														Append base domain ({proxyBaseURL})
-													</Label>
-												</div>
-											{/if}
-
-											<p class="text-xs text-muted-foreground">
-												{#if formData.useBaseUrl && proxyBaseURL}
-													Players will connect using: {formData.proxyHostname}.{proxyBaseURL}
-												{:else}
-													Players will connect using: {formData.proxyHostname}
-												{/if}
-											</p>
-										</div>
-									</div>
-								{:else}
+								{#if proxyListeners.length > 1}
 									<div class="space-y-2">
-										<div class="flex items-center justify-between">
-											<Label for="port" class="text-sm font-medium">Server Port</Label>
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												onclick={refreshAvailablePort}
-												disabled={loading}
-											>
-												Auto-assign
-											</Button>
-										</div>
-										<Input
-											id="port"
-											type="number"
-											min="1"
-											max="65535"
-											bind:value={formData.port}
-											oninput={(e) => validatePort(Number(e.currentTarget.value))}
+										<Label for="proxy_listener">Proxy listener</Label>
+										<Select
+											type="single"
+											value={formData.proxyListenerId}
+											onValueChange={(v) => (formData.proxyListenerId = v || '')}
 											disabled={loading}
-											class="h-10 {portError ? 'border-destructive' : ''}"
-										/>
-										{#if portError}
-											<p class="text-xs text-destructive">{portError}</p>
-										{:else}
-											<p class="text-xs text-muted-foreground">Default Minecraft port is 25565</p>
-										{/if}
+										>
+											<SelectTrigger id="proxy_listener" class="w-full">
+												<span class="truncate">
+													{selectedListener
+														? `${selectedListener.name} (port ${selectedListener.port})`
+														: 'Select a listener'}
+												</span>
+											</SelectTrigger>
+											<SelectContent>
+												{#each proxyListeners as listener (listener.id)}
+													<SelectItem value={listener.id}>
+														{listener.name} (port {listener.port}){listener.isDefault
+															? ' — default'
+															: ''}
+													</SelectItem>
+												{/each}
+											</SelectContent>
+										</Select>
 									</div>
 								{/if}
 							</div>
 						{:else}
-							<div class="space-y-2">
-								<div class="flex items-center justify-between">
-									<Label for="port" class="text-sm font-medium">Server Port</Label>
-									<Button
-										type="button"
-										variant="ghost"
-										size="sm"
-										onclick={refreshAvailablePort}
-										disabled={loading}
-									>
-										Auto-assign
-									</Button>
-								</div>
-								<Input
-									id="port"
-									type="number"
-									min="1"
-									max="65535"
-									bind:value={formData.port}
-									oninput={(e) => validatePort(Number(e.currentTarget.value))}
-									disabled={loading}
-									class="h-10 {portError ? 'border-destructive' : ''}"
-								/>
-								{#if portError}
-									<p class="text-xs text-destructive">{portError}</p>
-								{:else}
-									<p class="text-xs text-muted-foreground">Default Minecraft port is 25565</p>
-								{/if}
-							</div>
+							{@render portField()}
 						{/if}
-
-						<div class="space-y-2">
-							<Label for="max_players" class="text-sm font-medium">Max Players</Label>
-							<Input
-								id="max_players"
-								type="number"
-								min="1"
-								max="1000"
-								bind:value={formData.maxPlayers}
-								disabled={loading}
-								class="h-10"
-							/>
-						</div>
-
-						<div class="space-y-2">
-							<Label for="memory" class="text-sm font-medium">Memory Allocation (MB)</Label>
-							<div class="flex gap-2">
-								<Input
-									id="memory"
-									type="number"
-									min="512"
-									bind:value={formData.memory}
-									disabled={loading}
-									class="h-10"
-								/>
+					{:else}
+						<div class="grid gap-4 sm:grid-cols-2">
+							{@render portField()}
+							<div class="rounded-lg border border-dashed p-3">
+								<div class="flex items-center gap-2 text-sm font-medium">
+									<Globe class="size-4 text-muted-foreground" />
+									Proxy routing is off
+								</div>
+								<p class="mt-1 text-xs text-muted-foreground">
+									With the proxy enabled, players join with a hostname like play.example.com instead
+									of a port number
+								</p>
 							</div>
-							<p class="text-xs text-muted-foreground">
-								Recommended: {formData.modLoader === ModLoader.VANILLA ? '2048' : '4096'} MB
-							</p>
 						</div>
+					{/if}
+				</div>
 
-						<Separator />
-
-						<AdditionalPortsEditor
-							bind:ports={formData.additionalPorts}
-							disabled={loading}
-							{usedPorts}
-							onchange={(ports) => (formData.additionalPorts = ports)}
-						/>
-
-						<Separator />
-
-						<div class="space-y-2">
-							<Label for="docker_image" class="text-sm font-medium"
-								>Docker Image <span class="text-xs text-muted-foreground">(Advanced)</span></Label
+				<div class="border-t px-4 py-4">
+					<span class="stat-label">Player address</span>
+					<div
+						class="mt-2 flex items-center justify-between gap-3 rounded-lg border bg-muted/40 py-2 pr-2 pl-4"
+					>
+						<p class="truncate font-mono text-lg" title={addressPreview}>{addressPreview}</p>
+						{#if proxyEnabled && useProxyMode}
+							<span
+								class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-status-ok/25 bg-status-ok/10 px-2 py-0.5 text-xs font-medium text-status-ok"
 							>
+								<Globe class="size-3" />
+								Routed via proxy
+							</span>
+						{:else}
+							<span
+								class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-status-idle/25 bg-status-idle/10 px-2 py-0.5 text-xs font-medium text-status-idle"
+							>
+								<Cable class="size-3" />
+								Direct connection
+							</span>
+						{/if}
+					</div>
+					<p class="mt-2 text-xs text-muted-foreground">
+						What players type into their multiplayer server list
+					</p>
+				</div>
+
+				<div class="border-t bg-muted/20 px-4 py-3.5">
+					<div class="flex flex-wrap items-center gap-2">
+						{@render pathNode(
+							Users,
+							'Players',
+							proxyEnabled && useProxyMode ? addressPreview : 'direct connect',
+							'active'
+						)}
+						<ArrowRight class="size-3.5 shrink-0 text-muted-foreground/60" />
+						{#if proxyEnabled && useProxyMode}
+							{@render pathNode(
+								Network,
+								selectedListener?.name || 'Proxy listener',
+								`:${selectedListener?.port ?? 25565}`,
+								'active'
+							)}
+							<ArrowRight class="size-3.5 shrink-0 text-muted-foreground/60" />
+							{@render pathNode(
+								Container,
+								formData.name.trim() || 'New server',
+								'container :25565',
+								'muted'
+							)}
+						{:else}
+							{@render pathNode(
+								Container,
+								formData.name.trim() || 'New server',
+								`container :${formData.port}`,
+								'active'
+							)}
+						{/if}
+					</div>
+				</div>
+			</section>
+
+			<section class="overflow-hidden rounded-xl border bg-card">
+				{@render sectionHeader('Memory', "How much of the host's memory this server gets")}
+				<div class="space-y-4 p-4">
+					<MemorySlider
+						bind:memory={formData.memory}
+						bind:memoryMin={formData.memoryMin}
+						bind:memoryMax={formData.memoryMax}
+						totalMb={hostTotalMb}
+						{occupiedMb}
+						disabled={loading}
+					/>
+				</div>
+			</section>
+
+			<section class="overflow-hidden rounded-xl border bg-card">
+				{@render sectionHeader('Lifecycle', 'How the server behaves around DiscoPanel')}
+				<div class="grid gap-3 p-4 sm:grid-cols-3">
+					<label
+						class="flex cursor-pointer flex-col gap-1.5 rounded-lg border p-3 text-sm transition-colors hover:bg-accent/30"
+					>
+						<span class="flex items-center justify-between gap-2">
+							<span class="font-medium">Start immediately</span>
+							<Switch bind:checked={formData.startImmediately} disabled={loading} />
+						</span>
+						<span class="text-xs font-normal text-muted-foreground">
+							Boot the server right after creation
+						</span>
+					</label>
+
+					<label
+						class="flex cursor-pointer flex-col gap-1.5 rounded-lg border p-3 text-sm transition-colors hover:bg-accent/30"
+					>
+						<span class="flex items-center justify-between gap-2">
+							<span class="font-medium">Detached mode</span>
+							<Switch
+								bind:checked={formData.detached}
+								disabled={loading || useProxyMode}
+								onCheckedChange={(checked) => {
+									if (checked && useProxyMode) {
+										toast.error('Cannot detach proxied servers');
+										formData.detached = false;
+										return;
+									}
+									formData.detached = checked;
+									if (checked) {
+										formData.autoStart = false;
+									}
+								}}
+							/>
+						</span>
+						<span class="text-xs font-normal text-muted-foreground">
+							Keeps running when DiscoPanel stops. Not available for proxied servers.
+						</span>
+					</label>
+
+					<label
+						class="flex cursor-pointer flex-col gap-1.5 rounded-lg border p-3 text-sm transition-colors hover:bg-accent/30"
+					>
+						<span class="flex items-center justify-between gap-2">
+							<span class="font-medium">Auto start</span>
+							<Switch
+								bind:checked={formData.autoStart}
+								disabled={loading || formData.detached}
+								onCheckedChange={(checked) => {
+									if (formData.detached) {
+										toast.error('Cannot enable auto-start for detached servers');
+										formData.autoStart = false;
+										return;
+									}
+									formData.autoStart = checked;
+								}}
+							/>
+						</span>
+						<span class="text-xs font-normal text-muted-foreground">
+							Starts with DiscoPanel{formData.detached ? '. Disabled for detached servers.' : '.'}
+						</span>
+					</label>
+				</div>
+			</section>
+
+			<section class="overflow-hidden rounded-xl border bg-card">
+				<button
+					type="button"
+					class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/30"
+					onclick={() => (showAdvanced = !showAdvanced)}
+				>
+					<div class="min-w-0">
+						<h3 class="text-sm font-semibold">Advanced</h3>
+						<p class="mt-0.5 text-xs text-muted-foreground">
+							Docker image, extra ports, and container overrides
+						</p>
+					</div>
+					{#if showAdvanced}
+						<ChevronUp class="size-4 shrink-0 text-muted-foreground" />
+					{:else}
+						<ChevronDown class="size-4 shrink-0 text-muted-foreground" />
+					{/if}
+				</button>
+
+				{#if showAdvanced}
+					<div class="space-y-5 border-t p-4">
+						<div class="space-y-2">
+							<Label for="docker_image">Docker image</Label>
 							<Select
 								type="single"
 								value={formData.dockerImage}
 								onValueChange={(v: string | undefined) => (formData.dockerImage = v ?? '')}
 								disabled={loading || loadingVersions}
 							>
-								<SelectTrigger id="docker_image">
-									<span
-										>{formData.dockerImage
-											? getDockerImageDisplayName(formData.dockerImage)
-											: 'Auto-select (Recommended)'}</span
-									>
+								<SelectTrigger id="docker_image" class="w-full">
+									<span>
+										{formData.dockerImage
+											? getDockerImageDisplayName(formData.dockerImage, dockerImages)
+											: 'Auto-select (recommended)'}
+									</span>
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="">Auto-select (Recommended)</SelectItem>
+									<SelectItem value="">Auto-select (recommended)</SelectItem>
 									{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
 										<SelectItem value={image.tag}>
 											{getDockerImageDisplayName(image)}
@@ -874,156 +1134,120 @@
 								</SelectContent>
 							</Select>
 							<p class="text-xs text-muted-foreground">
-								Leave as auto-select unless you have specific requirements
+								Leave on auto-select unless you have specific requirements
 							</p>
 						</div>
 
-						<Separator />
+						<AdditionalPortsEditor
+							bind:ports={formData.additionalPorts}
+							disabled={loading}
+							{usedPorts}
+							onchange={(ports) => (formData.additionalPorts = ports)}
+						/>
 
-						<div class="space-y-4">
-							<h4 class="text-sm font-semibold">Lifecycle Management</h4>
+						<DockerOverridesEditor
+							bind:overrides={formData.dockerOverrides}
+							disabled={loading}
+							onchange={(overrides) => (formData.dockerOverrides = overrides)}
+						/>
+					</div>
+				{/if}
+			</section>
+		</form>
 
-							<div class="flex items-center justify-between rounded-lg bg-muted/50 p-4">
-								<div class="space-y-0.5">
-									<Label for="start_immediately" class="cursor-pointer text-sm font-medium"
-										>Start Immediately</Label
-									>
-									<p class="text-xs text-muted-foreground">Start the server right after creation</p>
-								</div>
-								<Switch
-									id="start_immediately"
-									bind:checked={formData.startImmediately}
-									disabled={loading}
-								/>
-							</div>
-
-							<div class="flex items-center justify-between rounded-lg bg-muted/50 p-4">
-								<div class="space-y-0.5">
-									<Label for="detached" class="cursor-pointer text-sm font-medium"
-										>Detached Mode</Label
-									>
-									<p class="text-xs text-muted-foreground">
-										Server continues running when DiscoPanel stops (not available for proxied
-										servers)
-									</p>
-								</div>
-								<Switch
-									id="detached"
-									bind:checked={formData.detached}
-									disabled={loading || useProxyMode}
-									onCheckedChange={(checked) => {
-										if (checked && useProxyMode) {
-											toast.error('Cannot detach proxied servers');
-											formData.detached = false;
-											return;
-										}
-										formData.detached = checked;
-										// If detaching, disable auto-start
-										if (checked) {
-											formData.autoStart = false;
-										}
-									}}
-								/>
-							</div>
-
-							<div class="flex items-center justify-between rounded-lg bg-muted/50 p-4">
-								<div class="space-y-0.5">
-									<Label for="auto_start" class="cursor-pointer text-sm font-medium"
-										>Auto Start</Label
-									>
-									<p class="text-xs text-muted-foreground">
-										Automatically start when DiscoPanel starts{formData.detached
-											? ' (disabled for detached servers)'
-											: ''}
-									</p>
-								</div>
-								<Switch
-									id="auto_start"
-									bind:checked={formData.autoStart}
-									disabled={loading || formData.detached}
-									onCheckedChange={(checked) => {
-										if (formData.detached) {
-											toast.error('Cannot enable auto-start for detached servers');
-											formData.autoStart = false;
-											return;
-										}
-										formData.autoStart = checked;
-									}}
-								/>
-							</div>
+		<aside class="sticky top-4 hidden space-y-3 lg:block">
+			<div class="overflow-hidden rounded-xl border bg-card">
+				<div class="border-b bg-muted/30 px-4 py-2.5">
+					<span class="stat-label">Summary</span>
+				</div>
+				<div class="space-y-3 p-4">
+					<div class="flex items-center gap-3">
+						<ServerAvatar name={formData.name.trim() || '?'} favicon={avatarPreview} size="lg" />
+						<div class="min-w-0">
+							<p class="truncate text-sm font-semibold">
+								{formData.name.trim() || 'Unnamed server'}
+							</p>
+							<p class="truncate text-xs text-muted-foreground">
+								{selectedModpack ? selectedModpack.name : 'Blank server'}
+							</p>
 						</div>
-					</CardContent>
-				</Card>
+					</div>
 
-				<!-- Docker Overrides - Advanced Configuration -->
-				<div class="lg:col-span-2">
-					<DockerOverridesEditor
-						bind:overrides={formData.dockerOverrides}
-						disabled={loading}
-						onchange={(overrides) => (formData.dockerOverrides = overrides)}
-					/>
+					<div class="flex flex-wrap gap-1.5">
+						{#if formData.mcVersion}
+							<Badge variant="secondary" class="text-xs">MC {formData.mcVersion}</Badge>
+						{/if}
+						{#if selectedLoaderInfo}
+							<Badge variant="secondary" class="text-xs">{selectedLoaderInfo.displayName}</Badge>
+						{/if}
+					</div>
+
+					<div class="space-y-2 border-t pt-3 text-xs">
+						<div class="flex items-center justify-between gap-2">
+							<span class="flex items-center gap-1.5 text-muted-foreground">
+								<MemoryStick class="size-3.5" />
+								Memory
+							</span>
+							<span class="tabular font-medium">{(formData.memory / 1024).toFixed(1)} GB</span>
+						</div>
+						<div class="flex items-center justify-between gap-2">
+							<span class="flex items-center gap-1.5 text-muted-foreground">
+								{#if proxyEnabled && useProxyMode}
+									<Globe class="size-3.5" />
+									Hostname
+								{:else}
+									<Cable class="size-3.5" />
+									Address
+								{/if}
+							</span>
+							<span class="tabular max-w-36 truncate font-mono font-medium" title={addressPreview}>
+								{addressPreview}
+							</span>
+						</div>
+						<div class="flex items-center justify-between gap-2">
+							<span class="flex items-center gap-1.5 text-muted-foreground">
+								<Zap class="size-3.5" />
+								After creation
+							</span>
+							<span class="font-medium">
+								{formData.startImmediately ? 'Starts right away' : 'Stays stopped'}
+							</span>
+						</div>
+					</div>
+
+					{#if !formData.name.trim()}
+						<p class="rounded-md bg-muted/50 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+							Give the server a name to create it
+						</p>
+					{:else if portError}
+						<p class="rounded-md bg-status-danger/10 px-2.5 py-1.5 text-[11px] text-status-danger">
+							{portError}
+						</p>
+					{:else if hostnameMissing}
+						<p class="rounded-md bg-muted/50 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+							Enter a hostname so players can join through the proxy
+						</p>
+					{/if}
+
+					{@render createButton(true)}
+					<Button variant="ghost" href={resolve('/servers')} disabled={loading} class="w-full">
+						Cancel
+					</Button>
 				</div>
 			</div>
+		</aside>
+	</div>
 
-			<div class="mt-8 flex justify-end gap-3">
-				<Button variant="outline" href="/servers" disabled={loading} size="lg">Cancel</Button>
-				<Button type="submit" disabled={loading || loadingVersions} size="lg" class="min-w-35">
-					{#if loading}
-						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						Creating...
-					{:else}
-						Create Server
-					{/if}
-				</Button>
-			</div>
-		</form>
+	<div
+		class="sticky bottom-4 z-10 flex items-center justify-between gap-3 rounded-xl border bg-card/95 px-4 py-3 shadow-lg backdrop-blur-sm lg:hidden"
+	>
+		<div class="min-w-0">
+			<p class="truncate text-sm font-medium">{formData.name.trim() || 'Unnamed server'}</p>
+			<p class="truncate font-mono text-xs text-muted-foreground">{addressPreview}</p>
+		</div>
+		<div class="flex shrink-0 gap-2">
+			<Button variant="outline" href={resolve('/servers')} disabled={loading}>Cancel</Button>
+			{@render createButton(false)}
+		</div>
 	</div>
 </div>
-
-<Dialog bind:open={showModpackDialog}>
-	<DialogContent class="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
-		<DialogHeader>
-			<DialogTitle>Select Modpack</DialogTitle>
-			<DialogDescription>Choose from your favorite modpacks</DialogDescription>
-		</DialogHeader>
-
-		<div class="-mx-6 flex-1 overflow-y-auto px-6">
-			<div class="grid gap-4">
-				{#each favoriteModpacks as modpack (modpack.id)}
-					<Card
-						class="cursor-pointer transition-shadow hover:shadow-md"
-						onclick={() => selectModpack(modpack)}
-					>
-						<CardContent class="p-4">
-							<div class="flex items-start gap-4">
-								{#if modpack.logoUrl}
-									<img
-										src={modpack.logoUrl}
-										alt={modpack.name}
-										class="h-16 w-16 rounded-md object-cover"
-									/>
-								{/if}
-								<div class="min-w-0 flex-1">
-									<h4 class="font-semibold">{modpack.name}</h4>
-									<p class="mb-2 line-clamp-2 text-sm text-muted-foreground">
-										{modpack.summary}
-									</p>
-									<div class="flex items-center gap-2">
-										<Badge variant="secondary" class="text-xs">
-											{modpack.indexer}
-										</Badge>
-										{#if parseJsonArray(modpack.gameVersions).length > 0}
-											<span class="text-xs text-muted-foreground">
-												MC: {parseJsonArray(modpack.gameVersions)[0]}
-											</span>
-										{/if}
-									</div>
-								</div>
-							</div>
-						</CardContent>
-					</Card>
-				{/each}
-			</div>
-		</div>
-	</DialogContent>
-</Dialog>

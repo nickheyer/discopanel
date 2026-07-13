@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/pkg/download"
@@ -27,7 +29,7 @@ import (
 // Compile-time check that FileService implements the interface
 var _ discopanelv1connect.FileServiceHandler = (*FileService)(nil)
 
-// extractionOp tracks an in-progress or completed extraction.
+// Tracks an in-progress or completed extraction
 type extractionOp struct {
 	State          string // "extracting", "completed", "failed"
 	FilesExtracted atomic.Int32
@@ -35,21 +37,23 @@ type extractionOp struct {
 	CompletedAt    time.Time
 }
 
-// FileService implements the File service
+// Implements the File service
 type FileService struct {
 	store           *storage.Store
 	docker          *docker.Client
+	rec             *activity.Recorder
 	log             *logger.Logger
 	uploadManager   *upload.Manager
 	downloadManager *download.Manager
 	extractions     sync.Map
 }
 
-// NewFileService creates a new file service
-func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, downloadManager *download.Manager, log *logger.Logger) *FileService {
+// Creates a new file service
+func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, downloadManager *download.Manager, rec *activity.Recorder, log *logger.Logger) *FileService {
 	svc := &FileService{
 		store:           store,
 		docker:          docker,
+		rec:             rec,
 		log:             log,
 		uploadManager:   uploadManager,
 		downloadManager: downloadManager,
@@ -58,7 +62,7 @@ func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *
 	return svc
 }
 
-// ListFiles lists files in a directory
+// Lists files in a directory
 func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.ListFilesRequest]) (*connect.Response[v1.ListFilesResponse], error) {
 	msg := req.Msg
 
@@ -83,7 +87,7 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 	// List directory
 	var files []*v1.FileInfo
 	if msg.Tree {
-		files, err = s.listDirectoryTree(fullPath, server.DataPath, 0, 10) // max depth 10
+		files, err = s.listDirectoryTree(fullPath, server.DataPath, 0, 10) // Max depth 10
 	} else {
 		files, err = s.listDirectory(fullPath, server.DataPath)
 	}
@@ -98,7 +102,7 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 	}), nil
 }
 
-// GetFile gets a file's content
+// Gets a file's content
 func (s *FileService) GetFile(ctx context.Context, req *connect.Request[v1.GetFileRequest]) (*connect.Response[v1.GetFileResponse], error) {
 	msg := req.Msg
 
@@ -144,7 +148,7 @@ func (s *FileService) GetFile(ctx context.Context, req *connect.Request[v1.GetFi
 	}), nil
 }
 
-// SaveUploadedFile saves a file from a completed chunked upload session
+// Saves a file from a completed chunked upload session
 func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request[v1.SaveUploadedFileRequest]) (*connect.Response[v1.SaveUploadedFileResponse], error) {
 	msg := req.Msg
 
@@ -208,13 +212,16 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 	// Cleanup the upload session
 	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
+	uploadedPath := filepath.Join(targetPath, targetFilename)
+	s.rec.Record(ctx, server.ID, "file.upload", activity.Attrs{"path": uploadedPath}, "uploaded file %s", uploadedPath)
+
 	return connect.NewResponse(&v1.SaveUploadedFileResponse{
 		Message: "File uploaded successfully",
-		Path:    filepath.Join(targetPath, targetFilename),
+		Path:    uploadedPath,
 	}), nil
 }
 
-// UpdateFile updates a file's content
+// Updates a file's content
 func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.UpdateFileRequest]) (*connect.Response[v1.UpdateFileResponse], error) {
 	msg := req.Msg
 
@@ -242,6 +249,7 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 		s.log.Error("Failed to write file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update file"))
 	}
+	s.rec.Record(ctx, server.ID, "file.edit", activity.Attrs{"path": msg.Path}, "edited file %s", msg.Path)
 
 	return connect.NewResponse(&v1.UpdateFileResponse{
 		Message: "File updated successfully",
@@ -249,7 +257,7 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 	}), nil
 }
 
-// DeleteFile deletes a file or multiple files (bulk)
+// Deletes a file or multiple files, bulk
 func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.DeleteFileRequest]) (*connect.Response[v1.DeleteFileResponse], error) {
 	msg := req.Msg
 
@@ -259,7 +267,7 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	// Build list of paths to delete: prefer bulk paths, fall back to single path
+	// Prefers bulk paths, falls back to single path
 	paths := msg.Paths
 	if len(paths) == 0 && msg.Path != "" {
 		paths = []string{msg.Path}
@@ -295,11 +303,12 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete %s", p))
 		}
 	}
+	s.rec.Record(ctx, server.ID, "file.delete", activity.Attrs{"paths": strings.Join(paths, ", ")}, "deleted %s", strings.Join(paths, ", "))
 
 	return connect.NewResponse(&v1.DeleteFileResponse{}), nil
 }
 
-// RenameFile renames a file
+// Renames a file
 func (s *FileService) RenameFile(ctx context.Context, req *connect.Request[v1.RenameFileRequest]) (*connect.Response[v1.RenameFileResponse], error) {
 	msg := req.Msg
 
@@ -353,6 +362,7 @@ func (s *FileService) RenameFile(ctx context.Context, req *connect.Request[v1.Re
 		s.log.Error("Failed to rename file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to rename file"))
 	}
+	s.rec.Record(ctx, server.ID, "file.rename", activity.Attrs{"from": msg.Path, "to": newPath}, "renamed %s to %s", msg.Path, msg.NewName)
 
 	return connect.NewResponse(&v1.RenameFileResponse{
 		Message: "File renamed successfully",
@@ -360,7 +370,7 @@ func (s *FileService) RenameFile(ctx context.Context, req *connect.Request[v1.Re
 	}), nil
 }
 
-// ExtractArchive extracts an archive
+// Extracts an archive
 func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v1.ExtractArchiveRequest]) (*connect.Response[v1.ExtractArchiveResponse], error) {
 	msg := req.Msg
 
@@ -390,7 +400,7 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path is a directory, not an archive"))
 	}
 
-	// Determine extraction destination (same directory as archive, folder named after archive without extension)
+	// Extraction destination is archive dir plus name without extension
 	archiveDir := filepath.Dir(fullArchivePath)
 	archiveName := filepath.Base(msg.Path)
 
@@ -408,14 +418,16 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 	op := &extractionOp{State: "extracting"}
 	s.extractions.Store(opID, op)
 
+	bgCtx := detach(ctx)
 	go func() {
-		_, err := files.ExtractArchive(context.Background(), fullArchivePath, destPath, &op.FilesExtracted)
+		_, err := files.ExtractArchive(bgCtx, fullArchivePath, destPath, &op.FilesExtracted)
 		if err != nil {
 			op.Error = err.Error()
 			op.State = "failed"
 			s.log.Error("Extraction %s failed: %v", opID, err)
 		} else {
 			op.State = "completed"
+			s.rec.Record(bgCtx, server.ID, "file.extract", activity.Attrs{"archive": msg.Path, "files": strconv.Itoa(int(op.FilesExtracted.Load()))}, "extracted %s (%d files)", msg.Path, op.FilesExtracted.Load())
 			s.log.Info("Extraction %s completed: %d files", opID, op.FilesExtracted.Load())
 		}
 		op.CompletedAt = time.Now()
@@ -441,7 +453,7 @@ func (s *FileService) GetExtractionStatus(ctx context.Context, req *connect.Requ
 	}), nil
 }
 
-// Rm finished extraction ops after 1 hour.
+// Removes finished extraction ops after 1 hour
 func (s *FileService) cleanupExtractions() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -457,7 +469,7 @@ func (s *FileService) cleanupExtractions() {
 	}
 }
 
-// CreateFolder creates a new directory
+// Creates a new directory
 func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.CreateFolderRequest]) (*connect.Response[v1.CreateFolderResponse], error) {
 	msg := req.Msg
 
@@ -475,13 +487,14 @@ func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.
 		s.log.Error("Failed to create folder: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create folder"))
 	}
+	s.rec.Record(ctx, server.ID, "file.mkdir", activity.Attrs{"path": msg.Path}, "created folder %s", msg.Path)
 
 	return connect.NewResponse(&v1.CreateFolderResponse{
 		Message: "Folder created successfully",
 	}), nil
 }
 
-// MoveFile moves a file or directory to a new location
+// Moves a file or directory to a new location
 func (s *FileService) MoveFile(ctx context.Context, req *connect.Request[v1.MoveFileRequest]) (*connect.Response[v1.MoveFileResponse], error) {
 	msg := req.Msg
 
@@ -528,13 +541,14 @@ func (s *FileService) MoveFile(ctx context.Context, req *connect.Request[v1.Move
 		}
 		os.RemoveAll(srcFull)
 	}
+	s.rec.Record(ctx, server.ID, "file.move", activity.Attrs{"from": msg.SourcePath, "to": msg.DestinationPath}, "moved %s to %s", msg.SourcePath, msg.DestinationPath)
 
 	return connect.NewResponse(&v1.MoveFileResponse{
 		Message: "File moved successfully",
 	}), nil
 }
 
-// CopyFile copies a file or directory
+// Copies a file or directory
 func (s *FileService) CopyFile(ctx context.Context, req *connect.Request[v1.CopyFileRequest]) (*connect.Response[v1.CopyFileResponse], error) {
 	msg := req.Msg
 
@@ -558,7 +572,7 @@ func (s *FileService) CopyFile(ctx context.Context, req *connect.Request[v1.Copy
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to access source"))
 	}
 
-	// If src and dst are the same, generate a "copy" name to avoid truncation
+	// Generates copy name when src equals dst
 	if srcFull == dstFull {
 		dstFull = uniqueCopyPath(dstFull, srcInfo.IsDir())
 	}
@@ -584,7 +598,7 @@ func (s *FileService) CopyFile(ctx context.Context, req *connect.Request[v1.Copy
 	}), nil
 }
 
-// CreateArchive creates a zip archive from selected paths
+// Creates a zip archive from selected paths
 func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1.CreateArchiveRequest]) (*connect.Response[v1.CreateArchiveResponse], error) {
 	msg := req.Msg
 
@@ -630,6 +644,7 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 	}
 
 	archivePath, _ := filepath.Rel(server.DataPath, destFull)
+	s.rec.Record(ctx, server.ID, "file.archive", activity.Attrs{"path": archivePath}, "created archive %s", archivePath)
 	return connect.NewResponse(&v1.CreateArchiveResponse{
 		Message:       "Archive created successfully",
 		ArchivePath:   archivePath,
@@ -637,8 +652,7 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 	}), nil
 }
 
-// DownloadArchive creates a zip on disk and returns a download session.
-// The actual bytes are served via GET /api/v1/download/{session_id}.
+// Creates zip on disk, bytes served via download endpoint
 func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[v1.DownloadArchiveRequest]) (*connect.Response[v1.DownloadArchiveResponse], error) {
 	msg := req.Msg
 
@@ -680,7 +694,7 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stat archive"))
 	}
 
-	// Register download session (temp zip — delete after expiry)
+	// Register download session (temp zip - delete after expiry)
 	session := s.downloadManager.InitSession(tempPath, filename, info.Size(), true)
 
 	return connect.NewResponse(&v1.DownloadArchiveResponse{
@@ -690,8 +704,7 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 	}), nil
 }
 
-// Creates a download session for file
-// Bytes are served via GET /api/v1/download/{session_id}.
+// Creates download session for file, served via download endpoint
 func (s *FileService) InitFileDownload(ctx context.Context, req *connect.Request[v1.InitFileDownloadRequest]) (*connect.Response[v1.InitFileDownloadResponse], error) {
 	msg := req.Msg
 
@@ -728,7 +741,7 @@ func (s *FileService) InitFileDownload(ctx context.Context, req *connect.Request
 	}), nil
 }
 
-// uniqueCopyPath generates a non-colliding "name (copy).ext" path.
+// Generates a non-colliding "name (copy).ext" path
 func uniqueCopyPath(fullPath string, isDir bool) string {
 	dir := filepath.Dir(fullPath)
 	base := filepath.Base(fullPath)
@@ -811,7 +824,7 @@ func (s *FileService) listDirectoryTree(path, basePath string, depth, maxDepth i
 			IsEditable: !entry.IsDir() && files.IsTextFile(fullPath),
 		}
 
-		// If it's a directory and we haven't reached max depth, get children
+		// Recurses into subdirectory if under max depth
 		if entry.IsDir() && depth < maxDepth {
 			childPath := filepath.Join(path, entry.Name())
 			children, err := s.listDirectoryTree(childPath, basePath, depth+1, maxDepth)

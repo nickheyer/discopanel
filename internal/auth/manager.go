@@ -55,7 +55,7 @@ func NewManager(store *db.Store, enforcer *rbac.Enforcer, cfg *config.AuthConfig
 	ctx := context.Background()
 	var secret []byte
 
-	// Priority: config value → DB-stored value → generate + persist to DB
+	// Config value wins, then DB, then generate and persist
 	if cfg.JWTSecret != "" {
 		secret = []byte(cfg.JWTSecret)
 	} else {
@@ -270,8 +270,7 @@ func (m *Manager) IsAnyAuthEnabled() bool {
 	return m.config.Local.Enabled || m.config.OIDC.Enabled
 }
 
-// AuthenticateFromHeader validates the bearer token from an Authorization header value.
-// Handles session tokens, API tokens, no-auth bypass, and anonymous access.
+// Validates bearer token, handles session, API token, or anon
 func (m *Manager) AuthenticateFromHeader(ctx context.Context, authHeader string) (*AuthenticatedUser, error) {
 	if !m.IsAnyAuthEnabled() {
 		return &AuthenticatedUser{
@@ -310,8 +309,7 @@ func (m *Manager) GetConfig() *config.AuthConfig {
 	return m.config
 }
 
-// loadSettingOverrides reads SystemSetting overrides from the DB and applies
-// them to the in-memory config, so DB values take precedence over config.yaml.
+// Applies db setting overrides so db wins over config.yaml
 func (m *Manager) loadSettingOverrides(ctx context.Context) {
 	if v, err := m.store.GetSystemSetting(ctx, settingLocalEnabled); err == nil {
 		if b, err := strconv.ParseBool(v); err == nil {

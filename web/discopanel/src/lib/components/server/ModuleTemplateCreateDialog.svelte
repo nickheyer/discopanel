@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -8,24 +9,23 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import AliasHelper from '$lib/components/ui/AliasHelper.svelte';
+	import { EmptyState } from '$lib/components/app';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { ModuleEventAction, type ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
 	import { TriggeredEventType } from '$lib/proto/discopanel/v1/event_pb';
+	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import {
 		Loader2,
 		Plus,
 		Trash2,
-		Package,
 		X,
 		FileText,
 		Container,
 		Network,
 		Variable,
 		HardDrive,
-		Wrench,
-		Heart,
-		Info
+		Wrench
 	} from '@lucide/svelte';
 
 	interface Props {
@@ -91,27 +91,67 @@
 	let defaultInitCommand = $state('');
 	let defaultInitCommandDelay = $state(0);
 	let defaultRestartAfterInit = $state(false);
-
-	// Environment variables and volumes as editable arrays
 	let envVars = $state<EnvVar[]>([]);
 	let volumes = $state<VolumeMount[]>([]);
-
-	// Port configuration
 	let ports = $state<PortConfig[]>([]);
 	let suggestedDependencies = $state('');
 	let defaultHooks = $state<EventHook[]>([]);
 	let metadata = $state<MetadataEntry[]>([]);
 
-	const navItems: { id: ConfigSection; label: string; icon: typeof FileText }[] = [
-		{ id: 'basic', label: 'Basic Info', icon: FileText },
-		{ id: 'docker', label: 'Docker', icon: Container },
-		{ id: 'ports', label: 'Ports', icon: Network },
-		{ id: 'environment', label: 'Environment', icon: Variable },
-		{ id: 'volumes', label: 'Volumes', icon: HardDrive },
-		{ id: 'advanced', label: 'Advanced', icon: Wrench }
+	const navItems: {
+		id: ConfigSection;
+		label: string;
+		title: string;
+		desc: string;
+		icon: typeof FileText;
+	}[] = [
+		{
+			id: 'basic',
+			label: 'Basic info',
+			title: 'Basic information',
+			desc: 'Template name, description, and appearance',
+			icon: FileText
+		},
+		{
+			id: 'docker',
+			label: 'Docker',
+			title: 'Docker configuration',
+			desc: 'Container image, health check, and behavior',
+			icon: Container
+		},
+		{
+			id: 'ports',
+			label: 'Ports',
+			title: 'Port configuration',
+			desc: 'Default port mappings for the container',
+			icon: Network
+		},
+		{
+			id: 'environment',
+			label: 'Environment',
+			title: 'Environment variables',
+			desc: 'Default environment variables for new instances',
+			icon: Variable
+		},
+		{
+			id: 'volumes',
+			label: 'Volumes',
+			title: 'Volume mounts',
+			desc: 'Default volume mounts for new instances',
+			icon: HardDrive
+		},
+		{
+			id: 'advanced',
+			label: 'Advanced',
+			title: 'Advanced settings',
+			desc: 'Dependencies, hooks, init command, and metadata',
+			icon: Wrench
+		}
 	];
 
-	// Convert env vars array to JSON string for API
+	let activeItem = $derived(navItems.find((item) => item.id === activeSection) ?? navItems[0]);
+
+	// Serializes env rows into json object string
 	function envVarsToJson(): string {
 		const obj: Record<string, string> = {};
 		for (const env of envVars) {
@@ -122,7 +162,7 @@
 		return JSON.stringify(obj);
 	}
 
-	// Convert volumes array to JSON string for API
+	// Serializes volume rows into snake case json
 	function volumesToJson(): string {
 		return JSON.stringify(
 			volumes
@@ -134,6 +174,20 @@
 					create_dir: v.createDir
 				}))
 		);
+	}
+
+	// Parses stored snake case volumes into form rows
+	function parseVolumes(json: string): VolumeMount[] {
+		try {
+			return JSON.parse(json || '[]').map((v: Record<string, unknown>) => ({
+				hostPath: v.source || '',
+				containerPath: v.target || '',
+				readOnly: v.read_only || false,
+				createDir: v.create_dir || false
+			}));
+		} catch {
+			return [];
+		}
 	}
 
 	function addEnvVar() {
@@ -198,23 +252,6 @@
 		return map;
 	}
 
-	function getEventTypeLabel(event: TriggeredEventType): string {
-		switch (event) {
-			case TriggeredEventType.SERVER_START:
-				return 'Server Start';
-			case TriggeredEventType.SERVER_STOP:
-				return 'Server Stop';
-			case TriggeredEventType.SERVER_HEALTHY:
-				return 'Server Healthy';
-			case TriggeredEventType.PLAYER_JOIN:
-				return 'Player Join';
-			case TriggeredEventType.PLAYER_LEAVE:
-				return 'Player Leave';
-			default:
-				return 'Unknown';
-		}
-	}
-
 	function getEventActionLabel(action: ModuleEventAction): string {
 		switch (action) {
 			case ModuleEventAction.START:
@@ -232,13 +269,16 @@
 		}
 	}
 
+	// Snapshots template once so reloads keep edits
 	$effect(() => {
 		if (open) {
-			if (mode === 'edit' && template) {
-				loadTemplateData(template);
-			} else if (mode === 'create') {
-				resetForm();
-			}
+			untrack(() => {
+				if (mode === 'edit' && template) {
+					loadTemplateData(template);
+				} else if (mode === 'create') {
+					resetForm();
+				}
+			});
 		} else {
 			resetForm();
 		}
@@ -268,11 +308,7 @@
 			envVars = [];
 		}
 
-		try {
-			volumes = JSON.parse(t.defaultVolumes || '[]');
-		} catch {
-			volumes = [];
-		}
+		volumes = parseVolumes(t.defaultVolumes);
 
 		ports = t.ports.map((p) => ({
 			name: p.name,
@@ -325,6 +361,13 @@
 
 		submitting = true;
 		try {
+			const validPorts = ports.filter((p) => p.containerPort > 0);
+			const droppedPorts = ports.length - validPorts.length;
+			if (droppedPorts > 0) {
+				toast.warning(
+					`Ignored ${droppedPorts} port row${droppedPorts === 1 ? '' : 's'} without a container port`
+				);
+			}
 			const payload = {
 				name: name.trim(),
 				description: description.trim(),
@@ -338,15 +381,13 @@
 				icon: icon.trim(),
 				category: category.trim(),
 				documentation: documentation.trim(),
-				ports: ports
-					.filter((p) => p.containerPort > 0)
-					.map((p) => ({
-						name: p.name,
-						containerPort: p.containerPort,
-						hostPort: p.hostPort,
-						protocol: p.protocol,
-						proxyEnabled: p.proxyEnabled
-					})),
+				ports: validPorts.map((p) => ({
+					name: p.name,
+					containerPort: p.containerPort,
+					hostPort: p.hostPort,
+					protocol: p.protocol,
+					proxyEnabled: p.proxyEnabled
+				})),
 				suggestedDependencies: suggestedDependencies.trim()
 					? suggestedDependencies
 							.split(',')
@@ -390,49 +431,40 @@
 
 <Dialog bind:open>
 	<DialogContent
-		class="flex h-[85vh]! w-[95vw]! max-w-6xl! flex-col gap-0! overflow-hidden p-0!"
+		class="flex h-[85vh]! w-[95vw]! max-w-4xl! flex-col gap-0! overflow-hidden p-0!"
 		showCloseButton={false}
 	>
-		<div class="flex h-full">
-			<!-- Sidebar -->
-			<div class="flex w-64 flex-col border-r bg-muted/30">
-				<!-- Sidebar Header -->
-				<div class="border-b p-6">
-					<div class="flex items-center gap-3">
-						<div class="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-							<Package class="h-6 w-6 text-primary" />
-						</div>
-						<div class="min-w-0 flex-1">
-							<h3 class="truncate font-semibold">
-								{name || (mode === 'create' ? 'New Template' : 'Edit Template')}
-							</h3>
-							<p class="text-sm text-muted-foreground">Custom template</p>
-						</div>
-					</div>
+		<div class="flex h-full min-h-0">
+			<!-- Section nav sidebar -->
+			<div class="flex w-64 shrink-0 flex-col border-r bg-card/40">
+				<div class="border-b px-5 py-4">
+					<p class="stat-label">Custom template</p>
+					<h3 class="mt-1 truncate text-sm font-semibold">
+						{name || (mode === 'create' ? 'New template' : 'Edit template')}
+					</h3>
 				</div>
 
-				<!-- Navigation -->
-				<nav class="flex-1 space-y-1 p-4">
+				<nav class="flex-1 space-y-0.5 overflow-y-auto p-3">
 					{#each navItems as item (item.id)}
 						{@const Icon = item.icon}
 						<button
+							type="button"
 							onclick={() => (activeSection = item.id)}
-							class="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors {activeSection ===
+							class="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors {activeSection ===
 							item.id
-								? 'bg-primary text-primary-foreground'
-								: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+								? 'bg-accent font-medium text-foreground'
+								: 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
 						>
-							<Icon class="h-5 w-5" />
-							<span class="font-medium">{item.label}</span>
+							<Icon class="size-4 shrink-0" />
+							{item.label}
 						</button>
 					{/each}
 				</nav>
 
-				<!-- Sidebar Footer -->
-				<div class="border-t p-4">
-					<div class="rounded-lg bg-muted/50 p-4">
-						<p class="mb-2 text-sm font-medium">Template Aliases</p>
-						<p class="mb-3 text-xs text-muted-foreground">
+				<div class="border-t p-3">
+					<div class="rounded-lg border bg-card p-3">
+						<p class="text-sm font-medium">Template aliases</p>
+						<p class="mt-1 mb-3 text-xs text-muted-foreground">
 							Use aliases for dynamic values in any configuration field.
 						</p>
 						<AliasHelper showLabel />
@@ -440,271 +472,232 @@
 				</div>
 			</div>
 
-			<!-- Main Content -->
+			<!-- Section content -->
 			<div class="flex min-w-0 flex-1 flex-col">
-				<!-- Content Header -->
-				<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
-					<div>
-						<h2 class="text-2xl font-semibold tracking-tight">
-							{#if activeSection === 'basic'}Basic Information
-							{:else if activeSection === 'docker'}Docker Configuration
-							{:else if activeSection === 'ports'}Port Configuration
-							{:else if activeSection === 'environment'}Environment Variables
-							{:else if activeSection === 'volumes'}Volume Mounts
-							{:else if activeSection === 'advanced'}Advanced Settings
-							{/if}
-						</h2>
-						<p class="mt-1 text-muted-foreground">
-							{#if activeSection === 'basic'}Template name, description, and appearance
-							{:else if activeSection === 'docker'}Container image and health check settings
-							{:else if activeSection === 'ports'}Default port mappings for the container
-							{:else if activeSection === 'environment'}Default environment variables
-							{:else if activeSection === 'volumes'}Default volume mount configurations
-							{:else if activeSection === 'advanced'}Behavior, dependencies, hooks, and metadata
-							{/if}
-						</p>
+				<div class="flex items-start justify-between gap-4 border-b px-6 py-4">
+					<div class="min-w-0">
+						<h2 class="text-lg font-semibold">{activeItem.title}</h2>
+						<p class="mt-0.5 text-sm text-muted-foreground">{activeItem.desc}</p>
 					</div>
-					<Button variant="ghost" size="icon" onclick={() => (open = false)} class="h-10 w-10">
-						<X class="h-5 w-5" />
+					<Button
+						variant="ghost"
+						size="icon"
+						onclick={() => (open = false)}
+						class="size-8 shrink-0"
+					>
+						<X class="size-4" />
 					</Button>
 				</div>
 
-				<!-- Scrollable Content Area -->
-				<div class="flex-1 overflow-y-auto p-8">
+				<div class="min-h-0 flex-1 overflow-y-auto px-6 py-5">
 					{#if activeSection === 'basic'}
-						<!-- Basic Info Section -->
-						<div class="max-w-2xl space-y-8">
-							<div class="space-y-3">
-								<Label for="name" class="text-base font-medium">Template Name *</Label>
-								<Input
-									id="name"
-									bind:value={name}
-									placeholder="My Custom Module"
-									class="h-12 text-base"
-								/>
-								<p class="text-sm text-muted-foreground">
+						<div class="space-y-6">
+							<div class="space-y-2">
+								<Label for="tpl-name">Template name *</Label>
+								<Input id="tpl-name" bind:value={name} placeholder="My Custom Module" />
+								<p class="text-xs text-muted-foreground">
 									A descriptive name for this module template
 								</p>
 							</div>
 
-							<div class="space-y-3">
-								<Label for="description" class="text-base font-medium">Description</Label>
+							<div class="space-y-2">
+								<Label for="tpl-description">Description</Label>
 								<Textarea
-									id="description"
+									id="tpl-description"
 									bind:value={description}
 									placeholder="What does this module do? Describe its purpose and features."
 									rows={4}
-									class="text-base"
 								/>
 							</div>
 
-							<div class="grid grid-cols-2 gap-6">
-								<div class="space-y-3">
-									<Label for="category">Category</Label>
+							<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+								<div class="space-y-2">
+									<Label for="tpl-category">Category</Label>
 									<Input
-										id="category"
+										id="tpl-category"
 										bind:value={category}
 										placeholder="monitoring, maps, voice..."
-										class="h-12"
 									/>
-									<p class="text-sm text-muted-foreground">Group similar templates</p>
+									<p class="text-xs text-muted-foreground">Group similar templates</p>
 								</div>
-								<div class="space-y-3">
-									<Label for="icon">Icon</Label>
+								<div class="space-y-2">
+									<Label for="tpl-icon">Icon</Label>
 									<Input
-										id="icon"
+										id="tpl-icon"
 										bind:value={icon}
 										placeholder="chart-bar, map, microphone..."
-										class="h-12"
 									/>
-									<p class="text-sm text-muted-foreground">
+									<p class="text-xs text-muted-foreground">
 										Lucide icon name from <a
 											href="https://lucide.dev"
 											target="_blank"
 											rel="noopener noreferrer"
-											class="underline">lucide.dev</a
+											class="underline underline-offset-2 hover:text-foreground">lucide.dev</a
 										>
 									</p>
 								</div>
 							</div>
 						</div>
 					{:else if activeSection === 'docker'}
-						<!-- Docker Section -->
-						<div class="max-w-2xl space-y-8">
-							<div class="space-y-3">
-								<Label for="dockerImage" class="text-base font-medium">Docker Image *</Label>
+						<div class="space-y-6">
+							<div class="space-y-2">
+								<Label for="tpl-image">Docker image *</Label>
 								<Input
-									id="dockerImage"
+									id="tpl-image"
 									bind:value={dockerImage}
 									placeholder="nginx:latest, redis:alpine, myregistry/myimage:v1"
-									class="h-12 font-mono text-base"
+									class="font-mono"
 								/>
-								<p class="text-sm text-muted-foreground">
+								<p class="text-xs text-muted-foreground">
 									The Docker image to pull and run for this module
 								</p>
 							</div>
 
-							<div class="space-y-4">
-								<div>
-									<h3 class="flex items-center gap-2 text-base font-medium">
-										<Heart class="h-5 w-5" />
-										Health Check
-									</h3>
-									<p class="mt-1 text-sm text-muted-foreground">
+							<div class="rounded-lg border bg-card">
+								<div class="border-b px-4 py-3">
+									<span class="stat-label">Health check</span>
+									<p class="mt-1 text-xs text-muted-foreground">
 										Configure how to verify the container is healthy
 									</p>
 								</div>
-
-								<div class="grid grid-cols-2 gap-6 rounded-lg border bg-card p-6">
-									<div class="space-y-3">
-										<Label for="healthCheckPath">Health Check Path</Label>
+								<div class="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+									<div class="space-y-2">
+										<Label for="tpl-hc-path">Health check path</Label>
 										<Input
-											id="healthCheckPath"
+											id="tpl-hc-path"
 											bind:value={healthCheckPath}
 											placeholder="/health or /api/status"
-											class="h-11"
 										/>
-										<p class="text-sm text-muted-foreground">HTTP endpoint to check</p>
+										<p class="text-xs text-muted-foreground">HTTP endpoint to check</p>
 									</div>
-									<div class="space-y-3">
-										<Label for="healthCheckPort">Health Check Port</Label>
+									<div class="space-y-2">
+										<Label for="tpl-hc-port">Health check port</Label>
 										<Input
-											id="healthCheckPort"
+											id="tpl-hc-port"
 											type="number"
 											bind:value={healthCheckPort}
 											min={0}
 											max={65535}
-											class="h-11"
 										/>
-										<p class="text-sm text-muted-foreground">0 = use first configured port</p>
+										<p class="text-xs text-muted-foreground">0 = use first configured port</p>
 									</div>
 								</div>
 							</div>
 
-							<div class="space-y-4">
-								<div>
-									<h3 class="text-base font-medium">Container User</h3>
-									<p class="mt-1 text-sm text-muted-foreground">
+							<div class="rounded-lg border bg-card">
+								<div class="border-b px-4 py-3">
+									<span class="stat-label">Container user</span>
+									<p class="mt-1 text-xs text-muted-foreground">
 										Default UID/GID for the container process
 									</p>
 								</div>
-								<div class="grid grid-cols-2 gap-6 rounded-lg border bg-card p-6">
-									<div class="space-y-3">
-										<Label for="defaultUid">Default UID</Label>
+								<div class="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+									<div class="space-y-2">
+										<Label for="tpl-uid">Default UID</Label>
 										<Input
-											id="defaultUid"
+											id="tpl-uid"
 											bind:value={defaultUid}
 											placeholder={'{{host.uid}}'}
-											class="h-11 font-mono"
+											class="font-mono"
 										/>
-										<p class="text-sm text-muted-foreground">User ID or alias</p>
+										<p class="text-xs text-muted-foreground">User ID or alias</p>
 									</div>
-									<div class="space-y-3">
-										<Label for="defaultGid">Default GID</Label>
+									<div class="space-y-2">
+										<Label for="tpl-gid">Default GID</Label>
 										<Input
-											id="defaultGid"
+											id="tpl-gid"
 											bind:value={defaultGid}
 											placeholder={'{{host.gid}}'}
-											class="h-11 font-mono"
+											class="font-mono"
 										/>
-										<p class="text-sm text-muted-foreground">Group ID or alias</p>
+										<p class="text-xs text-muted-foreground">Group ID or alias</p>
 									</div>
 								</div>
 							</div>
 
-							<div class="space-y-4">
-								<h3 class="text-base font-medium">Behavior Flags</h3>
-								<div class="space-y-4">
-									<label
-										class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
-									>
-										<Switch bind:checked={requiresServer} class="mt-0.5" />
-										<div class="space-y-1">
-											<span class="font-medium">Requires Server</span>
-											<p class="text-sm text-muted-foreground">
-												This module must be attached to a game server
-											</p>
-										</div>
-									</label>
-
-									<label
-										class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
-									>
-										<Switch bind:checked={supportsProxy} class="mt-0.5" />
-										<div class="space-y-1">
-											<span class="font-medium">Supports Proxy</span>
-											<p class="text-sm text-muted-foreground">
-												Can be accessed through the server's proxy hostname
-											</p>
-										</div>
-									</label>
-								</div>
+							<div class="space-y-3">
+								<span class="stat-label">Behavior flags</span>
+								<label
+									class="flex cursor-pointer items-center justify-between gap-4 rounded-lg border bg-card p-4 transition-colors hover:bg-accent/50"
+								>
+									<div class="space-y-0.5">
+										<span class="text-sm font-medium">Requires server</span>
+										<p class="text-xs text-muted-foreground">
+											This module must be attached to a game server
+										</p>
+									</div>
+									<Switch bind:checked={requiresServer} />
+								</label>
+								<label
+									class="flex cursor-pointer items-center justify-between gap-4 rounded-lg border bg-card p-4 transition-colors hover:bg-accent/50"
+								>
+									<div class="space-y-0.5">
+										<span class="text-sm font-medium">Supports proxy</span>
+										<p class="text-xs text-muted-foreground">
+											Can be accessed through the server's proxy hostname
+										</p>
+									</div>
+									<Switch bind:checked={supportsProxy} />
+								</label>
 							</div>
 						</div>
 					{:else if activeSection === 'ports'}
-						<!-- Ports Section -->
-						<div class="space-y-6">
-							<div class="flex items-center justify-between">
+						<div class="space-y-4">
+							<div class="flex items-start justify-between gap-4">
 								<div>
-									<p class="text-muted-foreground">
+									<p class="text-sm font-medium">
 										{ports.length} port{ports.length !== 1 ? 's' : ''} configured
 									</p>
-									<p class="mt-1 text-sm text-muted-foreground">
+									<p class="mt-0.5 text-xs text-muted-foreground">
 										Host port 0 = auto-allocate when creating module instances
 									</p>
 								</div>
-								<Button onclick={addPort} class="gap-2">
-									<Plus class="h-4 w-4" />
-									Add Port
+								<Button size="sm" onclick={addPort}>
+									<Plus class="size-4" />
+									Add port
 								</Button>
 							</div>
 
 							{#if ports.length > 0}
-								<div class="space-y-4">
+								<div class="space-y-3">
 									{#each ports as port, i (i)}
-										<div class="space-y-4 rounded-xl border bg-card p-6">
+										<div class="space-y-4 rounded-lg border bg-card p-4">
 											<div class="flex items-center justify-between">
-												<span class="font-medium">Port {i + 1}</span>
+												<span class="stat-label">Port {i + 1}</span>
 												<Button
 													variant="ghost"
 													size="icon"
 													onclick={() => removePort(i)}
-													class="h-8 w-8 text-destructive hover:text-destructive"
+													class="size-7 text-muted-foreground hover:text-destructive"
 												>
-													<Trash2 class="h-4 w-4" />
+													<Trash2 class="size-4" />
 												</Button>
 											</div>
 
 											<div class="space-y-2">
-												<Label>Port Name</Label>
-												<Input
-													bind:value={port.name}
-													placeholder="Web UI, API, Metrics..."
-													class="h-11"
-												/>
+												<Label>Port name</Label>
+												<Input bind:value={port.name} placeholder="Web UI, API, Metrics..." />
 											</div>
 
-											<div class="grid grid-cols-3 gap-4">
+											<div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
 												<div class="space-y-2">
-													<Label>Host Port</Label>
+													<Label>Host port</Label>
 													<Input
 														type="number"
 														bind:value={port.hostPort}
 														min={0}
 														max={65535}
 														placeholder="0 = auto"
-														class="h-11"
 													/>
 												</div>
 												<div class="space-y-2">
-													<Label>Container Port</Label>
+													<Label>Container port</Label>
 													<Input
 														type="number"
 														bind:value={port.containerPort}
 														min={1}
 														max={65535}
 														placeholder="8080"
-														class="h-11"
 													/>
 												</div>
 												<div class="space-y-2">
@@ -716,7 +709,7 @@
 															if (v) port.protocol = v;
 														}}
 													>
-														<SelectTrigger class="h-11">
+														<SelectTrigger class="w-full">
 															<span class="uppercase">{port.protocol}</span>
 														</SelectTrigger>
 														<SelectContent>
@@ -729,7 +722,7 @@
 												</div>
 											</div>
 
-											<label class="flex items-center gap-3 pt-2">
+											<label class="flex w-fit cursor-pointer items-center gap-2">
 												<Checkbox bind:checked={port.proxyEnabled} />
 												<span class="text-sm">Route through proxy</span>
 											</label>
@@ -737,136 +730,132 @@
 									{/each}
 								</div>
 							{:else}
-								<div
-									class="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-center"
-								>
-									<Network class="mb-4 h-12 w-12 text-muted-foreground/50" />
-									<h3 class="mb-1 font-medium">No ports configured</h3>
-									<p class="mb-4 text-sm text-muted-foreground">
-										Add ports to expose container services
-									</p>
-									<Button onclick={addPort} variant="outline" class="gap-2">
-										<Plus class="h-4 w-4" />
-										Add Port
-									</Button>
+								<div class="rounded-xl border border-dashed">
+									<EmptyState
+										icon={Network}
+										title="No ports configured"
+										description="Add ports to expose container services"
+									>
+										<Button variant="outline" size="sm" onclick={addPort}>
+											<Plus class="size-4" />
+											Add port
+										</Button>
+									</EmptyState>
 								</div>
 							{/if}
 						</div>
 					{:else if activeSection === 'environment'}
-						<!-- Environment Section -->
-						<div class="space-y-6">
-							<div class="flex items-center justify-between">
+						<div class="space-y-4">
+							<div class="flex items-start justify-between gap-4">
 								<div>
-									<p class="text-muted-foreground">
+									<p class="text-sm font-medium">
 										{envVars.length} variable{envVars.length !== 1 ? 's' : ''} defined
 									</p>
-									<p class="mt-1 text-sm text-muted-foreground">
+									<p class="mt-0.5 text-xs text-muted-foreground">
 										Use template aliases like {'{{server.data_path}}'} for dynamic values
 									</p>
 								</div>
-								<Button onclick={addEnvVar} class="gap-2">
-									<Plus class="h-4 w-4" />
-									Add Variable
+								<Button size="sm" onclick={addEnvVar}>
+									<Plus class="size-4" />
+									Add variable
 								</Button>
 							</div>
 
 							{#if envVars.length > 0}
-								<div class="space-y-3">
+								<div class="space-y-2">
 									{#each envVars as env, i (i)}
-										<div class="flex items-center gap-3 rounded-lg border bg-card p-4">
+										<div class="flex items-center gap-2 rounded-lg border bg-card px-3 py-2.5">
 											<Input
 												bind:value={env.key}
 												placeholder="VARIABLE_NAME"
-												class="h-11 w-56 font-mono"
+												class="w-56 font-mono"
 											/>
-											<span class="text-xl text-muted-foreground">=</span>
+											<span class="font-mono text-sm text-muted-foreground">=</span>
 											<Input
 												bind:value={env.value}
 												placeholder="value or {'{{alias}}'}"
-												class="h-11 flex-1 font-mono"
+												class="flex-1 font-mono"
 											/>
 											<Button
 												variant="ghost"
 												size="icon"
 												onclick={() => removeEnvVar(i)}
-												class="h-10 w-10 shrink-0 text-destructive hover:text-destructive"
+												class="size-7 shrink-0 text-muted-foreground hover:text-destructive"
 											>
-												<Trash2 class="h-4 w-4" />
+												<Trash2 class="size-4" />
 											</Button>
 										</div>
 									{/each}
 								</div>
 							{:else}
-								<div
-									class="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-center"
-								>
-									<Variable class="mb-4 h-12 w-12 text-muted-foreground/50" />
-									<h3 class="mb-1 font-medium">No environment variables</h3>
-									<p class="mb-4 text-sm text-muted-foreground">
-										Add default variables for container configuration
-									</p>
-									<Button onclick={addEnvVar} variant="outline" class="gap-2">
-										<Plus class="h-4 w-4" />
-										Add Variable
-									</Button>
+								<div class="rounded-xl border border-dashed">
+									<EmptyState
+										icon={Variable}
+										title="No environment variables"
+										description="Add default variables for container configuration"
+									>
+										<Button variant="outline" size="sm" onclick={addEnvVar}>
+											<Plus class="size-4" />
+											Add variable
+										</Button>
+									</EmptyState>
 								</div>
 							{/if}
 						</div>
 					{:else if activeSection === 'volumes'}
-						<!-- Volumes Section -->
-						<div class="space-y-6">
-							<div class="flex items-center justify-between">
+						<div class="space-y-4">
+							<div class="flex items-start justify-between gap-4">
 								<div>
-									<p class="text-muted-foreground">
+									<p class="text-sm font-medium">
 										{volumes.length} volume{volumes.length !== 1 ? 's' : ''} configured
 									</p>
-									<p class="mt-1 text-sm text-muted-foreground">
+									<p class="mt-0.5 text-xs text-muted-foreground">
 										Use template aliases like {'{{module.data_path}}'} for dynamic paths
 									</p>
 								</div>
-								<Button onclick={addVolume} class="gap-2">
-									<Plus class="h-4 w-4" />
-									Add Volume
+								<Button size="sm" onclick={addVolume}>
+									<Plus class="size-4" />
+									Add volume
 								</Button>
 							</div>
 
 							{#if volumes.length > 0}
-								<div class="space-y-4">
+								<div class="space-y-3">
 									{#each volumes as vol, i (i)}
-										<div class="space-y-4 rounded-xl border bg-card p-6">
+										<div class="space-y-4 rounded-lg border bg-card p-4">
 											<div class="flex items-center justify-between">
-												<span class="font-medium">Volume {i + 1}</span>
+												<span class="stat-label">Volume {i + 1}</span>
 												<Button
 													variant="ghost"
 													size="icon"
 													onclick={() => removeVolume(i)}
-													class="h-8 w-8 text-destructive hover:text-destructive"
+													class="size-7 text-muted-foreground hover:text-destructive"
 												>
-													<Trash2 class="h-4 w-4" />
+													<Trash2 class="size-4" />
 												</Button>
 											</div>
 
-											<div class="grid grid-cols-2 gap-4">
+											<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 												<div class="space-y-2">
-													<Label>Host Path</Label>
+													<Label>Host path</Label>
 													<Input
 														bind:value={vol.hostPath}
 														placeholder="/host/path or {'{{alias}}'}"
-														class="h-11 font-mono"
+														class="font-mono"
 													/>
 												</div>
 												<div class="space-y-2">
-													<Label>Container Path</Label>
+													<Label>Container path</Label>
 													<Input
 														bind:value={vol.containerPath}
 														placeholder="/container/path"
-														class="h-11 font-mono"
+														class="font-mono"
 													/>
 												</div>
 											</div>
 
-											<div class="flex items-center gap-6 pt-2">
-												<label class="flex items-center gap-3">
+											<div class="flex items-center gap-6">
+												<label class="flex cursor-pointer items-center gap-2">
 													<Checkbox
 														checked={vol.readOnly}
 														onCheckedChange={(checked) => {
@@ -876,7 +865,7 @@
 													/>
 													<span class="text-sm">Read-only mount</span>
 												</label>
-												<label class="flex items-center gap-3">
+												<label class="flex cursor-pointer items-center gap-2">
 													<Checkbox
 														checked={vol.createDir}
 														onCheckedChange={(checked) => {
@@ -891,98 +880,85 @@
 									{/each}
 								</div>
 							{:else}
-								<div
-									class="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-center"
-								>
-									<HardDrive class="mb-4 h-12 w-12 text-muted-foreground/50" />
-									<h3 class="mb-1 font-medium">No volumes configured</h3>
-									<p class="mb-4 text-sm text-muted-foreground">
-										Mount host directories for persistent data
-									</p>
-									<Button onclick={addVolume} variant="outline" class="gap-2">
-										<Plus class="h-4 w-4" />
-										Add Volume
-									</Button>
+								<div class="rounded-xl border border-dashed">
+									<EmptyState
+										icon={HardDrive}
+										title="No volumes configured"
+										description="Mount host directories for persistent data"
+									>
+										<Button variant="outline" size="sm" onclick={addVolume}>
+											<Plus class="size-4" />
+											Add volume
+										</Button>
+									</EmptyState>
 								</div>
 							{/if}
 						</div>
 					{:else if activeSection === 'advanced'}
-						<!-- Advanced Section -->
-						<div class="space-y-10">
-							<!-- Suggested Dependencies -->
-							<div class="space-y-4">
+						<div class="space-y-8">
+							<!-- Suggested dependencies group -->
+							<div class="space-y-3">
 								<div>
-									<h3 class="text-lg font-medium">Suggested Dependencies</h3>
-									<p class="mt-1 text-sm text-muted-foreground">
+									<h3 class="text-sm font-medium">Suggested dependencies</h3>
+									<p class="mt-0.5 text-xs text-muted-foreground">
 										Template IDs this module commonly needs (comma-separated)
 									</p>
 								</div>
 								<Input
 									bind:value={suggestedDependencies}
 									placeholder="redis, mysql, prometheus..."
-									class="h-11 max-w-xl font-mono"
+									class="max-w-xl font-mono"
 								/>
 							</div>
 
-							<!-- Event Hooks -->
-							<div class="space-y-4">
-								<div class="flex items-center justify-between">
+							<!-- Default hooks group -->
+							<div class="space-y-3">
+								<div class="flex items-start justify-between gap-4">
 									<div>
-										<h3 class="text-lg font-medium">Default Event Hooks</h3>
-										<p class="mt-1 text-sm text-muted-foreground">
+										<h3 class="text-sm font-medium">Default event hooks</h3>
+										<p class="mt-0.5 text-xs text-muted-foreground">
 											Pre-configured hooks for server lifecycle events
 										</p>
 									</div>
-									<Button onclick={addDefaultHook} variant="outline" class="gap-2">
-										<Plus class="h-4 w-4" />
-										Add Hook
+									<Button variant="outline" size="sm" onclick={addDefaultHook}>
+										<Plus class="size-4" />
+										Add hook
 									</Button>
 								</div>
 
 								{#if defaultHooks.length > 0}
-									<div class="space-y-4">
+									<div class="space-y-3">
 										{#each defaultHooks as hook, i (i)}
-											<div class="space-y-4 rounded-xl border bg-card p-6">
+											<div class="space-y-4 rounded-lg border bg-card p-4">
 												<div class="flex items-center justify-between">
-													<span class="font-medium">Hook {i + 1}</span>
+													<span class="stat-label">Hook {i + 1}</span>
 													<Button
 														variant="ghost"
 														size="icon"
 														onclick={() => removeDefaultHook(i)}
-														class="h-8 w-8 text-destructive hover:text-destructive"
+														class="size-7 text-muted-foreground hover:text-destructive"
 													>
-														<Trash2 class="h-4 w-4" />
+														<Trash2 class="size-4" />
 													</Button>
 												</div>
 
-												<div class="grid grid-cols-3 gap-4">
+												<div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
 													<div class="space-y-2">
 														<Label>Event</Label>
 														<Select
 															type="single"
-															value={getEventTypeLabel(hook.event)}
+															value={String(hook.event)}
 															onValueChange={(v) => {
-																if (v === 'Server Start')
-																	hook.event = TriggeredEventType.SERVER_START;
-																else if (v === 'Server Stop')
-																	hook.event = TriggeredEventType.SERVER_STOP;
-																else if (v === 'Server Healthy')
-																	hook.event = TriggeredEventType.SERVER_HEALTHY;
-																else if (v === 'Player Join')
-																	hook.event = TriggeredEventType.PLAYER_JOIN;
-																else if (v === 'Player Leave')
-																	hook.event = TriggeredEventType.PLAYER_LEAVE;
+																if (v) hook.event = Number(v);
 															}}
 														>
-															<SelectTrigger class="h-11">
-																<span>{getEventTypeLabel(hook.event)}</span>
+															<SelectTrigger class="w-full">
+																<span class="truncate">{getEventTypeLabel(hook.event)}</span>
 															</SelectTrigger>
 															<SelectContent>
-																<SelectItem value="Server Start">Server Start</SelectItem>
-																<SelectItem value="Server Stop">Server Stop</SelectItem>
-																<SelectItem value="Server Healthy">Server Healthy</SelectItem>
-																<SelectItem value="Player Join">Player Join</SelectItem>
-																<SelectItem value="Player Leave">Player Leave</SelectItem>
+																{#each SERVER_EVENT_TYPES as { type, label } (type)}
+																	<SelectItem value={String(type)}>{label}</SelectItem>
+																{/each}
 															</SelectContent>
 														</Select>
 													</div>
@@ -990,37 +966,36 @@
 														<Label>Action</Label>
 														<Select
 															type="single"
-															value={getEventActionLabel(hook.action)}
+															value={String(hook.action)}
 															onValueChange={(v) => {
-																if (v === 'Start Module') hook.action = ModuleEventAction.START;
-																else if (v === 'Stop Module') hook.action = ModuleEventAction.STOP;
-																else if (v === 'Restart Module')
-																	hook.action = ModuleEventAction.RESTART;
-																else if (v === 'Execute Command')
-																	hook.action = ModuleEventAction.EXEC;
-																else if (v === 'RCON Command') hook.action = ModuleEventAction.RCON;
+																if (v) hook.action = Number(v);
 															}}
 														>
-															<SelectTrigger class="h-11">
-																<span>{getEventActionLabel(hook.action)}</span>
+															<SelectTrigger class="w-full">
+																<span class="truncate">{getEventActionLabel(hook.action)}</span>
 															</SelectTrigger>
 															<SelectContent>
-																<SelectItem value="Start Module">Start Module</SelectItem>
-																<SelectItem value="Stop Module">Stop Module</SelectItem>
-																<SelectItem value="Restart Module">Restart Module</SelectItem>
-																<SelectItem value="Execute Command">Execute Command</SelectItem>
-																<SelectItem value="RCON Command">RCON Command</SelectItem>
+																<SelectItem value={String(ModuleEventAction.START)}>
+																	Start Module
+																</SelectItem>
+																<SelectItem value={String(ModuleEventAction.STOP)}>
+																	Stop Module
+																</SelectItem>
+																<SelectItem value={String(ModuleEventAction.RESTART)}>
+																	Restart Module
+																</SelectItem>
+																<SelectItem value={String(ModuleEventAction.EXEC)}>
+																	Execute Command
+																</SelectItem>
+																<SelectItem value={String(ModuleEventAction.RCON)}>
+																	RCON Command
+																</SelectItem>
 															</SelectContent>
 														</Select>
 													</div>
 													<div class="space-y-2">
 														<Label>Delay (seconds)</Label>
-														<Input
-															type="number"
-															bind:value={hook.delaySeconds}
-															min={0}
-															class="h-11"
-														/>
+														<Input type="number" bind:value={hook.delaySeconds} min={0} />
 													</div>
 												</div>
 
@@ -1032,7 +1007,7 @@
 															placeholder={hook.action === ModuleEventAction.RCON
 																? 'say Hello'
 																: '/bin/sh -c "..."'}
-															class="h-11 font-mono"
+															class="font-mono"
 														/>
 													</div>
 												{/if}
@@ -1042,7 +1017,7 @@
 													<Input
 														bind:value={hook.condition}
 														placeholder={'{{server.players_online}} == 0'}
-														class="h-11 font-mono"
+														class="font-mono"
 													/>
 												</div>
 											</div>
@@ -1050,120 +1025,106 @@
 									</div>
 								{:else}
 									<div
-										class="rounded-lg border border-dashed p-6 text-center text-muted-foreground"
+										class="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground"
 									>
 										No default event hooks configured
 									</div>
 								{/if}
 							</div>
 
-							<!-- Init Command -->
-							<div class="space-y-4">
+							<!-- Init command group -->
+							<div class="space-y-3">
 								<div>
-									<h3 class="text-lg font-medium">Default Init Command</h3>
-									<p class="mt-1 text-sm text-muted-foreground">
+									<h3 class="text-sm font-medium">Default init command</h3>
+									<p class="mt-0.5 text-xs text-muted-foreground">
 										Command to exec inside the container after it starts
 									</p>
 								</div>
 
-								<div class="space-y-4 rounded-lg border bg-card p-6">
+								<div class="space-y-4 rounded-lg border bg-card p-4">
 									<div class="space-y-2">
 										<Label>Command</Label>
 										<Input
 											bind:value={defaultInitCommand}
 											placeholder="sh -c 'sed -i ...'"
-											class="h-11 font-mono"
+											class="font-mono"
 										/>
 										<p class="text-xs text-muted-foreground">
 											Shell command to exec inside the container after start
 										</p>
 									</div>
-									<div class="grid grid-cols-2 gap-6">
+									<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 										<div class="space-y-2">
 											<Label>Delay (seconds)</Label>
-											<Input
-												type="number"
-												bind:value={defaultInitCommandDelay}
-												min={0}
-												class="h-11"
-											/>
+											<Input type="number" bind:value={defaultInitCommandDelay} min={0} />
 											<p class="text-xs text-muted-foreground">
 												Seconds to wait after start before running
 											</p>
 										</div>
-										<div class="flex items-center pt-6">
-											<label class="flex items-center gap-3">
-												<Checkbox bind:checked={defaultRestartAfterInit} />
-												<div>
-													<span class="text-sm font-medium">Restart after init</span>
-													<p class="text-xs text-muted-foreground">
-														Restart the container after the command runs
-													</p>
-												</div>
-											</label>
-										</div>
+										<label class="flex cursor-pointer items-start gap-2 sm:pt-7">
+											<Checkbox bind:checked={defaultRestartAfterInit} />
+											<div class="space-y-0.5">
+												<span class="text-sm font-medium">Restart after init</span>
+												<p class="text-xs text-muted-foreground">
+													Restart the container after the command runs
+												</p>
+											</div>
+										</label>
 									</div>
 								</div>
 							</div>
 
-							<!-- Metadata -->
-							<div class="space-y-4">
-								<div class="flex items-center justify-between">
+							<!-- Default metadata group -->
+							<div class="space-y-3">
+								<div class="flex items-start justify-between gap-4">
 									<div>
-										<h3 class="flex items-center gap-2 text-lg font-medium">
-											<Info class="h-5 w-5" />
-											Default Metadata
-										</h3>
-										<p class="mt-1 text-sm text-muted-foreground">
+										<h3 class="text-sm font-medium">Default metadata</h3>
+										<p class="mt-0.5 text-xs text-muted-foreground">
 											Custom key-value pairs for notes, instructions, or links
 										</p>
 									</div>
-									<Button onclick={addMetadataEntry} variant="outline" class="gap-2">
-										<Plus class="h-4 w-4" />
-										Add Entry
+									<Button variant="outline" size="sm" onclick={addMetadataEntry}>
+										<Plus class="size-4" />
+										Add entry
 									</Button>
 								</div>
 
 								{#if metadata.length > 0}
-									<div class="space-y-3">
+									<div class="space-y-2">
 										{#each metadata as entry, i (i)}
-											<div class="flex items-center gap-3 rounded-lg border bg-card p-4">
-												<Input
-													bind:value={entry.key}
-													placeholder="key"
-													class="h-11 w-48 font-mono"
-												/>
-												<span class="text-xl text-muted-foreground">:</span>
+											<div class="flex items-center gap-2 rounded-lg border bg-card px-3 py-2.5">
+												<Input bind:value={entry.key} placeholder="key" class="w-48 font-mono" />
+												<span class="font-mono text-sm text-muted-foreground">:</span>
 												<Input
 													bind:value={entry.value}
 													placeholder="value"
-													class="h-11 flex-1 font-mono"
+													class="flex-1 font-mono"
 												/>
 												<Button
 													variant="ghost"
 													size="icon"
 													onclick={() => removeMetadataEntry(i)}
-													class="h-10 w-10 shrink-0 text-destructive hover:text-destructive"
+													class="size-7 shrink-0 text-muted-foreground hover:text-destructive"
 												>
-													<Trash2 class="h-4 w-4" />
+													<Trash2 class="size-4" />
 												</Button>
 											</div>
 										{/each}
 									</div>
 								{:else}
 									<div
-										class="rounded-lg border border-dashed p-6 text-center text-muted-foreground"
+										class="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground"
 									>
 										No metadata entries
 									</div>
 								{/if}
 							</div>
 
-							<!-- Documentation -->
-							<div class="space-y-4">
+							<!-- Documentation group -->
+							<div class="space-y-3">
 								<div>
-									<h3 class="text-lg font-medium">Documentation</h3>
-									<p class="mt-1 text-sm text-muted-foreground">
+									<h3 class="text-sm font-medium">Documentation</h3>
+									<p class="mt-0.5 text-xs text-muted-foreground">
 										Usage instructions, configuration notes, or helpful information
 									</p>
 								</div>
@@ -1178,19 +1139,19 @@
 					{/if}
 				</div>
 
-				<!-- Footer -->
-				<div class="flex items-center justify-between border-t bg-muted/20 p-4">
-					<Button variant="ghost" onclick={() => (open = false)}>Cancel</Button>
+				<!-- Footer actions -->
+				<div class="flex items-center justify-end gap-2 border-t px-6 py-4">
+					<Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
 					<Button
 						onclick={handleSubmit}
 						disabled={!name.trim() || !dockerImage.trim() || submitting}
 						class="min-w-[120px]"
 					>
 						{#if submitting}
-							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							<Loader2 class="size-4 animate-spin" />
 							{mode === 'create' ? 'Creating...' : 'Saving...'}
 						{:else}
-							{mode === 'create' ? 'Create Template' : 'Save Changes'}
+							{mode === 'create' ? 'Create template' : 'Save changes'}
 						{/if}
 					</Button>
 				</div>

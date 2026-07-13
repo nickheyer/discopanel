@@ -1,15 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle
-	} from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
 	import { ScrollText, RefreshCw, Download, Loader2, AlertCircle, ArrowDown } from '@lucide/svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { toast } from 'svelte-sonner';
 	import { rpcClient } from '$lib/api/rpc-client';
 
@@ -18,7 +11,7 @@
 	let logs = $state('');
 	let filename = $state('');
 	let fileSize = $state(0);
-	let autoScroll = $state(true);
+	let pinned = $state(true);
 	let logContainer: HTMLPreElement | null = $state(null);
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -28,7 +21,7 @@
 		refreshing = true;
 		try {
 			const response = await rpcClient.support.getApplicationLogs({
-				tail: 500 // Get last 500 lines
+				tail: 500 // Fetches last 500 lines
 			});
 			logs = response.content;
 			filename = response.filename;
@@ -38,8 +31,8 @@
 				toast.success('Logs refreshed');
 			}
 
-			// Auto-scroll to bottom
-			if (autoScroll && logContainer) {
+			// Keeps view pinned to newest line
+			if (pinned && logContainer) {
 				setTimeout(() => {
 					if (logContainer) {
 						logContainer.scrollTop = logContainer.scrollHeight;
@@ -56,6 +49,19 @@
 			loading = false;
 			refreshing = false;
 		}
+	}
+
+	// Scrolling away unpins, returning to the bottom repins
+	function handleScroll() {
+		if (!logContainer) return;
+		const { scrollTop, scrollHeight, clientHeight } = logContainer;
+		pinned = scrollHeight - scrollTop - clientHeight < 5;
+	}
+
+	function scrollToBottom() {
+		if (!logContainer) return;
+		logContainer.scrollTop = logContainer.scrollHeight;
+		pinned = true;
 	}
 
 	function downloadLogs() {
@@ -79,15 +85,9 @@
 		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 	}
 
-	function scrollToBottom() {
-		if (logContainer) {
-			logContainer.scrollTop = logContainer.scrollHeight;
-		}
-	}
-
 	onMount(() => {
 		loadLogs();
-		// Auto-refresh every 5 seconds
+		// Refreshes logs every 5 seconds
 		refreshInterval = setInterval(() => loadLogs(), 5000);
 	});
 
@@ -98,99 +98,98 @@
 	});
 </script>
 
-<Card
-	class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
->
-	<div
-		class="pointer-events-none absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
-	></div>
-	<CardHeader class="relative pb-4">
-		<div class="flex items-center justify-between">
-			<div>
-				<CardTitle class="text-2xl font-semibold">Application Logs</CardTitle>
-				<CardDescription class="mt-2 text-base">
-					View real-time DiscoPanel application logs for debugging and monitoring.
-				</CardDescription>
-			</div>
-			<div class="flex items-center gap-2">
-				{#if filename}
-					<Badge variant="outline" class="text-xs">
-						{filename}
-					</Badge>
-					<Badge variant="secondary" class="text-xs">
+<div class="flex min-h-0 flex-1 flex-col gap-3">
+	<div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-terminal shadow-sm">
+		<div class="flex shrink-0 items-center gap-3 border-b border-white/8 bg-white/3 px-3 py-2">
+			<div class="flex min-w-0 items-center gap-2">
+				<span class="relative flex size-2 shrink-0">
+					<span
+						class="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-ok opacity-40"
+					></span>
+					<span class="relative inline-flex size-2 rounded-full bg-status-ok"></span>
+				</span>
+				<span class="truncate font-mono text-xs font-medium tracking-wide text-white/80">
+					{filename || 'discopanel.log'}
+				</span>
+				{#if fileSize > 0}
+					<span class="tabular shrink-0 font-mono text-[11px] text-white/35">
 						{formatFileSize(fileSize)}
-					</Badge>
+					</span>
 				{/if}
 			</div>
-		</div>
-	</CardHeader>
-	<CardContent class="space-y-4">
-		<!-- Controls -->
-		<div class="flex items-center justify-between gap-4">
-			<div class="flex items-center gap-2">
-				<Button onclick={() => loadLogs(true)} disabled={refreshing} variant="outline" size="sm">
-					{#if refreshing}
-						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-					{:else}
-						<RefreshCw class="mr-2 h-4 w-4" />
-					{/if}
-					Refresh
-				</Button>
-				<Button onclick={downloadLogs} disabled={!logs} variant="outline" size="sm">
-					<Download class="mr-2 h-4 w-4" />
-					Download
-				</Button>
-				<Button onclick={scrollToBottom} variant="outline" size="sm">
-					<ArrowDown class="mr-2 h-4 w-4" />
-					Scroll to Bottom
-				</Button>
-			</div>
-			<div class="flex items-center gap-2">
-				<label class="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-					<input type="checkbox" bind:checked={autoScroll} class="rounded border-border" />
-					Auto-scroll
-				</label>
+
+			<div class="ml-auto flex shrink-0 items-center gap-0.5">
+				<Tooltip.Root>
+					<Tooltip.Trigger>
+						<Button
+							size="icon"
+							variant="ghost"
+							onclick={() => loadLogs(true)}
+							disabled={refreshing}
+							class="size-6.5 text-white/45 hover:bg-white/10 hover:text-white"
+						>
+							{#if refreshing}
+								<Loader2 class="size-3.5 animate-spin" />
+							{:else}
+								<RefreshCw class="size-3.5" />
+							{/if}
+						</Button>
+					</Tooltip.Trigger>
+					<Tooltip.Content>Refresh now</Tooltip.Content>
+				</Tooltip.Root>
+				<Tooltip.Root>
+					<Tooltip.Trigger>
+						<Button
+							size="icon"
+							variant="ghost"
+							onclick={downloadLogs}
+							disabled={!logs}
+							class="size-6.5 text-white/45 hover:bg-white/10 hover:text-white"
+						>
+							<Download class="size-3.5" />
+						</Button>
+					</Tooltip.Trigger>
+					<Tooltip.Content>Download logs</Tooltip.Content>
+				</Tooltip.Root>
 			</div>
 		</div>
 
-		<!-- Log Display -->
-		<div class="relative overflow-hidden rounded-lg border border-border bg-black/90">
+		<div class="relative min-h-0 flex-1">
 			{#if loading}
-				<div class="flex h-96 items-center justify-center">
-					<div class="space-y-3 text-center">
-						<Loader2 class="mx-auto h-8 w-8 animate-spin text-primary" />
-						<div class="text-sm text-muted-foreground">Loading logs...</div>
-					</div>
+				<div class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-white/30">
+					<Loader2 class="mb-2 size-6 animate-spin" />
+					<p class="font-mono text-sm">Loading logs...</p>
 				</div>
 			{:else if !logs}
-				<div class="flex h-96 items-center justify-center">
-					<div class="space-y-3 text-center">
-						<AlertCircle class="mx-auto h-8 w-8 text-muted-foreground" />
-						<div class="text-sm text-muted-foreground">No logs available</div>
-						<p class="text-xs text-muted-foreground">
-							File logging may not be enabled in your configuration.
-						</p>
-					</div>
+				<div class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-white/30">
+					<AlertCircle class="mb-2 size-6" />
+					<p class="font-mono text-sm">No logs available</p>
+					<p class="font-mono text-xs">File logging may not be enabled in your configuration.</p>
 				</div>
 			{:else}
 				<pre
 					bind:this={logContainer}
-					class="h-96 overflow-auto p-4 font-mono text-xs break-all whitespace-pre-wrap text-green-400">{logs}</pre>
+					onscroll={handleScroll}
+					class="absolute inset-0 overflow-auto p-4 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-zinc-300">{logs}</pre>
+
+				{#if !pinned}
+					<button
+						class="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-white/15 bg-terminal/95 px-3 py-1 font-mono text-xs text-white/80 shadow-lg backdrop-blur-sm transition-colors hover:bg-white/10"
+						onclick={scrollToBottom}
+					>
+						<ArrowDown class="size-3" />
+						Follow output
+					</button>
+				{/if}
 			{/if}
 		</div>
+	</div>
 
-		<!-- Info Notice -->
-		<div class="rounded-lg border border-border/50 bg-muted/30 p-4">
-			<div class="flex gap-3">
-				<ScrollText class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-				<div class="space-y-1 text-sm text-muted-foreground">
-					<p class="font-medium">Log Information</p>
-					<p class="text-xs leading-relaxed">
-						Showing the last 500 lines of application logs. Logs auto-refresh every 5 seconds. For
-						complete logs, use the Support tab to generate a support bundle or click Download.
-					</p>
-				</div>
-			</div>
-		</div>
-	</CardContent>
-</Card>
+	<div class="flex shrink-0 items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+		<ScrollText class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+		<p class="text-xs leading-relaxed text-muted-foreground">
+			Showing the last 500 lines, refreshed every 5 seconds. For complete logs, download the file or
+			generate a support bundle from the Support tab.
+		</p>
+	</div>
+</div>

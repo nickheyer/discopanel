@@ -57,12 +57,11 @@ type LocalConfig struct {
 }
 
 type ServerConfig struct {
-	Port         string `mapstructure:"port" json:"port"`
-	Host         string `mapstructure:"host" json:"host"`
-	ReadTimeout  int    `mapstructure:"read_timeout" json:"read_timeout"`
-	WriteTimeout int    `mapstructure:"write_timeout" json:"write_timeout"`
-	IdleTimeout  int    `mapstructure:"idle_timeout" json:"idle_timeout"`
-	UserAgent    string `mapstructure:"user_agent" json:"user_agent"`
+	Port              string `mapstructure:"port" json:"port"`
+	Host              string `mapstructure:"host" json:"host"`
+	ReadHeaderTimeout int    `mapstructure:"read_header_timeout" json:"read_header_timeout"`
+	IdleTimeout       int    `mapstructure:"idle_timeout" json:"idle_timeout"`
+	UserAgent         string `mapstructure:"user_agent" json:"user_agent"`
 }
 
 type DockerConfig struct {
@@ -70,16 +69,16 @@ type DockerConfig struct {
 	Host         string            `mapstructure:"host" json:"host"`
 	Version      string            `mapstructure:"version" json:"version"`
 	NetworkName  string            `mapstructure:"network_name" json:"network_name"`
-	RegistryURL  string            `mapstructure:"registry_url" json:"registry_url"`
+	RuntimeImage string            `mapstructure:"runtime_image" json:"runtime_image"` // Override for discopanel-runtime repository
+	AgentURL     string            `mapstructure:"agent_url" json:"agent_url"`         // Panel URL for runtime containers, auto-detected if empty
 	DNS          string            `mapstructure:"dns" json:"dns"`
 	Labels       map[string]string `mapstructure:"labels" json:"labels"`
 }
 
 type StorageConfig struct {
-	DataDir       string `mapstructure:"data_dir" json:"data_dir"`
-	BackupDir     string `mapstructure:"backup_dir" json:"backup_dir"`
-	TempDir       string `mapstructure:"temp_dir" json:"temp_dir"`
-	MaxUploadSize int64  `mapstructure:"max_upload_size" json:"max_upload_size"`
+	DataDir   string `mapstructure:"data_dir" json:"data_dir"`
+	BackupDir string `mapstructure:"backup_dir" json:"backup_dir"`
+	TempDir   string `mapstructure:"temp_dir" json:"temp_dir"`
 }
 
 type ProxyConfig struct {
@@ -154,13 +153,13 @@ func Load(configPath string) (*Config, error) {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("error reading config file: %w", err)
 		}
-		// Config file not found; use defaults and environment
+		// Config file not found, uses defaults and environment
 	}
 
 	// Flatten nested maps like docker.labels into map[string]string
 	flattenMapSetting(v, "docker.labels")
 
-	// Unmarshal config with a decode hook that handles JSON strings from env
+	// Decodes config, handling JSON strings from env
 	var cfg Config
 	if err := v.Unmarshal(&cfg, func(dc *mapstructure.DecoderConfig) {
 		dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(
@@ -184,8 +183,7 @@ func setDefaults(v *viper.Viper) {
 	// Server defaults
 	v.SetDefault("server.port", "8080")
 	v.SetDefault("server.host", "0.0.0.0")
-	v.SetDefault("server.read_timeout", 15)
-	v.SetDefault("server.write_timeout", 15)
+	v.SetDefault("server.read_header_timeout", 15)
 	v.SetDefault("server.idle_timeout", 60)
 	v.SetDefault("server.user_agent", "DiscoPanel/1.0 (github.com/nickheyer/discopanel)")
 
@@ -201,7 +199,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.host", "unix:///var/run/docker.sock")
 	v.SetDefault("docker.version", "")
 	v.SetDefault("docker.network_name", "discopanel-network")
-	v.SetDefault("docker.registry_url", "")
+	v.SetDefault("docker.runtime_image", "")
+	v.SetDefault("docker.agent_url", "")
 	v.SetDefault("docker.dns", "")
 	v.SetDefault("docker.labels", map[string]string{})
 
@@ -213,7 +212,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("storage.data_dir", dataDir)
 	v.SetDefault("storage.backup_dir", "./backups")
 	v.SetDefault("storage.temp_dir", "./tmp")
-	v.SetDefault("storage.max_upload_size", 500*1024*1024) // 500MB
 
 	// Proxy defaults
 	v.SetDefault("proxy.enabled", false)
@@ -234,9 +232,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.enabled", true)
 	v.SetDefault("logging.file_path", "./data/discopanel.log")
 	v.SetDefault("logging.max_size", 10)   // 10 MB
-	v.SetDefault("logging.max_backups", 5) // keep 5
+	v.SetDefault("logging.max_backups", 5) // Keeps 5
 	v.SetDefault("logging.max_age", 30)    // 30 days
-	v.SetDefault("logging.compress", true) // compress rotated
+	v.SetDefault("logging.compress", true) // Compresses rotated logs
 
 	// Auth defaults
 	v.SetDefault("auth.session_timeout", 86400)
@@ -264,7 +262,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("upload.session_ttl", 240)                // 4 hours (in minutes)
 	v.SetDefault("upload.default_chunk_size", 5*1024*1024) // 5MB
 	v.SetDefault("upload.max_chunk_size", 10*1024*1024)    // 10MB
-	v.SetDefault("upload.max_upload_size", 0)              // unlimited
+	v.SetDefault("upload.max_upload_size", 0)              // Unlimited
 }
 
 func validateConfig(cfg *Config) error {
@@ -336,8 +334,7 @@ func jsonStringToMapHook() mapstructure.DecodeHookFuncType {
 	}
 }
 
-// flattenMapSetting flattens a nested viper setting into a flat map[string]string.
-// For example, docker.labels.com.example.enable: true becomes {"com.example.enable": "true"}.
+// Flattens a nested viper setting into a flat map
 func flattenMapSetting(v *viper.Viper, key string) {
 	val := v.Get(key)
 	if val == nil {

@@ -2,8 +2,10 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -21,7 +23,12 @@ type Store struct {
 }
 
 func NewSQLiteStore(cfg *config.Config) (*Store, error) {
-	db, err := gorm.Open(sqlite.Open(cfg.Database.Path), &gorm.Config{
+	dsn := cfg.Database.Path
+	// Pragmas reduce locked database errors under load
+	if dsn != ":memory:" && !strings.Contains(dsn, "?") {
+		dsn += "?_busy_timeout=5000&_journal_mode=WAL&_synchronous=NORMAL"
+	}
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
@@ -76,8 +83,8 @@ func (s *Store) CreateServer(ctx context.Context, server *Server) error {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
 
-	// Create and sync server config
-	return s.SyncServerConfigWithServer(ctx, server)
+	// Create and sync server properties
+	return s.SyncServerPropertiesWithServer(ctx, server)
 }
 
 func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
@@ -98,12 +105,28 @@ func (s *Store) ListServers(ctx context.Context) ([]*Server, error) {
 	return servers, err
 }
 
+// Resolves the server owning an agent token's SHA-256 hash
+func (s *Store) GetServerByAgentTokenHash(ctx context.Context, hash string) (*Server, error) {
+	if hash == "" {
+		return nil, fmt.Errorf("server not found: %w", gorm.ErrRecordNotFound)
+	}
+	var server Server
+	err := s.db.WithContext(ctx).First(&server, "agent_token_hash = ?", hash).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("server not found: %w", err)
+		}
+		return nil, err
+	}
+	return &server, nil
+}
+
 func (s *Store) UpdateServer(ctx context.Context, server *Server) error {
 	if err := s.db.WithContext(ctx).Save(server).Error; err != nil {
 		return err
 	}
-	// Sync config with updated server settings
-	return s.SyncServerConfigWithServer(ctx, server)
+	// Sync properties with updated server settings
+	return s.SyncServerPropertiesWithServer(ctx, server)
 }
 
 func (s *Store) DeleteServer(ctx context.Context, id string) error {
@@ -114,8 +137,13 @@ func (s *Store) DeleteServer(ctx context.Context, id string) error {
 			return err
 		}
 
-		// Delete config
-		if err := tx.Where("server_id = ?", id).Delete(&ServerConfig{}).Error; err != nil {
+		// Delete properties
+		if err := tx.Where("server_id = ?", id).Delete(&ServerProperties{}).Error; err != nil {
+			return err
+		}
+
+		// Delete metrics history
+		if err := tx.Where("server_id = ?", id).Delete(&MetricsSample{}).Error; err != nil {
 			return err
 		}
 
@@ -124,9 +152,106 @@ func (s *Store) DeleteServer(ctx context.Context, id string) error {
 	})
 }
 
+// Metrics history operations
+
+// Inserts one batch of telemetry points
+func (s *Store) AddMetricsSamples(ctx context.Context, samples []*MetricsSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Create(samples).Error
+}
+
+// Uses datetime() since stored timestamps may lack UTC offset
+
+// Scan target for bucketed metrics aggregation
+type metricsBucketRow struct {
+	ServerID   string  `gorm:"column:server_id"`
+	Bucket     int64   `gorm:"column:bucket"`
+	TPS        float64 `gorm:"column:tps"`
+	MSPT       float64 `gorm:"column:mspt"`
+	Players    int     `gorm:"column:players"`
+	CPUPercent float64 `gorm:"column:cpu_percent"`
+	MemoryMB   float64 `gorm:"column:memory_mb"`
+	HeapUsedMB float64 `gorm:"column:heap_used_mb"`
+	DiskBytes  int64   `gorm:"column:disk_bytes"`
+}
+
+// Returns ordered samples, aggregated into buckets when bucketSeconds is positive
+func (s *Store) GetMetricsHistory(ctx context.Context, serverID string, from, to time.Time, bucketSeconds int) ([]*MetricsSample, error) {
+	if bucketSeconds <= 0 {
+		var samples []*MetricsSample
+		err := s.db.WithContext(ctx).
+			Where("server_id = ? AND datetime(timestamp) >= datetime(?) AND datetime(timestamp) <= datetime(?)",
+				serverID, from.UTC(), to.UTC()).
+			Order("datetime(timestamp) ASC").
+			Find(&samples).Error
+		return samples, err
+	}
+	query := `
+		SELECT server_id,
+			(CAST(strftime('%s', timestamp) AS INTEGER) / ?) * ? AS bucket,
+			AVG(tps) AS tps, AVG(mspt) AS mspt, MAX(players) AS players,
+			AVG(cpu_percent) AS cpu_percent, AVG(memory_mb) AS memory_mb,
+			AVG(heap_used_mb) AS heap_used_mb, MAX(disk_bytes) AS disk_bytes
+		FROM metrics_samples
+		WHERE server_id = ? AND datetime(timestamp) >= datetime(?) AND datetime(timestamp) <= datetime(?)
+		GROUP BY bucket
+		ORDER BY bucket ASC`
+	var rows []metricsBucketRow
+	err := s.db.WithContext(ctx).
+		Raw(query, bucketSeconds, bucketSeconds, serverID, from.UTC(), to.UTC()).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	samples := make([]*MetricsSample, 0, len(rows))
+	for _, r := range rows {
+		samples = append(samples, &MetricsSample{
+			ServerID:   r.ServerID,
+			Resolution: bucketSeconds,
+			Timestamp:  time.Unix(r.Bucket, 0).UTC(),
+			TPS:        r.TPS,
+			MSPT:       r.MSPT,
+			Players:    r.Players,
+			CPUPercent: r.CPUPercent,
+			MemoryMB:   r.MemoryMB,
+			HeapUsedMB: r.HeapUsedMB,
+			DiskBytes:  r.DiskBytes,
+		})
+	}
+	return samples, nil
+}
+
+// Folds raw samples older than cutoff into buckets
+func (s *Store) RollupMetricsSamples(ctx context.Context, olderThan time.Time, bucketSeconds int) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		insert := `
+			INSERT INTO metrics_samples (server_id, resolution, timestamp, tps, mspt, players, cpu_percent, memory_mb, heap_used_mb, disk_bytes)
+			SELECT server_id, ?,
+				datetime((CAST(strftime('%s', timestamp) AS INTEGER) / ?) * ?, 'unixepoch'),
+				AVG(tps), AVG(mspt), MAX(players), AVG(cpu_percent), AVG(memory_mb), AVG(heap_used_mb), MAX(disk_bytes)
+			FROM metrics_samples
+			WHERE resolution = 0 AND datetime(timestamp) < datetime(?)
+			GROUP BY server_id, CAST(strftime('%s', timestamp) AS INTEGER) / ?`
+		if err := tx.Exec(insert, bucketSeconds, bucketSeconds, bucketSeconds, olderThan.UTC(), bucketSeconds).Error; err != nil {
+			return err
+		}
+		return tx.Where("resolution = 0 AND datetime(timestamp) < datetime(?)", olderThan.UTC()).
+			Delete(&MetricsSample{}).Error
+	})
+}
+
+// Removes samples of one resolution older than the cutoff
+func (s *Store) PruneMetricsSamples(ctx context.Context, resolution int, olderThan time.Time) error {
+	return s.db.WithContext(ctx).
+		Where("resolution = ? AND datetime(timestamp) < datetime(?)", resolution, olderThan.UTC()).
+		Delete(&MetricsSample{}).Error
+}
+
 func (s *Store) GetServerByPort(ctx context.Context, port int) (*Server, error) {
 	var server Server
-	// Only check servers that don't have a proxy hostname (i.e., servers that actually bind to the port)
+	// Skip servers with a proxy hostname, they bind indirectly
 	err := s.db.WithContext(ctx).Where("port = ? AND (proxy_hostname IS NULL OR proxy_hostname = '')", port).First(&server).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -137,81 +262,61 @@ func (s *Store) GetServerByPort(ctx context.Context, port int) (*Server, error) 
 	return &server, nil
 }
 
-// Server config operations
-func (s *Store) GetServerConfig(ctx context.Context, serverID string) (*ServerConfig, error) {
-	var config ServerConfig
+// Server properties operations
+func (s *Store) GetServerProperties(ctx context.Context, serverID string) (*ServerProperties, error) {
+	var config ServerProperties
 	err := s.db.WithContext(ctx).Where("server_id = ?", serverID).First(&config).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("server config not found")
+			return nil, fmt.Errorf("server properties not found: %w", err)
 		}
 		return nil, err
 	}
 	return &config, nil
 }
 
-func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) error {
+func (s *Store) UpdateServerProperties(ctx context.Context, config *ServerProperties) error {
 	return s.db.WithContext(ctx).Save(config).Error
 }
 
-func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
+func (s *Store) SaveServerProperties(ctx context.Context, config *ServerProperties) error {
 	return s.db.WithContext(ctx).Save(config).Error
 }
 
-// UpdateServerConfigMemory updates memory settings in ServerConfig
-func (s *Store) UpdateServerConfigMemory(ctx context.Context, serverID string, memory int) error {
-	config, err := s.GetServerConfig(ctx, serverID)
-	if err != nil {
-		return err
-	}
-
-	// Update memory and max memory (they're the same I THINK) ... Note: They are not...
-	strServerMem := fmt.Sprintf("%dM", int64(float64(memory)*.75))
-	config.MaxMemory = &strServerMem
-
-	if config.Memory != nil {
-		config.Memory = &strServerMem
-	}
-
-	return s.SaveServerConfig(ctx, config)
-}
-
-// ClearEphemeralConfigFields clears all ephemeral configuration fields
-func (s *Store) ClearEphemeralConfigFields(ctx context.Context, serverID string) error {
-	config, err := s.GetServerConfig(ctx, serverID)
+// Clears all ephemeral property fields
+func (s *Store) ClearEphemeralPropertyFields(ctx context.Context, serverID string) error {
+	config, err := s.GetServerProperties(ctx, serverID)
 	if err != nil {
 		return err
 	}
 
 	// Clear ephemeral fields
-	config.CFForceReinstallModloader = nil
+	config.ForceProvision = nil
 
-	return s.SaveServerConfig(ctx, config)
+	return s.SaveServerProperties(ctx, config)
 }
 
-// SyncServerConfigWithServer updates system fields in ServerConfig based on Server settings
-func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) error {
+// Syncs system fields in ServerProperties from Server settings
+func (s *Store) SyncServerPropertiesWithServer(ctx context.Context, server *Server) error {
 	// Get or create config
-	config, err := s.GetServerConfig(ctx, server.ID)
+	config, err := s.GetServerProperties(ctx, server.ID)
 	if err != nil {
-		if err.Error() == "server config not found" {
-			config = s.CreateDefaultServerConfig(server.ID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			config = s.CreateDefaultServerProperties(server.ID)
 		} else {
 			return err
 		}
 	}
 
-	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
-	config.Type = stringPtr(string(server.ModLoader))
-	config.Version = stringPtr(server.MCVersion)
 	config.ServerPort = intPtr(server.Port)
 	config.MaxPlayers = intPtr(server.MaxPlayers)
+	config.SyncMemoryFromServer(server)
 
-	return s.SaveServerConfig(ctx, config)
+	return s.SaveServerProperties(ctx, config)
 }
 
-func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
+func (s *Store) CreateDefaultServerProperties(serverID string) *ServerProperties {
 	boolPtr := func(b bool) *bool { return &b }
 	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
@@ -222,27 +327,25 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 		rconPassword = fmt.Sprintf("discopanel_%s", serverID[:8])
 	}
 
-	config := &ServerConfig{
+	config := &ServerProperties{
 		ID:           serverID + "-config",
 		ServerID:     serverID,
 		EULA:         stringPtr("TRUE"),
 		EnableRCON:   boolPtr(true),
 		RCONPassword: stringPtr(rconPassword),
 		RCONPort:     intPtr(25575),
-		Version:      stringPtr("LATEST"),
-		Type:         stringPtr("VANILLA"),
 		Difficulty:   stringPtr("easy"),
 		Mode:         stringPtr("survival"),
 		MaxPlayers:   intPtr(20),
 	}
 
-	// Don't try to get global settings if we're creating the global settings themselves
+	// Skip global settings lookup when creating global settings
 	if serverID == GlobalSettingsID {
 		return config
 	}
 
 	// Get global settings and copy non-nil values
-	var globalSettings ServerConfig
+	var globalSettings ServerProperties
 	err := s.db.Where("id = ?", GlobalSettingsID).First(&globalSettings).Error
 	if err == nil {
 		// Use reflection to copy non-nil values from global settings
@@ -255,7 +358,6 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 			// Skip these fields as they're server-specific
 			if field.Name == "ID" || field.Name == "ServerID" || field.Name == "UpdatedAt" ||
 				field.Name == "Server" || field.Name == "RCONPassword" ||
-				field.Name == "Type" || field.Name == "Version" || field.Name == "Memory" ||
 				field.Name == "InitMemory" || field.Name == "MaxMemory" || field.Name == "ServerPort" ||
 				field.Name == "MaxPlayers" {
 				continue
@@ -430,7 +532,7 @@ func (s *Store) GetIndexedModpackFiles(ctx context.Context, modpackID string) ([
 // Checks if any servers are using the specified modpack
 func (s *Store) CheckModpackInUse(ctx context.Context, modpackID string) ([]*Server, error) {
 	var servers []*Server
-	var configs []*ServerConfig
+	var configs []*ServerProperties
 
 	// For manual modpacks, the CFSlug is set to "manual-{modpackID}"
 	cfSlug := "manual-" + modpackID
@@ -511,17 +613,17 @@ func (s *Store) ListFavoriteModpacks(ctx context.Context) ([]*IndexedModpack, er
 	return modpacks, nil
 }
 
-// Global Settings operations (using ServerConfig with a special ID)
+// Global Settings operations (using ServerProperties with a special ID)
 const GlobalSettingsID = "global-settings"
 
-func (s *Store) GetGlobalSettings(ctx context.Context) (*ServerConfig, bool, error) {
-	var config ServerConfig
+func (s *Store) GetGlobalSettings(ctx context.Context) (*ServerProperties, bool, error) {
+	var config ServerProperties
 	isNew := false
 	err := s.db.WithContext(ctx).Where("id = ?", GlobalSettingsID).First(&config).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			// Create EMPTY global settings - no defaults!
-			config = ServerConfig{
+			// Create empty global settings, no defaults
+			config = ServerProperties{
 				ID:       GlobalSettingsID,
 				ServerID: GlobalSettingsID,
 			}
@@ -537,7 +639,7 @@ func (s *Store) GetGlobalSettings(ctx context.Context) (*ServerConfig, bool, err
 	return &config, isNew, nil
 }
 
-func (s *Store) UpdateGlobalSettings(ctx context.Context, config *ServerConfig) error {
+func (s *Store) UpdateGlobalSettings(ctx context.Context, config *ServerProperties) error {
 	config.ID = GlobalSettingsID
 	config.ServerID = GlobalSettingsID
 	return s.db.WithContext(ctx).Save(config).Error
@@ -550,7 +652,7 @@ func (s *Store) SeedGlobalSettings() error {
 		return err
 	}
 	if isNew || s.cfg.Minecraft.ResetGlobal {
-		gc := s.CreateDefaultServerConfig(GlobalSettingsID)
+		gc := s.CreateDefaultServerProperties(GlobalSettingsID)
 		if len(s.cfg.Minecraft.GlobalConfig) > 0 {
 			mapstructure.WeakDecode(s.cfg.Minecraft.GlobalConfig, gc)
 			gc.ID = GlobalSettingsID + "-config"
@@ -672,8 +774,7 @@ func (s *Store) FindAvailableListenerPort(ctx context.Context) (int, error) {
 			continue
 		}
 
-		// Check if any non-proxied module is using this port
-		// proxyEnabled=false means we're checking for direct host binding
+		// Checks for a non-proxied module already bound to this port
 		conflict, err := s.CheckPortAvailability(ctx, port, "tcp", false, "", "")
 		if err != nil {
 			return 0, fmt.Errorf("failed to check port availability: %w", err)
@@ -895,12 +996,12 @@ func (s *Store) CleanExpiredSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
 }
 
-// CleanAllSessions deletes all sessions (used when JWT secret changes).
+// Deletes all sessions, used when JWT secret changes
 func (s *Store) CleanAllSessions(ctx context.Context) error {
 	return s.db.WithContext(ctx).Where("1 = 1").Delete(&Session{}).Error
 }
 
-// ResetAllUsers deletes all sessions, API tokens, user roles, registration invites, and users.
+// Deletes all sessions, tokens, roles, invites, and users
 func (s *Store) ResetAllUsers(ctx context.Context) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("1 = 1").Delete(&Session{}).Error; err != nil {
@@ -1162,9 +1263,9 @@ func (s *Store) CleanOldTaskExecutions(ctx context.Context, olderThan time.Time,
 			continue
 		}
 
-		// Only delete if we have more than the minimum to keep
+		// Only delete when count exceeds the minimum to keep
 		if count > int64(keepMinimum) {
-			// Get the IDs of executions we want to keep (the most recent ones)
+			// Finds IDs of the most recent executions to keep
 			var keepIDs []string
 			s.db.WithContext(ctx).Model(&TaskExecution{}).
 				Where("task_id = ?", taskID).
@@ -1239,7 +1340,7 @@ func (s *Store) DeleteModuleTemplate(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Delete(&ModuleTemplate{}, "id = ?", id).Error
 }
 
-// UpsertModuleTemplate creates or updates a module template by ID
+// Creates or updates a module template by ID
 func (s *Store) UpsertModuleTemplate(ctx context.Context, template *ModuleTemplate) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing ModuleTemplate
@@ -1252,7 +1353,7 @@ func (s *Store) UpsertModuleTemplate(ctx context.Context, template *ModuleTempla
 		}
 		// Preserve created_at when updating
 		template.CreatedAt = existing.CreatedAt
-		// Use Select("*") to force update of all columns including JSON-serialized fields
+		// Selects all columns to update the JSON-serialized fields too
 		return tx.Model(&existing).Select("*").Omit("created_at").Updates(template).Error
 	})
 }
@@ -1303,7 +1404,7 @@ func (s *Store) DeleteModule(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Delete(&Module{}, "id = ?", id).Error
 }
 
-// GetModuleByHostPort finds a module that uses the specified host port
+// Finds a module that uses the specified host port
 func (s *Store) GetModuleByHostPort(ctx context.Context, port int) (*Module, error) {
 	var modules []*Module
 	if err := s.db.WithContext(ctx).Find(&modules).Error; err != nil {
@@ -1321,7 +1422,7 @@ func (s *Store) GetModuleByHostPort(ctx context.Context, port int) (*Module, err
 	return nil, nil
 }
 
-// PortConflict represents a port conflict with details
+// Describes a port conflict between modules
 type PortConflict struct {
 	Module   *Module
 	Port     int
@@ -1329,13 +1430,7 @@ type PortConflict struct {
 	Reason   string
 }
 
-// CheckPortAvailability checks if a port can be used by a module, considering:
-// - Non-proxied ports: exclusive (Docker binds to host)
-// - Proxied TCP: can share if different hostname (TCP proxy routes by hostname)
-// - Proxied UDP: exclusive (UDP proxy only supports one route per port)
-//
-// Returns nil if port is available, or a PortConflict if not.
-// excludeModuleID allows excluding the current module when updating.
+// Checks port availability across proxied and non-proxied modules
 func (s *Store) CheckPortAvailability(ctx context.Context, hostPort int, protocol string, proxyEnabled bool, hostname string, excludeModuleID string) (*PortConflict, error) {
 	var modules []*Module
 	if err := s.db.WithContext(ctx).Find(&modules).Error; err != nil {
@@ -1372,7 +1467,7 @@ func (s *Store) CheckPortAvailability(ctx context.Context, hostPort int, protoco
 				}, nil
 			}
 
-			// Proxied UDP: exclusive (no hostname routing)
+			// Proxied UDP is exclusive, no hostname routing
 			if protocol == "udp" {
 				return &PortConflict{
 					Module:   module,
@@ -1382,7 +1477,7 @@ func (s *Store) CheckPortAvailability(ctx context.Context, hostPort int, protoco
 				}, nil
 			}
 
-			// Proxied TCP: allows hostname-based routing, no conflict here
+			// Proxied TCP allows hostname-based routing, no conflict here
 		}
 	}
 
@@ -1413,8 +1508,7 @@ func (s *Store) ListModulesFollowingServerLifecycle(ctx context.Context, serverI
 	return modules, err
 }
 
-// ListEventTriggeredTasks returns all enabled tasks subscribed to the given event for a server.
-// EventTriggers is stored as a JSON array, so we filter in Go.
+// Returns enabled tasks subscribed to an event for a server
 func (s *Store) ListEventTriggeredTasks(ctx context.Context, serverID string, eventType v1.TriggeredEventType) ([]*ScheduledTask, error) {
 	var tasks []*ScheduledTask
 	err := s.db.WithContext(ctx).
@@ -1434,4 +1528,68 @@ func (s *Store) ListEventTriggeredTasks(ctx context.Context, serverID string, ev
 		}
 	}
 	return matching, nil
+}
+
+// Keeps the per-server ledger bounded
+const maxServerActions = 2000
+
+// Appends one action row to the server's ledger
+func (s *Store) AppendServerAction(ctx context.Context, action *ServerAction) error {
+	if action.Timestamp.IsZero() {
+		action.Timestamp = time.Now()
+	}
+	if err := s.db.WithContext(ctx).Create(action).Error; err != nil {
+		return err
+	}
+	if action.ID%128 == 0 {
+		s.pruneServerActions(ctx, action.ServerID)
+	}
+	return nil
+}
+
+func (s *Store) pruneServerActions(ctx context.Context, serverID string) {
+	s.db.WithContext(ctx).Exec(
+		"DELETE FROM server_actions WHERE server_id = ? AND id NOT IN (SELECT id FROM server_actions WHERE server_id = ? ORDER BY id DESC LIMIT ?)",
+		serverID, serverID, maxServerActions)
+}
+
+// Returns ledger rows oldest first, after_id pages forward
+func (s *Store) GetServerActions(ctx context.Context, serverID string, afterID uint) ([]ServerAction, error) {
+	var actions []ServerAction
+	q := s.db.WithContext(ctx).Where("server_id = ?", serverID)
+	if afterID > 0 {
+		q = q.Where("id > ?", afterID)
+	}
+	err := q.Order("id asc").Limit(maxServerActions).Find(&actions).Error
+	return actions, err
+}
+
+// Saves or refreshes a finding dismissal
+func (s *Store) UpsertFindingDismissal(ctx context.Context, serverID, findingID, contentHash string) error {
+	d := &FindingDismissal{
+		ServerID:    serverID,
+		FindingID:   findingID,
+		ContentHash: contentHash,
+		DismissedAt: time.Now(),
+	}
+	return s.db.WithContext(ctx).Save(d).Error
+}
+
+func (s *Store) DeleteFindingDismissal(ctx context.Context, serverID, findingID string) error {
+	return s.db.WithContext(ctx).
+		Where("server_id = ? AND finding_id = ?", serverID, findingID).
+		Delete(&FindingDismissal{}).Error
+}
+
+// Dismissals for one server keyed by finding id
+func (s *Store) GetFindingDismissals(ctx context.Context, serverID string) (map[string]FindingDismissal, error) {
+	var rows []FindingDismissal
+	if err := s.db.WithContext(ctx).Where("server_id = ?", serverID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]FindingDismissal, len(rows))
+	for _, r := range rows {
+		out[r.FindingID] = r
+	}
+	return out, nil
 }

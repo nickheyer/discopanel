@@ -16,7 +16,7 @@ import (
 	models "github.com/nickheyer/discopanel/internal/db"
 )
 
-// ModuleVolumeMount represents a volume mount from module configuration
+// Represents a volume mount from module configuration
 type ModuleVolumeMount struct {
 	Source    string `json:"source"`
 	Target    string `json:"target"`
@@ -25,25 +25,24 @@ type ModuleVolumeMount struct {
 	CreateDir bool   `json:"create_dir,omitempty"` // Pre-create source dirs
 }
 
-// Create container for a module w/ optional map of sibling modules by name for inter-module references
-func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Module, template *models.ModuleTemplate, server *models.Server, serverConfig *models.ServerConfig, cfg *config.Config, siblingModules ...map[string]*models.Module) (string, error) {
+// Creates a module container, optionally given sibling modules by name
+func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Module, template *models.ModuleTemplate, server *models.Server, serverConfig *models.ServerProperties, cfg *config.Config, siblingModules ...map[string]*models.Module) (string, error) {
 	// Determine the Docker image to use
 	imageName := template.DockerImage
 	if imageName == "" {
 		return "", fmt.Errorf("module template has no Docker image configured")
 	}
 
-	// Try pulling the image
-	if err := c.pullImage(ctx, imageName); err != nil {
-		c.log.Warn("Failed to pull image %s: %v, attempting to use local", imageName, err)
+	if err := c.ensureImage(ctx, imageName, nil); err != nil {
+		return "", err
 	}
 
 	// Build alias context for substitution (needed for env and volumes)
 	aliasCtx := &alias.Context{
-		Server:       server,
-		ServerConfig: serverConfig,
-		Module:       module,
-		Config:       cfg,
+		Server:           server,
+		ServerProperties: serverConfig,
+		Module:           module,
+		Config:           cfg,
 	}
 	// Add sibling modules for inter-module references
 	if len(siblingModules) > 0 && siblingModules[0] != nil {
@@ -72,7 +71,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		natPort := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, dockerProto))
 		exposedPorts[natPort] = struct{}{}
 
-		// Bind host port when proxy is not enabled for this port
+		// Binds host port only when proxy is disabled
 		if port.HostPort > 0 && !port.ProxyEnabled {
 			portBindings[natPort] = []nat.PortBinding{
 				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", port.HostPort)},
@@ -121,7 +120,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		config.User = fmt.Sprintf("%s:%s", uid, gid)
 	}
 
-	// Set container command if specified (module override takes precedence over template default)
+	// Module command override takes precedence over template default
 	cmd := module.CmdOverride
 	if cmd == "" {
 		cmd = template.DefaultCmd
@@ -185,7 +184,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 	return resp.ID, nil
 }
 
-// buildModuleEnv builds environment variables for a module container
+// Builds environment variables for a module container
 func (c *Client) buildModuleEnv(module *models.Module, server *models.Server, aliasCtx *alias.Context) []string {
 	env := make([]string, 0)
 
@@ -204,7 +203,7 @@ func (c *Client) buildModuleEnv(module *models.Module, server *models.Server, al
 		env = append(env, fmt.Sprintf("DISCOPANEL_API_TOKEN=%s", module.TokenPlaintext))
 	}
 
-	// Add module environment variables (frontend sends complete config with alias substitution)
+	// Adds env vars, frontend already resolved alias substitution
 	if module.EnvOverrides != "" {
 		var envOverrides map[string]string
 		if err := json.Unmarshal([]byte(module.EnvOverrides), &envOverrides); err == nil {
@@ -255,7 +254,7 @@ func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount) []mount.Moun
 			continue
 		}
 
-		// Translate bind mount sources to host paths when running in a container
+		// Translates bind mount sources to host paths in-container
 		source := vol.Source
 		if mountType == mount.TypeBind {
 			source = TranslateToHostPath(source)
@@ -273,7 +272,7 @@ func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount) []mount.Moun
 	return mounts
 }
 
-// GetModuleContainerIP gets the IP address of a module container on the discopanel network
+// Gets a module container's IP on the discopanel network
 func (c *Client) GetModuleContainerIP(ctx context.Context, containerID string) (string, error) {
 	inspect, err := c.docker.ContainerInspect(ctx, containerID)
 	if err != nil {

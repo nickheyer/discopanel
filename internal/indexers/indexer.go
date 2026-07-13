@@ -9,22 +9,22 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 )
 
-// ModpackIndexer defines the interface for modpack indexing services
+// Interface for modpack indexing services
 type ModpackIndexer interface {
-	// SearchModpacks searches for modpacks with the given criteria
+	// Searches for modpacks matching given criteria
 	SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*SearchResult, error)
 
-	// GetModpack retrieves detailed information about a specific modpack
+	// Retrieves detailed info for one modpack
 	GetModpack(ctx context.Context, modpackID string) (*Modpack, error)
 
-	// GetModpackFiles retrieves all available files for a modpack
-	GetModpackFiles(ctx context.Context, modpackID string) ([]ModpackFile, error)
+	// Retrieves available files, empty filters mean all
+	GetModpackFiles(ctx context.Context, modpackID string, gameVersion string, modLoader string) ([]ModpackFile, error)
 
-	// GetIndexerName returns the name of this indexer (e.g., "fuego", "modrinth")
+	// Name of this indexer, e.g. fuego or modrinth
 	GetIndexerName() string
 }
 
-// SearchResult contains the results of a modpack search
+// Results of a modpack search
 type SearchResult struct {
 	Modpacks   []Modpack
 	TotalCount int
@@ -32,7 +32,7 @@ type SearchResult struct {
 	Offset     int
 }
 
-// Modpack represents a modpack from any indexer
+// A modpack from any indexer
 type Modpack struct {
 	ID            string    `json:"id"`
 	IndexerID     string    `json:"indexer_id"` // Original ID from the indexer
@@ -53,7 +53,7 @@ type Modpack struct {
 	DateReleased  time.Time `json:"date_released"`
 }
 
-// ModpackFile represents a downloadable file for a modpack
+// A downloadable file for a modpack
 type ModpackFile struct {
 	ID               string    `json:"id"`
 	ModpackID        string    `json:"modpack_id"`
@@ -70,7 +70,7 @@ type ModpackFile struct {
 	VersionNumber    string    `json:"version_number"` // Human-readable version for Modrinth
 }
 
-// IndexerFactory creates a ModpackIndexer from an API key and config.
+// Creates a ModpackIndexer from an API key and config
 type IndexerFactory func(apiKey string, cfg *config.Config) ModpackIndexer
 
 var (
@@ -78,15 +78,14 @@ var (
 	registry   = make(map[string]IndexerFactory)
 )
 
-// RegisterIndexer registers an IndexerFactory under the given name.
-// Typically called from an indexer package's init() function.
+// Registers an IndexerFactory under a given name
 func RegisterIndexer(name string, factory IndexerFactory) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	registry[name] = factory
 }
 
-// NewIndexer creates a ModpackIndexer by name using the factory registry.
+// Creates a ModpackIndexer by name from the registry
 func NewIndexer(name string, apiKey string, cfg *config.Config) (ModpackIndexer, error) {
 	registryMu.RLock()
 	factory, ok := registry[name]

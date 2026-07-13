@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image images dev-docker dev-auth modules runtime agent proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
 
 DATA_DIR := ./data
 DOCKER_DATA_DIR := /tmp/discopanel
@@ -73,33 +73,88 @@ image:
 	@echo "Building and pushing Docker image..."
 	@bash scripts/build.sh
 
-# Build and push all module Docker images
-modules: gen
-	@echo "Building and pushing module images..."
-	@for dockerfile in docker/Dockerfile.*; do \
-		name=$$(basename $$dockerfile | sed 's/Dockerfile\.//'); \
-		if [ "$$name" != "discopanel" ]; then \
-			echo "Building nickheyer/discopanel-$$name:latest..."; \
-			docker build -t "nickheyer/discopanel-$$name:latest" -f "$$dockerfile" . && \
-			echo "Pushing nickheyer/discopanel-$$name:latest..." && \
-			docker push "nickheyer/discopanel-$$name:latest"; \
-		fi \
-	done
-	@echo "Module builds complete!"
+# Published Java majors, sync with docker.SupportedJavaVersions
+RUNTIME_JAVA_VERSIONS := 8 11 17 21 25
 
-# Build and push a specific module (e.g., make module-status, make module-geyser)
-module-%: gen
-	@if [ ! -f "docker/Dockerfile.$*" ]; then \
-		echo "Error: docker/Dockerfile.$* not found"; \
-		echo "Available modules:"; \
-		ls docker/Dockerfile.* 2>/dev/null | sed 's/docker\/Dockerfile\./  /g' | grep -v discopanel; \
-		exit 1; \
+# Published Graal majors, sync with docker.GraalJavaVersions
+RUNTIME_GRAAL_VERSIONS := 21 25
+
+# Pushes happen only in CI, local builds stay local
+STAMP_DIR := build/.stamps
+
+MODULE_NAMES := $(filter-out discopanel runtime,$(patsubst docker/Dockerfile.%,%,$(wildcard docker/Dockerfile.*)))
+
+# Everything the runtime image bakes in, generated code excluded
+RUNTIME_SRC := docker/Dockerfile.runtime go.mod go.sum \
+	$(shell find cmd/runtime pkg/runtimespec proto -type f 2>/dev/null) \
+	$(shell find agent -type f -not -path 'agent/build/*' -not -path 'agent/.gradle-home/*' -not -path 'agent/src/generated/*' 2>/dev/null)
+
+# Module images copy the whole Go tree, track it coarsely
+MODULE_SRC := go.mod go.sum \
+	$(shell find cmd internal pkg proto -type f 2>/dev/null | grep -v '_test.go')
+
+# Stamps for tags someone removed by hand die at parse time
+ifneq ($(filter images runtime modules module-%,$(MAKECMDGOALS)),)
+_STAMP_SYNC := $(shell mkdir -p $(STAMP_DIR); \
+	for v in $(RUNTIME_JAVA_VERSIONS); do docker image inspect "nickheyer/discopanel-runtime:java$$v" >/dev/null 2>&1 || rm -f $(STAMP_DIR)/runtime-java$$v; done; \
+	for v in $(RUNTIME_GRAAL_VERSIONS); do docker image inspect "nickheyer/discopanel-runtime:java$$v-graal" >/dev/null 2>&1 || rm -f $(STAMP_DIR)/runtime-graal-java$$v; done; \
+	for m in $(MODULE_NAMES); do docker image inspect "nickheyer/discopanel-$$m:latest" >/dev/null 2>&1 || rm -f $(STAMP_DIR)/module-$$m; done)
+endif
+
+# Rebuilds a local tag and deletes the image it displaced
+define build_image
+	@old=$$(docker image inspect -f '{{.Id}}' "$(1)" 2>/dev/null || true); \
+	docker build $(2) -t "$(1)" -f "$(3)" . || exit 1; \
+	new=$$(docker image inspect -f '{{.Id}}' "$(1)"); \
+	if [ -n "$$old" ] && [ "$$old" != "$$new" ]; then \
+		echo "Removing replaced image $${old#sha256:}..."; \
+		docker rmi "$$old" >/dev/null 2>&1 || true; \
 	fi
+endef
+
+# Everything discopanel needs at runtime, built locally when stale
+images: runtime modules
+	@echo "All local images up to date!"
+
+# Builds every runtime image variant locally when inputs changed
+runtime: $(addprefix $(STAMP_DIR)/runtime-java,$(RUNTIME_JAVA_VERSIONS)) \
+	$(addprefix $(STAMP_DIR)/runtime-graal-java,$(RUNTIME_GRAAL_VERSIONS))
+	@echo "Runtime images up to date!"
+
+$(STAMP_DIR)/runtime-java%: $(RUNTIME_SRC)
+	@mkdir -p $(STAMP_DIR)
+	@echo "Building nickheyer/discopanel-runtime:java$*..."
+	$(call build_image,nickheyer/discopanel-runtime:java$*,--build-arg JAVA_VERSION=$*,docker/Dockerfile.runtime)
+	@touch $@
+
+$(STAMP_DIR)/runtime-graal-java%: $(RUNTIME_SRC)
+	@mkdir -p $(STAMP_DIR)
+	@echo "Building nickheyer/discopanel-runtime:java$*-graal..."
+	$(call build_image,nickheyer/discopanel-runtime:java$*-graal,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_FLAVOR=graal,docker/Dockerfile.runtime)
+	@touch $@
+
+# Builds all module images locally when inputs changed
+modules: $(addprefix $(STAMP_DIR)/module-,$(MODULE_NAMES))
+	@echo "Module images up to date!"
+
+$(STAMP_DIR)/module-%: docker/Dockerfile.% $(MODULE_SRC)
+	@mkdir -p $(STAMP_DIR)
 	@echo "Building nickheyer/discopanel-$*:latest..."
-	@docker build -t "nickheyer/discopanel-$*:latest" -f "docker/Dockerfile.$*" .
-	@echo "Pushing nickheyer/discopanel-$*:latest..."
-	@docker push "nickheyer/discopanel-$*:latest"
-	@echo "Module $* build complete!"
+	$(call build_image,nickheyer/discopanel-$*:latest,,docker/Dockerfile.$*)
+	@touch $@
+
+# Builds one module image locally (e.g., make module-status)
+module-%: $(STAMP_DIR)/module-%
+	@echo "Module $* image up to date!"
+
+# Builds disco-agent jar via containerized Gradle
+agent:
+	docker run --rm \
+		--volume "$(shell pwd)/agent:/agent" \
+		--workdir /agent \
+		--user "$(shell id -u):$(shell id -g)" \
+		--env GRADLE_USER_HOME=/agent/.gradle-home \
+		gradle:9-jdk21 gradle --no-daemon build
 
 # Clean development data
 clean:
@@ -165,12 +220,15 @@ check:
 proto:
 	@echo "Generating protocol buffer code (using Docker)..."
 	$(BUF_RUN) generate
+	@echo "Generating disco-agent Java code (using Docker)..."
+	$(BUF_RUN) generate --template buf.gen.agent.yaml --path proto/discopanel/agent
 	@echo "Proto generation complete!"
 
 proto-clean:
 	@echo "Cleaning generated proto files..."
 	rm -rf pkg/proto
 	rm -rf web/discopanel/src/lib/proto
+	rm -rf agent/src/generated/java
 	@echo "Proto files cleaned!"
 
 proto-lint:
@@ -202,7 +260,9 @@ help:
 	@echo "  make image          - Build and push Docker image to :dev tag"
 	@echo "  make dev-docker     - Build and run Docker container locally (no cache)"
 	@echo "  make dev-auth       - Build and run with OIDC provider (Keycloak)"
-	@echo "  make modules        - Build and push all module Docker images"
+	@echo "  make images         - Build runtime + module images locally when stale"
+	@echo "  make runtime        - Build all runtime image variants locally"
+	@echo "  make modules        - Build all module images locally"
 	@echo "  make clean          - Remove data directory and build artifacts"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"
 	@echo "  make deps           - Install all dependencies"

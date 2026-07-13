@@ -28,6 +28,17 @@ service ProxyService {
   rpc UpdateServerRouting(UpdateServerRoutingRequest) returns (UpdateServerRoutingResponse);
 }
 
+// Route serving state
+enum ProxyRouteState {
+  PROXY_ROUTE_STATE_UNSPECIFIED = 0;
+  // Backend is reachable, connections relay through
+  PROXY_ROUTE_STATE_ONLINE = 1;
+  // Server is booting, status pings get a synthesized response
+  PROXY_ROUTE_STATE_STARTING = 2;
+  // Server is stopped, logins may wake it when wakeable
+  PROXY_ROUTE_STATE_OFFLINE = 3;
+}
+
 // Active proxy connection
 message ProxyRoute {
   string server_id = 1;
@@ -35,6 +46,18 @@ message ProxyRoute {
   string backend_host = 3;
   int32 backend_port = 4;
   bool active = 5;
+  ProxyRouteState state = 6;
+  bool wakeable = 7;
+  bool proxy_protocol = 8;
+  bool preserve_hostname = 9;
+  int64 active_connections = 10;
+  int64 total_connections = 11;
+  int64 bytes_to_backend = 12;
+  int64 bytes_to_client = 13;
+  int32 last_protocol_version = 14;
+  int64 logins = 15;
+  int64 status_pings = 16;
+  int64 wakes = 17;
 }
 
 // Empty routes request

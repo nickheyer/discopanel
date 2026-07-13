@@ -9,12 +9,15 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
+	"github.com/nickheyer/discopanel/internal/activity"
+	"github.com/nickheyer/discopanel/internal/agent"
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/events"
+	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
@@ -25,6 +28,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/ws"
 	"github.com/nickheyer/discopanel/pkg/download"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1/agentv1connect"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	"github.com/nickheyer/discopanel/pkg/upload"
 	web "github.com/nickheyer/discopanel/web/discopanel"
@@ -34,12 +38,13 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// Server represents the Connect RPC server
+// Represents the Connect RPC server
 type Server struct {
 	store            *storage.Store
 	docker           *docker.Client
 	sender           *command.Sender
 	config           *config.Config
+	rec              *activity.Recorder
 	log              *logger.Logger
 	handler          http.Handler
 	proxyManager     *proxy.Manager
@@ -48,16 +53,18 @@ type Server struct {
 	oidcHandler      *auth.OIDCHandler
 	logStreamer      *logger.LogStreamer
 	scheduler        *scheduler.Scheduler
+	lifecycle        *lifecycle.Manager
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	bus              *events.Bus
+	agentHub         *agent.Hub
 	uploadManager    *upload.Manager
 	downloadManager  *download.Manager
 	wsHub            *ws.Hub
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, log *logger.Logger) *Server {
+func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, agentHub *agent.Hub, rec *activity.Recorder, log *logger.Logger) *Server {
 	// Initialize RBAC enforcer
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
@@ -84,7 +91,8 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 
 	// Initialize log streamer
 	logStreamer := logger.NewLogStreamer(docker.GetDockerClient(), log, 10000)
-	docker.SetLogStreamer(logStreamer)
+	lifecycleManager.SetLogStreamer(logStreamer)
+	moduleManager.SetLogStreamer(logStreamer)
 
 	// Initialize upload manager
 	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
@@ -94,7 +102,7 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 	downloadManager := download.NewManager(cfg.Storage.TempDir, uploadTTL, log)
 
 	// Initialize WebSocket hub
-	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, docker, sender, log)
+	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, docker, sender, metricsCollector, rec, log)
 	go wsHub.Run()
 
 	s := &Server{
@@ -102,6 +110,7 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 		docker:           docker,
 		sender:           sender,
 		config:           cfg,
+		rec:              rec,
 		log:              log,
 		proxyManager:     proxyManager,
 		authManager:      authManager,
@@ -109,9 +118,11 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 		oidcHandler:      oidcHandler,
 		logStreamer:      logStreamer,
 		scheduler:        sched,
+		lifecycle:        lifecycleManager,
 		metricsCollector: metricsCollector,
 		moduleManager:    moduleManager,
 		bus:              bus,
+		agentHub:         agentHub,
 		uploadManager:    uploadManager,
 		downloadManager:  downloadManager,
 		wsHub:            wsHub,
@@ -145,7 +156,7 @@ func (s *Server) setupHandler() {
 	// Add reflection for gRPC clients
 	reflector := grpcreflect.NewStaticReflector(
 		discopanelv1connect.AuthServiceName,
-		discopanelv1connect.ConfigServiceName,
+		discopanelv1connect.PropertiesServiceName,
 		discopanelv1connect.FileServiceName,
 		discopanelv1connect.MinecraftServiceName,
 		discopanelv1connect.ModServiceName,
@@ -158,6 +169,7 @@ func (s *Server) setupHandler() {
 		discopanelv1connect.TaskServiceName,
 		discopanelv1connect.UploadServiceName,
 		discopanelv1connect.UserServiceName,
+		agentv1connect.AgentServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
@@ -183,7 +195,7 @@ func (s *Server) setupHandler() {
 	// Serve frontend for non-RPC routes
 	s.setupFrontend(mux)
 
-	// h2c HTTP/2 cleartext
+	// Serves h2c HTTP/2 cleartext
 	s.handler = h2c.NewHandler(mux, &http2.Server{})
 }
 
@@ -191,26 +203,26 @@ func (s *Server) setupHandler() {
 func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
-	configService := services.NewConfigService(s.store, s.config, s.docker, s.log)
-	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
+	propertiesService := services.NewPropertiesService(s.store, s.config, s.docker, s.lifecycle, s.rec, s.log)
+	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.rec, s.log)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
-	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
+	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.rec, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
-	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.logStreamer, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log)
+	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.rec, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.lifecycle, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.rec, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
-	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
+	taskService := services.NewTaskService(s.store, s.scheduler, s.rec, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
-	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
+	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.rec, s.log)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
 
 	// Register service handlers
 	authPath, authHandler := discopanelv1connect.NewAuthServiceHandler(authService, opts...)
 	mux.Handle(authPath, authHandler)
 
-	configPath, configHandler := discopanelv1connect.NewConfigServiceHandler(configService, opts...)
-	mux.Handle(configPath, configHandler)
+	propertiesPath, propertiesHandler := discopanelv1connect.NewPropertiesServiceHandler(propertiesService, opts...)
+	mux.Handle(propertiesPath, propertiesHandler)
 
 	filePath, fileHandler := discopanelv1connect.NewFileServiceHandler(fileService, opts...)
 	mux.Handle(filePath, fileHandler)
@@ -247,6 +259,11 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	uploadPath, uploadHandler := discopanelv1connect.NewUploadServiceHandler(uploadService, opts...)
 	mux.Handle(uploadPath, uploadHandler)
+
+	// Agent auth is in-handler, unary interceptors skip bidi streams
+	agentService := services.NewAgentService(s.store, s.agentHub, s.log)
+	agentPath, agentHandler := agentv1connect.NewAgentServiceHandler(agentService)
+	mux.Handle(agentPath, agentHandler)
 }
 
 // The HTTP handler for the server
@@ -287,6 +304,8 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 
 			// Set user in context
 			ctx = auth.WithUser(ctx, user)
+			// Ledger events in this request carry the user and one trace
+			ctx = activity.WithTrace(activity.WithSource(ctx, user.Username))
 
 			// Authenticated-only procedures (no specific resource permission needed)
 			if rbac.AuthenticatedOnlyProcedures[procedure] {
@@ -316,7 +335,7 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// pollingProcedures lists endpoints that are called frequently and should be excluded from logging.
+// Lists high-frequency endpoints excluded from logging
 var pollingProcedures = []string{
 	"/discopanel.v1.AuthService/GetAuthStatus",
 	"/discopanel.v1.ServerService/ListServers",
@@ -327,9 +346,11 @@ var pollingProcedures = []string{
 	"/discopanel.v1.UploadService/UploadChunk",
 	"/discopanel.v1.UploadService/GetUploadStatus",
 	"/discopanel.v1.FileService/GetExtractionStatus",
+	"/discopanel.v1.ServerService/GetServerPerformanceReport",
+	"/discopanel.v1.ServerService/GetServerActions",
 }
 
-// Checks if a procedure is a polling endpoint or high-frequency endpoint
+// Reports whether a procedure is a polling endpoint
 func (s *Server) isPollingProcedure(procedure string) bool {
 	return slices.Contains(pollingProcedures, procedure)
 }
@@ -366,7 +387,7 @@ func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
 			return
 		}
 
-		// Try to serve the file directly (static assets like JS, CSS, images)
+		// Serves static assets like JS, CSS, and images directly
 		path := r.URL.Path
 		if path == "/" {
 			path = "/index.html"
@@ -399,6 +420,7 @@ func isConnectPath(path string) bool {
 	// Connect paths start with service names
 	connectPrefixes := []string{
 		"/discopanel.v1.",
+		"/discopanel.agent.",
 		"/grpc.reflection.",
 		"/connect.",
 	}
@@ -411,8 +433,7 @@ func isConnectPath(path string) bool {
 	return false
 }
 
-// extractObjectID extracts a named string field from a protobuf request message
-// using reflection. Falls back to "*" if the field is missing or empty.
+// Extracts a named string field from a protobuf request message
 func extractObjectID(req connect.AnyRequest, fieldName string) string {
 	msg, ok := req.Any().(proto.Message)
 	if !ok {
@@ -429,12 +450,17 @@ func extractObjectID(req connect.AnyRequest, fieldName string) string {
 	return "*"
 }
 
-// RecoveryKey returns the current recovery key from the auth manager.
+// Returns the current recovery key from the auth manager
 func (s *Server) RecoveryKey() string {
 	return s.authManager.GetRecoveryKey()
 }
 
-// Starts log streaming for a container
-func (s *Server) StartLogStreaming(containerID string) error {
-	return s.logStreamer.StartStreaming(containerID)
+// Exposes the streamer for cross-component wiring
+func (s *Server) LogStreamer() *logger.LogStreamer {
+	return s.logStreamer
+}
+
+// Attaches a servers container output to its log stream
+func (s *Server) StartLogStreaming(serverID, containerID string) error {
+	return s.logStreamer.StartStreaming(serverID, containerID)
 }

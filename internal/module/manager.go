@@ -15,7 +15,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
-// Manager handles the lifecycle of modules
+// Handles the lifecycle of modules
 type Manager struct {
 	store        *storage.Store
 	docker       *docker.Client
@@ -28,7 +28,7 @@ type Manager struct {
 	running      bool
 }
 
-// NewManager creates a new module manager
+// Creates a new module manager
 func NewManager(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, log *logger.Logger) *Manager {
 	return &Manager{
 		store:        store,
@@ -40,12 +40,12 @@ func NewManager(store *storage.Store, docker *docker.Client, sender *command.Sen
 	}
 }
 
-// SetLogStreamer sets the log streamer for module containers
+// Sets log streamer for module containers
 func (m *Manager) SetLogStreamer(streamer *logger.LogStreamer) {
 	m.logStreamer = streamer
 }
 
-// Start initializes the module manager
+// Initializes the module manager
 func (m *Manager) Start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -69,7 +69,7 @@ func (m *Manager) Start() error {
 	return nil
 }
 
-// Stop gracefully stops all managed modules
+// Gracefully stops all managed modules
 func (m *Manager) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -103,7 +103,7 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
-// CreateAndStartModule creates a container and optionally starts the module
+// Creates a container and optionally starts the module
 func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, startImmediately bool) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
@@ -127,7 +127,7 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	}
 
 	// Fetch server config for alias resolution
-	serverConfig, _ := m.store.GetServerConfig(ctx, server.ID)
+	serverConfig, _ := m.store.GetServerProperties(ctx, server.ID)
 
 	// Fetch sibling modules for inter-module alias resolution
 	siblingModules := make(map[string]*storage.Module)
@@ -164,7 +164,7 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	return nil
 }
 
-// StartModule starts an existing module container
+// Starts an existing module container
 func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
@@ -207,7 +207,7 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 
 	// Start log streaming
 	if m.logStreamer != nil {
-		if err := m.logStreamer.StartStreaming(module.ContainerID); err != nil {
+		if err := m.logStreamer.StartStreaming(module.ID, module.ContainerID); err != nil {
 			m.logger.Warn("Failed to start log streaming for module %s: %v", module.Name, err)
 		}
 	}
@@ -240,7 +240,7 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 	return nil
 }
 
-// runInitCommand executes the module's init command after an optional delay
+// Executes the module's init command after an optional delay
 func (m *Manager) runInitCommand(moduleID string) {
 	ctx := context.Background()
 
@@ -263,13 +263,16 @@ func (m *Manager) runInitCommand(moduleID string) {
 	}
 
 	m.logger.Info("Init command: executing for module %s: %s", module.Name, module.InitCommand)
-	output, err := m.docker.Exec(ctx, module.ContainerID, []string{"sh", "-c", module.InitCommand})
+	stdout, stderr, err := m.docker.Exec(ctx, module.ContainerID, []string{"sh", "-c", module.InitCommand})
 	if err != nil {
 		m.logger.Error("Init command: failed for module %s: %v", module.Name, err)
 		return
 	}
-	if output != "" {
-		m.logger.Info("Init command: output for module %s: %s", module.Name, output)
+	if stdout != "" {
+		m.logger.Info("Init command: output for module %s: %s", module.Name, stdout)
+	}
+	if stderr != "" {
+		m.logger.Warn("Init command: stderr for module %s: %s", module.Name, stderr)
 	}
 
 	if module.RestartAfterInit {
@@ -280,7 +283,7 @@ func (m *Manager) runInitCommand(moduleID string) {
 	}
 }
 
-// startDependencies starts and waits for module dependencies
+// Starts and waits for module dependencies
 func (m *Manager) startDependencies(ctx context.Context, module *storage.Module) error {
 	if len(module.Dependencies) == 0 {
 		return nil
@@ -327,7 +330,7 @@ func (m *Manager) startDependencies(ctx context.Context, module *storage.Module)
 	return nil
 }
 
-// waitForHealthy waits for a module to pass its health check
+// Waits for a module to pass its health check
 func (m *Manager) waitForHealthy(ctx context.Context, moduleID string, timeoutSeconds int) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
@@ -339,7 +342,7 @@ func (m *Manager) waitForHealthy(ctx context.Context, moduleID string, timeoutSe
 		return err
 	}
 
-	// If no health check configured, just wait for container to be running
+	// No health check configured, just wait for container running
 	if template.HealthCheckPath == "" && template.HealthCheckPort == 0 {
 		m.logger.Debug("No health check configured for %s, checking container status", module.Name)
 		return m.waitForRunning(ctx, moduleID, timeoutSeconds)
@@ -389,7 +392,7 @@ func (m *Manager) waitForHealthy(ctx context.Context, moduleID string, timeoutSe
 	}
 }
 
-// waitForRunning waits for a module container to be in running state
+// Waits for a module container to reach running state
 func (m *Manager) waitForRunning(ctx context.Context, moduleID string, timeoutSeconds int) error {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -414,7 +417,7 @@ func (m *Manager) waitForRunning(ctx context.Context, moduleID string, timeoutSe
 	}
 }
 
-// checkHealth performs an HTTP health check
+// Performs an HTTP health check
 func (m *Manager) checkHealth(url string, timeoutSeconds int) bool {
 	if timeoutSeconds == 0 {
 		timeoutSeconds = 5
@@ -433,7 +436,7 @@ func (m *Manager) checkHealth(url string, timeoutSeconds int) bool {
 	return resp.StatusCode >= 200 && resp.StatusCode < 400
 }
 
-// StopModule stops a running module
+// Stops a running module
 func (m *Manager) StopModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
@@ -467,7 +470,7 @@ func (m *Manager) StopModule(ctx context.Context, moduleID string) error {
 	}
 
 	// Stop the container
-	if _, err := m.docker.StopContainer(ctx, module.ContainerID); err != nil {
+	if _, err := m.docker.StopContainer(ctx, module.ContainerID, 30); err != nil {
 		m.logger.Error("Failed to stop module container: %v", err)
 	}
 
@@ -481,7 +484,7 @@ func (m *Manager) StopModule(ctx context.Context, moduleID string) error {
 	return nil
 }
 
-// RestartModule restarts a module
+// Restarts a module
 func (m *Manager) RestartModule(ctx context.Context, moduleID string) error {
 	if err := m.StopModule(ctx, moduleID); err != nil {
 		return fmt.Errorf("failed to stop module: %w", err)
@@ -492,7 +495,7 @@ func (m *Manager) RestartModule(ctx context.Context, moduleID string) error {
 	return m.StartModule(ctx, moduleID)
 }
 
-// RecreateModule recreates a module container
+// Recreates a module container
 func (m *Manager) RecreateModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
@@ -525,7 +528,7 @@ func (m *Manager) RecreateModule(ctx context.Context, moduleID string) error {
 	return nil
 }
 
-// DeleteModule stops and removes a module and its container
+// Stops and removes a module and its container
 func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
@@ -562,7 +565,7 @@ func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
 	return nil
 }
 
-// GetModuleStatus returns current status from Docker
+// Returns current status from Docker
 func (m *Manager) GetModuleStatus(ctx context.Context, moduleID string) (storage.ModuleStatus, error) {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
@@ -595,12 +598,12 @@ func (m *Manager) GetModuleStatus(ctx context.Context, moduleID string) (storage
 	}
 }
 
-// AllocateModulePort finds an available port for a module
+// Finds an available port for a module
 func (m *Manager) AllocateModulePort(ctx context.Context) (int, error) {
 	return m.AllocateModulePortExcluding(ctx, nil)
 }
 
-// AllocateModulePortExcluding finds an available port, excluding any ports in the exclude map
+// Finds an available port, excluding given ports
 func (m *Manager) AllocateModulePortExcluding(ctx context.Context, exclude map[int]bool) (int, error) {
 	modules, err := m.store.ListModules(ctx)
 	if err != nil {
@@ -631,7 +634,7 @@ func (m *Manager) AllocateModulePortExcluding(ctx context.Context, exclude map[i
 	return 0, fmt.Errorf("no available module ports in range %d-%d", m.config.Module.PortRangeMin, m.config.Module.PortRangeMax)
 }
 
-// GetUsedModulePorts returns all ports currently in use by modules
+// Returns all ports currently in use by modules
 func (m *Manager) GetUsedModulePorts(ctx context.Context) ([]int, error) {
 	modules, err := m.store.ListModules(ctx)
 	if err != nil {
@@ -650,7 +653,7 @@ func (m *Manager) GetUsedModulePorts(ctx context.Context) ([]int, error) {
 	return ports, nil
 }
 
-// IsRunning returns whether the manager is running
+// Reports whether manager is running
 func (m *Manager) IsRunning() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()

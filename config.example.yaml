@@ -14,8 +14,7 @@
 server:
   port: "8080"
   host: "0.0.0.0"
-  read_timeout: 15
-  write_timeout: 15
+  read_header_timeout: 15
   idle_timeout: 60
   user_agent: "DiscoPanel/1.0 (github.com/nickheyer/discopanel)"
 
@@ -31,7 +30,8 @@ docker:
   host: "unix:///var/run/docker.sock"
   version: ""
   network_name: "discopanel-network"
-  registry_url: ""
+  runtime_image: ""  # Override the discopanel-runtime image repository (default: nickheyer/discopanel-runtime)
+  agent_url: ""  # URL server containers use to reach the panel for live telemetry (auto-detected when empty)
   sync_interval: 5  # Seconds between docker state sync
   # Can be configure like labels: {"your.label.key": "your_label_value", "other.label.key": "other_label_value"}
   # or
@@ -45,7 +45,6 @@ storage:
   data_dir: "./data"
   backup_dir: "./backups"
   temp_dir: "./tmp"
-  max_upload_size: 524288000  # 500MB in bytes
 
 # Authentication configuration
 auth:
@@ -94,14 +93,14 @@ proxy:
 
 # Example usage:
 # With proxy enabled and base_url set to "mc.example.com":
-# - Server named "survival" → Connect via: survival.mc.example.com:25565
-# - Server named "creative" → Connect via: creative.mc.example.com:25565
-# - Server named "modded" → Connect via: modded.mc.example.com:25565
+# - Server named "survival" connects via survival.mc.example.com:25565
+# - Server named "creative" connects via creative.mc.example.com:25565
+# - Server named "modded" connects via modded.mc.example.com:25565
 #
 # All servers use the same port (25565) and are routed based on hostname!
 # 
 # DNS Setup Required:
-# Add a wildcard DNS record: *.mc.example.com → Your server's IP
+# Add a wildcard DNS record: *.mc.example.com pointing to your server's IP
 # Or add individual A records for each server subdomain
 
 
@@ -116,22 +115,19 @@ minecraft:
     initMemory: "1G"
     maxMemory: "1G"
     tz: "UTC"
-    enableRollingLogs: false
     enableJmx: false
     jmxHost: ""
     useAikarFlags: false
     useMeowiceFlags: false
-    useMeowiceGraalvmFlags: true
+    useFlareFlags: false
+    useSimdFlags: false
     jvmOpts: ""
     jvmXxOpts: ""
     jvmDdOpts: ""
     extraArgs: ""
-    logTimestamp: false
 
     # Server Configuration
-    type: "VANILLA"
     eula: "TRUE"
-    version: "LATEST"
     motd: ""
     difficulty: "easy"
     icon: ""
@@ -171,15 +167,8 @@ minecraft:
     preventProxyConnections: false
     useNativeTransport: false
     simulationDistance: 0
-    execDirectly: false
     stopServerAnnounceDelay: 0
-    proxy: ""
-    console: true
-    gui: true
     stopDuration: 60
-    setupOnly: false
-    useFlareFlags: false
-    useSimdFlags: false
 
     # Custom Resource Pack
     resourcePack: ""
@@ -189,7 +178,6 @@ minecraft:
     # Whitelist
     enableWhitelist: false
     whitelist: ""
-    whitelistFile: ""
     overrideWhitelist: false
 
     # RCON
@@ -203,21 +191,15 @@ minecraft:
     rconCmdsOnDisconnect: ""
     rconCmdsLastDisconnect: ""
 
-    # Auto-Pause
+    # Auto-Pause (requires the server to be behind the DiscoPanel proxy)
     enableAutopause: false
     autopauseTimeoutEst: 3600
     autopauseTimeoutInit: 600
-    autopauseTimeoutKn: 120
-    autopausePeriod: 10
-    autopauseKnockInterface: "eth0"
-    debugAutopause: false
 
     # Auto-Stop
     enableAutostop: false
     autostopTimeoutEst: 3600
     autostopTimeoutInit: 1800
-    autostopPeriod: 10
-    debugAutostop: false
 
     # Forge Configuration
     forgeVersion: ""
@@ -226,36 +208,23 @@ minecraft:
 
     # CurseForge Configuration
     cfApiKey: ""
-    cfApiKeyFile: ""
     cfPageUrl: ""
     cfSlug: ""
     cfFileId: ""
     cfModpackZip: ""
-    cfFilenameMatcher: ""
-    cfExcludeIncludeFile: ""
     cfExcludeMods: ""
     cfForceIncludeMods: ""
-    cfForceSynchronize: false
-    cfSetLevelFrom: ""
-    cfParallelDownloads: 4
-    cfOverridesSkipExisting: false
-    cfForceReinstallModloader: false
 
     # Modrinth Configuration
     modrinthModpack: ""
     modrinthModpackVersionType: "release"
     modrinthVersion: ""
     modrinthLoader: ""
-    modrinthIgnoreMissingFiles: ""
     modrinthExcludeFiles: ""
     modrinthForceIncludeFiles: ""
-    modrinthForceSynchronize: false
-    modrinthDefaultExcludeIncludes: ""
-    modrinthOverridesExclusions: ""
     modrinthProjects: ""
     modrinthDownloadDependencies: "none"
     modrinthProjectsDefaultVersionType: "release"
-    versionFromModrinthProjects: false
 
     # Custom Server Configuration
     customServer: ""
@@ -283,13 +252,9 @@ minecraft:
     customServerProperties: ""
 
     # Ops / Admins
-    userApiProvider: "playerdb"
     ops: ""
-    opsFile: ""
-    existingOpsFile: "SYNC_FILE_MERGE_LIST"
 
     # Additional Whitelist Options
-    existingWhitelistFile: "SYNC_FILE_MERGE_LIST"
     enforceWhitelist: false
 
 # Logging configuration

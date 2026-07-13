@@ -60,11 +60,10 @@ export default defineConfig({
 				target: 'http://localhost:8080',
 				changeOrigin: true
 			},
-			// Proxy WebSocket connections
+			// Keeps browser Host so backend origin check passes
 			'/ws': {
 				target: 'ws://localhost:8080',
-				ws: true,
-				changeOrigin: true
+				ws: true
 			}
 		}
 	},

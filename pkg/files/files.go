@@ -58,7 +58,7 @@ func FindWorldDir(dataDir string) (string, error) {
 	return worldDir, nil
 }
 
-// Returns the server's world directory along with any sibling world dirs
+// Returns the world directory plus any sibling world dirs
 func FindWorldDirs(dataDir string) ([]string, error) {
 	worldDir, err := FindWorldDir(dataDir)
 	if err != nil {
@@ -75,7 +75,7 @@ func FindWorldDirs(dataDir string) ([]string, error) {
 	return dirs, nil
 }
 
-// calculateDirSize calculates the total size of a directory in bytes, including all nested files.
+// Calculates total directory size in bytes, including nested files
 func CalculateDirSize(dirPath string) (int64, error) {
 	var totalSize int64
 
@@ -108,7 +108,7 @@ func CalculateDirSize(dirPath string) (int64, error) {
 }
 
 func SanitizePathName(name string) string {
-	// alphanum + _ + -
+	// Alphanum plus underscore and dash
 	re := regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 	safe := re.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "_")
 
@@ -133,7 +133,7 @@ func ExtractArchive(ctx context.Context, archivePath string, destPath string, co
 		return 0, fmt.Errorf("failed to identify archive format: %w", err)
 	}
 
-	// Is format extractable?
+	// Checks if format supports extraction
 	extractor, ok := format.(archives.Extractor)
 	if !ok {
 		return 0, fmt.Errorf("format does not support extraction")
@@ -243,7 +243,7 @@ func IsTextFile(path string) bool {
 	return true
 }
 
-// These get zip.Store (no compression) to avoid wasting CPU.
+// These get zip.Store (no compression) to avoid wasting CPU
 var compressedExts = map[string]bool{
 	// Archives
 	".zip": true, ".gz": true, ".bz2": true, ".xz": true, ".7z": true,
@@ -272,10 +272,7 @@ func zipMethod(name string) uint16 {
 	return zip.Deflate
 }
 
-// CreateZipToWriter writes a zip archive of the given paths to the writer.
-// basePath is the root directory used to calculate relative paths in the archive.
-// When compress is false all entries are stored uncompressed.
-// Returns the number of files archived.
+// Writes a zip archive of paths, returns file count
 func CreateZipToWriter(paths []string, basePath string, w io.Writer, compress bool) (int, error) {
 	zw := zip.NewWriter(w)
 	defer zw.Close()
@@ -358,7 +355,7 @@ func CreateZipToWriter(paths []string, basePath string, w io.Writer, compress bo
 	return count, nil
 }
 
-// CreateZipArchive creates a zip archive file on disk from the given paths.
+// Creates a zip archive file on disk from paths
 func CreateZipArchive(paths []string, basePath string, destPath string, compress bool) (int, error) {
 	f, err := os.Create(destPath)
 	if err != nil {
@@ -374,7 +371,7 @@ func CreateZipArchive(paths []string, basePath string, destPath string, compress
 	return count, nil
 }
 
-// CopyDir recursively copies a directory tree from src to dst.
+// Recursively copies a directory tree from src to dst
 func CopyDir(src, dst string) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -399,7 +396,7 @@ func CopyDir(src, dst string) error {
 }
 
 func CopyFile(src, dst string) error {
-	// Prevent copying a file onto itself — os.Create truncates before io.Copy reads.
+	// Prevents copying a file onto itself before truncation
 	if filepath.Clean(src) == filepath.Clean(dst) {
 		return fmt.Errorf("source and destination are the same file: %s", src)
 	}

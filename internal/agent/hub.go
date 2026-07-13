@@ -1,0 +1,284 @@
+// Package agent routes telemetry and console messages over disco-agent
+package agent
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/nickheyer/discopanel/internal/activity"
+	"github.com/nickheyer/discopanel/internal/autopilot"
+	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/events"
+	"github.com/nickheyer/discopanel/internal/metrics"
+	"github.com/nickheyer/discopanel/pkg/logger"
+	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+)
+
+// Feeds human-readable agent lines into a server's console stream
+type ConsoleSink func(serverID string, message string)
+
+// One live agent stream, hub owns the registry
+type Session struct {
+	ServerID string
+	sendCh   chan *agentv1.PanelMessage
+	closed   chan struct{}
+	once     sync.Once
+}
+
+// Returns panel-to-agent messages the RPC handler pumps into the stream
+func (s *Session) Outbound() <-chan *agentv1.PanelMessage {
+	return s.sendCh
+}
+
+// Reports session teardown to the RPC handler's send pump
+func (s *Session) Closed() <-chan struct{} {
+	return s.closed
+}
+
+func (s *Session) close() {
+	s.once.Do(func() { close(s.closed) })
+}
+
+// Tracks live agent sessions and routes telemetry
+type Hub struct {
+	store     *storage.Store
+	collector *metrics.Collector
+	bus       *events.Bus
+	rec       *activity.Recorder
+	log       *logger.Logger
+
+	mu        sync.Mutex
+	sessions  map[string]*Session
+	sink      ConsoleSink
+	responder *autopilot.CrashResponder
+}
+
+func NewHub(store *storage.Store, collector *metrics.Collector, bus *events.Bus, rec *activity.Recorder, log *logger.Logger) *Hub {
+	return &Hub{
+		store:     store,
+		collector: collector,
+		bus:       bus,
+		rec:       rec,
+		log:       log,
+		sessions:  make(map[string]*Session),
+	}
+}
+
+// Wires agent lifecycle lines into the server console stream
+func (h *Hub) SetConsoleSink(sink ConsoleSink) {
+	h.mu.Lock()
+	h.sink = sink
+	h.mu.Unlock()
+}
+
+// Wires the lifecycle manager and dep installer for crash repair
+func (h *Hub) SetCrashDoctor(lifecycle autopilot.CrashLifecycle, installer autopilot.DepInstaller) {
+	h.mu.Lock()
+	h.responder = &autopilot.CrashResponder{
+		Store:     h.store,
+		Collector: h.collector,
+		Lifecycle: lifecycle,
+		Installer: installer,
+		Rec:       h.rec,
+		Log:       h.log,
+	}
+	h.mu.Unlock()
+}
+
+func (h *Hub) crashResponder() *autopilot.CrashResponder {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.responder
+}
+
+func (h *Hub) console(serverID, format string, args ...any) {
+	h.mu.Lock()
+	sink := h.sink
+	h.mu.Unlock()
+	if sink != nil {
+		sink(serverID, fmt.Sprintf(format, args...))
+	}
+}
+
+// Registers a new live session, reconnect displaces the stale one
+func (h *Hub) Attach(serverID string, hello *agentv1.Hello) *Session {
+	sess := &Session{
+		ServerID: serverID,
+		sendCh:   make(chan *agentv1.PanelMessage, 64),
+		closed:   make(chan struct{}),
+	}
+	h.mu.Lock()
+	old := h.sessions[serverID]
+	h.sessions[serverID] = sess
+	h.mu.Unlock()
+	if old != nil {
+		old.close()
+	}
+	h.collector.SetAgentConnected(serverID, true)
+	h.collector.ApplyAgentHello(serverID, hello)
+	h.log.Info("agent: session attached for server %s (runtime %s, %s MC %s)",
+		serverID, hello.GetVersion(), hello.GetLoader(), hello.GetMcVersion())
+	return sess
+}
+
+// Unregisters a session, no-op if a newer session displaced it
+func (h *Hub) Detach(serverID string, sess *Session) {
+	h.mu.Lock()
+	current := h.sessions[serverID] == sess
+	if current {
+		delete(h.sessions, serverID)
+	}
+	h.mu.Unlock()
+	sess.close()
+	if current {
+		h.collector.SetAgentConnected(serverID, false)
+		h.log.Info("agent: session detached for server %s", serverID)
+	}
+}
+
+// Reports whether a live agent session exists for the server
+func (h *Hub) Connected(serverID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sessions[serverID] != nil
+}
+
+func (h *Hub) sendToAgent(serverID string, msg *agentv1.PanelMessage) error {
+	h.mu.Lock()
+	sess := h.sessions[serverID]
+	h.mu.Unlock()
+	if sess == nil {
+		return fmt.Errorf("no agent session for server %s", serverID)
+	}
+	select {
+	case sess.sendCh <- msg:
+		return nil
+	case <-sess.closed:
+		return fmt.Errorf("agent session for server %s is closing", serverID)
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("agent session for server %s is not draining", serverID)
+	}
+}
+
+// Writes one command line to java stdin via supervisor
+func (h *Hub) SendConsole(ctx context.Context, serverID, command string) error {
+	_ = ctx
+	return h.sendToAgent(serverID, &agentv1.PanelMessage{Payload: &agentv1.PanelMessage_ConsoleCommand{
+		ConsoleCommand: &agentv1.ConsoleCommand{Command: command},
+	}})
+}
+
+// Broadcasts a chat message in game via the supervisor's tellraw
+func (h *Hub) SendChat(ctx context.Context, serverID, sender, message string) error {
+	_ = ctx
+	return h.sendToAgent(serverID, &agentv1.PanelMessage{Payload: &agentv1.PanelMessage_ChatMessage{
+		ChatMessage: &agentv1.ChatMessage{Sender: sender, Message: message},
+	}})
+}
+
+// Routes one agent telemetry message to the collector and bus
+func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.AgentMessage) {
+	switch p := msg.GetPayload().(type) {
+	case *agentv1.AgentMessage_Hello:
+		// Second hello on an open session means javaagent started
+		if p.Hello.GetSource() == agentv1.HelloSource_HELLO_SOURCE_JVM {
+			h.collector.SetAgentJvmActive(serverID, true)
+			h.console(serverID, "JVM telemetry active (disco-agent %s)", p.Hello.GetVersion())
+		}
+
+	case *agentv1.AgentMessage_Ready:
+		h.collector.ApplyAgentReady(ctx, serverID, p.Ready.GetStartupSeconds())
+		if secs := p.Ready.GetStartupSeconds(); secs > 0 {
+			h.console(serverID, "server ready in %.1fs", secs)
+		}
+		// A verified boot closes any open repair incident
+		if r := h.crashResponder(); r != nil {
+			r.OnServerReady(ctx, serverID)
+		}
+
+	case *agentv1.AgentMessage_Stopping:
+		h.console(serverID, "server is shutting down")
+
+	case *agentv1.AgentMessage_Exited:
+		// Boot replay repeats the live report, skip stale copies
+		if !h.collector.ApplyAgentExit(serverID, p.Exited) {
+			return
+		}
+		if p.Exited.GetCrashed() {
+			rctx := activity.WithTrace(activity.WithSource(ctx, "runtime"))
+			attrs := activity.Attrs{"exit_code": strconv.Itoa(int(p.Exited.GetExitCode()))}
+			if path := p.Exited.GetCrashReportPath(); path != "" {
+				attrs["crash_report"] = path
+			}
+			switch {
+			case p.Exited.GetOomKilled():
+				h.rec.Announce(rctx, serverID, "server.oom", attrs, "server was killed after running out of memory (exit code %d), raise the container memory or lower the heap", p.Exited.GetExitCode())
+			case p.Exited.GetBootFailed():
+				h.rec.Announce(rctx, serverID, "server.boot_failed", attrs, "server failed to start (crash report: %s)", p.Exited.GetCrashReportPath())
+			case p.Exited.GetCrashReportPath() != "":
+				h.rec.Announce(rctx, serverID, "server.crash", attrs, "server crashed (exit code %d, crash report: %s)", p.Exited.GetExitCode(), p.Exited.GetCrashReportPath())
+			default:
+				h.rec.Announce(rctx, serverID, "server.crash", attrs, "server exited abnormally (exit code %d)", p.Exited.GetExitCode())
+			}
+			if r := h.crashResponder(); r != nil {
+				r.OnCrashExit(ctx, serverID)
+			}
+		}
+
+	case *agentv1.AgentMessage_ProcSample:
+		h.collector.ApplyAgentProc(serverID, p.ProcSample)
+
+	case *agentv1.AgentMessage_TickSample:
+		h.collector.ApplyAgentTick(serverID, p.TickSample)
+
+	case *agentv1.AgentMessage_JvmSample:
+		h.collector.ApplyAgentJvm(serverID, p.JvmSample)
+
+	case *agentv1.AgentMessage_PlayerEvent:
+		h.handlePlayerEvent(ctx, serverID, p.PlayerEvent)
+
+	case *agentv1.AgentMessage_Roster:
+		h.collector.ApplyAgentRoster(serverID, p.Roster.GetOnlinePlayers())
+
+	case *agentv1.AgentMessage_FatalError:
+		// Live capture, the exit report lands moments later
+		if causes := p.FatalError.GetCauses(); len(causes) > 0 {
+			h.console(serverID, "fatal error in the JVM: %s", causes[0].GetType())
+		}
+	}
+}
+
+// Updates roster, emits bus event, replaces agent SLP diffing
+func (h *Hub) handlePlayerEvent(ctx context.Context, serverID string, ev *agentv1.PlayerEvent) {
+	player := ev.GetPlayer()
+	data := map[string]any{"player": player}
+	if d := ev.GetDetail(); d != "" {
+		data["detail"] = d
+	}
+
+	var eventType v1.TriggeredEventType
+	switch ev.GetType() {
+	case agentv1.PlayerEventType_PLAYER_EVENT_TYPE_JOIN:
+		h.collector.ApplyAgentPlayerChange(serverID, player, true, int(ev.GetPlayersOnline()))
+		eventType = v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_JOIN
+	case agentv1.PlayerEventType_PLAYER_EVENT_TYPE_LEAVE:
+		h.collector.ApplyAgentPlayerChange(serverID, player, false, int(ev.GetPlayersOnline()))
+		eventType = v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_LEAVE
+	case agentv1.PlayerEventType_PLAYER_EVENT_TYPE_DEATH:
+		eventType = v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_DEATH
+	case agentv1.PlayerEventType_PLAYER_EVENT_TYPE_ADVANCEMENT:
+		eventType = v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_ADVANCEMENT
+	case agentv1.PlayerEventType_PLAYER_EVENT_TYPE_CHAT:
+		eventType = v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_CHAT
+	default:
+		return
+	}
+
+	if h.bus != nil {
+		h.bus.Emit(ctx, events.Event{Type: eventType, ServerID: serverID, Data: data})
+	}
+}

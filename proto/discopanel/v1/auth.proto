@@ -7,12 +7,12 @@ import "gnostic/openapi/v3/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
-// Global OpenAPI security: Bearer token auth via session JWT or API token (dp_...)
+// Bearer token auth via session JWT or API token
 option (gnostic.openapi.v3.document) = {
   info: {
     title: "DiscoPanel API"
     version: "2.x"
-    description: "DiscoPanel server management API. Authenticate using a session token (from Login/OIDC) or an API token (dp_... prefix) in the Authorization header.\n\n## Connect Protocol\n\nThis API uses the [Connect protocol](https://connectrpc.com/docs/protocol) over HTTP. All endpoints accept `POST` with `application/json` bodies. Connect clients may send the following optional headers:\n\n- `Connect-Protocol-Version: 1` — declares the Connect protocol version.\n- `Connect-Timeout-Ms: <ms>` — request deadline in milliseconds.\n\nThese headers are handled automatically by Connect client libraries and are not required when calling the API directly with curl or other HTTP clients."
+    description: "DiscoPanel server management API. Authenticate using a session token (from Login/OIDC) or an API token (dp_... prefix) in the Authorization header.\n\n## Connect Protocol\n\nThis API uses the [Connect protocol](https://connectrpc.com/docs/protocol) over HTTP. All endpoints accept `POST` with `application/json` bodies. Connect clients may send the following optional headers:\n\n- `Connect-Protocol-Version: 1` - declares the Connect protocol version.\n- `Connect-Timeout-Ms: <ms>` - request deadline in milliseconds.\n\nThese headers are handled automatically by Connect client libraries and are not required when calling the API directly with curl or other HTTP clients."
   }
   components: {
     security_schemes: {
@@ -52,7 +52,7 @@ service AuthService {
   rpc Login(LoginRequest) returns (LoginResponse);
   // Invalidate session
   rpc Logout(LogoutRequest) returns (LogoutResponse);
-  // Register new local account (public)
+  // Creates a new local account (public)
   rpc Register(RegisterRequest) returns (RegisterResponse);
   // Get authenticated user info
   rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
@@ -80,7 +80,7 @@ service AuthService {
   rpc ListAPITokens(ListAPITokensRequest) returns (ListAPITokensResponse);
   // Delete/revoke an API token
   rpc DeleteAPIToken(DeleteAPITokenRequest) returns (DeleteAPITokenResponse);
-  // Use recovery key to reset all users and return to first-user-setup (public)
+  // Resets all users to first-user-setup via recovery key (public)
   rpc UseRecoveryKey(UseRecoveryKeyRequest) returns (UseRecoveryKeyResponse);
 }
 
@@ -178,7 +178,7 @@ message GetAuthConfigResponse {
   bool first_user_setup = 11;
 }
 
-// Update mutable auth settings (all fields optional, only provided fields are updated)
+// Updates mutable auth settings, only provided fields change
 message UpdateAuthSettingsRequest {
   optional bool local_auth_enabled = 1;
   optional bool allow_registration = 2;

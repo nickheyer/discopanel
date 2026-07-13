@@ -4,13 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	// v2 API
+	// Uses the v2 manifest API
 	versionManifestV2URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 
 	// Cache for 1 hour
@@ -44,6 +46,13 @@ type VersionMetadata struct {
 		Component    string `json:"component"`
 		MajorVersion int    `json:"majorVersion"`
 	} `json:"javaVersion"`
+	Downloads struct {
+		Server struct {
+			SHA1 string `json:"sha1"`
+			Size int64  `json:"size"`
+			URL  string `json:"url"`
+		} `json:"server"`
+	} `json:"downloads"`
 }
 
 // Manifest data
@@ -119,23 +128,6 @@ func GetLatestVersion() string {
 	return "0"
 }
 
-// Returns a list of all Minecraft release versions
-func GetVersions() []string {
-	manifest, err := fetchVersionManifest()
-	if err != nil {
-		return []string{}
-	}
-
-	var versions []string
-	for _, version := range manifest.Versions {
-		if version.Type == "release" {
-			versions = append(versions, version.ID)
-		}
-	}
-
-	return versions
-}
-
 // Returns all versions including snapshots
 func GetAllVersions() []string {
 	manifest, err := fetchVersionManifest()
@@ -149,38 +141,6 @@ func GetAllVersions() []string {
 	}
 
 	return versions
-}
-
-// Checks if a given version string is a valid Minecraft version
-func IsValidVersion(version string) bool {
-	manifest, err := fetchVersionManifest()
-	if err != nil {
-		return false
-	}
-
-	for _, v := range manifest.Versions {
-		if v.ID == version {
-			return true
-		}
-	}
-
-	return false
-}
-
-// Returns the release date of a Minecraft version
-func GetVersionDate(version string) (time.Time, error) {
-	manifest, err := fetchVersionManifest()
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	for _, v := range manifest.Versions {
-		if v.ID == version {
-			return v.ReleaseTime, nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("version %s not found", version)
 }
 
 // Returns detailed information about a specific version
@@ -199,30 +159,38 @@ func GetVersionInfo(version string) (*Version, error) {
 	return nil, fmt.Errorf("version %s not found", version)
 }
 
-// Returns the latest snapshot version
-func GetLatestSnapshot() string {
-	manifest, err := fetchVersionManifest()
+// Fetches the full metadata document for a specific Minecraft version
+func GetVersionMetadata(mcVersion string) (*VersionMetadata, error) {
+	versionInfo, err := GetVersionInfo(mcVersion)
 	if err != nil {
-		return ""
+		return nil, fmt.Errorf("version %s not found in manifest", mcVersion)
 	}
 
-	return manifest.Latest.Snapshot
-}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 
-// Checks if a version is a snapshot
-func IsSnapshot(version string) bool {
-	manifest, err := fetchVersionManifest()
+	resp, err := client.Get(versionInfo.URL)
 	if err != nil {
-		return false
+		return nil, fmt.Errorf("failed to fetch version metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch version metadata: status code %d", resp.StatusCode)
 	}
 
-	for _, v := range manifest.Versions {
-		if v.ID == version {
-			return v.Type == "snapshot"
-		}
+	var metadata VersionMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		return nil, fmt.Errorf("failed to decode version metadata: %w", err)
 	}
 
-	return false
+	// Cache the java version for GetJavaVersion
+	cache.mu.Lock()
+	cache.javaVersions[mcVersion] = strconv.Itoa(metadata.JavaVersion.MajorVersion)
+	cache.mu.Unlock()
+
+	return &metadata, nil
 }
 
 // Fetches required Java version for a specific Minecraft version
@@ -235,40 +203,79 @@ func GetJavaVersion(mcVersion string) (string, error) {
 	}
 	cache.mu.RUnlock()
 
-	// Get version URL from manifest
-	versionInfo, err := GetVersionInfo(mcVersion)
+	metadata, err := GetVersionMetadata(mcVersion)
 	if err != nil {
-		return "0", fmt.Errorf("version %s not found in manifest", mcVersion)
+		return "0", err
 	}
 
-	// Fetch version metadata
-	client := &http.Client{
-		Timeout: 10 * time.Second,
+	return strconv.Itoa(metadata.JavaVersion.MajorVersion), nil
+}
+
+// First release shipping the management server
+const managementProtocolRelease = "1.21.9"
+
+// Management protocol snapshot floor (25w35a introduced it)
+const (
+	managementSnapshotYear = 25
+	managementSnapshotWeek = 35
+)
+
+var snapshotIDPattern = regexp.MustCompile(`^(\d{2})w(\d{2})`)
+
+// Compares version strings numerically, ignoring pre-release suffix
+func CompareGameVersions(a, b string) int {
+	as, bs := splitVersionSegments(a), splitVersionSegments(b)
+	for i := 0; i < len(as) || i < len(bs); i++ {
+		av, bv := 0, 0
+		if i < len(as) {
+			av = as[i]
+		}
+		if i < len(bs) {
+			bv = bs[i]
+		}
+		if av != bv {
+			if av < bv {
+				return -1
+			}
+			return 1
+		}
 	}
+	return 0
+}
 
-	resp, err := client.Get(versionInfo.URL)
-	if err != nil {
-		return "0", fmt.Errorf("failed to fetch version metadata: %w", err)
+// Parses leading numeric dot-separated segments into ints
+func splitVersionSegments(v string) []int {
+	var out []int
+	for _, seg := range strings.Split(strings.TrimSpace(v), ".") {
+		n := 0
+		digits := 0
+		for _, r := range seg {
+			if r < '0' || r > '9' {
+				break
+			}
+			n = n*10 + int(r-'0')
+			digits++
+		}
+		if digits == 0 {
+			return out
+		}
+		out = append(out, n)
 	}
-	defer resp.Body.Close()
+	return out
+}
 
-	if resp.StatusCode != http.StatusOK {
-		return "0", fmt.Errorf("failed to fetch version metadata: status code %d", resp.StatusCode)
+// Reports whether a version supports Mojang's management API
+func SupportsManagementProtocol(mcVersion string) bool {
+	if m := snapshotIDPattern.FindStringSubmatch(strings.TrimSpace(mcVersion)); m != nil {
+		year, _ := strconv.Atoi(m[1])
+		week, _ := strconv.Atoi(m[2])
+		return year > managementSnapshotYear ||
+			(year == managementSnapshotYear && week >= managementSnapshotWeek)
 	}
-
-	var metadata VersionMetadata
-	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
-		return "0", fmt.Errorf("failed to decode version metadata: %w", err)
+	if len(splitVersionSegments(mcVersion)) == 0 {
+		return false
 	}
-
-	javaVersion := strconv.Itoa(metadata.JavaVersion.MajorVersion)
-
-	// Cache the result
-	cache.mu.Lock()
-	cache.javaVersions[mcVersion] = javaVersion
-	cache.mu.Unlock()
-
-	return javaVersion, nil
+	return CompareGameVersions(mcVersion, managementProtocolRelease) >= 0
 }
 
 func FindMostRecentMinecraftVersion(versions []string) string {
@@ -288,89 +295,4 @@ func FindMostRecentMinecraftVersion(versions []string) string {
 		return versions[len(versions)-1] // Return last because we don't have a choice now
 	}
 	return ""
-}
-
-const (
-	protocolVersionsURL = "https://raw.githubusercontent.com/PrismarineJS/minecraft-data/master/data/pc/common/protocolVersions.json"
-)
-
-type ProtocolVersionEntry struct {
-	MinecraftVersion string `json:"minecraftVersion"`
-	Version          int    `json:"version"`
-	DataVersion      int    `json:"dataVersion"`
-	UsesNetty        bool   `json:"usesNetty"`
-	MajorVersion     string `json:"majorVersion"`
-	ReleaseType      string `json:"releaseType"`
-}
-
-// Protocol cache
-type protocolCache struct {
-	mu            sync.RWMutex
-	versions      map[string]int // mcVersion -> protocolVersion
-	lastFetchTime time.Time
-}
-
-var protoCache = &protocolCache{
-	versions: make(map[string]int),
-}
-
-// Fetches PrismarineJS minecraft-data
-func fetchProtocolVersions() (map[string]int, error) {
-	// Check cache first
-	protoCache.mu.RLock()
-	if len(protoCache.versions) > 0 && time.Since(protoCache.lastFetchTime) < cacheDuration {
-		versions := protoCache.versions
-		protoCache.mu.RUnlock()
-		return versions, nil
-	}
-	protoCache.mu.RUnlock()
-
-	// Fetch new data
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Get(protocolVersionsURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch protocol versions: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch protocol versions: status code %d", resp.StatusCode)
-	}
-
-	var entries []ProtocolVersionEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-		return nil, fmt.Errorf("failed to decode protocol versions: %w", err)
-	}
-
-	// Build version map
-	versions := make(map[string]int)
-	for _, entry := range entries {
-		versions[entry.MinecraftVersion] = entry.Version
-	}
-
-	// Update cache
-	protoCache.mu.Lock()
-	protoCache.versions = versions
-	protoCache.lastFetchTime = time.Now()
-	protoCache.mu.Unlock()
-
-	return versions, nil
-}
-
-// Get protocol version for a Minecraft version string
-func GetProtocolVersion(mcVersion string) int {
-	versions, err := fetchProtocolVersions()
-	if err != nil {
-		return -1
-	}
-
-	if proto, ok := versions[mcVersion]; ok {
-		return proto
-	}
-
-	// Return -1 for unknown versions - servers accept this for status pings
-	return -1
 }

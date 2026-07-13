@@ -28,6 +28,7 @@ type Config struct {
 	Compress   bool
 }
 
+// Plain stdout logger, used by tests
 func New() *Logger {
 	return &Logger{
 		Logger:    log.New(os.Stdout, "", 0),

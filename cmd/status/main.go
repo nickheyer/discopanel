@@ -61,14 +61,14 @@ func main() {
 	}
 
 	p := &panel{
-		serverClient:    discopanelv1connect.NewServerServiceClient(httpClient, apiURL, clientOpts...),
-		minecraftClient: discopanelv1connect.NewMinecraftServiceClient(httpClient, apiURL, clientOpts...),
-		configClient:    discopanelv1connect.NewConfigServiceClient(httpClient, apiURL, clientOpts...),
-		modpackClient:   discopanelv1connect.NewModpackServiceClient(httpClient, apiURL, clientOpts...),
-		serverID:        serverID,
-		poll:            poll,
-		tmpl:            tmpl,
-		title:           os.Getenv("PANEL_TITLE"),
+		serverClient:     discopanelv1connect.NewServerServiceClient(httpClient, apiURL, clientOpts...),
+		minecraftClient:  discopanelv1connect.NewMinecraftServiceClient(httpClient, apiURL, clientOpts...),
+		propertiesClient: discopanelv1connect.NewPropertiesServiceClient(httpClient, apiURL, clientOpts...),
+		modpackClient:    discopanelv1connect.NewModpackServiceClient(httpClient, apiURL, clientOpts...),
+		serverID:         serverID,
+		poll:             poll,
+		tmpl:             tmpl,
+		title:            os.Getenv("PANEL_TITLE"),
 	}
 
 	go p.loop()
@@ -85,14 +85,14 @@ func main() {
 }
 
 type panel struct {
-	serverClient    discopanelv1connect.ServerServiceClient
-	minecraftClient discopanelv1connect.MinecraftServiceClient
-	configClient    discopanelv1connect.ConfigServiceClient
-	modpackClient   discopanelv1connect.ModpackServiceClient
-	serverID        string
-	poll            time.Duration
-	tmpl            *template.Template
-	title           string
+	serverClient     discopanelv1connect.ServerServiceClient
+	minecraftClient  discopanelv1connect.MinecraftServiceClient
+	propertiesClient discopanelv1connect.PropertiesServiceClient
+	modpackClient    discopanelv1connect.ModpackServiceClient
+	serverID         string
+	poll             time.Duration
+	tmpl             *template.Template
+	title            string
 
 	mu             sync.RWMutex
 	server         *v1.Server
@@ -166,7 +166,7 @@ func (p *panel) fetchStaticOnce(ctx context.Context) {
 	// Fetch server config to find modpack URL and version
 	indexerKeys := []string{"cfPageUrl", "modrinthModpack"}
 	versionKeys := []string{"cfFileId", "modrinthVersion"}
-	configResp, err := p.configClient.GetServerConfig(ctx, connect.NewRequest(&v1.GetServerConfigRequest{ServerId: p.serverID}))
+	propsResp, err := p.propertiesClient.GetServerProperties(ctx, connect.NewRequest(&v1.GetServerPropertiesRequest{ServerId: p.serverID}))
 	if err != nil {
 		fmt.Printf("failed to fetch server config: %v\n", err)
 		return
@@ -174,7 +174,7 @@ func (p *panel) fetchStaticOnce(ctx context.Context) {
 
 	var modpackURL string
 	var modpackVersion string
-	for _, cat := range configResp.Msg.GetCategories() {
+	for _, cat := range propsResp.Msg.GetCategories() {
 		for _, prop := range cat.GetProperties() {
 			if slices.Contains(indexerKeys, prop.GetKey()) && prop.GetValue() != "" {
 				modpackURL = prop.GetValue()
@@ -326,7 +326,7 @@ func envDuration(k string, d time.Duration) time.Duration {
 	return d
 }
 
-// authInterceptor injects a Bearer token into every outgoing RPC request.
+// Injects Bearer token into every outgoing RPC request
 func authInterceptor(token string) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {

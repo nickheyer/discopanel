@@ -133,7 +133,7 @@ func (s *AuthService) Register(ctx context.Context, req *connect.Request[v1.Regi
 			}
 		}
 	} else if !isFirstUser && !s.authManager.IsRegistrationAllowed() {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("registration is disabled"))
+		return nil, connect.NewError(connect.CodePermissionDenied, auth.ErrRegistrationDisabled)
 	}
 
 	if msg.Username == "" || msg.Password == "" {
@@ -146,7 +146,7 @@ func (s *AuthService) Register(ctx context.Context, req *connect.Request[v1.Regi
 		return nil, connect.NewError(connect.CodeAlreadyExists, errors.New("registration failed"))
 	}
 
-	// Role assignment: first user → admin; invite with roles → invite roles; else → default roles
+	// First user gets admin, invite gives invite roles, else default
 	if isFirstUser {
 		_ = s.store.AssignRole(ctx, user.ID, "admin", "local")
 	} else if invite != nil && len(invite.Roles) > 0 {
@@ -178,8 +178,7 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
 
-	// When all auth is disabled, the interceptor injects a synthetic admin
-	// that doesn't exist in DB. Return it directly.
+	// Auth disabled means synthetic admin has no db row
 	if !s.authManager.IsAnyAuthEnabled() {
 		roles := authUser.Roles
 		protoUser := &v1.User{

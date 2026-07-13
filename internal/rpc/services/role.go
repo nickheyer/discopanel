@@ -201,14 +201,11 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 		RolePermissions: rolePermsMap,
 	}
 
-	// Populate available objects for scoped permissions when requested.
-	// Driven entirely by ProcedurePermissions: any resource with a non-empty
-	// ObjectIDField is scopeable, and the field name determines which entity
-	// type provides the objects (e.g. "server_id" → servers).
+	// Populates scopeable objects driven by ProcedurePermissions ObjectIDField
 	if req.Msg.IncludeObjects {
 		type idName struct{ id, name string }
 
-		// Store fetchers keyed by resource constant.
+		// Fetchers keyed by resource constant
 		fetchers := map[string]func() []idName{
 			rbac.ResourceServers: func() []idName {
 				items, err := s.store.ListServers(ctx)
@@ -278,7 +275,7 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 			},
 		}
 
-		// Collect needed source resources and fetch each once.
+		// Collects needed source resources, fetches each once
 		fetched := make(map[string][]idName)
 		needed := make(map[string]bool)
 		for _, res := range rbac.AllResources {
@@ -292,7 +289,7 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 			}
 		}
 
-		// Emit ScopeableObjects in stable resource order.
+		// Emits ScopeableObjects in stable resource order
 		var objects []*v1.ScopeableObject
 		for _, resource := range rbac.AllResources {
 			source, ok := rbac.ResourceScopeSource[resource]

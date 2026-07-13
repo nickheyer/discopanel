@@ -1,0 +1,17 @@
+import { rpcClient } from '$lib/api/rpc-client';
+import type { ModLoaderInfo } from '$lib/proto/discopanel/v1/minecraft_pb';
+import type { ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+
+let cache: Promise<ModLoaderInfo[]> | null = null;
+
+// Registry-backed loader facts, fetched once per session
+export function loadModLoaders(): Promise<ModLoaderInfo[]> {
+	cache ??= rpcClient.minecraft.getModLoaders({}).then((r) => r.modloaders);
+	return cache;
+}
+
+// Directory jars install into, empty when the loader has none
+export async function modsDirectoryFor(loader: ModLoader): Promise<string> {
+	const loaders = await loadModLoaders();
+	return loaders.find((l) => l.loader === loader)?.modsDirectory ?? '';
+}

@@ -4,6 +4,8 @@ package discopanel.v1;
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
+import "discopanel/v1/common.proto";
+
 // Minecraft version and runtime information
 service MinecraftService {
   // List all Minecraft versions
@@ -17,7 +19,7 @@ service MinecraftService {
 // Minecraft version metadata
 message MinecraftVersion {
   string id = 1;
-  string type = 2; // release, snapshot, old_beta, old_alpha
+  string type = 2; // Release, snapshot, old_beta, or old_alpha
   string release_time = 3;
   string url = 4;
 }
@@ -39,6 +41,11 @@ message ModLoaderInfo {
   bool supports_mods = 4;
   bool supports_plugins = 5;
   string category = 6;
+  // True when the provisioner installs this loader itself
+  bool provisionable = 7;
+  ModLoader loader = 8;
+  // Directory jars install into, mods or plugins, empty when none
+  string mods_directory = 9;
 }
 
 // Empty loaders request
@@ -97,14 +104,14 @@ message SLPServerStatus {
   SLPPlayers players = 2;
   string description = 3; // Parsed MOTD text
   optional string description_json = 4; // Raw JSON for rich formatting
-  optional string favicon = 5; // Base64 PNG (data:image/png;base64,...)
+  optional string favicon = 5; // Base64 PNG image data
   bool enforces_secure_chat = 6;
   int64 latency_ms = 7;
 }
 
 // Server version information
 message SLPVersion {
-  string name = 1; // ie: "1.21.4"
+  string name = 1; // Example version 1.21.4
   int32 protocol = 2; // Protocol version number
 }
 

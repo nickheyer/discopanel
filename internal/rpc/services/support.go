@@ -30,7 +30,7 @@ import (
 // Compile-time check that SupportService implements the interface
 var _ discopanelv1connect.SupportServiceHandler = (*SupportService)(nil)
 
-// SupportService implements the Support service
+// Implements the Support service
 type SupportService struct {
 	store  *storage.Store
 	docker *docker.Client
@@ -40,7 +40,7 @@ type SupportService struct {
 	bundles map[string]*BundleInfo
 }
 
-// BundleInfo stores information about a generated bundle
+// Stores information about a generated bundle
 type BundleInfo struct {
 	ID        string
 	Filename  string
@@ -49,7 +49,7 @@ type BundleInfo struct {
 	CreatedAt time.Time
 }
 
-// UploadUserInfo contains user-provided contact and issue information
+// Contains user-provided contact and issue information
 type UploadUserInfo struct {
 	DiscordUsername  string
 	Email            string
@@ -58,7 +58,7 @@ type UploadUserInfo struct {
 	StepsToReproduce string
 }
 
-// NewSupportService creates a new support service
+// Creates a new support service
 func NewSupportService(store *storage.Store, docker *docker.Client, config *config.Config, log *logger.Logger) *SupportService {
 	return &SupportService{
 		store:   store,
@@ -69,7 +69,7 @@ func NewSupportService(store *storage.Store, docker *docker.Client, config *conf
 	}
 }
 
-// GenerateSupportBundle generates a support bundle
+// Generates a support bundle
 func (s *SupportService) GenerateSupportBundle(ctx context.Context, req *connect.Request[v1.GenerateSupportBundleRequest]) (*connect.Response[v1.GenerateSupportBundleResponse], error) {
 	msg := req.Msg
 
@@ -127,7 +127,7 @@ func (s *SupportService) GenerateSupportBundle(ctx context.Context, req *connect
 		}
 
 		// Add server configurations
-		if err := s.addServerConfigsToBundle(ctx, tarWriter, msg.ServerIds); err != nil {
+		if err := s.addServerPropertiessToBundle(ctx, tarWriter, msg.ServerIds); err != nil {
 			s.log.Error("Failed to add server configs: %v", err)
 			s.log.Warn("Continuing without server configs")
 		}
@@ -179,7 +179,7 @@ func (s *SupportService) GenerateSupportBundle(ctx context.Context, req *connect
 	}), nil
 }
 
-// DownloadSupportBundle downloads a support bundle
+// Downloads a support bundle
 func (s *SupportService) DownloadSupportBundle(ctx context.Context, req *connect.Request[v1.DownloadSupportBundleRequest]) (*connect.Response[v1.DownloadSupportBundleResponse], error) {
 	bundleInfo, exists := s.bundles[req.Msg.BundleId]
 	if !exists {
@@ -203,7 +203,7 @@ func (s *SupportService) DownloadSupportBundle(ctx context.Context, req *connect
 	}), nil
 }
 
-// UploadSupportBundle generates and uploads a support bundle to the support server
+// Generates and uploads a support bundle to server
 func (s *SupportService) UploadSupportBundle(ctx context.Context, req *connect.Request[v1.UploadSupportBundleRequest]) (*connect.Response[v1.UploadSupportBundleResponse], error) {
 	msg := req.Msg
 
@@ -260,7 +260,7 @@ func (s *SupportService) UploadSupportBundle(ctx context.Context, req *connect.R
 		}
 
 		// Add server configurations
-		if err := s.addServerConfigsToBundle(ctx, tarWriter, msg.ServerIds); err != nil {
+		if err := s.addServerPropertiessToBundle(ctx, tarWriter, msg.ServerIds); err != nil {
 			s.log.Error("Failed to add server configs: %v", err)
 			s.log.Warn("Continuing without server configs")
 		}
@@ -308,7 +308,7 @@ func (s *SupportService) UploadSupportBundle(ctx context.Context, req *connect.R
 	}), nil
 }
 
-// uploadBundleToServer uploads a bundle file to the support server
+// Uploads a bundle file to the support server
 func (s *SupportService) uploadBundleToServer(bundlePath, fileName string, userInfo *UploadUserInfo) (string, error) {
 	supportURL := s.getUploadSupportUrl()
 
@@ -395,7 +395,7 @@ func (s *SupportService) uploadBundleToServer(bundlePath, fileName string, userI
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&uploadResp); err != nil {
-		// If we can't decode the response, just return the support URL
+		// Falls back to support URL if response can't decode
 		return supportURL, nil
 	}
 
@@ -421,7 +421,7 @@ func (s *SupportService) getUploadSupportUrl() string {
 	return s.getSupportUrl() + "/api/v1/uploads"
 }
 
-// cleanupBundle removes a bundle from memory and disk
+// Removes a bundle from memory and disk
 func (s *SupportService) cleanupBundle(bundleID string) {
 	if bundleInfo, exists := s.bundles[bundleID]; exists {
 		// Remove file
@@ -432,7 +432,7 @@ func (s *SupportService) cleanupBundle(bundleID string) {
 	}
 }
 
-// addLogsToBundle adds logs to the tar archive
+// Adds logs to the tar archive
 func (s *SupportService) addLogsToBundle(ctx context.Context, tarWriter *tar.Writer, serverIDs []string) error {
 	// Get recent logs from memory buffer
 	recentLogs := s.log.GetRecentLogs()
@@ -501,7 +501,7 @@ func (s *SupportService) addLogsToBundle(ctx context.Context, tarWriter *tar.Wri
 	return nil
 }
 
-// addDatabaseToBundle adds the database to the tar archive
+// Adds the database to the tar archive
 func (s *SupportService) addDatabaseToBundle(tarWriter *tar.Writer) error {
 	dbPath := s.config.Database.Path
 
@@ -513,8 +513,8 @@ func (s *SupportService) addDatabaseToBundle(tarWriter *tar.Writer) error {
 	return addFileToTar(tarWriter, dbPath, "database/discopanel.db")
 }
 
-// addServerConfigsToBundle adds server configuration files to the bundle
-func (s *SupportService) addServerConfigsToBundle(ctx context.Context, tarWriter *tar.Writer, serverIDs []string) error {
+// Adds server configuration files to the bundle
+func (s *SupportService) addServerPropertiessToBundle(ctx context.Context, tarWriter *tar.Writer, serverIDs []string) error {
 	var servers []*storage.Server
 	var err error
 
@@ -537,7 +537,7 @@ func (s *SupportService) addServerConfigsToBundle(ctx context.Context, tarWriter
 	// Add each server's configuration
 	for _, server := range servers {
 		// Get server config from database
-		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+		serverConfig, err := s.store.GetServerProperties(ctx, server.ID)
 		if err != nil {
 			s.log.Warn("Failed to get config for server %s: %v", server.Name, err)
 			continue
@@ -579,7 +579,7 @@ func (s *SupportService) addServerConfigsToBundle(ctx context.Context, tarWriter
 	return nil
 }
 
-// addSystemInfoToBundle adds system and configuration information to bundle
+// Adds system and configuration information to bundle
 func (s *SupportService) addSystemInfoToBundle(ctx context.Context, tarWriter *tar.Writer) error {
 	servers, _ := s.store.ListServers(ctx)
 
@@ -691,7 +691,7 @@ func (s *SupportService) addSystemInfoToBundle(ctx context.Context, tarWriter *t
 	return nil
 }
 
-// addFileToTar adds a file to the tar archive
+// Adds a file to the tar archive
 func addFileToTar(tw *tar.Writer, sourcePath, destPath string) error {
 	file, err := os.Open(sourcePath)
 	if err != nil {
@@ -719,7 +719,7 @@ func addFileToTar(tw *tar.Writer, sourcePath, destPath string) error {
 	return err
 }
 
-// fileExists checks if a file exists
+// Checks if a file exists
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
@@ -733,7 +733,7 @@ func toInt32Slice(intSlice []int) []int32 {
 	return result
 }
 
-// getVersionInfo gets version information for the application
+// Gets version information for the application
 func getVersionInfo() string {
 	// Check env var first
 	if appV := os.Getenv("APP_VERSION"); appV != "" {
@@ -764,7 +764,7 @@ func getVersionInfo() string {
 	return "unknown"
 }
 
-// GetApplicationLogs returns the application log file content
+// Returns the application log file content
 func (s *SupportService) GetApplicationLogs(ctx context.Context, req *connect.Request[v1.GetApplicationLogsRequest]) (*connect.Response[v1.GetApplicationLogsResponse], error) {
 	logFilePath := s.log.GetLogFilePath()
 	if logFilePath == "" {

@@ -158,7 +158,7 @@ func (m *Manager) execInModule(ctx context.Context, module *storage.Module, comm
 		return nil // Cannot exec in non-existent container
 	}
 
-	_, err := m.docker.Exec(ctx, module.ContainerID, []string{command})
+	_, _, err := m.docker.Exec(ctx, module.ContainerID, []string{command})
 	return err
 }
 

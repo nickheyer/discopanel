@@ -26,7 +26,7 @@ func NewClient(cfg *config.Config) *Client {
 	}
 }
 
-// SearchResponse represents the Modrinth search API response
+// Represents the Modrinth search API response
 type SearchResponse struct {
 	Hits      []Project `json:"hits"`
 	Offset    int       `json:"offset"`
@@ -34,7 +34,7 @@ type SearchResponse struct {
 	TotalHits int       `json:"total_hits"`
 }
 
-// Project represents a Modrinth project (modpack)
+// Represents a Modrinth project or modpack
 type Project struct {
 	Slug              string   `json:"slug"`
 	Title             string   `json:"title"`
@@ -59,7 +59,7 @@ type Project struct {
 	Color             *int     `json:"color"`
 }
 
-// ProjectDetails represents full project details from GET /project/{id}
+// Full project details from GET /project/{id}
 type ProjectDetails struct {
 	ID                   string        `json:"id"`
 	Slug                 string        `json:"slug"`
@@ -112,7 +112,7 @@ type License struct {
 	URL  string `json:"url"`
 }
 
-// Version represents a project version
+// Represents a single project version
 type Version struct {
 	ID            string       `json:"id"`
 	Name          string       `json:"name"`
@@ -151,7 +151,7 @@ type Dependency struct {
 	DependencyType string  `json:"dependency_type"`
 }
 
-// SearchModpacks searches for modpacks on Modrinth
+// Searches for modpacks on Modrinth
 func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*SearchResponse, error) {
 	// Build facets for filtering
 	facets := [][]string{
@@ -188,7 +188,7 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 	return &searchResp, nil
 }
 
-// GetModpack retrieves detailed information about a specific modpack
+// Retrieves detailed info for one modpack
 func (c *Client) GetModpack(ctx context.Context, modpackID string) (*ProjectDetails, error) {
 	var project ProjectDetails
 	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/project/%s", BaseURL, modpackID), &project); err != nil {
@@ -198,12 +198,37 @@ func (c *Client) GetModpack(ctx context.Context, modpackID string) (*ProjectDeta
 	return &project, nil
 }
 
-// GetModpackVersions retrieves all versions for a specific modpack
-func (c *Client) GetModpackVersions(ctx context.Context, modpackID string) ([]Version, error) {
-	var versions []Version
-	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/project/%s/version", BaseURL, modpackID), &versions); err != nil {
-		return nil, err
+// Retrieves project versions, filtered by loader and game version
+func (c *Client) GetProjectVersionsFiltered(ctx context.Context, projectID string, loaders []string, gameVersions []string) ([]Version, error) {
+	params := url.Values{}
+	if len(loaders) > 0 {
+		if f, err := json.Marshal(loaders); err == nil {
+			params.Set("loaders", string(f))
+		}
+	}
+	if len(gameVersions) > 0 {
+		if f, err := json.Marshal(gameVersions); err == nil {
+			params.Set("game_versions", string(f))
+		}
 	}
 
+	endpoint := fmt.Sprintf("%s/project/%s/version", BaseURL, projectID)
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
+
+	var versions []Version
+	if err := c.http.DoJSON(ctx, endpoint, &versions); err != nil {
+		return nil, err
+	}
 	return versions, nil
+}
+
+// Retrieves a single version by its ID
+func (c *Client) GetVersion(ctx context.Context, versionID string) (*Version, error) {
+	var version Version
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/version/%s", BaseURL, versionID), &version); err != nil {
+		return nil, err
+	}
+	return &version, nil
 }

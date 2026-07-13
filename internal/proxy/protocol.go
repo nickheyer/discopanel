@@ -3,33 +3,34 @@ package proxy
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 )
 
-// VarInt reads/writes variable-length integers as used in Minecraft protocol
+// Bounds handshake size, generous for modded Forge FML data
+const maxHandshakeLength = 2048
+
+// First byte of a legacy pre-1.7 server list ping
+const legacyPingByte = 0xFE
+
+// Reads and writes Minecraft's variable-length integers
 type VarInt int32
 
-// ReadVarInt reads a variable-length integer from the reader
+// Reads a variable-length integer from the reader
 func ReadVarInt(r io.Reader) (VarInt, error) {
 	var value int32
 	var position int
-	var currentByte byte
 
 	for {
-		buf := make([]byte, 1)
-		n, err := r.Read(buf)
+		b, err := readByte(r)
 		if err != nil {
 			return 0, fmt.Errorf("failed to read varint byte: %w", err)
 		}
-		if n != 1 {
-			return 0, fmt.Errorf("failed to read full byte")
-		}
-		currentByte = buf[0]
 
-		value |= int32(currentByte&0x7F) << position
+		value |= int32(b&0x7F) << position
 
-		if currentByte&0x80 == 0 {
+		if b&0x80 == 0 {
 			break
 		}
 
@@ -43,28 +44,41 @@ func ReadVarInt(r io.Reader) (VarInt, error) {
 	return VarInt(value), nil
 }
 
-// WriteVarInt writes a variable-length integer to the writer
+// Reads one byte, using ByteReader fast path if available
+func readByte(r io.Reader) (byte, error) {
+	if br, ok := r.(io.ByteReader); ok {
+		return br.ReadByte()
+	}
+	var buf [1]byte
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return 0, err
+	}
+	return buf[0], nil
+}
+
+// Writes a variable-length integer, unsigned shift handles negatives
 func WriteVarInt(w io.Writer, value VarInt) error {
+	v := uint32(value)
 	for {
-		if (value & ^0x7F) == 0 {
-			return binary.Write(w, binary.BigEndian, byte(value))
+		if v&^uint32(0x7F) == 0 {
+			return binary.Write(w, binary.BigEndian, byte(v))
 		}
 
-		if err := binary.Write(w, binary.BigEndian, byte((value&0x7F)|0x80)); err != nil {
+		if err := binary.Write(w, binary.BigEndian, byte((v&0x7F)|0x80)); err != nil {
 			return err
 		}
 
-		value >>= 7
+		v >>= 7
 	}
 }
 
-// Len returns the length of the VarInt when encoded
+// Returns encoded length, unsigned shift handles negatives
 func (v VarInt) Len() int {
-	value := int32(v)
+	value := uint32(v)
 	length := 0
 	for {
 		length++
-		if (value & ^0x7F) == 0 {
+		if value&^uint32(0x7F) == 0 {
 			break
 		}
 		value >>= 7
@@ -72,7 +86,13 @@ func (v VarInt) Len() int {
 	return length
 }
 
-// HandshakePacket represents the initial handshake packet from a Minecraft client
+// Handshake next-state values
+const (
+	NextStateStatus = 1
+	NextStateLogin  = 2
+)
+
+// Represents the initial handshake packet from a client
 type HandshakePacket struct {
 	ProtocolVersion VarInt
 	ServerAddress   string
@@ -80,19 +100,17 @@ type HandshakePacket struct {
 	NextState       VarInt // 1 for status, 2 for login
 }
 
-// ReadHandshakePacket reads a handshake packet from the connection
+// Reads a handshake packet from the connection
 func ReadHandshakePacket(r io.Reader) (*HandshakePacket, error) {
-	// Read packet length
 	length, err := ReadVarInt(r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read packet length: %w", err)
 	}
 
-	if length < 1 || length > 255 {
-		return nil, fmt.Errorf("invalid packet length: %d", length)
+	if length < 1 || length > maxHandshakeLength {
+		return nil, fmt.Errorf("invalid handshake length: %d", length)
 	}
 
-	// Read packet data
 	data := make([]byte, length)
 	n, err := io.ReadFull(r, data)
 	if err != nil {
@@ -101,7 +119,6 @@ func ReadHandshakePacket(r io.Reader) (*HandshakePacket, error) {
 
 	buf := bytes.NewReader(data)
 
-	// Read packet ID (should be 0x00 for handshake)
 	packetID, err := ReadVarInt(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read packet ID: %w", err)
@@ -113,16 +130,17 @@ func ReadHandshakePacket(r io.Reader) (*HandshakePacket, error) {
 
 	packet := &HandshakePacket{}
 
-	// Read protocol version
 	packet.ProtocolVersion, err = ReadVarInt(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read protocol version: %w", err)
 	}
 
-	// Read server address string
 	addressLen, err := ReadVarInt(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read address length: %w", err)
+	}
+	if addressLen < 0 || int(addressLen) > buf.Len() {
+		return nil, fmt.Errorf("invalid address length: %d", addressLen)
 	}
 
 	addressBytes := make([]byte, addressLen)
@@ -131,12 +149,10 @@ func ReadHandshakePacket(r io.Reader) (*HandshakePacket, error) {
 	}
 	packet.ServerAddress = string(addressBytes)
 
-	// Read server port
 	if err := binary.Read(buf, binary.BigEndian, &packet.ServerPort); err != nil {
 		return nil, fmt.Errorf("failed to read port: %w", err)
 	}
 
-	// Read next state
 	packet.NextState, err = ReadVarInt(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read next state: %w", err)
@@ -145,43 +161,56 @@ func ReadHandshakePacket(r io.Reader) (*HandshakePacket, error) {
 	return packet, nil
 }
 
-// WriteHandshakePacket writes a handshake packet to the connection
+// Writes a handshake packet to the connection
 func WriteHandshakePacket(w io.Writer, packet *HandshakePacket) error {
 	var buf bytes.Buffer
 
-	// Write packet ID
 	if err := WriteVarInt(&buf, 0x00); err != nil {
 		return err
 	}
-
-	// Write protocol version
 	if err := WriteVarInt(&buf, packet.ProtocolVersion); err != nil {
 		return err
 	}
-
-	// Write server address
 	if err := WriteVarInt(&buf, VarInt(len(packet.ServerAddress))); err != nil {
 		return err
 	}
 	if _, err := buf.WriteString(packet.ServerAddress); err != nil {
 		return err
 	}
-
-	// Write server port
 	if err := binary.Write(&buf, binary.BigEndian, packet.ServerPort); err != nil {
 		return err
 	}
-
-	// Write next state
 	if err := WriteVarInt(&buf, packet.NextState); err != nil {
 		return err
 	}
 
-	// Write packet length and data
-	data := buf.Bytes()
-	if err := WriteVarInt(w, VarInt(len(data))); err != nil {
+	return writeFramed(w, buf.Bytes())
+}
+
+// Writes a length-prefixed Minecraft packet
+func writeFramed(w io.Writer, data []byte) error {
+	var buf bytes.Buffer
+	if err := WriteVarInt(&buf, VarInt(len(data))); err != nil {
 		return err
 	}
-	_, err := w.Write(data)
+	buf.Write(data)
+	_, err := w.Write(buf.Bytes())
 	return err
+}
+
+// Sends a login disconnect with a chat-component reason
+func WriteLoginDisconnect(w io.Writer, message string) error {
+	reason, err := json.Marshal(map[string]string{"text": message})
+	if err != nil {
+		return err
+	}
+	var payload bytes.Buffer
+	if err := WriteVarInt(&payload, 0x00); err != nil {
+		return err
+	}
+	if err := WriteVarInt(&payload, VarInt(len(reason))); err != nil {
+		return err
+	}
+	payload.Write(reason)
+	return writeFramed(w, payload.Bytes())
 }

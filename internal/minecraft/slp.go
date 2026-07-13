@@ -47,7 +47,7 @@ func NewSLPClient(timeout time.Duration) *SLPClient {
 }
 
 // Server list ping to host and port
-func (c *SLPClient) Ping(ctx context.Context, host string, port int, mcVersion string) (*SLPResult, error) {
+func (c *SLPClient) Ping(ctx context.Context, host string, port int) (*SLPResult, error) {
 	// Create connection
 	var d net.Dialer
 	d.Timeout = c.timeout
@@ -67,11 +67,8 @@ func (c *SLPClient) Ping(ctx context.Context, host string, port int, mcVersion s
 		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
 
-	// Get protocol version for the MC version
-	protocolVersion := GetProtocolVersion(mcVersion)
-
-	// Send handshake packet (NextState = 1 for status)
-	if err := c.sendHandshake(conn, host, port, protocolVersion); err != nil {
+	// Protocol -1 is accepted for status pings
+	if err := c.sendHandshake(conn, host, port, -1); err != nil {
 		return nil, fmt.Errorf("failed to send handshake: %w", err)
 	}
 

@@ -4,30 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 
+	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/command"
 	appconfig "github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/events"
+	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
-// Scheduler manages scheduled tasks for all servers
+// Manages scheduled tasks for all servers
 type Scheduler struct {
 	store         *storage.Store
 	docker        *docker.Client
 	sender        *command.Sender
+	lifecycle     *lifecycle.Manager
 	appConfig     *appconfig.Config
 	metrics       *metrics.Collector
+	rec           *activity.Recorder
 	log           *logger.Logger
 	checkInterval time.Duration
 
@@ -38,7 +43,7 @@ type Scheduler struct {
 	wg       sync.WaitGroup
 
 	// Execution tracking
-	runningExecutions map[string]context.CancelFunc // executionID -> cancel func
+	runningExecutions map[string]context.CancelFunc // Maps execution id to its cancel func
 	executionMu       sync.RWMutex
 
 	// Cron parser
@@ -49,20 +54,20 @@ type Scheduler struct {
 	nextCheck time.Time
 }
 
-// Config holds scheduler configuration
+// Holds scheduler configuration
 type Config struct {
 	CheckInterval time.Duration // How often to check for due tasks
 }
 
-// DefaultConfig returns default scheduler configuration
+// Returns default scheduler configuration
 func DefaultConfig() Config {
 	return Config{
 		CheckInterval: 10 * time.Second,
 	}
 }
 
-// NewScheduler creates a new task scheduler
-func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, appCfg *appconfig.Config, metricsCollector *metrics.Collector, log *logger.Logger, config ...Config) *Scheduler {
+// Creates a new task scheduler
+func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, lifecycleManager *lifecycle.Manager, appCfg *appconfig.Config, metricsCollector *metrics.Collector, rec *activity.Recorder, log *logger.Logger, config ...Config) *Scheduler {
 	cfg := DefaultConfig()
 	if len(config) > 0 {
 		cfg = config[0]
@@ -72,8 +77,10 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 		store:             store,
 		docker:            docker,
 		sender:            sender,
+		lifecycle:         lifecycleManager,
 		appConfig:         appCfg,
 		metrics:           metricsCollector,
+		rec:               rec,
 		log:               log,
 		checkInterval:     cfg.CheckInterval,
 		stopChan:          make(chan struct{}),
@@ -82,7 +89,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 	}
 }
 
-// Start begins the scheduler loop
+// Begins the scheduler loop
 func (s *Scheduler) Start() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -101,7 +108,7 @@ func (s *Scheduler) Start() error {
 	return nil
 }
 
-// Stop gracefully stops the scheduler
+// Gracefully stops the scheduler
 func (s *Scheduler) Stop() error {
 	s.mu.Lock()
 	if !s.running {
@@ -127,14 +134,14 @@ func (s *Scheduler) Stop() error {
 	return nil
 }
 
-// IsRunning returns whether the scheduler is running
+// Returns whether the scheduler is running
 func (s *Scheduler) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.running
 }
 
-// GetStatus returns current scheduler status
+// Returns current scheduler status
 func (s *Scheduler) GetStatus() SchedulerStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -162,7 +169,7 @@ func (s *Scheduler) GetStatus() SchedulerStatus {
 	}
 }
 
-// SchedulerStatus represents the current state of the scheduler
+// Represents the current state of the scheduler
 type SchedulerStatus struct {
 	Running           bool
 	ActiveTasks       int
@@ -171,7 +178,7 @@ type SchedulerStatus struct {
 	NextCheck         time.Time
 }
 
-// runLoop is the main scheduler loop
+// Main scheduler loop
 func (s *Scheduler) runLoop() {
 	defer s.wg.Done()
 
@@ -191,7 +198,7 @@ func (s *Scheduler) runLoop() {
 	}
 }
 
-// checkAndRunDueTasks checks for due tasks and executes them
+// Checks for due tasks and executes them
 func (s *Scheduler) checkAndRunDueTasks() {
 	s.mu.Lock()
 	s.lastCheck = time.Now()
@@ -217,7 +224,7 @@ func (s *Scheduler) checkAndRunDueTasks() {
 	}
 }
 
-// TriggerTask manually triggers a task execution
+// Manually triggers a task execution
 func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*storage.TaskExecution, error) {
 	task, err := s.store.GetScheduledTask(ctx, taskID)
 	if err != nil {
@@ -244,15 +251,12 @@ func (s *Scheduler) HandleServerEvent(ctx context.Context, event events.Event) {
 	}
 }
 
-// executeTaskForEvent runs a task as a result of an event firing. The event
-// type is threaded through to webhook executors so the rendered payload
-// reflects which event triggered the delivery.
+// Runs a task from an event, threads type to webhooks
 func (s *Scheduler) executeTaskForEvent(task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) {
 	s.executeTask(task, "event", eventType, eventData)
 }
 
-// executeTask runs a single task. eventTrigger names the event that drove an
-// event-triggered run (empty for scheduled/manual runs).
+// Runs a single task, trigger names what drove it
 func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any) (*storage.TaskExecution, error) {
 	ctx := context.Background()
 
@@ -263,9 +267,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 		return nil, err
 	}
 
-	// Check if server is online (if required). Webhook tasks always fire —
-	// they notify, they don't operate on the server, and most useful events
-	// (server_stop, server_restart) happen while the server is not running.
+	// Checks if server is online, webhook tasks always fire
 	if task.RequireOnline && task.TaskType != storage.TaskTypeWebhook && server.Status != storage.StatusRunning {
 		s.log.Debug("Task %s: skipped (server offline)", task.Name)
 
@@ -307,7 +309,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 	if timeout == 0 {
 		timeout = 5 * time.Minute // Default timeout
 	}
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	execCtx, cancel := context.WithTimeout(activity.WithTrace(activity.WithSource(ctx, "scheduler")), timeout)
 
 	// Track running execution
 	s.executionMu.Lock()
@@ -323,7 +325,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 
 	s.log.Info("Task %s: executing on server %s (trigger: %s)", task.Name, server.Name, trigger)
 
-	// Execute the task based on type, retrying on failure if configured
+	// Executes the task, retrying on failure if configured
 	var output string
 	var execErr error
 
@@ -380,7 +382,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 	return execution, execErr
 }
 
-// runTaskType dispatches a single execution attempt to the type-specific executor
+// Dispatches a single execution attempt to its executor
 func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
 	switch task.TaskType {
 	case storage.TaskTypeCommand:
@@ -402,7 +404,7 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 	}
 }
 
-// CancelExecution cancels a running execution
+// Cancels a running execution
 func (s *Scheduler) CancelExecution(executionID string) error {
 	s.executionMu.RLock()
 	cancel, exists := s.runningExecutions[executionID]
@@ -416,7 +418,7 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 	return nil
 }
 
-// updateNextRun calculates and updates the next run time for a task
+// Calculates and updates the next run time
 func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
 	ctx := context.Background()
 	now := time.Now()
@@ -441,7 +443,7 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
 		task.Status = storage.TaskStatusDisabled
 		nextRun = nil
 	case storage.ScheduleTypeEvent:
-		// Event-triggered tasks have no time-based next run.
+		// Event-triggered tasks have no time-based next run
 		nextRun = nil
 	}
 
@@ -450,7 +452,7 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
 
 // Task type executors
 
-// CommandTaskConfig represents configuration for command tasks
+// Configuration for command tasks
 type CommandTaskConfig struct {
 	Command string `json:"command"`
 }
@@ -472,87 +474,34 @@ func (s *Scheduler) executeCommandTask(ctx context.Context, server *storage.Serv
 	}
 
 	output, err := s.sender.SendCommand(ctx, server.ID, config.Command)
+	if err == nil {
+		s.rec.Record(ctx, server.ID, "task.command", activity.Attrs{"command": config.Command, "task": task.Name}, "ran command %q (task %q)", config.Command, task.Name)
+	}
 	return output, err
 }
 
 func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
-	if server.ContainerID == "" {
-		return "", fmt.Errorf("server has no container")
+	if err := s.lifecycle.Restart(ctx, server.ID); err != nil {
+		return "", err
 	}
-
-	// Stop container
-	found, err := s.docker.StopContainer(ctx, server.ContainerID)
-	if err != nil {
-		return "", fmt.Errorf("failed to stop: %w", err)
-	}
-	if !found {
-		server.ContainerID = ""
-		server.Status = storage.StatusStopped
-		s.store.UpdateServer(ctx, server)
-		return "container not found, marked as stopped", nil
-	}
-
-	// Wait a moment
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case <-time.After(2 * time.Second):
-	}
-
-	// Start container
-	if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
-		return "", fmt.Errorf("failed to start: %w", err)
-	}
-
-	// Update server status
-	server.Status = storage.StatusStarting
-	now := time.Now()
-	server.LastStarted = &now
-	s.store.UpdateServer(ctx, server)
-
 	return "server restarted successfully", nil
 }
 
 func (s *Scheduler) executeStartTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
-	if server.ContainerID == "" {
-		return "", fmt.Errorf("server has no container")
+	if err := s.lifecycle.Start(ctx, server.ID); err != nil {
+		return "", err
 	}
-
-	if err := s.docker.StartContainer(ctx, server.ContainerID); err != nil {
-		return "", fmt.Errorf("failed to start: %w", err)
-	}
-
-	server.Status = storage.StatusStarting
-	now := time.Now()
-	server.LastStarted = &now
-	s.store.UpdateServer(ctx, server)
-
 	return "server started successfully", nil
 }
 
 func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
-	if server.ContainerID == "" {
-		return "", fmt.Errorf("server has no container")
+	if err := s.lifecycle.Stop(ctx, server.ID); err != nil {
+		return "", err
 	}
-
-	found, err := s.docker.StopContainer(ctx, server.ContainerID)
-	if err != nil {
-		return "", fmt.Errorf("failed to stop: %w", err)
-	}
-	if !found {
-		server.ContainerID = ""
-		server.Status = storage.StatusStopped
-		s.store.UpdateServer(ctx, server)
-		return "container not found, marked as stopped", nil
-	}
-
-	server.Status = storage.StatusStopping
-	s.store.UpdateServer(ctx, server)
-
 	return "server stopped successfully", nil
 }
 
-// ScriptTaskConfig represents configuration for script tasks
+// Configuration for script tasks
 type ScriptTaskConfig struct {
 	ScriptPath string   `json:"script_path"`
 	Args       []string `json:"args"`
@@ -572,10 +521,18 @@ func (s *Scheduler) executeScriptTask(ctx context.Context, server *storage.Serve
 	}
 
 	execCmd := []string{config.ScriptPath}
-	return s.docker.Exec(ctx, server.ContainerID, append(execCmd, config.Args...))
+	stdout, stderr, err := s.docker.Exec(ctx, server.ContainerID, append(execCmd, config.Args...))
+	if err != nil {
+		return "", err
+	}
+	s.rec.Record(ctx, server.ID, "task.script", activity.Attrs{"script": config.ScriptPath, "task": task.Name}, "ran script %s (task %q)", config.ScriptPath, task.Name)
+	if strings.TrimSpace(stderr) != "" {
+		return stdout + "\n[stderr]\n" + stderr, nil
+	}
+	return stdout, nil
 }
 
-// CalculateNextRun calculates the next run time for a task based on its schedule
+// Calculates the next run time based on schedule
 func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, error) {
 	now := time.Now()
 
@@ -608,7 +565,7 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 		return task.RunAt, nil
 
 	case storage.ScheduleTypeEvent:
-		// No scheduled time; execution is triggered via OnEvent.
+		// No scheduled time, execution is triggered via OnEvent
 		return nil, nil
 
 	default:
@@ -616,7 +573,7 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 	}
 }
 
-// ValidateCronExpr validates a cron expression
+// Validates a cron expression
 func (s *Scheduler) ValidateCronExpr(expr string) error {
 	_, err := s.cronParser.Parse(expr)
 	return err

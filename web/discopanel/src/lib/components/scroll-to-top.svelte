@@ -72,9 +72,9 @@
 		<Button
 			size="icon"
 			onclick={scrollToTop}
-			class="bg-primary text-primary-foreground shadow-lg transition-all hover:scale-110 hover:bg-primary/90 hover:shadow-xl"
+			class="bg-primary text-primary-foreground shadow-lg hover:bg-primary/90"
 		>
-			<ArrowUp class="h-5 w-5" />
+			<ArrowUp class="size-5" />
 		</Button>
 	</div>
 {/if}

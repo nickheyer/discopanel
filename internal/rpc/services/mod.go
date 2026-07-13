@@ -8,6 +8,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
@@ -26,15 +27,17 @@ var _ discopanelv1connect.ModServiceHandler = (*ModService)(nil)
 type ModService struct {
 	store         *storage.Store
 	docker        *docker.Client
+	rec           *activity.Recorder
 	log           *logger.Logger
 	uploadManager *upload.Manager
 }
 
 // NewModService creates a new mod service
-func NewModService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, log *logger.Logger) *ModService {
+func NewModService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, rec *activity.Recorder, log *logger.Logger) *ModService {
 	return &ModService{
 		store:         store,
 		docker:        docker,
+		rec:           rec,
 		log:           log,
 		uploadManager: uploadManager,
 	}
@@ -270,6 +273,8 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	// Cleanup the upload session
 	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
+	s.rec.Record(ctx, server.ID, "mod.install", activity.Attrs{"file": originalFilename}, "installed mod %s", originalFilename)
+
 	// Get file info for the response
 	info, err := os.Stat(modPath)
 	if err != nil {
@@ -375,6 +380,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to enable mod"))
 			}
 			finalEnabled = true
+			s.rec.Record(ctx, server.ID, "mod.enable", activity.Attrs{"file": modFileName}, "enabled mod %s", modFileName)
 		} else {
 			// Move from mods to disabled directory
 			os.MkdirAll(disabledDir, 0755)
@@ -385,6 +391,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to disable mod"))
 			}
 			finalEnabled = false
+			s.rec.Record(ctx, server.ID, "mod.disable", activity.Attrs{"file": modFileName}, "disabled mod %s", modFileName)
 		}
 	}
 
@@ -435,7 +442,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 	}
 
 	// Try to find and delete the mod file
-	deleted := false
+	deletedName := ""
 
 	// Check active directory
 	if files, err := os.ReadDir(modsDir); err == nil {
@@ -448,7 +455,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 						s.log.Error("Failed to delete mod file: %v", err)
 						return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete mod file"))
 					}
-					deleted = true
+					deletedName = file.Name()
 					break
 				}
 			}
@@ -456,7 +463,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 	}
 
 	// Check disabled directory
-	if !deleted {
+	if deletedName == "" {
 		disabledDir := modsDir + "_disabled"
 		if files, err := os.ReadDir(disabledDir); err == nil {
 			for _, file := range files {
@@ -468,7 +475,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 							s.log.Error("Failed to delete mod file: %v", err)
 							return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete mod file"))
 						}
-						deleted = true
+						deletedName = file.Name()
 						break
 					}
 				}
@@ -476,9 +483,10 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 		}
 	}
 
-	if !deleted {
+	if deletedName == "" {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("mod not found"))
 	}
+	s.rec.Record(ctx, server.ID, "mod.delete", activity.Attrs{"file": deletedName}, "deleted mod %s", deletedName)
 
 	return connect.NewResponse(&v1.DeleteModResponse{
 		Message: "Mod deleted successfully",

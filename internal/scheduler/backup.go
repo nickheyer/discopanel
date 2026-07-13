@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/files"
 )
@@ -78,6 +79,10 @@ func (s *Scheduler) executeBackupTask(ctx context.Context, server *storage.Serve
 
 	output := fmt.Sprintf("backup created: %s (%d files, %s, took %s)",
 		filepath.Base(destPath), count, formatBytes(size), time.Since(start).Round(time.Millisecond))
+	s.rec.Record(ctx, server.ID, "backup.create",
+		activity.Attrs{"file": filepath.Base(destPath), "size": formatBytes(size), "task": task.Name},
+		"backed up %s (%d files, %s, task %q)",
+		filepath.Base(destPath), count, formatBytes(size), task.Name)
 	if len(missing) > 0 {
 		output += fmt.Sprintf("; skipped missing paths: %s", strings.Join(missing, ", "))
 	}

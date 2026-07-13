@@ -13,19 +13,19 @@
 	import type { FileInfo } from '$lib/proto/discopanel/v1/file_pb';
 
 	interface Props {
-		open: boolean;
+		open?: boolean;
 		title: string;
+		confirmLabel: string;
 		files: FileInfo[];
 		onConfirm: (destinationPath: string) => void;
-		onClose: () => void;
 	}
 
-	let { open, title, files, onConfirm, onClose }: Props = $props();
+	let { open = $bindable(false), title, confirmLabel, files, onConfirm }: Props = $props();
 
 	let selectedPath = $state('');
 	let expanded = new SvelteSet<string>();
 
-	// Reset when dialog opens
+	// Resets picker each time dialog opens
 	$effect(() => {
 		if (open) {
 			selectedPath = '';
@@ -52,21 +52,21 @@
 			<DialogTitle>{title}</DialogTitle>
 			<DialogDescription>Select a destination folder</DialogDescription>
 		</DialogHeader>
-		<div class="max-h-60 overflow-auto rounded-md border py-1">
-			<!-- Root option -->
+		<div class="max-h-60 overflow-auto rounded-md border bg-muted/20 py-1">
+			<!-- Root destination -->
 			<button
-				class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted/50
+				class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent/40
 					{selectedPath === '' ? 'bg-primary/10 font-medium' : ''}"
 				onclick={() => (selectedPath = '')}
 			>
-				<FolderOpen class="h-4 w-4 text-blue-400" />
-				/ (Root)
+				<FolderOpen class="size-4 text-status-sleep" />
+				<span class="font-mono">/ (root)</span>
 			</button>
 			{#snippet dirTree(dirs: FileInfo[], depth: number)}
 				{#each getDirs(dirs) as dir (dir.path)}
 					<div>
 						<button
-							class="flex w-full items-center gap-1 py-1.5 text-left text-sm hover:bg-muted/50
+							class="flex w-full items-center gap-1 py-1.5 text-left text-sm transition-colors hover:bg-accent/40
 								{selectedPath === dir.path ? 'bg-primary/10 font-medium' : ''}"
 							style="padding-left: {depth * 16 + 12}px"
 							onclick={() => (selectedPath = dir.path)}
@@ -75,23 +75,23 @@
 								<span
 									role="button"
 									tabindex="-1"
-									class="shrink-0 cursor-pointer p-0"
+									class="shrink-0 cursor-pointer p-0 text-muted-foreground transition-colors hover:text-foreground"
 									onclick={(e) => {
 										e.stopPropagation();
 										toggleExpand(dir.path);
 									}}
 								>
 									{#if expanded.has(dir.path)}
-										<ChevronDown class="h-3 w-3" />
+										<ChevronDown class="size-3" />
 									{:else}
-										<ChevronRight class="h-3 w-3" />
+										<ChevronRight class="size-3" />
 									{/if}
 								</span>
 							{:else}
 								<span class="w-3"></span>
 							{/if}
-							<Folder class="h-4 w-4 shrink-0 text-blue-400" />
-							<span class="truncate">{dir.name}</span>
+							<Folder class="size-4 shrink-0 text-status-sleep" />
+							<span class="truncate font-mono">{dir.name}</span>
 						</button>
 						{#if expanded.has(dir.path) && dir.children}
 							{@render dirTree(getDirs(dir.children), depth + 1)}
@@ -102,10 +102,8 @@
 			{@render dirTree(files, 1)}
 		</div>
 		<DialogFooter>
-			<Button variant="outline" onclick={onClose}>Cancel</Button>
-			<Button onclick={() => onConfirm(selectedPath)}>
-				{title.startsWith('Move') ? 'Move Here' : 'Copy Here'}
-			</Button>
+			<Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
+			<Button onclick={() => onConfirm(selectedPath)}>{confirmLabel}</Button>
 		</DialogFooter>
 	</DialogContent>
 </DialogPrimitive.Root>

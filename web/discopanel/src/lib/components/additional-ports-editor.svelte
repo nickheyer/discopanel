@@ -17,7 +17,20 @@
 
 	let { ports = $bindable([]), disabled = false, usedPorts = {}, onchange }: Props = $props();
 
-	let portErrors = $state<Record<number, string>>({});
+	// Derived per row so removals never misalign errors
+	let portErrors = $derived.by(() => {
+		return ports.map((port, index) => {
+			const value = Number(port.hostPort);
+			if (!value) return '';
+			if (value < 1 || value > 65535) return 'Port must be between 1 and 65535';
+			if (usedPorts[value]) return `Port ${value} is already in use`;
+			const duplicate = ports.some(
+				(p, i) => i !== index && p.hostPort === value && p.protocol === port.protocol
+			);
+			if (duplicate) return `Duplicate port ${value}/${port.protocol}`;
+			return '';
+		});
+	});
 
 	function addPort() {
 		const newPort = create(AdditionalPortSchema, {
@@ -32,8 +45,6 @@
 
 	function removePort(index: number) {
 		ports = ports.filter((_, i) => i !== index);
-		// Clear any errors for this port
-		delete portErrors[index];
 		onchange?.(ports);
 	}
 
@@ -42,31 +53,9 @@
 			...ports[index],
 			[field]: value
 		};
-
-		// Validate port if it's a hostPort change
-		if (field === 'hostPort') {
-			const port = Number(value);
-			if (port && usedPorts[port]) {
-				portErrors[index] = `Port ${port} is already in use`;
-			} else if (port < 1 || port > 65535) {
-				portErrors[index] = 'Port must be between 1 and 65535';
-			} else {
-				// Check for duplicates within additional ports
-				const hasDuplicate = ports.some(
-					(p, i) => i !== index && p.hostPort === port && p.protocol === ports[index].protocol
-				);
-				if (hasDuplicate) {
-					portErrors[index] = `Duplicate port ${port}/${ports[index].protocol}`;
-				} else {
-					delete portErrors[index];
-				}
-			}
-		}
-
 		onchange?.(ports);
 	}
 
-	// Find next available port
 	function findNextAvailablePort(startFrom: number = 25566): number {
 		let port = startFrom;
 		while (port <= 65535) {
@@ -75,125 +64,115 @@
 			}
 			port++;
 		}
-		return 25566; // Fallback
+		return 25566;
 	}
 </script>
 
-<div class="space-y-4">
-	<div class="flex items-center justify-between">
+<div class="space-y-3">
+	<div class="flex flex-wrap items-center justify-between gap-2">
 		<div>
-			<Label class="text-sm font-medium">Additional Ports</Label>
+			<Label class="text-sm font-medium">Additional ports</Label>
 			<p class="mt-1 text-xs text-muted-foreground">
-				Configure extra ports for mods, plugins, or services (e.g., BlueMap, voice chat, dynmap)
+				Extra ports for mods, plugins, or services like BlueMap, voice chat, or dynmap
 			</p>
 		</div>
-		<Button
-			type="button"
-			variant="outline"
-			size="sm"
-			onclick={addPort}
-			{disabled}
-			class="h-8 gap-1"
-		>
-			<Plus class="h-3 w-3" />
-			Add Port
+		<Button type="button" variant="outline" size="sm" onclick={addPort} {disabled} class="h-8">
+			<Plus class="size-3.5" />
+			Add port
 		</Button>
 	</div>
 
 	{#if ports.length > 0}
-		<div class="rounded-lg border bg-muted/10 p-3">
-			<div class="space-y-3">
-				<!-- Headers -->
-				<div class="grid grid-cols-12 gap-2 px-1 text-xs font-medium text-muted-foreground">
-					<div class="col-span-4">Name</div>
-					<div class="col-span-2">Container Port</div>
-					<div class="col-span-2">Host Port</div>
-					<div class="col-span-2">Protocol</div>
-					<div class="col-span-2"></div>
-				</div>
-
-				<!-- Port entries -->
-				{#each ports as port, index (index)}
-					<div class="space-y-2">
-						<div class="grid grid-cols-12 items-center gap-2">
-							<div class="col-span-4">
-								<Input
-									type="text"
-									placeholder="e.g., BlueMap Web"
-									bind:value={port.name}
-									{disabled}
-									onchange={() => updatePort(index, 'name', port.name)}
-									class="h-8 text-xs"
-								/>
-							</div>
-							<div class="col-span-2">
-								<Input
-									type="number"
-									min="1"
-									max="65535"
-									placeholder="8100"
-									bind:value={port.containerPort}
-									{disabled}
-									onchange={() => updatePort(index, 'containerPort', port.containerPort)}
-									class="h-8 text-xs"
-								/>
-							</div>
-							<div class="col-span-2">
-								<Input
-									type="number"
-									min="1"
-									max="65535"
-									placeholder="8100"
-									bind:value={port.hostPort}
-									{disabled}
-									onchange={() => updatePort(index, 'hostPort', port.hostPort)}
-									class="h-8 text-xs {portErrors[index] ? 'border-destructive' : ''}"
-								/>
-							</div>
-							<div class="col-span-2">
-								<Select
-									type="single"
-									value={port.protocol}
-									onValueChange={(v) => updatePort(index, 'protocol', v)}
-									{disabled}
-								>
-									<SelectTrigger class="h-8 text-xs">
-										<span>{port.protocol.toUpperCase()}</span>
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="tcp">TCP</SelectItem>
-										<SelectItem value="udp">UDP</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div class="col-span-2 flex justify-end">
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon"
-									onclick={() => removePort(index)}
-									{disabled}
-									class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
-								>
-									<X class="h-3 w-3" />
-								</Button>
-							</div>
-						</div>
-
-						{#if portErrors[index]}
-							<div class="flex items-center gap-2 pl-1 text-destructive">
-								<AlertCircle class="h-3 w-3" />
-								<span class="text-xs">{portErrors[index]}</span>
-							</div>
-						{/if}
-					</div>
-				{/each}
+		<div class="space-y-2 rounded-lg border p-3">
+			<div class="hidden grid-cols-12 gap-2 px-1 text-xs font-medium text-muted-foreground sm:grid">
+				<div class="col-span-4">Name</div>
+				<div class="col-span-3">Container port</div>
+				<div class="col-span-2">Host port</div>
+				<div class="col-span-2">Protocol</div>
+				<div class="col-span-1"></div>
 			</div>
+
+			{#each ports as port, index (index)}
+				<div class="space-y-1.5">
+					<div class="grid grid-cols-2 items-center gap-2 sm:grid-cols-12">
+						<div class="col-span-2 sm:col-span-4">
+							<Input
+								type="text"
+								placeholder="e.g. BlueMap Web"
+								bind:value={port.name}
+								{disabled}
+								onchange={() => updatePort(index, 'name', port.name)}
+								class="h-8 text-xs"
+							/>
+						</div>
+						<div class="sm:col-span-3">
+							<Input
+								type="number"
+								min="1"
+								max="65535"
+								placeholder="8100"
+								bind:value={port.containerPort}
+								{disabled}
+								onchange={() => updatePort(index, 'containerPort', port.containerPort)}
+								class="h-8 text-xs"
+							/>
+						</div>
+						<div class="sm:col-span-2">
+							<Input
+								type="number"
+								min="1"
+								max="65535"
+								placeholder="8100"
+								bind:value={port.hostPort}
+								{disabled}
+								onchange={() => updatePort(index, 'hostPort', port.hostPort)}
+								class="h-8 text-xs {portErrors[index] ? 'border-destructive' : ''}"
+							/>
+						</div>
+						<div class="sm:col-span-2">
+							<Select
+								type="single"
+								value={port.protocol}
+								onValueChange={(v) => updatePort(index, 'protocol', v)}
+								{disabled}
+							>
+								<SelectTrigger class="h-8 w-full text-xs">
+									<span>{port.protocol.toUpperCase()}</span>
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="tcp">TCP</SelectItem>
+									<SelectItem value="udp">UDP</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div class="flex justify-end sm:col-span-1">
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								onclick={() => removePort(index)}
+								{disabled}
+								class="size-8 hover:bg-destructive/10 hover:text-destructive"
+								title="Remove port"
+							>
+								<X class="size-3.5" />
+							</Button>
+						</div>
+					</div>
+
+					{#if portErrors[index]}
+						<div class="flex items-center gap-1.5 pl-1 text-destructive">
+							<AlertCircle class="size-3" />
+							<span class="text-xs">{portErrors[index]}</span>
+						</div>
+					{/if}
+				</div>
+			{/each}
 		</div>
 	{:else}
 		<div class="rounded-lg border border-dashed p-4">
 			<p class="text-center text-sm text-muted-foreground">
-				No additional ports configured. Click "Add Port" to expose extra ports for mods or services.
+				No additional ports configured. Add one to expose extra services.
 			</p>
 		</div>
 	{/if}

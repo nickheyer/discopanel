@@ -1,0 +1,16 @@
+# Prometheus exporter for Minecraft servers via SLP ping
+FROM golang:alpine AS builder
+
+WORKDIR /build
+COPY cmd/exporter/main.go .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /exporter main.go
+
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /exporter /usr/local/bin/discopanel-exporter
+
+EXPOSE 9225/tcp
+
+ENTRYPOINT ["/usr/local/bin/discopanel-exporter"]

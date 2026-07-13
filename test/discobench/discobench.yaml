@@ -1,0 +1,49 @@
+# discobench configuration. Every contender in a scenario runs with the
+# identical fairness envelope below, so the runtime is the only variable.
+
+iterations: 3
+bots: 30
+load_duration: 5m
+ramp_skip: 30s
+
+# Fairness envelope, applied to every contender
+memory_mb: 4096
+heap_mb: 3072
+cpus: 0            # 0 leaves CPU uncapped
+seed: "discobench"
+view_distance: 10
+simulation_distance: 10
+
+ready_timeout: 10m
+stop_timeout: 3m
+
+# Bot behavior: radial flights out to walk_radius and back, spreading
+# bots over distinct chunk paths so worldgen and entity load are real
+walk_speed: 4.0
+walk_radius: 128
+
+scenarios:
+  - name: vanilla-1.21.1
+    type: vanilla
+    mc_version: "1.21.1"
+    java_major: 21
+    bots_supported: true    # bot protocol is pinned to 1.21.1
+  - name: paper-1.21.1
+    type: paper
+    mc_version: "1.21.1"
+    java_major: 21
+    bots_supported: true
+
+contenders:
+  - name: discopanel
+    kind: discopanel
+    image: nickheyer/discopanel-runtime:java21
+  - name: itzg
+    kind: itzg
+    image: itzg/minecraft-server:java21
+  # A/B our own knobs by adding a third column, for example ZGC:
+  # - name: discopanel-zgc
+  #   kind: discopanel
+  #   image: nickheyer/discopanel-runtime:java21
+  #   env:
+  #     USE_ZGC_FLAGS: "true"

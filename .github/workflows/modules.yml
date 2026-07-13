@@ -66,7 +66,7 @@ jobs:
 
           for dockerfile in docker/Dockerfile.*; do
             name=$(basename "$dockerfile" | sed 's/Dockerfile\.//')
-            if [ "$name" != "discopanel" ]; then
+            if [ "$name" != "discopanel" ] && [ "$name" != "runtime" ]; then
               echo "Building nickheyer/discopanel-$name (linux/amd64,linux/arm64)..."
               TAGS="--tag nickheyer/discopanel-$name:latest"
               if [ -n "$VERSION" ]; then
@@ -85,3 +85,38 @@ jobs:
           done
 
           echo "Module builds complete!"
+
+      - name: Build and push runtime images
+        run: |
+          # Must stay in sync with RUNTIME_JAVA_VERSIONS in the Makefile and
+          # docker.SupportedJavaVersions (internal/docker/images.go).
+          for java in 8 11 17 21 25; do
+            echo "Building nickheyer/discopanel-runtime:java$java (linux/amd64,linux/arm64)..."
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --file docker/Dockerfile.runtime \
+              --build-arg JAVA_VERSION=$java \
+              --tag "nickheyer/discopanel-runtime:java$java" \
+              --push \
+              .
+
+            echo "Pushed nickheyer/discopanel-runtime:java$java"
+          done
+
+          # Must stay in sync with RUNTIME_GRAAL_VERSIONS in the Makefile and
+          # docker.GraalJavaVersions (internal/docker/images.go).
+          for java in 21 25; do
+            echo "Building nickheyer/discopanel-runtime:java$java-graal (linux/amd64,linux/arm64)..."
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --file docker/Dockerfile.runtime \
+              --build-arg JAVA_VERSION=$java \
+              --build-arg RUNTIME_FLAVOR=graal \
+              --tag "nickheyer/discopanel-runtime:java$java-graal" \
+              --push \
+              .
+
+            echo "Pushed nickheyer/discopanel-runtime:java$java-graal"
+          done
+
+          echo "Runtime builds complete!"

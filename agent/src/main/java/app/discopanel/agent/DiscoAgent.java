@@ -3,6 +3,7 @@ package app.discopanel.agent;
 import app.discopanel.agent.proto.AgentProto;
 
 import java.lang.instrument.Instrumentation;
+import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryUsage;
 import java.util.concurrent.Executors;
@@ -59,6 +60,7 @@ public final class DiscoAgent {
             }
         });
         watchLogErrors(scheduler, inst, port);
+        final long[] gcPrev = gcTotals();
         scheduler.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
@@ -66,19 +68,46 @@ public final class DiscoAgent {
                 if (tick != null) {
                     connection.enqueue(AgentProto.AgentMessage.newBuilder().setTickThreadSample(tick).build());
                 }
-                connection.enqueue(AgentProto.AgentMessage.newBuilder().setJvmSample(jvmSample()).build());
+                connection.enqueue(AgentProto.AgentMessage.newBuilder().setJvmSample(jvmSample(gcPrev)).build());
             }
         }, TELEMETRY_PERIOD_SECONDS, TELEMETRY_PERIOD_SECONDS, TimeUnit.SECONDS);
     }
 
-    private static AgentProto.JvmSample jvmSample() {
+    /** Builds one sample, folds GC bean deltas since last call */
+    private static AgentProto.JvmSample jvmSample(long[] gcPrev) {
         MemoryUsage heap = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage();
+        long[] totals = gcTotals();
+        long gcCount = Math.max(0L, totals[0] - gcPrev[0]);
+        long gcTimeMs = Math.max(0L, totals[1] - gcPrev[1]);
+        gcPrev[0] = totals[0];
+        gcPrev[1] = totals[1];
         return AgentProto.JvmSample.newBuilder()
                 .setHeapUsedMb(heap.getUsed() / 1024.0 / 1024.0)
                 .setHeapMaxMb(heap.getMax() > 0 ? heap.getMax() / 1024.0 / 1024.0 : 0)
                 .setThreadCount(ManagementFactory.getThreadMXBean().getThreadCount())
                 .setClassCount(ManagementFactory.getClassLoadingMXBean().getLoadedClassCount())
+                .setGc(AgentProto.GcWindow.newBuilder()
+                        .setCount(gcCount)
+                        .setTotalMs(gcTimeMs)
+                        .build())
                 .build();
+    }
+
+    /** Sums collection count and time across collector beans */
+    private static long[] gcTotals() {
+        long count = 0;
+        long timeMs = 0;
+        for (GarbageCollectorMXBean bean : ManagementFactory.getGarbageCollectorMXBeans()) {
+            long c = bean.getCollectionCount();
+            if (c > 0) {
+                count += c;
+            }
+            long t = bean.getCollectionTime();
+            if (t > 0) {
+                timeMs += t;
+            }
+        }
+        return new long[]{count, timeMs};
     }
 
     private static void watchLogErrors(ScheduledExecutorService scheduler, Instrumentation inst, int port) {

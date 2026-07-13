@@ -7,7 +7,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 )
 
-// Every exposed properties field must map to a category
+// Every exposed properties field must carry a known category tag
 func TestEveryPropertyFieldHasCategory(t *testing.T) {
 	cfgType := reflect.TypeOf(storage.ServerProperties{})
 	for i := 0; i < cfgType.NumField(); i++ {
@@ -16,8 +16,8 @@ func TestEveryPropertyFieldHasCategory(t *testing.T) {
 		if jsonTag == "" || jsonTag == "-" || jsonTag == "id" || jsonTag == "server_id" || jsonTag == "updated_at" {
 			continue
 		}
-		if getCategoryIndex(jsonTag) < 0 {
-			t.Errorf("field %s (json %q) has no category, hidden from API", field.Name, jsonTag)
+		if propertyCategoryIndex(field.Tag.Get("category")) < 0 {
+			t.Errorf("field %s (json %q) has no category tag, hidden from API", field.Name, jsonTag)
 		}
 	}
 }

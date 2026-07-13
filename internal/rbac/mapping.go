@@ -1,10 +1,21 @@
 package rbac
 
+// Names the id space ObjectIDField carries
+type ObjectScope string
+
+const (
+	ScopeDirect        ObjectScope = ""               // Field already carries the policy object id
+	ScopeTask          ObjectScope = "task"           // Field is a task id, resolves to server id
+	ScopeTaskExecution ObjectScope = "task_execution" // Field is an execution id, resolves to server id
+	ScopeModule        ObjectScope = "module"         // Field is a module id, resolves to server id
+)
+
 // Maps RPC procedure to a resource and action
 type ProcedurePermission struct {
 	Resource      string
 	Action        string
-	ObjectIDField string // Protobuf field for per-object RBAC, empty means all
+	ObjectIDField string      // Protobuf field for per-object RBAC, empty means all
+	Scope         ObjectScope // Id space of the field, empty means direct
 }
 
 // Lists RPC procedures that require no authentication
@@ -51,11 +62,14 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.ServerService/RestartServer":              {Resource: ResourceServers, Action: ActionRestart, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/RecreateServer":             {Resource: ResourceServers, Action: ActionRestart, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/SendCommand":                {Resource: ResourceServers, Action: ActionCommand, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/UploadToMCLogs":             {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/GetServerPerformanceReport": {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/GetServerMetricsHistory":    {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/ApplyPerformanceFix":        {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/DismissPerformanceFinding":  {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/GetServerActions":           {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/ListBackups":                {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
+	"/discopanel.v1.ServerService/RestoreBackup":              {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
 
 	// -- AuthService (admin) -------------------------------------------
 	"/discopanel.v1.AuthService/GetAuthConfig":      {Resource: ResourceSettings, Action: ActionRead},
@@ -97,7 +111,6 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	// -- ModpackService -------------------------------------------------
 	"/discopanel.v1.ModpackService/SearchModpacks":        {Resource: ResourceModpacks, Action: ActionRead},
 	"/discopanel.v1.ModpackService/GetModpack":            {Resource: ResourceModpacks, Action: ActionRead, ObjectIDField: "id"},
-	"/discopanel.v1.ModpackService/GetModpackBySlug":      {Resource: ResourceModpacks, Action: ActionRead},
 	"/discopanel.v1.ModpackService/GetModpackByURL":       {Resource: ResourceModpacks, Action: ActionRead},
 	"/discopanel.v1.ModpackService/SyncModpacks":          {Resource: ResourceModpacks, Action: ActionCreate},
 	"/discopanel.v1.ModpackService/ImportUploadedModpack": {Resource: ResourceModpacks, Action: ActionCreate},
@@ -106,7 +119,6 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.ModpackService/ListFavorites":         {Resource: ResourceModpacks, Action: ActionRead},
 	"/discopanel.v1.ModpackService/GetIndexerStatus":      {Resource: ResourceModpacks, Action: ActionRead},
 	"/discopanel.v1.ModpackService/GetModpackConfig":      {Resource: ResourceModpacks, Action: ActionRead, ObjectIDField: "id"},
-	"/discopanel.v1.ModpackService/GetModpackFiles":       {Resource: ResourceModpacks, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.ModpackService/GetModpackVersions":    {Resource: ResourceModpacks, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.ModpackService/SyncModpackFiles":      {Resource: ResourceModpacks, Action: ActionUpdate, ObjectIDField: "id"},
 
@@ -117,15 +129,15 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.ModuleService/UpdateModuleTemplate":       {Resource: ResourceModuleTemplates, Action: ActionUpdate, ObjectIDField: "id"},
 	"/discopanel.v1.ModuleService/DeleteModuleTemplate":       {Resource: ResourceModuleTemplates, Action: ActionDelete, ObjectIDField: "id"},
 	"/discopanel.v1.ModuleService/ListModules":                {Resource: ResourceModules, Action: ActionRead},
-	"/discopanel.v1.ModuleService/GetModule":                  {Resource: ResourceModules, Action: ActionRead, ObjectIDField: "id"},
+	"/discopanel.v1.ModuleService/GetModule":                  {Resource: ResourceModules, Action: ActionRead, ObjectIDField: "id", Scope: ScopeModule},
 	"/discopanel.v1.ModuleService/CreateModule":               {Resource: ResourceModules, Action: ActionCreate, ObjectIDField: "server_id"},
-	"/discopanel.v1.ModuleService/UpdateModule":               {Resource: ResourceModules, Action: ActionUpdate, ObjectIDField: "id"},
-	"/discopanel.v1.ModuleService/DeleteModule":               {Resource: ResourceModules, Action: ActionDelete, ObjectIDField: "id"},
-	"/discopanel.v1.ModuleService/StartModule":                {Resource: ResourceModules, Action: ActionStart, ObjectIDField: "id"},
-	"/discopanel.v1.ModuleService/StopModule":                 {Resource: ResourceModules, Action: ActionStop, ObjectIDField: "id"},
-	"/discopanel.v1.ModuleService/RestartModule":              {Resource: ResourceModules, Action: ActionRestart, ObjectIDField: "id"},
-	"/discopanel.v1.ModuleService/RecreateModule":             {Resource: ResourceModules, Action: ActionRestart, ObjectIDField: "id"},
-	"/discopanel.v1.ModuleService/GetModuleLogs":              {Resource: ResourceModules, Action: ActionRead, ObjectIDField: "id"},
+	"/discopanel.v1.ModuleService/UpdateModule":               {Resource: ResourceModules, Action: ActionUpdate, ObjectIDField: "id", Scope: ScopeModule},
+	"/discopanel.v1.ModuleService/DeleteModule":               {Resource: ResourceModules, Action: ActionDelete, ObjectIDField: "id", Scope: ScopeModule},
+	"/discopanel.v1.ModuleService/StartModule":                {Resource: ResourceModules, Action: ActionStart, ObjectIDField: "id", Scope: ScopeModule},
+	"/discopanel.v1.ModuleService/StopModule":                 {Resource: ResourceModules, Action: ActionStop, ObjectIDField: "id", Scope: ScopeModule},
+	"/discopanel.v1.ModuleService/RestartModule":              {Resource: ResourceModules, Action: ActionRestart, ObjectIDField: "id", Scope: ScopeModule},
+	"/discopanel.v1.ModuleService/RecreateModule":             {Resource: ResourceModules, Action: ActionRestart, ObjectIDField: "id", Scope: ScopeModule},
+	"/discopanel.v1.ModuleService/GetModuleLogs":              {Resource: ResourceModules, Action: ActionRead, ObjectIDField: "id", Scope: ScopeModule},
 	"/discopanel.v1.ModuleService/GetNextAvailableModulePort": {Resource: ResourceModules, Action: ActionRead},
 	"/discopanel.v1.ModuleService/GetAvailableAliases":        {Resource: ResourceModules, Action: ActionRead},
 	"/discopanel.v1.ModuleService/GetResolvedAliases":         {Resource: ResourceModules, Action: ActionRead},
@@ -143,16 +155,16 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 
 	// -- TaskService ----------------------------------------------------
 	"/discopanel.v1.TaskService/ListTasks":            {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "server_id"},
-	"/discopanel.v1.TaskService/GetTask":              {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "id"},
+	"/discopanel.v1.TaskService/GetTask":              {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "id", Scope: ScopeTask},
 	"/discopanel.v1.TaskService/CreateTask":           {Resource: ResourceTasks, Action: ActionCreate, ObjectIDField: "server_id"},
-	"/discopanel.v1.TaskService/UpdateTask":           {Resource: ResourceTasks, Action: ActionUpdate, ObjectIDField: "id"},
-	"/discopanel.v1.TaskService/DeleteTask":           {Resource: ResourceTasks, Action: ActionDelete, ObjectIDField: "id"},
-	"/discopanel.v1.TaskService/ToggleTask":           {Resource: ResourceTasks, Action: ActionUpdate, ObjectIDField: "id"},
-	"/discopanel.v1.TaskService/TriggerTask":          {Resource: ResourceTasks, Action: ActionUpdate, ObjectIDField: "id"},
-	"/discopanel.v1.TaskService/ListTaskExecutions":   {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "task_id"},
+	"/discopanel.v1.TaskService/UpdateTask":           {Resource: ResourceTasks, Action: ActionUpdate, ObjectIDField: "id", Scope: ScopeTask},
+	"/discopanel.v1.TaskService/DeleteTask":           {Resource: ResourceTasks, Action: ActionDelete, ObjectIDField: "id", Scope: ScopeTask},
+	"/discopanel.v1.TaskService/ToggleTask":           {Resource: ResourceTasks, Action: ActionUpdate, ObjectIDField: "id", Scope: ScopeTask},
+	"/discopanel.v1.TaskService/TriggerTask":          {Resource: ResourceTasks, Action: ActionUpdate, ObjectIDField: "id", Scope: ScopeTask},
+	"/discopanel.v1.TaskService/ListTaskExecutions":   {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "task_id", Scope: ScopeTask},
 	"/discopanel.v1.TaskService/ListServerExecutions": {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "server_id"},
-	"/discopanel.v1.TaskService/GetTaskExecution":     {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "id"},
-	"/discopanel.v1.TaskService/CancelExecution":      {Resource: ResourceTasks, Action: ActionUpdate, ObjectIDField: "id"},
+	"/discopanel.v1.TaskService/GetTaskExecution":     {Resource: ResourceTasks, Action: ActionRead, ObjectIDField: "id", Scope: ScopeTaskExecution},
+	"/discopanel.v1.TaskService/CancelExecution":      {Resource: ResourceTasks, Action: ActionUpdate, ObjectIDField: "id", Scope: ScopeTaskExecution},
 	"/discopanel.v1.TaskService/GetSchedulerStatus":   {Resource: ResourceTasks, Action: ActionRead},
 
 	// -- UserService ----------------------------------------------------
@@ -170,9 +182,6 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.RoleService/DeleteRole":          {Resource: ResourceRoles, Action: ActionDelete},
 	"/discopanel.v1.RoleService/GetPermissionMatrix": {Resource: ResourceRoles, Action: ActionRead},
 	"/discopanel.v1.RoleService/UpdatePermissions":   {Resource: ResourceRoles, Action: ActionUpdate},
-	"/discopanel.v1.RoleService/AssignRole":          {Resource: ResourceRoles, Action: ActionCreate},
-	"/discopanel.v1.RoleService/UnassignRole":        {Resource: ResourceRoles, Action: ActionDelete},
-	"/discopanel.v1.RoleService/GetUserRoles":        {Resource: ResourceRoles, Action: ActionRead},
 
 	// -- SupportService -------------------------------------------------
 	"/discopanel.v1.SupportService/GenerateSupportBundle": {Resource: ResourceSupport, Action: ActionCreate},

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
@@ -47,7 +47,6 @@
 	let dismissing = $state('');
 	let findings = $state<PerformanceFinding[]>([]);
 	let agentConnected = $state(false);
-	let refreshTimer: ReturnType<typeof setInterval> | undefined;
 	let initialized = false;
 
 	const serverUp = $derived(
@@ -192,12 +191,11 @@
 		loadReport(!isFirst && !serverChanged);
 	});
 
-	onMount(() => {
-		refreshTimer = setInterval(() => loadReport(true), 10000);
-	});
-
-	onDestroy(() => {
-		if (refreshTimer) clearInterval(refreshTimer);
+	$effect(() => {
+		if (!detailsOpen || !serverUp) return;
+		untrack(() => loadReport(true));
+		const timer = setInterval(() => loadReport(true), 10000);
+		return () => clearInterval(timer);
 	});
 </script>
 

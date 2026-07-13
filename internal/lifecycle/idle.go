@@ -95,7 +95,7 @@ func (m *Manager) checkIdleServers() {
 
 		// Paused servers can still be autostopped after stop timeout
 		if status == storage.StatusPaused {
-			if autostop && m.idleFor(server) >= m.idleTimeout(cfg, server.ID, false) {
+			if autostop && m.idleFor(server) >= m.idleTimeout(cfg, server.ID) {
 				m.log.Info("lifecycle: autostopping paused idle server %s", server.Name)
 				go m.stopIdle(server.ID)
 			}
@@ -166,7 +166,7 @@ func (m *Manager) idleFor(server *storage.Server) time.Duration {
 }
 
 // Resolves the applicable autostop timeout for a server
-func (m *Manager) idleTimeout(cfg *storage.ServerProperties, serverID string, _ bool) time.Duration {
+func (m *Manager) idleTimeout(cfg *storage.ServerProperties, serverID string) time.Duration {
 	m.idleMu.Lock()
 	hadPlayers := false
 	if st, ok := m.idle[serverID]; ok {

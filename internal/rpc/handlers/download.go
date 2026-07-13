@@ -13,11 +13,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
-// NewDownloadStreamHandler creates an HTTP handler for streaming file downloads.
-//
-//	GET /api/v1/download/{sessionId}
-//	Auth: Authorization header OR ?token= query param
-//	Response: file bytes with Content-Disposition, supports Range headers for resume.
+// Handles GET download streaming with auth and range resume
 func NewDownloadStreamHandler(downloadManager *download.Manager, authManager *auth.Manager, enforcer *rbac.Enforcer, log *logger.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -46,13 +42,11 @@ func NewDownloadStreamHandler(downloadManager *download.Manager, authManager *au
 			return
 		}
 
-		// Check RBAC permission (files:read)
-		if enforcer != nil {
-			allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceFiles, rbac.ActionRead, "*")
-			if rbacErr != nil || !allowed {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
+		// Check RBAC files read permission
+		allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceFiles, rbac.ActionRead, "*")
+		if rbacErr != nil || !allowed {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
 		}
 
 		// Look up download session

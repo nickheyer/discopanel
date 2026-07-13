@@ -27,11 +27,11 @@ import (
 )
 
 // Writes panel-managed config files and installs configured Modrinth mods
-func (p *Provisioner) applyConfigFiles(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, mcVersion string) error {
+func (p *Provisioner) applyConfigFiles(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, mcVersion string, force bool) error {
 	if err := p.writeServerProperties(server, cfg, mcVersion); err != nil {
 		return err
 	}
-	if err := p.writeEULA(server, cfg); err != nil {
+	if err := p.writeEULA(server); err != nil {
 		return err
 	}
 	if err := p.writeServerIcon(ctx, server, cfg); err != nil {
@@ -44,7 +44,7 @@ func (p *Provisioner) applyConfigFiles(ctx context.Context, server *storage.Serv
 	if err := p.writePlayerListFile(ctx, server, cfg, "whitelist.json", strVal(cfg.Whitelist), false, overwriteWhitelist); err != nil {
 		p.progress(server, "warning: failed to write whitelist.json: %v", err)
 	}
-	if err := p.installModrinthProjects(ctx, server, cfg, mcVersion); err != nil {
+	if err := p.installModrinthProjects(ctx, server, cfg, mcVersion, force); err != nil {
 		return err
 	}
 	return nil
@@ -85,27 +85,24 @@ func (p *Provisioner) writeServerProperties(server *storage.Server, cfg *storage
 	if _, ok := props["rcon.port"]; !ok {
 		props["rcon.port"] = "25575"
 	}
-	if props["rcon.password"] == "" {
-		password := "discopanel_default"
-		if len(server.ID) >= 8 {
-			password = "discopanel_" + server.ID[:8]
-		}
-		props["rcon.password"] = password
-	}
 	if _, ok := props["server-port"]; !ok {
 		props["server-port"] = fmt.Sprintf("%d", server.Port)
 	}
 
-	// Sets management server defaults, loopback only, secret rotates
+	// Sets management server defaults, loopback only, secret persists
 	agentEnabled := cfg == nil || cfg.EnableAgent == nil || *cfg.EnableAgent
 	if minecraft.SupportsManagementProtocol(mcVersion) {
 		if agentEnabled {
+			secret := readServerProperty(server.DataPath, "management-server-secret")
+			if secret == "" {
+				secret = generateManagementSecret()
+			}
 			props["management-server-enabled"] = "true"
 			props["management-server-host"] = "127.0.0.1"
 			props["management-server-port"] = strconv.Itoa(pickManagementPort(props))
 			props["management-server-tls-enabled"] = "false"
 			props["management-server-allowed-origins"] = "http://127.0.0.1"
-			props["management-server-secret"] = generateManagementSecret()
+			props["management-server-secret"] = secret
 		} else {
 			// The merge preserves old keys, disabling must be explicit
 			props["management-server-enabled"] = "false"
@@ -163,6 +160,24 @@ func generateManagementSecret() string {
 	return string(out)
 }
 
+// Reads one key from the existing server.properties file
+func readServerProperty(dataPath, key string) string {
+	data, err := os.ReadFile(filepath.Join(dataPath, "server.properties"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if k, v, ok := strings.Cut(line, "="); ok && strings.TrimSpace(k) == key {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 // Escapes non-ASCII runes as \uXXXX for legacy ISO-8859-1 readers
 func escapeUnicodeProperties(s string) string {
 	var b strings.Builder
@@ -176,12 +191,8 @@ func escapeUnicodeProperties(s string) string {
 	return b.String()
 }
 
-// Writes eula.txt once EULA is accepted
-func (p *Provisioner) writeEULA(server *storage.Server, cfg *storage.ServerProperties) error {
-	accepted := strings.EqualFold(strVal(cfg.EULA), "true")
-	if !accepted {
-		return fmt.Errorf("the Minecraft EULA must be accepted before the server can start")
-	}
+// Writes eula.txt, Ensure gates acceptance before install
+func (p *Provisioner) writeEULA(server *storage.Server) error {
 	content := "# Accepted via DiscoPanel\neula=true\n"
 	return os.WriteFile(filepath.Join(server.DataPath, "eula.txt"), []byte(content), 0644)
 }
@@ -268,14 +279,15 @@ func (p *Provisioner) writePlayerList(ctx context.Context, server *storage.Serve
 }
 
 // Resolves names to UUIDs and merges into list file
+// An explicit overwrite with an empty list truncates
 func (p *Provisioner) writePlayerListFile(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, filename, list string, isOps bool, overwrite bool) error {
 	names := splitList(list)
 	path := filepath.Join(server.DataPath, filename)
-	if len(names) == 0 {
+	if len(names) == 0 && !overwrite {
 		return nil
 	}
 
-	var entries []playerEntry
+	entries := []playerEntry{}
 	if !overwrite {
 		if data, err := os.ReadFile(path); err == nil {
 			json.Unmarshal(data, &entries)

@@ -22,12 +22,7 @@ service RoleService {
   rpc GetPermissionMatrix(GetPermissionMatrixRequest) returns (GetPermissionMatrixResponse);
   // Set permissions for a role
   rpc UpdatePermissions(UpdatePermissionsRequest) returns (UpdatePermissionsResponse);
-  // Assign a role to a user
-  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
-  // Unassign a role from a user
-  rpc UnassignRole(UnassignRoleRequest) returns (UnassignRoleResponse);
   // Get roles for a user
-  rpc GetUserRoles(GetUserRolesRequest) returns (GetUserRolesResponse);
 }
 
 // Empty list request
@@ -126,34 +121,3 @@ message UpdatePermissionsResponse {
   string message = 1;
 }
 
-// Assign role to user
-message AssignRoleRequest {
-  string user_id = 1;
-  string role_name = 2;
-}
-
-// Assignment confirmation
-message AssignRoleResponse {
-  string message = 1;
-}
-
-// Unassign role from user
-message UnassignRoleRequest {
-  string user_id = 1;
-  string role_name = 2;
-}
-
-// Unassignment confirmation
-message UnassignRoleResponse {
-  string message = 1;
-}
-
-// Get user roles request
-message GetUserRolesRequest {
-  string user_id = 1;
-}
-
-// User roles response
-message GetUserRolesResponse {
-  repeated string roles = 1;
-}

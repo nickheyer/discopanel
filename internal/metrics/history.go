@@ -44,6 +44,8 @@ func (c *Collector) sampleHistory() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	traffic := c.takeProxyDeltas()
+
 	now := time.Now().UTC()
 	var batch []*storage.MetricsSample
 	for id, m := range c.GetAllMetrics() {
@@ -56,21 +58,56 @@ func (c *Collector) sampleHistory() {
 		if m.AgentConnected {
 			heapUsed = m.HeapUsedMB
 		}
+		t := traffic[id]
 		batch = append(batch, &storage.MetricsSample{
-			ServerID:   id,
-			Timestamp:  now,
-			TPS:        m.TPS,
-			MSPT:       m.MSPT,
-			Players:    m.PlayersOnline,
-			CPUPercent: m.CPUPercent,
-			MemoryMB:   m.MemoryUsage,
-			HeapUsedMB: heapUsed,
-			DiskBytes:  m.DiskUsage,
+			ServerID:         id,
+			Timestamp:        now,
+			TPS:              m.TPS,
+			MSPT:             m.MSPT,
+			Players:          m.PlayersOnline,
+			CPUPercent:       m.CPUPercent,
+			MemoryMB:         m.MemoryUsage,
+			HeapUsedMB:       heapUsed,
+			DiskBytes:        m.DiskUsage,
+			ProxyActiveConns: t.ActiveConns,
+			ProxyBytesIn:     t.BytesToBackend,
+			ProxyBytesOut:    t.BytesToClient,
+			ProxyLogins:      t.Logins,
 		})
 	}
 	if err := c.store.AddMetricsSamples(ctx, batch); err != nil {
 		c.log.Debug("Metrics history: failed to insert samples: %v", err)
 	}
+}
+
+// Window deltas from monotonic proxy totals, resets clamp to zero
+func (c *Collector) takeProxyDeltas() map[string]ProxyTraffic {
+	if c.proxyTraffic == nil {
+		return nil
+	}
+	totals := c.proxyTraffic()
+	deltas := make(map[string]ProxyTraffic, len(totals))
+	if c.lastProxyTotals == nil {
+		c.lastProxyTotals = make(map[string]ProxyTraffic, len(totals))
+	}
+	clamp := func(cur, last int64) int64 {
+		if d := cur - last; d > 0 {
+			return d
+		}
+		return 0
+	}
+	for id, cur := range totals {
+		last := c.lastProxyTotals[id]
+		deltas[id] = ProxyTraffic{
+			ActiveConns:    cur.ActiveConns,
+			TotalConns:     clamp(cur.TotalConns, last.TotalConns),
+			Logins:         clamp(cur.Logins, last.Logins),
+			BytesToBackend: clamp(cur.BytesToBackend, last.BytesToBackend),
+			BytesToClient:  clamp(cur.BytesToClient, last.BytesToClient),
+		}
+		c.lastProxyTotals[id] = cur
+	}
+	return deltas
 }
 
 // Rolls up old raw samples and prunes expired rollups

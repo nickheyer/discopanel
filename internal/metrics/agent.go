@@ -20,6 +20,7 @@ func (c *Collector) SetAgentConnected(serverID string, connected bool) {
 			m.AgentJvmActive = false
 			m.AgentReady = false
 			m.PSIAvailable = false
+			m.GCLogWindowAt = time.Time{}
 		}
 		m.LastUpdated = time.Now()
 	})
@@ -96,11 +97,13 @@ func pruneCrashExits(times []time.Time) []time.Time {
 	return kept
 }
 
-// Records a crash doctor auto repair for findings
-func (c *Collector) RecordAutoRepair(serverID, summary string) {
+// Records a clean exit nobody requested for loop breaking
+func (c *Collector) RecordUnexpectedExit(serverID string, exitedAt time.Time) {
+	if exitedAt.IsZero() {
+		exitedAt = time.Now()
+	}
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
-		m.LastAutoRepairAt = time.Now()
-		m.LastAutoRepairSummary = summary
+		m.UnexpectedExits = pruneCrashExits(append(m.UnexpectedExits, exitedAt))
 	})
 }
 
@@ -122,12 +125,22 @@ func (c *Collector) ApplyAgentTick(serverID string, sample *agentv1.TickSample) 
 	})
 }
 
+// Log windows this fresh keep MX bean GC deltas out
+const gcLogWindowFresh = 45 * time.Second
+
 // Stores JVM telemetry from the javaagent
 func (c *Collector) ApplyAgentJvm(serverID string, sample *agentv1.JvmSample) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
 		m.HeapUsedMB = sample.GetHeapUsedMb()
 		m.HeapMaxMB = sample.GetHeapMaxMb()
 		m.ThreadCount = int(sample.GetThreadCount())
+		m.ClassCount = int(sample.GetClassCount())
+		// MX bean GC only speaks while no gc.log window flows
+		if gc := sample.GetGc(); gc != nil && time.Since(m.GCLogWindowAt) > gcLogWindowFresh {
+			m.GCPauseCount = gc.GetCount()
+			m.GCPauseTotalMs = gc.GetTotalMs()
+			m.GCPauseMaxMs = gc.GetMaxMs()
+		}
 		m.LastUpdated = time.Now()
 	})
 }
@@ -135,6 +148,12 @@ func (c *Collector) ApplyAgentJvm(serverID string, sample *agentv1.JvmSample) {
 // Stores cgroup and GC-log telemetry docker stats cannot see
 func (c *Collector) ApplyAgentProc(serverID string, sample *agentv1.ProcSample) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
+		// Java process attribution beats whole-container docker stats
+		m.CPUPercent = sample.GetCpuPercent()
+		if rss := sample.GetRssMb(); rss > 0 {
+			m.MemoryUsage = rss
+		}
+		m.AgentProcUpdated = time.Now()
 		m.CPUQuotaCores = sample.GetCpuQuotaCores()
 		if periods := sample.GetCfsPeriods(); periods > 0 {
 			m.CPUThrottlePercent = float64(sample.GetCfsThrottledPeriods()) / float64(periods) * 100
@@ -145,6 +164,7 @@ func (c *Collector) ApplyAgentProc(serverID string, sample *agentv1.ProcSample) 
 			m.GCPauseCount = gc.GetCount()
 			m.GCPauseTotalMs = gc.GetTotalMs()
 			m.GCPauseMaxMs = gc.GetMaxMs()
+			m.GCLogWindowAt = time.Now()
 		}
 		if psi := sample.GetPsi(); psi != nil {
 			m.PSIAvailable = true

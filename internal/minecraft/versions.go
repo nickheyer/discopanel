@@ -1,14 +1,15 @@
 package minecraft
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
 const (
@@ -17,7 +18,16 @@ const (
 
 	// Cache for 1 hour
 	cacheDuration = time.Hour
+
+	// Failed refetches wait this long before trying again
+	refetchFloor = time.Minute
+
+	// Bounds one manifest or metadata fetch
+	pistonFetchTimeout = 30 * time.Second
 )
+
+// Shared resilience client for piston-meta requests
+var pistonHTTP = indexers.NewHTTPClient("piston-meta.mojang.com", "", nil)
 
 type VersionManifestV2 struct {
 	Latest   LatestVersions `json:"latest"`
@@ -60,6 +70,7 @@ type versionCache struct {
 	mu            sync.RWMutex
 	manifest      *VersionManifestV2
 	lastFetchTime time.Time
+	lastAttempt   time.Time
 	javaVersions  map[string]string // Cache for Java versions by MC version ID
 }
 
@@ -67,38 +78,31 @@ var cache = &versionCache{
 	javaVersions: make(map[string]string),
 }
 
-// Fetches the version manifest from the Mojang API
+// Fetches the version manifest, stale beats a failed refetch
 func fetchVersionManifest() (*VersionManifestV2, error) {
-	// Check cache first
 	cache.mu.RLock()
-	if cache.manifest != nil && time.Since(cache.lastFetchTime) < cacheDuration {
-		manifest := cache.manifest
-		cache.mu.RUnlock()
-		return manifest, nil
-	}
+	stale := cache.manifest
+	fresh := stale != nil && time.Since(cache.lastFetchTime) < cacheDuration
+	attempted := time.Since(cache.lastAttempt) < refetchFloor
 	cache.mu.RUnlock()
-
-	// Fetch new manifest
-	client := &http.Client{
-		Timeout: 10 * time.Second,
+	if fresh || (stale != nil && attempted) {
+		return stale, nil
 	}
 
-	resp, err := client.Get(versionManifestV2URL)
-	if err != nil {
+	cache.mu.Lock()
+	cache.lastAttempt = time.Now()
+	cache.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), pistonFetchTimeout)
+	defer cancel()
+	var manifest VersionManifestV2
+	if err := pistonHTTP.DoJSON(ctx, versionManifestV2URL, &manifest); err != nil {
+		if stale != nil {
+			return stale, nil
+		}
 		return nil, fmt.Errorf("failed to fetch version manifest: %w", err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch version manifest: status code %d", resp.StatusCode)
-	}
-
-	var manifest VersionManifestV2
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return nil, fmt.Errorf("failed to decode version manifest: %w", err)
-	}
-
-	// Update cache
 	cache.mu.Lock()
 	cache.manifest = &manifest
 	cache.lastFetchTime = time.Now()
@@ -166,23 +170,11 @@ func GetVersionMetadata(mcVersion string) (*VersionMetadata, error) {
 		return nil, fmt.Errorf("version %s not found in manifest", mcVersion)
 	}
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Get(versionInfo.URL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch version metadata: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch version metadata: status code %d", resp.StatusCode)
-	}
-
+	ctx, cancel := context.WithTimeout(context.Background(), pistonFetchTimeout)
+	defer cancel()
 	var metadata VersionMetadata
-	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
-		return nil, fmt.Errorf("failed to decode version metadata: %w", err)
+	if err := pistonHTTP.DoJSON(ctx, versionInfo.URL, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to fetch version metadata: %w", err)
 	}
 
 	// Cache the java version for GetJavaVersion

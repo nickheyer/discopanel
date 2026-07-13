@@ -87,7 +87,7 @@ func TestLoopbackAllowlist(t *testing.T) {
 		t.Fatalf("expected 2 allowed messages relayed, got %d", n)
 	}
 
-	// Fatal errors are held for the exit report and relayed live
+	// Fatal errors held for exit report, relayed live
 	fatal := &agentv1.FatalError{Thread: "main"}
 	sup.handleAgentMessage(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_FatalError{FatalError: fatal}})
 	if n := len(sess.sendCh); n != 3 {
@@ -141,6 +141,12 @@ func TestExitReportFatalRoundTrip(t *testing.T) {
 }
 
 func TestSetFatalError(t *testing.T) {
+	armedAt := func(s *supervisor) time.Time {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.bootFailedAt
+	}
+
 	s := &supervisor{}
 	plain := &agentv1.FatalError{Causes: []*agentv1.CrashCause{{Type: "a.MixinError"}}}
 	attributed := &agentv1.FatalError{
@@ -149,14 +155,14 @@ func TestSetFatalError(t *testing.T) {
 	}
 
 	s.setFatalError(plain)
-	if !s.bootFailureArmedAt().IsZero() {
+	if !armedAt(s).IsZero() {
 		t.Fatal("plain fatal must not arm the watchdog")
 	}
 	s.setFatalError(attributed)
 	if len(s.fatalError().GetFailedMods()) != 1 {
 		t.Fatal("attributed report must replace the plain one")
 	}
-	if s.bootFailureArmedAt().IsZero() {
+	if armedAt(s).IsZero() {
 		t.Fatal("pre-ready loader-blamed fatal must arm the watchdog")
 	}
 
@@ -175,7 +181,7 @@ func TestSetFatalError(t *testing.T) {
 	if ready.fatalError() == nil {
 		t.Fatal("post-ready uncaught fatal must be held")
 	}
-	if !ready.bootFailureArmedAt().IsZero() {
+	if !armedAt(ready).IsZero() {
 		t.Fatal("post-ready fatal must not arm the watchdog")
 	}
 }
@@ -462,12 +468,12 @@ func TestMatchDeath(t *testing.T) {
 }
 
 func TestAssembleTickSample(t *testing.T) {
-	s := assembleTickSample(0.3, 22.5, 10)
+	s := assembleTickSample(0.3, 22.5, 10, 0, false)
 	if s.GetTps() != 20 || s.GetMsptAvg() != 15 || s.GetMsptMax() != 22.5 {
 		t.Errorf("healthy sample = %+v", s)
 	}
 
-	s = assembleTickSample(1.0, 9800, 10)
+	s = assembleTickSample(1.0, 9800, 10, 0, false)
 	if s.GetTps() != 18 {
 		t.Errorf("saturated tps = %v, want 18", s.GetTps())
 	}
@@ -478,9 +484,99 @@ func TestAssembleTickSample(t *testing.T) {
 		t.Errorf("saturated msptMax = %v, want the 9800ms stall visible", s.GetMsptMax())
 	}
 
-	s = assembleTickSample(0.5, 80, 10)
+	s = assembleTickSample(0.5, 80, 10, 0, false)
 	if s.GetMsptMax() != 80 || s.GetTps() != 20 {
 		t.Errorf("spike sample = %+v", s)
+	}
+
+	// Pegged threads with lag debt report real TPS
+	s = assembleTickSample(1.0, 400, 10, 0.75, true)
+	if s.GetTps() != 5 {
+		t.Errorf("lag debt tps = %v, want 5", s.GetTps())
+	}
+	if s.GetMsptAvg() != 200 {
+		t.Errorf("lag debt mspt = %v, want 200", s.GetMsptAvg())
+	}
+
+	// Debt just over budget beats the pessimistic bound
+	s = assembleTickSample(1.0, 100, 10, 0.012, true)
+	if s.GetTps() < 19.75 || s.GetTps() > 19.77 {
+		t.Errorf("mild debt tps = %v, want ~19.76", s.GetTps())
+	}
+
+	// Runaway debt rate clamps instead of reporting zero
+	s = assembleTickSample(1.0, 100, 10, 4.0, true)
+	if s.GetTps() < 0.99 || s.GetTps() > 1.01 {
+		t.Errorf("clamped tps = %v, want ~1", s.GetTps())
+	}
+
+	// Debt is only consulted while the thread is pegged
+	s = assembleTickSample(0.5, 80, 10, 0.75, true)
+	if s.GetTps() != 20 {
+		t.Errorf("unpegged debt tps = %v, want 20", s.GetTps())
+	}
+}
+
+func TestLagDebtRate(t *testing.T) {
+	s := &supervisor{}
+	if _, ok := s.lagDebtRate(); ok {
+		t.Fatal("no lag lines must mean no usable debt")
+	}
+
+	s.recordLagLine(2000)
+	if _, ok := s.lagDebtRate(); ok {
+		t.Fatal("a single lag line has no observed spacing yet")
+	}
+
+	// A 2000ms confession every 2.67s is a 5 TPS server
+	s.mu.Lock()
+	s.lagDebtMs = 2000
+	s.lagSpacing = 2670 * time.Millisecond
+	s.lagAt = time.Now()
+	s.mu.Unlock()
+	rate, ok := s.lagDebtRate()
+	if !ok || rate < 0.74 || rate > 0.76 {
+		t.Fatalf("lagDebtRate = %v, %v, want ~0.75", rate, ok)
+	}
+
+	// Tight spacing expires at the 45s floor
+	s.mu.Lock()
+	s.lagAt = time.Now().Add(-50 * time.Second)
+	s.mu.Unlock()
+	if _, ok := s.lagDebtRate(); ok {
+		t.Fatal("debt past the floor must expire")
+	}
+
+	// Sparse lines stay usable for 1.5x their spacing
+	s.mu.Lock()
+	s.lagSpacing = 2 * time.Minute
+	s.lagAt = time.Now().Add(-170 * time.Second)
+	s.mu.Unlock()
+	if _, ok := s.lagDebtRate(); !ok {
+		t.Fatal("sparse debt inside 1.5x spacing must stay usable")
+	}
+
+	// Five minutes caps usability no matter the spacing
+	s.mu.Lock()
+	s.lagSpacing = 10 * time.Minute
+	s.lagAt = time.Now().Add(-6 * time.Minute)
+	s.mu.Unlock()
+	if _, ok := s.lagDebtRate(); ok {
+		t.Fatal("debt older than the cap must expire")
+	}
+}
+
+func TestLagPattern(t *testing.T) {
+	modern := "Can't keep up! Is the server overloaded? Running 2861ms or 57 ticks behind"
+	if m := lagPattern.FindStringSubmatch(modern); m == nil || m[1] != "2861" {
+		t.Errorf("lagPattern missed modern lag line: %v", m)
+	}
+	legacy := "Can't keep up! Did the system time change, or is the server overloaded? Running 2000ms behind, skipping 40 tick(s)"
+	if m := lagPattern.FindStringSubmatch(legacy); m == nil || m[1] != "2000" {
+		t.Errorf("lagPattern missed legacy lag line: %v", m)
+	}
+	if lagPattern.MatchString("<Nick> Running 5000ms behind") {
+		t.Error("lagPattern matched a chat line")
 	}
 }
 
@@ -552,6 +648,49 @@ func TestBuildJavaArgs(t *testing.T) {
 	}
 	if args[len(args)-1] == "nogui" {
 		t.Error("custom launch must not get nogui appended")
+	}
+
+	// A user picked collector keeps the default Aikar G1 out
+	spec = &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar", JavaMajor: 21}
+	t.Setenv("JVM_OPTS", "-XX:+UseZGC")
+	args, err = buildJavaArgs(spec, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(args, "-XX:+UseG1GC") {
+		t.Error("user GC choice must skip the default Aikar block")
+	}
+	if !slices.Contains(args, "-XX:+UseZGC") {
+		t.Error("user GC flag missing from argv")
+	}
+	t.Setenv("JVM_OPTS", "")
+
+	// Explicit flag sets still win over user opts
+	t.Setenv("USE_MEOWICE_FLAGS", "true")
+	t.Setenv("JVM_OPTS", "-XX:+UseZGC")
+	args, err = buildJavaArgs(spec, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(args, "-XX:+UseG1GC") {
+		t.Error("explicit MeowIce request must still apply")
+	}
+	t.Setenv("USE_MEOWICE_FLAGS", "")
+	t.Setenv("JVM_OPTS", "")
+}
+
+func TestUserSelectsGC(t *testing.T) {
+	if !userSelectsGC("-Xmx4G -XX:+UseShenandoahGC") {
+		t.Error("Shenandoah selection missed")
+	}
+	if !userSelectsGC("-XX:+UseConcMarkSweepGC") {
+		t.Error("CMS selection missed")
+	}
+	if userSelectsGC("-XX:+UseStringDeduplication -XX:MaxGCPauseMillis=100") {
+		t.Error("non GC flags misread as a collector choice")
+	}
+	if userSelectsGC("") {
+		t.Error("empty opts misread as a collector choice")
 	}
 }
 

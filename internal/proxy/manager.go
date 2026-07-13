@@ -11,12 +11,15 @@ import (
 	db "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // Handles proxy lifecycle and manages routes
 type Manager struct {
 	proxies       map[int]Proxier // Map of port -> Proxy instance (TCP or UDP)
 	listenerPorts map[int]bool    // Ports serving hostname-routed server listeners
+	statsBase     map[string]RouteStatsSnapshot
+	statsLast     map[string]RouteStatsSnapshot
 	store         *db.Store
 	docker        *docker.Client
 	config        *config.ProxyConfig
@@ -42,6 +45,8 @@ func NewManager(store *db.Store, dockerClient *docker.Client, cfg *config.Config
 	return &Manager{
 		proxies:       make(map[int]Proxier),
 		listenerPorts: make(map[int]bool),
+		statsBase:     make(map[string]RouteStatsSnapshot),
+		statsLast:     make(map[string]RouteStatsSnapshot),
 		store:         store,
 		docker:        dockerClient,
 		config:        &cfg.Proxy,
@@ -162,6 +167,7 @@ func (m *Manager) Stop() error {
 	}
 
 	m.proxies = make(map[int]Proxier)
+	m.listenerPorts = make(map[int]bool)
 	m.logger.Info("Proxy manager stopped")
 	return lastErr
 }
@@ -448,31 +454,6 @@ func (m *Manager) RemoveListener(port int) error {
 	return nil
 }
 
-// Allocates a proxy port for a server
-func (m *Manager) AllocateProxyPort(serverID string) (int, error) {
-	// Get all servers to find used proxy ports
-	servers, err := m.store.ListServers(context.Background())
-	if err != nil {
-		return 0, err
-	}
-
-	usedPorts := make(map[int]bool)
-	for _, server := range servers {
-		if server.ProxyPort > 0 && server.ID != serverID {
-			usedPorts[server.ProxyPort] = true
-		}
-	}
-
-	// Find an available port in the configured range
-	for port := m.config.PortRangeMin; port <= m.config.PortRangeMax; port++ {
-		if !usedPorts[port] {
-			return port, nil
-		}
-	}
-
-	return 0, fmt.Errorf("no available proxy ports in range %d-%d", m.config.PortRangeMin, m.config.PortRangeMax)
-}
-
 // Adds proxy routes for a module's ports
 func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
 	m.mu.Lock()
@@ -505,7 +486,7 @@ func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
 
 		routeID := fmt.Sprintf("%s-port-%d", module.ID, port.HostPort)
 		if err := m.addPortRouteUnlocked(routeID, server.ProxyHostname, containerIP,
-			int(port.HostPort), int(port.ContainerPort), protocol, module.Name, port.Name); err != nil {
+			int(port.HostPort), m.moduleContainerPort(module, port), protocol, module.Name, port.Name); err != nil {
 			m.logger.Error("Failed to add port route for %s: %v", port.Name, err)
 		}
 	}
@@ -513,10 +494,28 @@ func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
 	return nil
 }
 
+// Resolves a container port from the template when unset
+func (m *Manager) moduleContainerPort(module *db.Module, port *v1.ModulePort) int {
+	if port.ContainerPort != 0 {
+		return int(port.ContainerPort)
+	}
+
+	template, err := m.store.GetModuleTemplate(context.Background(), module.TemplateID)
+	if err != nil {
+		return 0
+	}
+	for _, tp := range template.Ports {
+		if tp != nil && tp.Name == port.Name {
+			return int(tp.ContainerPort)
+		}
+	}
+	return 0
+}
+
 // Adds a single port route, caller must hold lock
 func (m *Manager) addPortRouteUnlocked(routeID, hostname, containerIP string, hostPort, containerPort int, protocol, moduleName, portName string) error {
 	if containerPort == 0 {
-		containerPort = 8081
+		return fmt.Errorf("no container port declared for %s", portName)
 	}
 
 	// Check if a proxy already exists for this port
@@ -642,6 +641,7 @@ func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error 
 			continue
 		}
 
+		containerPort := m.moduleContainerPort(module, port)
 		proxy, exists := m.proxies[int(port.HostPort)]
 		if !exists {
 			// Need to add it
@@ -651,15 +651,19 @@ func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error 
 			}
 			routeID := fmt.Sprintf("%s-port-%d", module.ID, port.HostPort)
 			if err := m.addPortRouteUnlocked(routeID, server.ProxyHostname, containerIP,
-				int(port.HostPort), int(port.ContainerPort), protocol, module.Name, port.Name); err != nil {
+				int(port.HostPort), containerPort, protocol, module.Name, port.Name); err != nil {
 				m.logger.Error("Failed to add port route for %s: %v", port.Name, err)
 			}
 			continue
 		}
 
-		proxy.UpdateRoute(server.ProxyHostname, containerIP, int(port.ContainerPort))
+		if containerPort == 0 {
+			m.logger.Error("No container port declared for %s", port.Name)
+			continue
+		}
+		proxy.UpdateRoute(server.ProxyHostname, containerIP, containerPort)
 		m.logger.Info("Updated module route: %s:%d -> %s:%d (module: %s, port: %s)",
-			server.ProxyHostname, port.HostPort, containerIP, port.ContainerPort, module.Name, port.Name)
+			server.ProxyHostname, port.HostPort, containerIP, containerPort, module.Name, port.Name)
 	}
 
 	return nil
@@ -694,9 +698,39 @@ func (m *Manager) GetRouteStats() map[string]RouteStatsSnapshot {
 		if !ok {
 			continue
 		}
-		maps.Copy(stats, mp.StatsSnapshots())
+		for id, raw := range mp.StatsSnapshots() {
+			if countersReset(m.statsLast[id], raw) {
+				m.statsBase[id] = addCounters(m.statsBase[id], m.statsLast[id])
+			}
+			m.statsLast[id] = raw
+			stats[id] = addCounters(m.statsBase[id], raw)
+		}
 	}
 	return stats
+}
+
+// Detects a counter restart after route removal
+func countersReset(last, cur RouteStatsSnapshot) bool {
+	return cur.TotalConns < last.TotalConns ||
+		cur.StatusPings < last.StatusPings ||
+		cur.Logins < last.Logins ||
+		cur.Wakes < last.Wakes ||
+		cur.BytesToBackend < last.BytesToBackend ||
+		cur.BytesToClient < last.BytesToClient
+}
+
+// Adds monotonic counters onto a base, gauges pass through
+func addCounters(base, cur RouteStatsSnapshot) RouteStatsSnapshot {
+	return RouteStatsSnapshot{
+		ActiveConns:    cur.ActiveConns,
+		TotalConns:     base.TotalConns + cur.TotalConns,
+		StatusPings:    base.StatusPings + cur.StatusPings,
+		Logins:         base.Logins + cur.Logins,
+		Wakes:          base.Wakes + cur.Wakes,
+		BytesToBackend: base.BytesToBackend + cur.BytesToBackend,
+		BytesToClient:  base.BytesToClient + cur.BytesToClient,
+		LastProtocol:   cur.LastProtocol,
+	}
 }
 
 // Creates default proxy listener if proxy is enabled

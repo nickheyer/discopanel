@@ -26,7 +26,8 @@
 		ChevronDown,
 		Activity,
 		Terminal,
-		ChevronRight
+		ChevronRight,
+		X
 	} from '@lucide/svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import AnsiToHtml from 'ansi-to-html';
@@ -81,8 +82,13 @@
 		for (const a of actions) if (a.source) seen.add(a.source);
 		return [...seen].sort();
 	});
+	let traceFilter = $state('');
 	let visibleActions = $derived(
-		sourceFilter === 'all' ? actions : actions.filter((a) => a.source === sourceFilter)
+		actions.filter(
+			(a) =>
+				(sourceFilter === 'all' || a.source === sourceFilter) &&
+				(traceFilter === '' || a.traceId === traceFilter)
+		)
 	);
 
 	function toggleExpanded(a: ServerAction) {
@@ -503,6 +509,16 @@
 		</div>
 
 		<div class="ml-auto flex shrink-0 items-center gap-2" class:hidden={channel !== 'actions'}>
+			{#if traceFilter}
+				<button
+					class="flex h-6 items-center gap-1 rounded-md border border-amber-400/30 px-2 font-mono text-[11px] text-amber-300/80"
+					title="Clear incident filter"
+					onclick={() => (traceFilter = '')}
+				>
+					{traceFilter}
+					<X class="size-3" />
+				</button>
+			{/if}
 			<div
 				class="flex h-6 items-center rounded-md border border-white/10 pl-2 font-mono text-[11px]"
 				title="Filter by source"
@@ -662,7 +678,17 @@
 								<div class="action-detail ml-9 grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
 									{#each details as [key, value] (key)}
 										<span class="text-white/35">{key}</span>
-										<span class="break-all text-white/70">{value}</span>
+										{#if key === 'trace'}
+											<button
+												class="w-fit break-all text-amber-300/80 hover:underline"
+												title="Show only this incident"
+												onclick={() => (traceFilter = value)}
+											>
+												{value}
+											</button>
+										{:else}
+											<span class="break-all text-white/70">{value}</span>
+										{/if}
 									{/each}
 								</div>
 							{/if}

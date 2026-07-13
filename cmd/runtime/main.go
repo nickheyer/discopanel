@@ -125,7 +125,7 @@ func main() {
 		pid:         cmd.Process.Pid,
 		proc:        cmd.Process,
 		oomBaseline: readOOMKills(),
-		prevExit:    readExitReport(dataDir),
+		pendingExit: readExitReport(dataDir),
 	}
 	sup.events = newConsoleEvents(sup)
 
@@ -190,25 +190,31 @@ type supervisor struct {
 	startedAt   time.Time
 	pid         int
 	events      *consoleEvents
-	oomBaseline int64       // Cgroup oom_kill count at process start
-	prevExit    *exitReport // Previous run's exit, replayed on connect
+	oomBaseline int64 // Cgroup oom_kill count at process start
+
+	lastOutputAt atomic.Int64 // Unix nanos of last console output
 
 	stdinMu sync.Mutex
 	stdin   interface{ Write([]byte) (int, error) }
 
-	mu            sync.Mutex
-	ready         bool
-	readyAt       time.Time // Set once alongside ready
-	readySeconds  float64
-	stopRequested bool                // Termination signal was forwarded to java
-	session       *panelSession       // Active panel stream, nil when disconnected
-	fatal         *agentv1.FatalError // Best structured JVM fatal error
-	captureArmed  bool                // Log watcher confirmed at least one hook
-	bootFailedAt  time.Time           // First boot failure signal, zero while healthy
-	bootFailed    bool                // Watchdog ended a hung boot-failed JVM
-	proc          *os.Process         // The supervised java process
-	closed        chan struct{}       // Closed once, on process exit
-	closeOnce     sync.Once
+	mu               sync.Mutex
+	ready            bool
+	readyAt          time.Time // Set once alongside ready
+	readySeconds     float64
+	stopRequested    bool                // Termination signal was forwarded to java
+	session          *panelSession       // Active panel stream, nil when disconnected
+	fatal            *agentv1.FatalError // Best structured JVM fatal error
+	captureArmed     bool                // Log watcher confirmed at least one hook
+	bootFailedAt     time.Time           // First boot failure signal, zero while healthy
+	bootFailed       bool                // Watchdog ended a hung boot-failed JVM
+	survivedReportAt time.Time           // Newest crash report the JVM outlived
+	pendingExit      *exitReport         // Unacked exit report, replayed until acked
+	lagDebtMs        float64             // Debt from the newest lag line
+	lagAt            time.Time           // When the newest lag line printed
+	lagSpacing       time.Duration       // Gap between the last two lag lines
+	proc             *os.Process         // The supervised java process
+	closed           chan struct{}       // Closed once, on process exit
+	closeOnce        sync.Once
 }
 
 func (s *supervisor) setFatalError(fatal *agentv1.FatalError) {
@@ -236,7 +242,7 @@ func (s *supervisor) fatalError() *agentv1.FatalError {
 	return s.fatal
 }
 
-// Prints one console line so a silent capture miss is diagnosable
+// Prints one line so capture misses stay diagnosable
 func (s *supervisor) markCaptureArmed(contexts int32) {
 	s.mu.Lock()
 	first := !s.captureArmed
@@ -248,9 +254,13 @@ func (s *supervisor) markCaptureArmed(contexts int32) {
 }
 
 const (
-	bootFailGrace  = 30 * time.Second
-	crashExitGrace = 90 * time.Second
-	killEscalation = 20 * time.Second
+	bootFailGrace     = 30 * time.Second
+	killEscalation    = 20 * time.Second
+	deathWatchHorizon = 5 * time.Minute
+	consoleIdleWindow = 60 * time.Second
+	cpuIdleWindow     = 30 * time.Second
+	cpuIdleCores      = 0.02
+	evidenceInterval  = 5 * time.Second
 )
 
 func (s *supervisor) armBootFailure() {
@@ -261,14 +271,15 @@ func (s *supervisor) armBootFailure() {
 	}
 	s.bootFailedAt = time.Now()
 	s.mu.Unlock()
-	fmt.Printf("[discopanel-runtime] fatal boot error, ending the boot in %ds\n", int(bootFailGrace.Seconds()))
+	fmt.Printf("[discopanel-runtime] fatal boot error, ending the JVM once it goes idle\n")
 	go s.endBootFailedAfterGrace()
 }
 
-// Crash reports mean death, wedged exits get ended
+// Crash reports arm a death watch, survivors stay watched
 func (s *supervisor) watchCrashReports() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	var watermark time.Time
 	for {
 		select {
 		case <-s.done():
@@ -277,47 +288,108 @@ func (s *supervisor) watchCrashReports() {
 		}
 		since := s.startedAt
 		readyAt := s.readyTime()
-		if !readyAt.IsZero() {
+		if !readyAt.IsZero() && readyAt.After(since) {
 			since = readyAt
 		}
-		if reportPath, _ := findCrashReport(since); reportPath != "" {
-			if readyAt.IsZero() {
-				s.armBootFailure()
-			} else {
-				s.endWedgedCrash()
-			}
-			return
+		if watermark.After(since) {
+			since = watermark
+		}
+		reportPath, _, reportAt := findCrashReport(since)
+		if reportPath == "" {
+			continue
+		}
+		watermark = reportAt
+		if readyAt.IsZero() {
+			s.armBootFailure()
+			continue
+		}
+		if !s.endWedgedCrash() {
+			s.markReportSurvived(reportAt)
 		}
 	}
 }
 
-// Ends a crashed JVM that never exits on its own
-func (s *supervisor) endWedgedCrash() {
-	fmt.Printf("[discopanel-runtime] crash report written, JVM gets %ds to exit\n", int(crashExitGrace.Seconds()))
-	select {
-	case <-s.done():
-		return
-	case <-time.After(crashExitGrace):
+// Time since the java process last wrote console output
+func (s *supervisor) consoleIdleFor() time.Duration {
+	last := s.lastOutputAt.Load()
+	if last == 0 {
+		return time.Since(s.startedAt)
+	}
+	return time.Since(time.Unix(0, last))
+}
+
+// Waits for console silence plus CPU idle, false means survival
+func (s *supervisor) awaitDeathEvidence() bool {
+	type cpuPoint struct {
+		at    time.Time
+		ticks int64
+	}
+	var window []cpuPoint
+	deadline := time.Now().Add(deathWatchHorizon)
+	ticker := time.NewTicker(evidenceInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.done():
+			return false
+		case <-ticker.C:
+		}
+		now := time.Now()
+		if now.After(deadline) {
+			return false
+		}
+		if ticks, ok := cpuTimes(s.pid); ok {
+			window = append(window, cpuPoint{at: now, ticks: ticks})
+		}
+		for len(window) > 0 && now.Sub(window[0].at) > cpuIdleWindow+evidenceInterval {
+			window = window[1:]
+		}
+		if s.consoleIdleFor() < consoleIdleWindow || len(window) < 2 {
+			continue
+		}
+		span := window[len(window)-1].at.Sub(window[0].at)
+		if span < cpuIdleWindow {
+			continue
+		}
+		cores := float64(window[len(window)-1].ticks-window[0].ticks) / clockTicksPerSecond / span.Seconds()
+		if cores < cpuIdleCores {
+			return true
+		}
+	}
+}
+
+// Ends a crashed JVM only when it stops showing life
+func (s *supervisor) endWedgedCrash() bool {
+	fmt.Printf("[discopanel-runtime] crash report written, watching the JVM for death evidence\n")
+	if !s.awaitDeathEvidence() {
+		if !s.exiting() {
+			fmt.Printf("[discopanel-runtime] server survived its crash report, leaving it running\n")
+		}
+		return false
 	}
 	s.mu.Lock()
 	proc := s.proc
 	s.mu.Unlock()
 	if proc == nil {
-		return
+		return false
 	}
-	fmt.Printf("[discopanel-runtime] crashed JVM is wedged, ending it\n")
+	fmt.Printf("[discopanel-runtime] crashed JVM is wedged (console and CPU idle), ending it\n")
 	_ = proc.Signal(syscall.SIGTERM)
 	select {
 	case <-s.done():
 	case <-time.After(killEscalation):
 		_ = proc.Kill()
 	}
+	return true
 }
 
-func (s *supervisor) bootFailureArmedAt() time.Time {
+// Keeps a survived report from tainting the eventual exit
+func (s *supervisor) markReportSurvived(at time.Time) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.bootFailedAt
+	if at.After(s.survivedReportAt) {
+		s.survivedReportAt = at
+	}
+	s.mu.Unlock()
 }
 
 func (s *supervisor) endBootFailedAfterGrace() {
@@ -329,6 +401,9 @@ func (s *supervisor) endBootFailedAfterGrace() {
 	if s.isReady() {
 		return
 	}
+	if !s.awaitDeathEvidence() || s.isReady() {
+		return
+	}
 
 	s.mu.Lock()
 	s.bootFailed = true
@@ -337,7 +412,7 @@ func (s *supervisor) endBootFailedAfterGrace() {
 	if proc == nil {
 		return
 	}
-	fmt.Printf("[discopanel-runtime] boot failed, shutting the JVM down\n")
+	fmt.Printf("[discopanel-runtime] boot failed and the JVM went idle, shutting it down\n")
 	_ = proc.Signal(syscall.SIGTERM)
 
 	select {
@@ -392,6 +467,7 @@ func (s *supervisor) mirrorConsole(r interface{ Read([]byte) (int, error) }, w *
 		n, err := r.Read(buf)
 		if n > 0 {
 			chunk := buf[:n]
+			s.lastOutputAt.Store(time.Now().UnixNano())
 			_, _ = w.Write(chunk)
 			line = append(line, chunk...)
 			for {
@@ -463,8 +539,12 @@ func (s *supervisor) readyTime() time.Time {
 func (s *supervisor) reportExit(exitCode int) {
 	s.mu.Lock()
 	requested := s.stopRequested
+	blameSince := s.survivedReportAt
 	s.mu.Unlock()
-	reportPath, excerpt := findCrashReport(s.startedAt)
+	if blameSince.Before(s.startedAt) {
+		blameSince = s.startedAt
+	}
+	reportPath, excerpt, _ := findCrashReport(blameSince)
 	oomKilled := readOOMKills()-s.oomBaseline > 0 && exitCode != 0
 	crashed := isCrash(exitCode, requested, reportPath) || oomKilled
 	report := &exitReport{
@@ -482,6 +562,9 @@ func (s *supervisor) reportExit(exitCode int) {
 		report.setFatal(s.fatalError())
 	}
 	writeExitReport(dataDir, report)
+	s.mu.Lock()
+	s.pendingExit = report
+	s.mu.Unlock()
 	if oomKilled {
 		fmt.Printf("[discopanel-runtime] server was killed by the kernel OOM killer (out of memory)\n")
 	}
@@ -559,11 +642,11 @@ func writeExitReport(dir string, r *exitReport) {
 }
 
 // Locates the newest crash report and a capped excerpt
-func findCrashReport(since time.Time) (string, string) {
+func findCrashReport(since time.Time) (string, string, time.Time) {
 	dir := filepath.Join(dataDir, "crash-reports")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return "", ""
+		return "", "", time.Time{}
 	}
 	var newest string
 	var newestTime time.Time
@@ -572,7 +655,7 @@ func findCrashReport(since time.Time) (string, string) {
 			continue
 		}
 		info, err := e.Info()
-		if err != nil || info.ModTime().Before(since) {
+		if err != nil || !info.ModTime().After(since) {
 			continue
 		}
 		if info.ModTime().After(newestTime) {
@@ -581,16 +664,16 @@ func findCrashReport(since time.Time) (string, string) {
 		}
 	}
 	if newest == "" {
-		return "", ""
+		return "", "", time.Time{}
 	}
 	data, err := os.ReadFile(filepath.Join(dir, newest))
 	if err != nil {
-		return filepath.Join("crash-reports", newest), ""
+		return filepath.Join("crash-reports", newest), "", newestTime
 	}
 	if len(data) > maxExcerpt {
 		data = data[:maxExcerpt]
 	}
-	return filepath.Join("crash-reports", newest), string(data)
+	return filepath.Join("crash-reports", newest), string(data), newestTime
 }
 
 func exitCodeOf(cmd *exec.Cmd, waitErr error) int {

@@ -6,7 +6,10 @@ import (
 	"encoding/hex"
 	"io"
 	"strconv"
+	"strings"
 
+	"github.com/nickheyer/discopanel/internal/alias"
+	"github.com/nickheyer/discopanel/internal/config"
 	models "github.com/nickheyer/discopanel/internal/db"
 	"google.golang.org/protobuf/proto"
 )
@@ -31,11 +34,7 @@ func (c *Client) DesiredConfigHash(server *models.Server, serverConfig *models.S
 	}
 
 	useProxy := server.ProxyHostname != ""
-	containerPort := server.Port
-	if useProxy {
-		containerPort = DefaultMinecraftPort
-	}
-	w("port", strconv.Itoa(server.Port), strconv.Itoa(containerPort), strconv.FormatBool(useProxy))
+	w("port", strconv.Itoa(server.Port), strconv.Itoa(server.InContainerPort()), strconv.FormatBool(useProxy))
 	for _, p := range server.AdditionalPorts {
 		w("extra-port", strconv.Itoa(int(p.GetHostPort())), strconv.Itoa(int(p.GetContainerPort())), p.GetProtocol())
 	}
@@ -56,6 +55,67 @@ func (c *Client) DesiredConfigHash(server *models.Server, serverConfig *models.S
 
 // Returns creation-time config hash, empty if predating the label
 func (c *Client) ContainerConfigHash(ctx context.Context, containerID string) (string, error) {
+	return c.containerLabel(ctx, containerID, LabelConfigHash)
+}
+
+// Create-time module fingerprint, compared to trigger recreate
+const LabelModuleConfigHash = "discopanel.module.confighash"
+
+// V1 fingerprints module create inputs, rotating token env excluded
+func (c *Client) DesiredModuleConfigHash(module *models.Module, template *models.ModuleTemplate, server *models.Server, serverConfig *models.ServerProperties, cfg *config.Config, siblings map[string]*models.Module) string {
+	h := sha256.New()
+	w := func(parts ...string) {
+		for _, p := range parts {
+			_, _ = io.WriteString(h, p)
+			_, _ = h.Write([]byte{0})
+		}
+	}
+
+	aliasCtx := &alias.Context{
+		Server:           server,
+		ServerProperties: serverConfig,
+		Module:           module,
+		Config:           cfg,
+		Modules:          siblings,
+	}
+
+	w("v1", template.DockerImage)
+	for _, e := range c.buildModuleEnv(module, server, aliasCtx) {
+		if strings.HasPrefix(e, "DISCOPANEL_API_TOKEN=") {
+			continue
+		}
+		w("env", e)
+	}
+	for _, p := range module.Ports {
+		if p == nil {
+			continue
+		}
+		w("port", strconv.Itoa(int(p.HostPort)), strconv.Itoa(int(p.ContainerPort)), p.Protocol, strconv.FormatBool(p.ProxyEnabled))
+	}
+	vols := c.parseModuleVolumes(module.VolumeOverrides, aliasCtx)
+	resolveWorldSources(vols, server.DataPath)
+	for _, v := range vols {
+		w("vol", v.Type, v.Source, v.Target, strconv.FormatBool(v.ReadOnly))
+	}
+	w("user", alias.Substitute(module.UID, aliasCtx), alias.Substitute(module.GID, aliasCtx))
+	cmd := module.CmdOverride
+	if cmd == "" {
+		cmd = template.DefaultCmd
+	}
+	w("cmd", cmd)
+	w("memory", strconv.Itoa(module.Memory))
+	w("cpu", strconv.FormatFloat(module.CPULimit, 'f', -1, 64))
+	w("network", c.config.NetworkName)
+
+	return hex.EncodeToString(h.Sum(nil))[:32]
+}
+
+// Returns a module container's create-time hash label
+func (c *Client) ModuleContainerConfigHash(ctx context.Context, containerID string) (string, error) {
+	return c.containerLabel(ctx, containerID, LabelModuleConfigHash)
+}
+
+func (c *Client) containerLabel(ctx context.Context, containerID, label string) (string, error) {
 	inspect, err := c.docker.ContainerInspect(ctx, containerID)
 	if err != nil {
 		return "", err
@@ -63,5 +123,5 @@ func (c *Client) ContainerConfigHash(ctx context.Context, containerID string) (s
 	if inspect.Config == nil {
 		return "", nil
 	}
-	return inspect.Config.Labels[LabelConfigHash], nil
+	return inspect.Config.Labels[label], nil
 }

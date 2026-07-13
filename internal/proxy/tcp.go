@@ -80,7 +80,6 @@ func (p *TCPProxy) GetRoutes() map[string]*Route {
 			Hostname:    "tcp",
 			BackendHost: p.backendHost,
 			BackendPort: p.backendPort,
-			Active:      true,
 		},
 	}
 }

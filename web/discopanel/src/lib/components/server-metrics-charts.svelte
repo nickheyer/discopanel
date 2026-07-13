@@ -7,9 +7,15 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import MetricsChart from '$lib/components/metrics-chart.svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import type { MetricsSample } from '$lib/proto/discopanel/v1/server_pb';
+	import type { MetricsSample, ServerAction } from '$lib/proto/discopanel/v1/server_pb';
 
 	let { server }: { server: Server } = $props();
+
+	interface EventMarker {
+		ts: Date;
+		label: string;
+		tone: string;
+	}
 
 	interface SamplePoint {
 		ts: Date;
@@ -30,8 +36,56 @@
 
 	let range = $state<(typeof ranges)[number]>(ranges[0]);
 	let samples = $state<SamplePoint[]>([]);
+	let events = $state<EventMarker[]>([]);
+	let rangeFrom = $state(new Date());
+	let rangeTo = $state(new Date());
 	let loading = $state(true);
 	let unsubscribeMetrics: (() => void) | null = null;
+
+	function markerTone(name: string): string {
+		if (name.startsWith('doctor.') || name.startsWith('fix.')) return 'bg-amber-400';
+		if (name.includes('crash') || name.includes('oom') || name.includes('boot_failed'))
+			return 'bg-red-400';
+		if (name === 'server.start') return 'bg-emerald-400';
+		return 'bg-zinc-400';
+	}
+
+	function toMarker(a: ServerAction, from: Date): EventMarker | null {
+		if (!a.timestamp) return null;
+		if (
+			!a.name.startsWith('server.') &&
+			!a.name.startsWith('doctor.') &&
+			!a.name.startsWith('fix.')
+		)
+			return null;
+		const ts = timestampDate(a.timestamp);
+		if (ts.getTime() < from.getTime()) return null;
+		return { ts, label: a.message, tone: markerTone(a.name) };
+	}
+
+	async function loadEvents(from: Date) {
+		try {
+			const res = await rpcClient.server.getServerActions(
+				{ id: server.id, afterId: 0n },
+				silentCallOptions
+			);
+			events = res.actions
+				.map((a) => toMarker(a, from))
+				.filter((m): m is EventMarker => m !== null);
+		} catch {
+			events = [];
+		}
+	}
+
+	function markerLeft(m: EventMarker): number {
+		const span = rangeTo.getTime() - rangeFrom.getTime();
+		if (span <= 0) return 0;
+		return Math.min(100, Math.max(0, ((m.ts.getTime() - rangeFrom.getTime()) / span) * 100));
+	}
+
+	function markerTitle(m: EventMarker): string {
+		return `${m.ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} ${m.label}`;
+	}
 
 	// Tick charts show only after tick data is observed
 	let tickCapable = $derived(
@@ -61,6 +115,8 @@
 		try {
 			const to = new Date();
 			const from = new Date(to.getTime() - range.hours * 60 * 60 * 1000);
+			rangeFrom = from;
+			rangeTo = to;
 			const response = await rpcClient.server.getServerMetricsHistory(
 				{
 					id: server.id,
@@ -71,6 +127,7 @@
 				silentCallOptions
 			);
 			samples = response.samples.map(toPoint).filter((p): p is SamplePoint => p !== null);
+			await loadEvents(from);
 		} catch (error) {
 			console.error('Failed to load metrics history:', error);
 		} finally {
@@ -146,6 +203,23 @@
 				{/each}
 			</div>
 		</div>
+
+		{#if events.length > 0 && samples.length > 0}
+			<div class="mb-3 flex items-center gap-2">
+				<span class="shrink-0 text-[10px] tracking-wide text-muted-foreground uppercase">
+					Events
+				</span>
+				<div class="relative h-3 flex-1 rounded bg-muted/40">
+					{#each events as m (m.ts.getTime() + m.label)}
+						<span
+							class="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full {m.tone}"
+							style="left: {markerLeft(m)}%"
+							title={markerTitle(m)}
+						></span>
+					{/each}
+				</div>
+			</div>
+		{/if}
 
 		{#if loading && samples.length === 0}
 			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">

@@ -71,8 +71,8 @@ class WebSocketClient {
 	private commandResultHandlers = new Set<CommandResultHandler>();
 	private metricsHandlers = new Set<MetricsHandler>();
 
-	// Active subscriptions (serverId -> true)
-	private subscriptions = new Map<string, boolean>();
+	// Active subscriptions (serverId -> tail)
+	private subscriptions = new Map<string, number>();
 
 	// Active metrics subscriptions (serverId -> refcount)
 	private metricsSubscriptions = new Map<string, number>();
@@ -143,6 +143,7 @@ class WebSocketClient {
 		this.cleanup();
 		this.state.connectionState = 'disconnected';
 		this.subscriptions.clear();
+		this.metricsSubscriptions.clear();
 	}
 
 	private cleanup(): void {
@@ -319,7 +320,7 @@ class WebSocketClient {
 	}
 
 	subscribe(serverId: string, tail: number = 500): void {
-		this.subscriptions.set(serverId, true);
+		this.subscriptions.set(serverId, tail);
 
 		if (this.state.connectionState !== 'authenticated') {
 			return;
@@ -355,6 +356,8 @@ class WebSocketClient {
 	subscribeMetrics(serverId: string): void {
 		const count = this.metricsSubscriptions.get(serverId) || 0;
 		this.metricsSubscriptions.set(serverId, count + 1);
+
+		this.connect();
 
 		if (count > 0 || this.state.connectionState !== 'authenticated') {
 			return;
@@ -423,12 +426,12 @@ class WebSocketClient {
 	}
 
 	private resubscribeAll(): void {
-		for (const serverId of this.subscriptions.keys()) {
+		for (const [serverId, tail] of this.subscriptions) {
 			const msg = create(WebSocketClientMessageSchema, {
 				type: WSMessageType.WS_MESSAGE_TYPE_SUBSCRIBE,
 				payload: {
 					case: 'subscribe',
-					value: create(SubscribeMessageSchema, { serverId, tail: 500 })
+					value: create(SubscribeMessageSchema, { serverId, tail })
 				}
 			});
 			this.send(toBinary(WebSocketClientMessageSchema, msg));

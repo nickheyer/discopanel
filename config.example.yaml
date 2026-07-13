@@ -24,6 +24,7 @@ database:
   max_connections: 25
   max_idle_conns: 5
   conn_max_lifetime: 300
+  auto_migrate: true  # Apply schema migrations on startup
 
 # Docker configuration
 docker:
@@ -32,6 +33,7 @@ docker:
   network_name: "discopanel-network"
   runtime_image: ""  # Override the discopanel-runtime image repository (default: nickheyer/discopanel-runtime)
   agent_url: ""  # URL server containers use to reach the panel for live telemetry (auto-detected when empty)
+  dns: ""  # Custom DNS server for containers (empty = docker default)
   sync_interval: 5  # Seconds between docker state sync
   # Can be configure like labels: {"your.label.key": "your_label_value", "other.label.key": "other_label_value"}
   # or
@@ -67,6 +69,12 @@ auth:
     scopes: ["openid", "profile", "email"]
     role_claim: "groups"  # The token claim that contains the user's groups (usually "groups")
     role_mapping: {}  # Mapping to groups if they arent the same name as discopanels (ie: {"my-admins": "admin", "my-users": "user"})
+    reject_unmapped: false  # Deny login when no claim group maps to a DiscoPanel role
+    required_claim: ""  # Claim that must be present to log in (ie: "groups")
+    required_values: []  # Values required in that claim (any match allows login)
+    extra_claims_url: ""  # Endpoint queried for additional claims (ie: userinfo-style URL)
+    extra_claims_key: ""  # JSON key holding the claim list in that response
+    extra_claims_name: ""  # Claim name the fetched values are merged under
     skip_tls_verify: false  # Skip TLS certificate verification (for self-signed certs)
 
 # Upload configuration

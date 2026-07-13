@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/config"
@@ -16,6 +17,7 @@ const (
 	BaseURL         = "https://api.curseforge.com/v1"
 	MinecraftGameID = 432
 	ModpackClassID  = 4471
+	ModsClassID     = 6
 )
 
 type Client struct {
@@ -120,6 +122,7 @@ type File struct {
 	Hashes               []Hash                `json:"hashes"`
 	FileDate             time.Time             `json:"fileDate"`
 	FileLength           int64                 `json:"fileLength"`
+	FileFingerprint      int64                 `json:"fileFingerprint"`
 	DownloadCount        int64                 `json:"downloadCount"`
 	DownloadURL          string                `json:"downloadUrl"`
 	GameVersions         []string              `json:"gameVersions"`
@@ -297,6 +300,30 @@ func (c *Client) GetFilesByIDs(ctx context.Context, fileIDs []int) ([]File, erro
 	return result.Data, nil
 }
 
+// One exact fingerprint hit with its file metadata
+type FingerprintMatch struct {
+	ID   int  `json:"id"`
+	File File `json:"file"`
+}
+
+// Identifies files by murmur2 fingerprint, unknown prints drop out
+func (c *Client) GetFingerprintMatches(ctx context.Context, fingerprints []uint32) ([]FingerprintMatch, error) {
+	if c.apiKey == "" {
+		return nil, indexers.NewAuthConfigError("fuego", "API key not configured")
+	}
+
+	var result struct {
+		Data struct {
+			ExactMatches []FingerprintMatch `json:"exactMatches"`
+		} `json:"data"`
+	}
+	body := map[string]any{"fingerprints": fingerprints}
+	if err := c.http.PostJSON(ctx, fmt.Sprintf("%s/fingerprints/%d", BaseURL, MinecraftGameID), body, &result); err != nil {
+		return nil, err
+	}
+	return result.Data.ExactMatches, nil
+}
+
 // Bulk-fetches mod metadata for class and slug resolution
 func (c *Client) GetModsByIDs(ctx context.Context, modIDs []int) ([]Modpack, error) {
 	if c.apiKey == "" {
@@ -326,7 +353,10 @@ func (c *Client) GetFileDownloadURL(ctx context.Context, modID, fileID int) (str
 	if err != nil {
 		var apiErr *indexers.IndexerError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == 403 {
-			return "", nil // Blocked by author
+			if verr := c.verifyKey(ctx); verr != nil {
+				return "", verr
+			}
+			return "", nil // Key works so author blocked distribution
 		}
 		return "", err
 	}
@@ -334,6 +364,42 @@ func (c *Client) GetFileDownloadURL(ctx context.Context, modID, fileID int) (str
 		return "", nil
 	}
 	return *result.Data, nil
+}
+
+var (
+	keyVerdictMu sync.Mutex
+	keyVerdicts  = map[string]error{}
+)
+
+// Probes a cheap endpoint once to judge the key
+func (c *Client) verifyKey(ctx context.Context) error {
+	keyVerdictMu.Lock()
+	verdict, known := keyVerdicts[c.apiKey]
+	keyVerdictMu.Unlock()
+	if known {
+		return verdict
+	}
+
+	var probe struct {
+		Data struct {
+			ID int `json:"id"`
+		} `json:"data"`
+	}
+	err := c.http.DoJSON(ctx, fmt.Sprintf("%s/games/%d", BaseURL, MinecraftGameID), &probe)
+	var apiErr *indexers.IndexerError
+	switch {
+	case err == nil:
+		verdict = nil
+	case errors.As(err, &apiErr) && apiErr.Kind == indexers.ErrAuth:
+		verdict = fmt.Errorf("CurseForge API key was rejected, update it in settings: %w", err)
+	default:
+		return err
+	}
+
+	keyVerdictMu.Lock()
+	keyVerdicts[c.apiKey] = verdict
+	keyVerdictMu.Unlock()
+	return verdict
 }
 
 // Builds Forge CDN url for an API-withheld file

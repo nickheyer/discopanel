@@ -51,6 +51,10 @@ service ServerService {
   rpc DismissPerformanceFinding(DismissPerformanceFindingRequest) returns (DismissPerformanceFindingResponse);
   // Ledger of automation actions taken on a server
   rpc GetServerActions(GetServerActionsRequest) returns (GetServerActionsResponse);
+  // List world backups for a server
+  rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse);
+  // Restore a world backup onto a stopped server
+  rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse);
 }
 
 // Server list options
@@ -108,8 +112,9 @@ message GetNextAvailablePortRequest {}
 
 // Port usage entry
 message UsedPort {
+  reserved 2;
+  reserved "in_use";
   int32 port = 1;
-  bool in_use = 2;
 }
 
 // Available port and usage list
@@ -156,6 +161,7 @@ message CreateServerRequest {
   bool use_base_url = 16;
   repeated AdditionalPort additional_ports = 17;
   DockerOverrides docker_overrides = 18;
+  string world_upload_session_id = 21; // Uploaded world zip to import at create
 }
 
 // Created server instance
@@ -382,6 +388,38 @@ message MetricsSample {
   double memory_mb = 6;
   int64 disk_bytes = 7;
   double heap_used_mb = 8; // JVM heap in use, zero without agent
+  int64 proxy_active_conns = 9; // Live proxied connections at sample time
+  int64 proxy_bytes_in = 10; // Client to backend bytes this window
+  int64 proxy_bytes_out = 11; // Backend to client bytes this window
+  int64 proxy_logins = 12; // Login handshakes this window
+}
+
+// One archived world snapshot
+message Backup {
+  string file_name = 1;
+  int64 size = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+// Backup listing for one server
+message ListBackupsRequest {
+  string id = 1;
+}
+
+// Backups ordered newest first
+message ListBackupsResponse {
+  repeated Backup backups = 1;
+}
+
+// Restore request, server must be stopped
+message RestoreBackupRequest {
+  string id = 1;
+  string file_name = 2;
+}
+
+// Restore outcome
+message RestoreBackupResponse {
+  string message = 1;
 }
 
 // Metrics history query for one server

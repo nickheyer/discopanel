@@ -26,6 +26,7 @@ type Session struct {
 	ServerID string
 	sendCh   chan *agentv1.PanelMessage
 	closed   chan struct{}
+	cancel   context.CancelFunc
 	once     sync.Once
 }
 
@@ -39,8 +40,14 @@ func (s *Session) Closed() <-chan struct{} {
 	return s.closed
 }
 
+// Cancels the owning stream so displacement never leaks handlers
 func (s *Session) close() {
-	s.once.Do(func() { close(s.closed) })
+	s.once.Do(func() {
+		if s.cancel != nil {
+			s.cancel()
+		}
+		close(s.closed)
+	})
 }
 
 // Tracks live agent sessions and routes telemetry
@@ -105,11 +112,12 @@ func (h *Hub) console(serverID, format string, args ...any) {
 }
 
 // Registers a new live session, reconnect displaces the stale one
-func (h *Hub) Attach(serverID string, hello *agentv1.Hello) *Session {
+func (h *Hub) Attach(serverID string, hello *agentv1.Hello, cancel context.CancelFunc) *Session {
 	sess := &Session{
 		ServerID: serverID,
 		sendCh:   make(chan *agentv1.PanelMessage, 64),
 		closed:   make(chan struct{}),
+		cancel:   cancel,
 	}
 	h.mu.Lock()
 	old := h.sessions[serverID]
@@ -147,7 +155,7 @@ func (h *Hub) Connected(serverID string) bool {
 	return h.sessions[serverID] != nil
 }
 
-func (h *Hub) sendToAgent(serverID string, msg *agentv1.PanelMessage) error {
+func (h *Hub) sendToAgent(ctx context.Context, serverID string, msg *agentv1.PanelMessage) error {
 	h.mu.Lock()
 	sess := h.sessions[serverID]
 	h.mu.Unlock()
@@ -159,6 +167,8 @@ func (h *Hub) sendToAgent(serverID string, msg *agentv1.PanelMessage) error {
 		return nil
 	case <-sess.closed:
 		return fmt.Errorf("agent session for server %s is closing", serverID)
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-time.After(5 * time.Second):
 		return fmt.Errorf("agent session for server %s is not draining", serverID)
 	}
@@ -166,18 +176,26 @@ func (h *Hub) sendToAgent(serverID string, msg *agentv1.PanelMessage) error {
 
 // Writes one command line to java stdin via supervisor
 func (h *Hub) SendConsole(ctx context.Context, serverID, command string) error {
-	_ = ctx
-	return h.sendToAgent(serverID, &agentv1.PanelMessage{Payload: &agentv1.PanelMessage_ConsoleCommand{
+	return h.sendToAgent(ctx, serverID, &agentv1.PanelMessage{Payload: &agentv1.PanelMessage_ConsoleCommand{
 		ConsoleCommand: &agentv1.ConsoleCommand{Command: command},
 	}})
 }
 
 // Broadcasts a chat message in game via the supervisor's tellraw
 func (h *Hub) SendChat(ctx context.Context, serverID, sender, message string) error {
-	_ = ctx
-	return h.sendToAgent(serverID, &agentv1.PanelMessage{Payload: &agentv1.PanelMessage_ChatMessage{
+	return h.sendToAgent(ctx, serverID, &agentv1.PanelMessage{Payload: &agentv1.PanelMessage_ChatMessage{
 		ChatMessage: &agentv1.ChatMessage{Sender: sender, Message: message},
 	}})
+}
+
+// Ack lets the runtime stop replaying a delivered exit report
+func (h *Hub) ackExit(ctx context.Context, serverID string, exitedAtUnixMs int64) {
+	err := h.sendToAgent(ctx, serverID, &agentv1.PanelMessage{Payload: &agentv1.PanelMessage_ExitAck{
+		ExitAck: &agentv1.ExitAck{ExitedAtUnixMs: exitedAtUnixMs},
+	}})
+	if err != nil {
+		h.log.Debug("agent: exit ack for server %s not sent: %v", serverID, err)
+	}
 }
 
 // Routes one agent telemetry message to the collector and bus
@@ -205,10 +223,8 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 
 	case *agentv1.AgentMessage_Exited:
 		// Boot replay repeats the live report, skip stale copies
-		if !h.collector.ApplyAgentExit(serverID, p.Exited) {
-			return
-		}
-		if p.Exited.GetCrashed() {
+		fresh := h.collector.ApplyAgentExit(serverID, p.Exited)
+		if fresh && p.Exited.GetCrashed() {
 			rctx := activity.WithTrace(activity.WithSource(ctx, "runtime"))
 			attrs := activity.Attrs{"exit_code": strconv.Itoa(int(p.Exited.GetExitCode()))}
 			if path := p.Exited.GetCrashReportPath(); path != "" {
@@ -224,10 +240,13 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 			default:
 				h.rec.Announce(rctx, serverID, "server.crash", attrs, "server exited abnormally (exit code %d)", p.Exited.GetExitCode())
 			}
+		}
+		if fresh {
 			if r := h.crashResponder(); r != nil {
 				r.OnCrashExit(ctx, serverID)
 			}
 		}
+		h.ackExit(ctx, serverID, p.Exited.GetExitedAtUnixMs())
 
 	case *agentv1.AgentMessage_ProcSample:
 		h.collector.ApplyAgentProc(serverID, p.ProcSample)

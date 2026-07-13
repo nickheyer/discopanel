@@ -330,58 +330,6 @@ func (s *RoleService) UpdatePermissions(ctx context.Context, req *connect.Reques
 	}), nil
 }
 
-func (s *RoleService) AssignRole(ctx context.Context, req *connect.Request[v1.AssignRoleRequest]) (*connect.Response[v1.AssignRoleResponse], error) {
-	msg := req.Msg
-
-	if msg.UserId == "" || msg.RoleName == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("user ID and role name are required"))
-	}
-
-	if err := s.store.AssignRole(ctx, msg.UserId, msg.RoleName, "local"); err != nil {
-		s.log.Error("Failed to assign role: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to assign role"))
-	}
-
-	return connect.NewResponse(&v1.AssignRoleResponse{
-		Message: "role assigned",
-	}), nil
-}
-
-func (s *RoleService) UnassignRole(ctx context.Context, req *connect.Request[v1.UnassignRoleRequest]) (*connect.Response[v1.UnassignRoleResponse], error) {
-	msg := req.Msg
-
-	if msg.UserId == "" || msg.RoleName == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("user ID and role name are required"))
-	}
-
-	if err := s.store.UnassignRole(ctx, msg.UserId, msg.RoleName); err != nil {
-		s.log.Error("Failed to unassign role: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to unassign role"))
-	}
-
-	return connect.NewResponse(&v1.UnassignRoleResponse{
-		Message: "role unassigned",
-	}), nil
-}
-
-func (s *RoleService) GetUserRoles(ctx context.Context, req *connect.Request[v1.GetUserRolesRequest]) (*connect.Response[v1.GetUserRolesResponse], error) {
-	msg := req.Msg
-
-	if msg.UserId == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("user ID is required"))
-	}
-
-	roles, err := s.store.GetUserRoleNames(ctx, msg.UserId)
-	if err != nil {
-		s.log.Error("Failed to get user roles: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get user roles"))
-	}
-
-	return connect.NewResponse(&v1.GetUserRolesResponse{
-		Roles: roles,
-	}), nil
-}
-
 func dbRoleToProto(role *storage.Role, perms []rbac.Permission) *v1.Role {
 	protoPerms := make([]*v1.Permission, 0, len(perms))
 	for _, p := range perms {

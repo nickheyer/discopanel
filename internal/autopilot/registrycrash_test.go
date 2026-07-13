@@ -130,6 +130,36 @@ func TestDoctorRegistryReenablesProvider(t *testing.T) {
 	}
 }
 
+func TestDoctorVanillaDatapackRepair(t *testing.T) {
+	dataPath := t.TempDir()
+	packDir := filepath.Join(dataPath, "world", "datapacks")
+	writeModJar(t, packDir, "BrokenPack.zip", map[string]string{
+		"data/dungeons_arise/worldgen/structure_set/major.json": `{"structures":[{"structure":"dungeons_arise:aviary"}]}`,
+	})
+
+	store := &fakeStore{
+		server: &storage.Server{ID: "s1", DataPath: dataPath, ModLoader: storage.ModLoaderVanilla},
+		cfg:    &storage.ServerProperties{},
+	}
+	lc := newFakeLifecycle()
+	r, collector := testResponder(t, store, lc)
+
+	collector.ApplyAgentExit("s1", registryCrash())
+	r.respond("s1")
+
+	if got := lc.wait(t); got != "restart" {
+		t.Fatalf("vanilla server should get the doctor, got %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(packDir+"_disabled", "BrokenPack.zip")); err != nil {
+		t.Fatal("referencing datapack should be disabled on vanilla")
+	}
+
+	r.OnServerReady(context.Background(), "s1")
+	if j := loadDoctor(dataPath); j.Incident != nil || j.Resolved == nil || j.Resolved.Outcome != "repaired" {
+		t.Fatalf("journal should hold a resolved incident, got %+v", j)
+	}
+}
+
 func TestDoctorStandsDownOnUserStop(t *testing.T) {
 	dataPath := t.TempDir()
 	modsDir := filepath.Join(dataPath, "mods")
@@ -164,11 +194,15 @@ func TestDoctorStandsDownOnUserStop(t *testing.T) {
 		t.Fatalf("no incident should open after a user stop, got %+v", j.Incident)
 	}
 
-	// The doctor's own stops never suppress a response
+	// Doctor stops stand down too, breaker owns loops
 	lc.stopSource = doctorSource
+	collector.ApplyAgentExit("s1", &agentv1.Exited{
+		ExitCode: 1, Crashed: true, ExitedAtUnixMs: time.Now().Add(time.Second).UnixMilli(),
+	})
 	r.respond("s1")
-	if got := lc.wait(t); got != "restart" {
-		t.Fatalf("expected restart once the stop is the doctor's own, got %s", got)
+	restarts, stops = lc.counts()
+	if restarts != 0 || stops != 0 {
+		t.Fatalf("doctor stop intent must stand down, got %d restarts %d stops", restarts, stops)
 	}
 }
 

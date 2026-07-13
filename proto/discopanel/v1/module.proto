@@ -417,6 +417,8 @@ message ListModulesRequest {
   optional string server_id = 1;
   // Filter by source template ID.
   optional string template_id = 2;
+  // Resolve live docker status and stats per module.
+  optional bool full_stats = 3;
 }
 
 // ListModulesResponse contains matching modules.

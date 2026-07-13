@@ -17,7 +17,7 @@ type Attrs map[string]string
 type sourceKey struct{}
 type traceKey struct{}
 
-// Tags the context with who acts, a username or a subsystem
+// Tags the context with the acting user or subsystem
 func WithSource(ctx context.Context, source string) context.Context {
 	return context.WithValue(ctx, sourceKey{}, source)
 }
@@ -30,7 +30,7 @@ func SourceFrom(ctx context.Context) string {
 	return "panel"
 }
 
-// Stamps a fresh trace id unless the operation already has one
+// Stamps a fresh trace id unless one already exists
 func WithTrace(ctx context.Context) context.Context {
 	if TraceFrom(ctx) != "" {
 		return ctx
@@ -38,7 +38,7 @@ func WithTrace(ctx context.Context) context.Context {
 	return WithTraceID(ctx, newTraceID())
 }
 
-// Ties the context to a known operation id, incidents reuse theirs
+// Ties the context to a known operation id
 func WithTraceID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, traceKey{}, id)
 }
@@ -59,7 +59,7 @@ func newTraceID() string {
 }
 
 // One chokepoint for the per-server activity ledger
-// Every action lands here with its source and trace from context
+// Records every action with context source and trace
 type Recorder struct {
 	store *storage.Store
 	log   *logger.Logger

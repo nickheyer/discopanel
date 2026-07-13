@@ -73,11 +73,14 @@ image:
 	@echo "Building and pushing Docker image..."
 	@bash scripts/build.sh
 
-# Published Java majors, sync with docker.SupportedJavaVersions
-RUNTIME_JAVA_VERSIONS := 8 11 17 21 25
+# Published Java majors, docker.SupportedJavaVersions is the source
+RUNTIME_JAVA_VERSIONS := $(shell go run ./cmd/javamajors 2>/dev/null)
 
-# Published Graal majors, sync with docker.GraalJavaVersions
-RUNTIME_GRAAL_VERSIONS := 21 25
+# Published Graal majors, docker.GraalJavaVersions is the source
+RUNTIME_GRAAL_VERSIONS := $(shell go run ./cmd/javamajors -graal 2>/dev/null)
+
+# Git identity stamped into runtime images
+RUNTIME_VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev)
 
 # Pushes happen only in CI, local builds stay local
 STAMP_DIR := build/.stamps
@@ -124,13 +127,13 @@ runtime: $(addprefix $(STAMP_DIR)/runtime-java,$(RUNTIME_JAVA_VERSIONS)) \
 $(STAMP_DIR)/runtime-java%: $(RUNTIME_SRC)
 	@mkdir -p $(STAMP_DIR)
 	@echo "Building nickheyer/discopanel-runtime:java$*..."
-	$(call build_image,nickheyer/discopanel-runtime:java$*,--build-arg JAVA_VERSION=$*,docker/Dockerfile.runtime)
+	$(call build_image,nickheyer/discopanel-runtime:java$*,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_VERSION=$(RUNTIME_VERSION),docker/Dockerfile.runtime)
 	@touch $@
 
 $(STAMP_DIR)/runtime-graal-java%: $(RUNTIME_SRC)
 	@mkdir -p $(STAMP_DIR)
 	@echo "Building nickheyer/discopanel-runtime:java$*-graal..."
-	$(call build_image,nickheyer/discopanel-runtime:java$*-graal,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_FLAVOR=graal,docker/Dockerfile.runtime)
+	$(call build_image,nickheyer/discopanel-runtime:java$*-graal,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_FLAVOR=graal --build-arg RUNTIME_VERSION=$(RUNTIME_VERSION),docker/Dockerfile.runtime)
 	@touch $@
 
 # Builds all module images locally when inputs changed

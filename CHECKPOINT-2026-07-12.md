@@ -7,6 +7,78 @@ claims were independently re-verified. Baseline health: `go build ./...` clean,
 `go vet` clean, `svelte-check` 0 errors, discobench module builds, deadcode
 reachability near-zero. Companion to TODO.md; this file is the checkpoint ledger.
 
+## STATUS 2026-07-12 (this session)
+
+DONE, gated (build/vet/test clean, svelte-check 0/0): all of B.1-B.10; all of
+C.1-C.64; A.4/A.5/A.6 substance; E config.example.yaml keys, E frontend shadcn
+dirs (−4,618 lines), E RBAC id-space, E proxy dead code (AllocateProxyPort,
+SetRouteActive), E support/file bounded reads + race + dedupe, E alias
+descriptions. Corrections to this ledger discovered while executing:
+- pkg/logger New is NOT dead (five test packages use it) — stays.
+- No ProxyPort model exists (E item was stale); nothing to remove.
+- C.48 anchor is internal/provisioner/download.go, not pkg/download.
+- B.10 as written breaks the panel (global-settings pseudo-row violates a real
+  FK); shipped with a companion migration that rebuilds server_properties
+  without the FK and purged 73 orphaned rows.
+- C.1 bootFailureArmedAt deleted (only tests referenced it), not wired.
+- Fabric exposes no structured getters (C.16); ResultAnalyzer message grammar
+  is the machine surface and is what ships.
+- Legacy default-role rows sourced `oidc` are dropped on next login by B.6 role
+  sync (one-time migration effect, intended).
+- Runtime images must be rebuilt + pushed after this lands (CI stamps version).
+
+DONE 2026-07-13 (in-session, serial): B.4 (module role, IsModuleToken read,
+plaintext dropped via migration, per-create mint+rotation); D.2-D.12 (registry
+ServerLoaderForModpack + CutPackLoaderID seams, applyModpackSelection dedupe
+which also fixed the broken manual-pack update path, PackPlatform descriptor
+rows, pack-source-ordered depinstall with CF path, module confighash label,
+container_port alias + InContainerPort + template migration, category struct
+tags + test, cmd/javamajors generated matrix, sender.Run chokepoint, webhook
+vars from alias context + Discord color into presets + vocab migration, alias
+EvaluateCondition raw-split); D.13 magic port removed by proxy pass, interface
+reshape declined as shape-only; F.6 storage half (proxy_* sample columns,
+delta clamping, collector wiring) — proto exposure rides the Wave-3 gen.
+
+DONE 2026-07-13 (E pass): proto dead surface removed with reserves (9 SLP
+messages, ProxyConfig, SERVER_STATUS_RESTARTING, UsedPort.in_use, upload
+temp_path incl. the HTTP handler echo, GetModpackBySlug, GetModpackFiles +
+ModpackFile message, AssignRole/UnassignRole/GetUserRoles, UpdateMod +
+ImportUploadedMod no-op name/description, Mod description/author/website);
+new surface wired end to end (MetricsSample proxy_* incl. live ws gauge,
+Server.class_count, ListModulesRequest.full_stats); CaptureArmed documented
+loopback-only; ListMods enriched with jar mod_id+version via ReadModJar and
+one scanModDir/modEntryID mechanism (6 uuid loops deleted); modpack proto
+converter deduped 7→1; SearchModpacks favorites N+1 gone; GetIndexerStatus
+uses GROUP BY count; ListModules batches lookups, never writes during read,
+docker stats gated behind full_stats; module.go commented converters deleted.
+Checkpoint correction: pkg/download anchor for C.48 was provisioner-local;
+GetModpackByURL kept (status module calls it, paste-link UI pending F.17).
+
+DONE 2026-07-13 (F pass): F.7 chart event strip from the ledger (server/doctor
+markers over the shared range); F.9 registry install rung before disables
+(nil-installer stands down the rung); F.10 incident view via clickable trace
+filter in the actions channel; F.14 CF fingerprint identify (murmur2 util,
+fuego POST codec, background ListMods name sweep cached per file); F.15
+bring-your-world (world_upload_session_id on create, minimal NBT level.dat
+reader for level-name + version testimony, staged extract); F.16 world rewind
+(ListBackups/RestoreBackup RPCs over the backup dir layout, pre-restore
+safety snapshot, pre-provision world snapshot hook, backups timeline on the
+files tab); F.17 paste-link import through the modpacks search box;
+task-execution wiring (cancel running executions, all-tasks history via
+ListServerExecutions, scheduler health via GetSchedulerStatus).
+
+DONE 2026-07-13 (closing pass): comment sweep (127 violations rewritten, census
+now zero; test fixtures mimicking real crash reports deliberately untouched);
+A.0 ledger hygiene applied to TODO.md (revert-and-rebuild history recorded for
+the wedge killer, lag-debt math, Java 8 GC fallback, clean-exit breaker;
+clientmods sha1 sweep marked not shipped; agent-off crash blindness recorded as
+a deliberate trade; guardrail note downgraded to validation-only; log levels
+marked done; dead file refs fixed; sections 4, 5, 8 close-outs recorded);
+runtime and module images rebuilt locally via make images (pushes happen in
+CI per the Makefile, trigger modules.yml to publish).
+
+CHECKPOINT COMPLETE. TODO.md is the ledger again.
+
 ---
 
 ## A. The ledger diverged from the tree (revert debt)

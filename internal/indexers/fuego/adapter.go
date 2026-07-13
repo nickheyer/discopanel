@@ -56,11 +56,12 @@ func loaderType(modLoader string) ModLoaderType {
 
 // Search for modpacks
 func (f *FuegoIndexer) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*indexers.SearchResult, error) {
-	// Calculate page index from offset
-	pageIndex := offset / limit
+	if limit <= 0 {
+		limit = 20
+	}
 
-	// Search using Fuego API
-	resp, err := f.client.SearchModpacks(ctx, query, gameVersion, loaderType(modLoader), pageIndex, limit)
+	// CurseForge index counts items, not pages
+	resp, err := f.client.SearchModpacks(ctx, query, gameVersion, loaderType(modLoader), offset, limit)
 	if err != nil {
 		return nil, err
 	}

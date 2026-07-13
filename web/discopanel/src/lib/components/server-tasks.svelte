@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
@@ -35,7 +35,11 @@
 		Zap
 	} from '@lucide/svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import type { ScheduledTask, TaskExecution } from '$lib/proto/discopanel/v1/task_pb';
+	import type {
+		ScheduledTask,
+		TaskExecution,
+		GetSchedulerStatusResponse
+	} from '$lib/proto/discopanel/v1/task_pb';
 	import {
 		TaskType,
 		TaskStatus,
@@ -78,6 +82,7 @@
 	let deleteTarget = $state<ScheduledTask | null>(null);
 	let deleteOpen = $state(false);
 	let runningTaskId = $state<string | null>(null);
+	let schedulerStatus = $state<GetSchedulerStatusResponse | null>(null);
 
 	// Shared backup defaults for create and edit
 	const BACKUP_DEFAULTS = { compress: true, retentionDays: 7, minBackups: 3, maxBackups: 0 };
@@ -184,7 +189,7 @@
     "status": "{{.server_status}}",
     "mc_version": "{{.server_mc_version}}",
     "mod_loader": "{{.server_mod_loader}}",
-    "players_online": {{.server_players}},
+    "players_online": {{.server_players_online}},
     "max_players": {{.server_max_players}},
     "port": {{.server_port}}
   }
@@ -193,11 +198,11 @@
   "embeds": [{
     "title": "{{.title}}",
     "description": "**{{.server_name}}** - {{.server_status}}",
-    "color": {{.color}},
+    "color": {{if .is_server_start}}5763719{{else if .is_server_stop}}15548997{{else if .is_server_restart}}16705372{{else}}5793266{{end}},
     "timestamp": "{{.timestamp}}",
     "fields": [
       {"name": "Version", "value": "{{.server_mc_version}}", "inline": true},
-      {"name": "Players", "value": "{{.server_players}}/{{.server_max_players}}", "inline": true},
+      {"name": "Players", "value": "{{.server_players_online}}/{{.server_max_players}}", "inline": true},
       {"name": "Mod Loader", "value": "{{.server_mod_loader}}", "inline": true}
     ],
     "footer": {"text": "DiscoPanel"}
@@ -217,7 +222,7 @@
       "type": "section",
       "fields": [
         {"type": "mrkdwn", "text": "*Version:*\\n{{.server_mc_version}}"},
-        {"type": "mrkdwn", "text": "*Players:*\\n{{.server_players}}/{{.server_max_players}}"},
+        {"type": "mrkdwn", "text": "*Players:*\\n{{.server_players_online}}/{{.server_max_players}}"},
         {"type": "mrkdwn", "text": "*Mod Loader:*\\n{{.server_mod_loader}}"},
         {"type": "mrkdwn", "text": "*Port:*\\n{{.server_port}}"}
       ]
@@ -252,7 +257,7 @@
           "type": "FactSet",
           "facts": [
             {"title": "Version", "value": "{{.server_mc_version}}"},
-            {"title": "Players", "value": "{{.server_players}}/{{.server_max_players}}"},
+            {"title": "Players", "value": "{{.server_players_online}}/{{.server_max_players}}"},
             {"title": "Mod Loader", "value": "{{.server_mod_loader}}"},
             {"title": "Port", "value": "{{.server_port}}"}
           ]
@@ -286,18 +291,18 @@
 
 	const TEMPLATE_VARIABLES: [string, string][] = [
 		['{{.event}}', 'Event name'],
+		['{{.is_<event>}}', 'True for the firing event'],
 		['{{.timestamp}}', 'ISO 8601 timestamp'],
 		['{{.title}}', 'Event title'],
-		['{{.color}}', 'Color (int, for Discord)'],
 		['{{.server_id}}', 'Server ID'],
 		['{{.server_name}}', 'Server name'],
 		['{{.server_status}}', 'Server status'],
 		['{{.server_mc_version}}', 'MC version'],
 		['{{.server_mod_loader}}', 'Mod loader'],
-		['{{.server_players}}', 'Player count'],
+		['{{.server_players_online}}', 'Player count'],
 		['{{.server_max_players}}', 'Max players'],
 		['{{.server_port}}', 'Server port'],
-		['{{.player}}', 'Player name (player join/leave events)']
+		['{{.player}}', 'Player name (player events)']
 	];
 
 	// Shows custom template or the resolved preset
@@ -359,6 +364,7 @@
 			const request = create(ListTasksRequestSchema, { serverId: server.id });
 			const response = await rpcClient.task.listTasks(request);
 			tasks = response.tasks;
+			await loadSchedulerStatus();
 		} catch (_e) {
 			toast.error('Failed to load tasks');
 		} finally {
@@ -690,6 +696,42 @@
 		}
 	}
 
+	async function viewServerHistory() {
+		selectedTask = null;
+		historyLoading = true;
+		showHistoryDialog = true;
+		try {
+			const response = await rpcClient.task.listServerExecutions({
+				serverId: server.id,
+				limit: 50
+			});
+			taskHistory = response.executions;
+		} catch (_e) {
+			toast.error('Failed to load run history');
+		} finally {
+			historyLoading = false;
+		}
+	}
+
+	async function cancelExecution(executionId: string) {
+		try {
+			await rpcClient.task.cancelExecution({ id: executionId });
+			toast.success('Execution cancelled');
+			if (selectedTask) await viewHistory(selectedTask);
+			else await viewServerHistory();
+		} catch (_e) {
+			toast.error('Failed to cancel execution');
+		}
+	}
+
+	async function loadSchedulerStatus() {
+		try {
+			schedulerStatus = await rpcClient.task.getSchedulerStatus({}, silentCallOptions);
+		} catch {
+			schedulerStatus = null;
+		}
+	}
+
 	function closeHistory() {
 		showHistoryDialog = false;
 		selectedTask = null;
@@ -865,6 +907,17 @@
 
 <SectionCard title="Tasks" description="Scheduled backups, restarts, webhooks, and custom jobs">
 	{#snippet action()}
+		{#if schedulerStatus && !schedulerStatus.running}
+			<span class="text-xs text-status-danger">Scheduler stopped</span>
+		{:else if schedulerStatus && schedulerStatus.runningExecutions > 0}
+			<span class="text-xs text-muted-foreground">
+				{schedulerStatus.runningExecutions} running
+			</span>
+		{/if}
+		<Button variant="outline" size="sm" onclick={viewServerHistory}>
+			<History class="size-4" />
+			History
+		</Button>
 		<Button variant="outline" size="sm" onclick={refresh} disabled={refreshing}>
 			<RefreshCw class="size-4 {refreshing ? 'animate-spin' : ''}" />
 			Refresh
@@ -1523,8 +1576,12 @@
 <Dialog.Root bind:open={showHistoryDialog}>
 	<Dialog.Content class="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Task history: {selectedTask?.name}</Dialog.Title>
-			<Dialog.Description>Recent execution history for this task</Dialog.Description>
+			<Dialog.Title>
+				{selectedTask ? `Task history: ${selectedTask.name}` : 'Recent runs'}
+			</Dialog.Title>
+			<Dialog.Description>
+				{selectedTask ? 'Recent execution history for this task' : 'Latest runs across all tasks'}
+			</Dialog.Description>
 		</Dialog.Header>
 
 		{#if historyLoading}
@@ -1557,7 +1614,17 @@
 											: 'Scheduled'}
 								</span>
 							</div>
-							{#if execution.duration}
+							{#if execution.status === ExecutionStatus.RUNNING}
+								<Button
+									variant="outline"
+									size="sm"
+									class="h-6 px-2 text-xs"
+									onclick={() => cancelExecution(execution.id)}
+								>
+									<X class="size-3" />
+									Cancel
+								</Button>
+							{:else if execution.duration}
 								<span class="tabular text-xs text-muted-foreground">
 									{formatDuration(execution.duration)}
 								</span>

@@ -186,14 +186,15 @@ func (h *Hub) encodeMetrics(serverID string) []byte {
 		Payload: &v1.WebSocketServerMessage_Metrics{Metrics: &v1.MetricsMessage{
 			ServerId: serverID,
 			Sample: &v1.MetricsSample{
-				Timestamp:  timestamppb.Now(),
-				Tps:        m.TPS,
-				Mspt:       m.MSPT,
-				Players:    int32(m.PlayersOnline),
-				CpuPercent: m.CPUPercent,
-				MemoryMb:   m.MemoryUsage,
-				HeapUsedMb: heapUsed,
-				DiskBytes:  m.DiskUsage,
+				Timestamp:        timestamppb.Now(),
+				Tps:              m.TPS,
+				Mspt:             m.MSPT,
+				Players:          int32(m.PlayersOnline),
+				CpuPercent:       m.CPUPercent,
+				MemoryMb:         m.MemoryUsage,
+				HeapUsedMb:       heapUsed,
+				DiskBytes:        m.DiskUsage,
+				ProxyActiveConns: m.ProxyActiveConns,
 			},
 		}},
 	}
@@ -342,13 +343,7 @@ func (c *Client) handleAuth(msg *v1.AuthMessage) {
 			user, err = c.hub.authManager.ValidateSession(ctx, msg.Token)
 		}
 		if err != nil {
-			// Try anonymous access
-			if c.hub.authManager.IsAnonymousAccessEnabled() {
-				c.user = c.hub.authManager.AnonymousUser()
-				c.authenticated = true
-				c.sendAuthOk()
-				return
-			}
+			// Presented tokens must validate, anonymous is for tokenless connects
 			c.sendAuthFail("invalid token")
 			return
 		}
@@ -377,12 +372,10 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 	}
 
 	// Check permission
-	if c.hub.enforcer != nil && c.user != nil {
-		allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionRead, msg.ServerId)
-		if err != nil || !allowed {
-			c.sendError("permission denied")
-			return
-		}
+	allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionRead, msg.ServerId)
+	if err != nil || !allowed {
+		c.sendError("permission denied")
+		return
 	}
 
 	// Validate the server exists
@@ -489,7 +482,7 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 	}
 
 	// Check command permission
-	if c.hub.enforcer != nil && c.user != nil {
+	if c.user != nil {
 		allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionCommand, msg.ServerId)
 		if err != nil || !allowed {
 			c.sendCommandResult(msg.ServerId, false, "", "permission denied")
@@ -497,46 +490,12 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 		}
 	}
 
-	ctx := context.Background()
-	server, err := c.hub.store.GetServer(ctx, msg.ServerId)
-	if err != nil {
-		c.sendCommandResult(msg.ServerId, false, "", "server not found")
-		return
+	ctx := activity.WithTrace(context.Background())
+	if c.user != nil && c.user.Username != "" {
+		ctx = activity.WithSource(ctx, c.user.Username)
 	}
 
-	if server.ContainerID == "" {
-		c.sendCommandResult(msg.ServerId, false, "", "server has no container")
-		return
-	}
-
-	// Check server status
-	status, err := c.hub.docker.GetContainerStatus(ctx, server.ContainerID)
-	if err != nil || (status != storage.StatusRunning && status != storage.StatusUnhealthy) {
-		c.sendCommandResult(msg.ServerId, false, "", "server is not running")
-		return
-	}
-
-	// Add command to log stream if not silent
-	commandTime := time.Now()
-	if !silent {
-		c.hub.logStreamer.AddCommandEntry(server.ID, msg.Command, commandTime)
-	}
-
-	output, err := c.hub.sender.SendCommand(ctx, server.ID, msg.Command)
-	success := err == nil
-	if success {
-		cmdCtx := activity.WithTrace(ctx)
-		if c.user != nil && c.user.Username != "" {
-			cmdCtx = activity.WithSource(cmdCtx, c.user.Username)
-		}
-		c.hub.rec.Record(cmdCtx, server.ID, "command.run", activity.Attrs{"command": msg.Command}, "ran command %q", msg.Command)
-	}
-
-	// Add output to log stream if not silent
-	if !silent && (output != "" || !success) {
-		c.hub.logStreamer.AddCommandOutput(server.ID, output, success, commandTime)
-	}
-
+	output, err := c.hub.sender.Run(ctx, msg.ServerId, msg.Command, silent)
 	if err != nil {
 		c.sendCommandResult(msg.ServerId, false, "", err.Error())
 		return

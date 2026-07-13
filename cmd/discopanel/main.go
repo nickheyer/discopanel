@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -173,13 +174,25 @@ func main() {
 	// One recorder owns the per-server activity ledger
 	rec := activity.NewRecorder(store, log)
 
-	// Initialize metrics collector - it is also the panel-side health source
+	// Initialize metrics collector, the panel side health source
 	metricsCollector := metrics.NewCollector(store, dockerClient, cfg, eventBus, log, metrics.DefaultConfig())
 	dockerClient.SetHealthChecker(metricsCollector)
+	metricsCollector.SetProxyTrafficSource(func() map[string]metrics.ProxyTraffic {
+		stats := proxyManager.GetRouteStats()
+		out := make(map[string]metrics.ProxyTraffic, len(stats))
+		for id, s := range stats {
+			out[id] = metrics.ProxyTraffic{
+				ActiveConns:    s.ActiveConns,
+				TotalConns:     s.TotalConns,
+				Logins:         s.Logins,
+				BytesToBackend: s.BytesToBackend,
+				BytesToClient:  s.BytesToClient,
+			}
+		}
+		return out
+	})
 
-	// Initialize the runtime agent hub: live telemetry sessions from server
-	// containers feed the collector and the event bus, and the command sender
-	// uses the agent console when RCON cannot serve a command
+	// Agent hub feeds telemetry and serves console commands
 	agentHub := agent.NewHub(store, metricsCollector, eventBus, rec, log)
 	sender.SetAgent(agentHub)
 
@@ -192,7 +205,7 @@ func main() {
 	// The hub repairs crashes through the lifecycle owner and provisioner
 	agentHub.SetCrashDoctor(lifecycleManager, prov)
 
-	// The proxy answers status pings for paused servers and wakes them on login
+	// Proxy answers pings for paused servers, wakes logins
 	proxyManager.SetServerGate(lifecycleManager)
 
 	// Initialize task scheduler
@@ -206,11 +219,6 @@ func main() {
 	}
 	defer taskScheduler.Stop()
 
-	// Initialize builtin module templates
-	if err := module.InitBuiltinTemplates(store); err != nil {
-		log.Error("Failed to initialize builtin module templates: %v", err)
-	}
-
 	// Initialize module manager
 	moduleManager := module.NewManager(store, dockerClient, sender, cfg, proxyManager, log)
 	if err := moduleManager.Start(); err != nil {
@@ -218,7 +226,7 @@ func main() {
 	}
 	defer moduleManager.Stop()
 
-	// Register event consumers on the event bus - EVENT CONSUMERS REGISTER HERE...
+	// Event consumers register on the bus here
 	eventBus.Subscribe(moduleManager.HandleServerEvent)
 	eventBus.Subscribe(taskScheduler.HandleServerEvent)
 	eventBus.Subscribe(lifecycleManager.HandleServerEvent)
@@ -234,9 +242,12 @@ func main() {
 	defer lifecycleManager.StopIdleWatcher()
 
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, lifecycleManager, metricsCollector, moduleManager, eventBus, agentHub, rec, log)
+	rpcServer, err := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, lifecycleManager, metricsCollector, moduleManager, eventBus, agentHub, rec, log)
+	if err != nil {
+		log.Fatal("Failed to initialize RPC server: %v", err)
+	}
 
-	// Provisioning progress lines land in the server console via the log streamer
+	// Provision progress lands in the server console
 	if streamer := rpcServer.LogStreamer(); streamer != nil {
 		prov.SetProgressSink(streamer.AddSystemEntry)
 		agentHub.SetConsoleSink(streamer.AddSystemEntry)
@@ -334,20 +345,21 @@ func main() {
 				}
 
 				for _, server := range servers {
-					if server.ContainerID != "" {
-						status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID)
-						if err == nil && server.Status != status {
-							oldStatus := server.Status
-							server.Status = status
-							if err := store.UpdateServer(ctx, server); err != nil {
-								log.Error("Failed to update server status: %v", err)
-							}
-							// Update proxy route if status changed and server has proxy configured
-							if server.ProxyHostname != "" && oldStatus != status {
-								if err := proxyManager.UpdateServerRoute(server); err != nil {
-									log.Error("Failed to update proxy route for %s: %v", server.Name, err)
-								}
-							}
+					if server.ContainerID == "" {
+						continue
+					}
+					status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID)
+					if err != nil || server.Status == status {
+						continue
+					}
+					server.Status = status
+					if err := store.UpdateServerStatus(ctx, server.ID, status); err != nil {
+						log.Error("Failed to update server status: %v", err)
+					}
+					// Updates proxy route on status change when proxied
+					if server.ProxyHostname != "" {
+						if err := proxyManager.UpdateServerRoute(server); err != nil {
+							log.Error("Failed to update proxy route for %s: %v", server.Name, err)
 						}
 					}
 				}
@@ -380,28 +392,40 @@ func main() {
 
 	log.Info("Shutting down server...")
 	close(stopSessionCleanup)
+	close(stopMonitor)
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Stop managed containers if auto-stop is enabled
+	// Stop managed servers in parallel through the lifecycle owner
 	log.Info("Checking for managed containers...")
 	managedServers, lsErr := store.ListServers(ctx)
 	if lsErr != nil {
 		log.Error("Unable to list managed containers prior to shutdown: %v", lsErr)
 	}
 
+	var stopWG sync.WaitGroup
 	for _, server := range managedServers {
 		if server.Detached {
 			log.Info("Skipping shutdown of detached server: %s", server.Name)
-		} else if server.Status == storage.StatusRunning {
-			log.Info("Stopping managed container for server: %s", server.Name)
-			if _, err := dockerClient.StopContainer(ctx, server.ContainerID, 25); err != nil {
-				log.Error("Failed to stop container %s: %v", server.ContainerID, err)
-			}
+			continue
 		}
+		if server.Status != storage.StatusRunning {
+			continue
+		}
+		stopWG.Add(1)
+		go func() {
+			defer stopWG.Done()
+			log.Info("Stopping managed server: %s", server.Name)
+			stopCtx, stopCancel := context.WithTimeout(activity.WithTrace(activity.WithSource(ctx, "system")), 25*time.Second)
+			defer stopCancel()
+			if err := lifecycleManager.Stop(stopCtx, server.ID); err != nil {
+				log.Error("Failed to stop server %s: %v", server.Name, err)
+			}
+		}()
 	}
+	stopWG.Wait()
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error("Server forced to shutdown: %v", err)

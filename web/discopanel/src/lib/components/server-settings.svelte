@@ -12,20 +12,20 @@
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, RotateCcw, Lock, Camera } from '@lucide/svelte';
-	import * as _ from 'lodash-es';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { UpdateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import type {
 		GetMinecraftVersionsResponse,
-		GetModLoadersResponse,
-		GetDockerImagesResponse
+		GetDockerImagesResponse,
+		ModLoaderInfo
 	} from '$lib/proto/discopanel/v1/minecraft_pb';
+	import { loadModLoaders } from '$lib/stores/loaders';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import MemorySlider from '$lib/components/memory-slider.svelte';
-	import { getUniqueDockerImages, enumToString } from '$lib/utils';
+	import { getUniqueDockerImages } from '$lib/utils';
 
 	interface Props {
 		server: Server;
@@ -62,7 +62,7 @@
 	let uploadedFavicon = $state('');
 
 	let minecraftVersions = $state<GetMinecraftVersionsResponse | null>(null);
-	let modLoaders = $state<GetModLoadersResponse | null>(null);
+	let modLoaders = $state<ModLoaderInfo[]>([]);
 	let dockerImages = $state<GetDockerImagesResponse | null>(null);
 
 	let stopped = $derived(server.status === ServerStatus.STOPPED);
@@ -155,12 +155,10 @@
 	);
 
 	let selectableLoaders = $derived(
-		(modLoaders?.modloaders || []).filter((l) => l.provisionable || l.loader === server.modLoader)
+		modLoaders.filter((l) => l.provisionable || l.loader === server.modLoader)
 	);
 	let loaderDisplay = $derived(
-		modLoaders?.modloaders?.find((l) => l.loader === formData.modLoader)?.displayName ||
-			_.startCase(enumToString(ModLoader, formData.modLoader)) ||
-			'Select a mod loader'
+		modLoaders.find((l) => l.loader === formData.modLoader)?.displayName || 'Select a mod loader'
 	);
 
 	// Rebuild the form when viewing a different server
@@ -189,7 +187,7 @@
 			loadingOptions = true;
 			const [versions, loaders, images, hostMemory] = await Promise.all([
 				rpcClient.minecraft.getMinecraftVersions({}),
-				rpcClient.minecraft.getModLoaders({}),
+				loadModLoaders(),
 				rpcClient.minecraft.getDockerImages({}),
 				rpcClient.server.getHostMemory({})
 			]);

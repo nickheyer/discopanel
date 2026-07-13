@@ -22,15 +22,14 @@ service ModService {
 
 // Server mod metadata
 message Mod {
+  reserved 5, 8, 9;
+  reserved "description", "author", "website";
   string id = 1;
   string server_id = 2;
   string file_name = 3;
   string display_name = 4;
-  string description = 5;
-  string version = 6;
-  string mod_id = 7; // External mod ID (e.g., CurseForge ID)
-  string author = 8;
-  string website = 9;
+  string version = 6; // From jar metadata when the jar declares it
+  string mod_id = 7; // Declared mod id from jar metadata
   int64 file_size = 10;
   google.protobuf.Timestamp uploaded_at = 11;
   google.protobuf.Timestamp updated_at = 12;
@@ -60,10 +59,10 @@ message GetModResponse {
 
 // Import mod from chunked upload session
 message ImportUploadedModRequest {
+  reserved 3, 4;
+  reserved "display_name", "description";
   string server_id = 1;
   string upload_session_id = 2;
-  string display_name = 3;
-  string description = 4;
 }
 
 // Import result
@@ -74,10 +73,10 @@ message ImportUploadedModResponse {
 
 // Mod fields to update
 message UpdateModRequest {
+  reserved 3, 4;
+  reserved "display_name", "description";
   string server_id = 1;
   string mod_id = 2;
-  optional string display_name = 3;
-  optional string description = 4;
   optional bool enabled = 5;
 }
 

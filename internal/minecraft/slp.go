@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// Frame bound shared by packet and JSON string
+const maxSLPPacketBytes = 1 << 20
+
 // Implements the Minecraft Server List Ping protocol
 type SLPClient struct {
 	timeout time.Duration
@@ -90,19 +93,12 @@ func (c *SLPClient) Ping(ctx context.Context, host string, port int) (*SLPResult
 		return nil, fmt.Errorf("failed to send ping: %w", err)
 	}
 
-	// Read pong response
-	pongPayload, err := c.readPong(conn)
-	if err != nil {
+	// Pong payload echo varies by server, only timing matters
+	if _, err := c.readPong(conn); err != nil {
 		return nil, fmt.Errorf("failed to read pong: %w", err)
 	}
 
 	latency := time.Since(pingTime).Milliseconds()
-
-	// Verify pong payload matches
-	if pongPayload != pingPayload {
-		// Some servers don't echo the payload correctly, just log and continue
-		latency = time.Since(pingTime).Milliseconds()
-	}
 
 	// Parse JSON response
 	var result SLPResult
@@ -162,7 +158,7 @@ func (c *SLPClient) readStatusResponse(conn net.Conn) (string, error) {
 		return "", fmt.Errorf("failed to read packet length: %w", err)
 	}
 
-	if packetLen < 1 || packetLen > 1024*1024 { // Max 1MB for safety
+	if packetLen < 1 || packetLen > maxSLPPacketBytes {
 		return "", fmt.Errorf("invalid packet length: %d", packetLen)
 	}
 
@@ -281,7 +277,7 @@ func parseDescription(desc json.RawMessage) string {
 		return strings.TrimSpace(result.String())
 	}
 
-	// Fallback: strip any JSON formatting and return raw
+	// Strips JSON formatting and returns raw text
 	return strings.TrimSpace(string(desc))
 }
 
@@ -340,7 +336,7 @@ func readString(r io.Reader) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if length < 0 || length > 32767 {
+	if length < 0 || length > maxSLPPacketBytes {
 		return "", fmt.Errorf("string length out of bounds: %d", length)
 	}
 	data := make([]byte, length)

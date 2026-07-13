@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -239,9 +240,19 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Assign resolved roles to user
+	// Drops oidc roles the IdP no longer grants
+	claimRoles := make(map[string]bool, len(resolvedRoles))
 	for _, roleName := range resolvedRoles {
+		claimRoles[roleName] = true
 		_ = h.store.AssignRole(ctx, user.ID, roleName, "oidc")
+	}
+	var oidcAssigned []db.UserRole
+	if err := h.store.DB().WithContext(ctx).Where("user_id = ? AND source = ?", user.ID, "oidc").Find(&oidcAssigned).Error; err == nil {
+		for _, ur := range oidcAssigned {
+			if !claimRoles[ur.RoleName] {
+				_ = h.store.UnassignRole(ctx, user.ID, ur.RoleName)
+			}
+		}
 	}
 
 	// Get user roles
@@ -274,8 +285,8 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("OIDC: user %s authenticated successfully", user.Username)
 
-	// Redirect to frontend with token in query param
-	http.Redirect(w, r, fmt.Sprintf("/login?token=%s", token), http.StatusFound)
+	// Fragment delivery keeps the token out of logs and Referer
+	http.Redirect(w, r, fmt.Sprintf("/login#token=%s", url.QueryEscape(token)), http.StatusFound)
 }
 
 // Finds or creates OIDC user, same username can coexist
@@ -313,10 +324,10 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, e
 		return nil, fmt.Errorf("failed to create OIDC user: %w", err)
 	}
 
-	// Assign default roles to new user
+	// Default roles keep local source so claim sync spares them
 	defaultRoles, _ := h.store.GetDefaultRoles(ctx)
 	for _, role := range defaultRoles {
-		_ = h.store.AssignRole(ctx, user.ID, role.Name, "oidc")
+		_ = h.store.AssignRole(ctx, user.ID, role.Name, "local")
 	}
 
 	h.log.Info("OIDC: created new user %s", user.Username)

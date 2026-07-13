@@ -135,7 +135,7 @@ func TestSolveDepsPlatformRangesNeverConvict(t *testing.T) {
 }
 
 func TestSolveDepsFiltersInertDialects(t *testing.T) {
-	// A universal jar's fabric deps are inert on a neoforge server
+	// Universal jar fabric deps stay inert on neoforge
 	metas := []ModJarMeta{
 		{
 			FileName: "collective.jar",
@@ -218,13 +218,13 @@ func TestSolveDepsDuplicatesAndBreaks(t *testing.T) {
 }
 
 func TestSolveDepsJarNeverDuplicatesItself(t *testing.T) {
-	// Same id in two manifests of one jar is not a duplicate
+	// Same id twice inside one jar is fine
 	metas := []ModJarMeta{
 		{
 			FileName: "universal.jar",
 			Mods: []ModInfo{
-				{ID: "unimod", Version: "2.0", Declared: true, Dialect: "fabric"},
 				{ID: "unimod", Version: "2.0", Declared: true, Dialect: "forge"},
+				{ID: "unimod", Version: "2.0", Declared: true},
 			},
 		},
 		{
@@ -232,7 +232,7 @@ func TestSolveDepsJarNeverDuplicatesItself(t *testing.T) {
 			Mods:     []ModInfo{{ID: "unimod", Version: "1.0", Declared: true, Dialect: "forge"}},
 		},
 	}
-	issues := SolveDeps(metas, nil)
+	issues := SolveDeps(metas, []string{"forge"})
 	for _, issue := range issues {
 		if issue.Kind == DepDuplicate && issue.File == issue.OtherFile {
 			t.Errorf("jar convicted of duplicating itself: %+v", issue)
@@ -240,6 +240,26 @@ func TestSolveDepsJarNeverDuplicatesItself(t *testing.T) {
 	}
 	if !hasIssue(issues, DepDuplicate, "unimod", "") {
 		t.Errorf("expected unimod duplicate across jars, got %+v", issues)
+	}
+}
+
+func TestSolveDepsNoDialectSolvesNothing(t *testing.T) {
+	// No dialect testimony means the platform is unknown
+	metas := []ModJarMeta{
+		{
+			FileName: "a.jar",
+			Mods:     []ModInfo{{ID: "dup", Version: "1.0", Declared: true, Dialect: "fabric"}},
+			Deps: []ModDep{
+				{Owner: "dup", ID: "missing", Mandatory: true, Dialect: "fabric"},
+			},
+		},
+		{
+			FileName: "b.jar",
+			Mods:     []ModInfo{{ID: "dup", Version: "2.0", Declared: true, Dialect: "forge"}},
+		},
+	}
+	if issues := SolveDeps(metas, nil); len(issues) != 0 {
+		t.Errorf("unscoped solve must report nothing, got %+v", issues)
 	}
 }
 

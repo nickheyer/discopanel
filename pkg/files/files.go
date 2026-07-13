@@ -17,44 +17,46 @@ import (
 	"github.com/mholt/archives"
 )
 
-func FindWorldDir(dataDir string) (string, error) {
-	var worldDir string
-
-	err := filepath.WalkDir(dataDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// Skip problematic paths
-			return nil // Continue walking
-		}
-
-		// Skip if not a directory
-		if !d.IsDir() {
-			return nil
-		}
-
-		folderName := d.Name()
-
-		// Check if this directory name matches "world" (case-insensitive)
-		if strings.ToLower(folderName) == "world" {
-			// Validate it's actually a Minecraft world by checking for level.dat
-			levelDatPath := filepath.Join(path, "level.dat")
-			if _, err := os.Stat(levelDatPath); err == nil {
-				worldDir = path
-				// Stop walking once we find a valid world
-				return fs.SkipAll
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil && err != fs.SkipAll {
-		return "", fmt.Errorf("failed to find world dir in data %s: %w", dataDir, err)
+// Joins rel under base and rejects escapes
+func ResolveUnder(base, rel string) (string, error) {
+	full := filepath.Join(base, rel)
+	r, err := filepath.Rel(base, full)
+	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes base directory: %s", rel)
 	}
+	return full, nil
+}
 
-	if worldDir == "" {
+// Reads level-name from server.properties, vanilla default otherwise
+func worldName(dataDir string) string {
+	data, err := os.ReadFile(filepath.Join(dataDir, "server.properties"))
+	if err != nil {
+		return "world"
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != "level-name" {
+			continue
+		}
+		if name := strings.TrimSpace(val); name != "" {
+			return name
+		}
+	}
+	return "world"
+}
+
+func FindWorldDir(dataDir string) (string, error) {
+	worldDir, err := ResolveUnder(dataDir, worldName(dataDir))
+	if err != nil {
+		return "", fmt.Errorf("invalid level-name in %s: %w", dataDir, err)
+	}
+	if _, err := os.Stat(filepath.Join(worldDir, "level.dat")); err != nil {
 		return "", fmt.Errorf("no valid world directory found in %s", dataDir)
 	}
-
 	return worldDir, nil
 }
 
@@ -147,11 +149,9 @@ func ExtractArchive(ctx context.Context, archivePath string, destPath string, co
 	// Extract and walk while recursively extracting
 	filesExtracted := 0
 	err = extractor.Extract(ctx, stream, func(ctx context.Context, f archives.FileInfo) error {
-		// Build path
-		targetPath := filepath.Join(destPath, f.NameInArchive)
-
 		// No sneaky traversals
-		if !strings.HasPrefix(filepath.Clean(targetPath), filepath.Clean(destPath)) {
+		targetPath, err := ResolveUnder(destPath, f.NameInArchive)
+		if err != nil {
 			return fmt.Errorf("illegal file path in archive: %s", f.NameInArchive)
 		}
 

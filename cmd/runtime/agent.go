@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -223,12 +224,14 @@ func (s *supervisor) panelSessionOnce(client agentv1connect.AgentServiceClient) 
 		s.mu.Unlock()
 	}()
 
-	// Replays persisted exit report until a send succeeds
-	if s.prevExit != nil {
-		if err := stream.Send(msgExited(s.prevExit)); err != nil {
+	// Replays the exit report every session until the panel acks
+	s.mu.Lock()
+	pending := s.pendingExit
+	s.mu.Unlock()
+	if pending != nil {
+		if err := stream.Send(msgExited(pending)); err != nil {
 			return err
 		}
-		s.prevExit = nil
 	}
 
 	// Reconnect loses panel-visible state, resend it
@@ -295,6 +298,21 @@ func (s *supervisor) handlePanelMessage(msg *agentv1.PanelMessage) {
 		if err := s.broadcastChat(p.ChatMessage.GetSender(), p.ChatMessage.GetMessage()); err != nil {
 			fmt.Printf("[discopanel-runtime] failed to broadcast chat: %v\n", err)
 		}
+	case *agentv1.PanelMessage_ExitAck:
+		s.clearExitReplay(p.ExitAck.GetExitedAtUnixMs())
+	}
+}
+
+// Panel confirmed receipt, replay state may clear now
+func (s *supervisor) clearExitReplay(exitedAtUnixMs int64) {
+	s.mu.Lock()
+	cleared := s.pendingExit != nil && s.pendingExit.ExitedAtUnixMs == exitedAtUnixMs
+	if cleared {
+		s.pendingExit = nil
+	}
+	s.mu.Unlock()
+	if cleared {
+		_ = os.Remove(exitReportPath(dataDir))
 	}
 }
 
@@ -314,11 +332,46 @@ const saturatedBusyFraction = 0.98
 
 const saturatedTickDebtMs = 2000
 
-func assembleTickSample(busyFraction, longestBusyMs, windowSec float64) *agentv1.TickSample {
+const (
+	lagDebtFloor = 45 * time.Second
+	lagDebtCap   = 5 * time.Minute
+)
+
+// Remembers the newest lag confession and its spacing
+func (s *supervisor) recordLagLine(debtMs float64) {
+	now := time.Now()
+	s.mu.Lock()
+	if !s.lagAt.IsZero() {
+		s.lagSpacing = now.Sub(s.lagAt)
+	}
+	s.lagDebtMs = debtMs
+	s.lagAt = now
+	s.mu.Unlock()
+}
+
+// Lag lines stay usable for 1.5x their observed spacing
+func (s *supervisor) lagDebtRate() (float64, bool) {
+	s.mu.Lock()
+	debtMs, at, spacing := s.lagDebtMs, s.lagAt, s.lagSpacing
+	s.mu.Unlock()
+	if at.IsZero() || spacing <= 0 || debtMs <= 0 {
+		return 0, false
+	}
+	usable := min(max(spacing*3/2, lagDebtFloor), lagDebtCap)
+	if time.Since(at) > usable {
+		return 0, false
+	}
+	return debtMs / float64(spacing.Milliseconds()), true
+}
+
+func assembleTickSample(busyFraction, longestBusyMs, windowSec, lagDebtRate float64, lagFresh bool) *agentv1.TickSample {
 	msptAvg := 50 * busyFraction
 	tps := 20.0
 	if busyFraction >= saturatedBusyFraction && windowSec > 0 {
 		debtRate := min((saturatedTickDebtMs/2)/(windowSec*1000), 0.95)
+		if lagFresh {
+			debtRate = min(lagDebtRate, 0.95)
+		}
 		tps = 20 * (1 - debtRate)
 		msptAvg = 1000 / tps
 	}
@@ -327,8 +380,9 @@ func assembleTickSample(busyFraction, longestBusyMs, windowSec float64) *agentv1
 }
 
 func (s *supervisor) emitTickSample(t *agentv1.TickThreadSample) {
+	rate, fresh := s.lagDebtRate()
 	s.send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_TickSample{
-		TickSample: assembleTickSample(t.GetBusyFraction(), t.GetLongestBusyMs(), t.GetWindowSec()),
+		TickSample: assembleTickSample(t.GetBusyFraction(), t.GetLongestBusyMs(), t.GetWindowSec(), rate, fresh),
 	}})
 }
 

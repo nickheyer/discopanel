@@ -102,7 +102,7 @@ func NewOpenAPIHandler(log *logger.Logger, isAuthEnabled func() bool) http.Handl
 				authEnabled = enabled
 			}
 
-			// Build auth-disabled variant: strip all security fields
+			// Build auth-disabled variant without security fields
 			delete(doc, "security")
 
 			if components, ok := doc["components"].(map[string]any); ok {

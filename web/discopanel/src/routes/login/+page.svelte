@@ -46,9 +46,9 @@
 	let invitePin = $state('');
 
 	onMount(() => {
-		// Token in the URL means an OIDC callback landed here
+		// Token in the URL fragment means an OIDC callback landed here
 		const urlParams = new URLSearchParams(window.location.search);
-		const token = urlParams.get('token');
+		const token = new URLSearchParams(window.location.hash.slice(1)).get('token');
 		if (token) {
 			validatingSso = true;
 			authStore.setToken(token);

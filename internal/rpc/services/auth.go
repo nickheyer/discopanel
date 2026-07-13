@@ -190,15 +190,13 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, req *connect.Request[v
 		}
 
 		var permissions []*v1.Permission
-		if s.enforcer != nil {
-			for _, role := range roles {
-				for _, p := range s.enforcer.GetPermissionsForRole(role) {
-					permissions = append(permissions, &v1.Permission{
-						Resource: p.Resource,
-						Action:   p.Action,
-						ObjectId: p.ObjectID,
-					})
-				}
+		for _, role := range roles {
+			for _, p := range s.enforcer.GetPermissionsForRole(role) {
+				permissions = append(permissions, &v1.Permission{
+					Resource: p.Resource,
+					Action:   p.Action,
+					ObjectId: p.ObjectID,
+				})
 			}
 		}
 
@@ -219,19 +217,17 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, req *connect.Request[v
 
 	// Collect permissions from all user roles via the RBAC enforcer
 	var permissions []*v1.Permission
-	if s.enforcer != nil {
-		seen := make(map[string]bool)
-		for _, role := range roles {
-			for _, p := range s.enforcer.GetPermissionsForRole(role) {
-				key := p.Resource + ":" + p.Action + ":" + p.ObjectID
-				if !seen[key] {
-					seen[key] = true
-					permissions = append(permissions, &v1.Permission{
-						Resource: p.Resource,
-						Action:   p.Action,
-						ObjectId: p.ObjectID,
-					})
-				}
+	seen := make(map[string]bool)
+	for _, role := range roles {
+		for _, p := range s.enforcer.GetPermissionsForRole(role) {
+			key := p.Resource + ":" + p.Action + ":" + p.ObjectID
+			if !seen[key] {
+				seen[key] = true
+				permissions = append(permissions, &v1.Permission{
+					Resource: p.Resource,
+					Action:   p.Action,
+					ObjectId: p.ObjectID,
+				})
 			}
 		}
 	}

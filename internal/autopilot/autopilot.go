@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -84,7 +85,34 @@ func withSource(source v1.FindingSource, findings []Finding) []Finding {
 	return findings
 }
 
-// Mutates server and cfg for a fix, caller must persist both
+// Matches a requested fix against the live findings
+func FindingForFix(findings []Finding, fixID string, fixArgs []string) *Finding {
+	if fixID == "" {
+		return nil
+	}
+	for i := range findings {
+		f := &findings[i]
+		if f.FixID != fixID {
+			continue
+		}
+		if len(fixArgs) == 0 && len(f.FixArgs) > 0 {
+			continue
+		}
+		offered := true
+		for _, arg := range fixArgs {
+			if !slices.Contains(f.FixArgs, arg) {
+				offered = false
+				break
+			}
+		}
+		if offered {
+			return f
+		}
+	}
+	return nil
+}
+
+// Mutates server and cfg, caller persists both
 func ApplyFix(server *storage.Server, cfg *storage.ServerProperties, fixID string, fixArgs []string) (string, error) {
 	t, f := true, false
 	switch fixID {
@@ -377,8 +405,11 @@ func checkHostTHP(m *metrics.ServerMetrics) []Finding {
 }
 
 func checkCrash(server *storage.Server, m *metrics.ServerMetrics) []Finding {
-	if !m.LastExitCrashed || time.Since(m.LastExitedAt) > 24*time.Hour {
+	if m.LastExitedAt.IsZero() || time.Since(m.LastExitedAt) > 24*time.Hour {
 		return nil
+	}
+	if !m.LastExitCrashed {
+		return checkExitLoop(m)
 	}
 	when := m.LastExitedAt.Format("15:04 on Jan 2")
 
@@ -404,7 +435,7 @@ func checkCrash(server *storage.Server, m *metrics.ServerMetrics) []Finding {
 		Detail:   "The server process died unexpectedly.",
 		Evidence: []string{fmt.Sprintf("exit code %d at %s", m.LastExitCode, when)},
 	}
-	// Boot failures end in a supervisor stop, the code means nothing
+	// Boot failures end in supervisor stops, code meaningless
 	if m.LastExitBootFailed {
 		f.ID = "boot_failed"
 		f.Title = "Server failed to start"
@@ -441,10 +472,11 @@ func checkCrash(server *storage.Server, m *metrics.ServerMetrics) []Finding {
 		}
 	}
 
-	// The doctor's own trail beats re-deriving a fix button
+	// The journal is the doctor's memory, it survives panel restarts
 	j := loadDoctor(server.DataPath)
-	doctorActed := !m.LastAutoRepairAt.IsZero() && !m.LastAutoRepairAt.Before(m.LastExitedAt)
-	if action := doctorNarration(j, m, doctorActed); action != "" {
+	resolvedCovers := j.Resolved != nil && !j.Resolved.ClosedAt.IsZero() && !j.Resolved.ClosedAt.Before(m.LastExitedAt)
+	doctorActed := j.Incident != nil || resolvedCovers
+	if action := doctorNarration(j, resolvedCovers); action != "" {
 		f.Action = action
 		f.LedgerMs = incidentStartMs(j)
 	}
@@ -453,8 +485,8 @@ func checkCrash(server *storage.Server, m *metrics.ServerMetrics) []Finding {
 	if f.Action == "" && !m.CrashLoopStoppedAt.IsZero() && time.Since(m.CrashLoopStoppedAt) < crashLoopWindow {
 		f.Action = "DiscoPanel stopped it to break the loop."
 	}
-	// A repaired crash on a running server is history, not an alarm
-	repaired := doctorActed && j.Resolved != nil && j.Resolved.Outcome == "repaired"
+	// Repaired crashes on running servers are history
+	repaired := resolvedCovers && j.Resolved.Outcome == "repaired"
 	if repaired && server.Status == storage.StatusRunning {
 		f.ID = "repaired_crash"
 		f.Severity = v1.PerformanceSeverity_PERFORMANCE_SEVERITY_INFO
@@ -472,6 +504,45 @@ func checkCrash(server *storage.Server, m *metrics.ServerMetrics) []Finding {
 		}
 	}
 	return []Finding{f}
+}
+
+// Flags rapid clean exit loops the runtime cannot classify
+func checkExitLoop(m *metrics.ServerMetrics) []Finding {
+	exits := m.ExitsWithin(crashLoopWindow)
+	if exits < 2 || !lastExitCounted(m) {
+		return nil
+	}
+	when := m.LastExitedAt.Format("15:04 on Jan 2")
+	f := Finding{
+		ID:       "exit_loop",
+		Severity: v1.PerformanceSeverity_PERFORMANCE_SEVERITY_CRITICAL,
+		Title:    "Server keeps exiting right after it starts",
+		Detail:   "The server process keeps ending without a crash report, and the container restart policy boots it again each time. A startup failure that exits cleanly is the usual cause, the console shows the last lines before each exit.",
+		Evidence: []string{
+			fmt.Sprintf("%d unexpected exits in the last %d minutes", exits, int(crashLoopWindow.Minutes())),
+			fmt.Sprintf("last exit code %d at %s", m.LastExitCode, when),
+		},
+		Epoch: strconv.FormatInt(m.LastExitedAt.UnixMilli(), 10),
+	}
+	if !m.CrashLoopStoppedAt.IsZero() && time.Since(m.CrashLoopStoppedAt) < crashLoopWindow {
+		f.Action = "DiscoPanel stopped it to break the loop."
+	}
+	return []Finding{f}
+}
+
+// Reports whether the last exit counted toward loop detection
+func lastExitCounted(m *metrics.ServerMetrics) bool {
+	for _, t := range m.UnexpectedExits {
+		if t.Equal(m.LastExitedAt) {
+			return true
+		}
+	}
+	for _, t := range m.CrashExits {
+		if t.Equal(m.LastExitedAt) {
+			return true
+		}
+	}
+	return false
 }
 
 // Summarizes the fatal cause chain for the evidence list
@@ -503,18 +574,18 @@ func incidentStartMs(j *doctorState) int64 {
 }
 
 // Narrates what the doctor did or is doing right now
-func doctorNarration(j *doctorState, m *metrics.ServerMetrics, acted bool) string {
+func doctorNarration(j *doctorState, resolvedCovers bool) string {
 	if j.Incident != nil && len(j.Incident.Actions) > 0 {
 		return fmt.Sprintf("DiscoPanel is repairing this now (attempt %d of %d): %s.",
 			j.Incident.Passes, maxDoctorPasses, summarizeIncident(j.Incident))
 	}
-	if !acted {
+	if !resolvedCovers {
 		return ""
 	}
-	if j.Resolved != nil && j.Resolved.Outcome == "gave_up" {
+	if j.Resolved.Outcome == "gave_up" {
 		return "DiscoPanel tried to repair this, undid its changes, and stopped the server: " + j.Resolved.Summary + "."
 	}
-	return "DiscoPanel automatically " + m.LastAutoRepairSummary + " and restarted the server."
+	return "DiscoPanel automatically " + j.Resolved.Summary + " and restarted the server."
 }
 
 func modLabel(mod crashModRef) string {

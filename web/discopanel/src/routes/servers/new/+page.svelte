@@ -39,10 +39,12 @@
 	import { ModLoader, type ProxyListener } from '$lib/proto/discopanel/v1/common_pb';
 	import type { ModLoaderInfo, DockerImage } from '$lib/proto/discopanel/v1/minecraft_pb';
 	import type { IndexedModpack, Version } from '$lib/proto/discopanel/v1/modpack_pb';
+	import { loadModLoaders } from '$lib/stores/loaders';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import MemorySlider from '$lib/components/memory-slider.svelte';
 	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
+	import { uploadFile } from '$lib/utils/chunked-upload';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
@@ -59,6 +61,9 @@
 	let showAdvanced = $state(false);
 	let hostTotalMb = $state(0);
 	let occupiedMb = $state(0);
+
+	// World zip picked now, uploaded on submit
+	let worldFile = $state<File | null>(null);
 
 	// Icon picked now, uploaded right after create
 	let iconFile = $state<File | null>(null);
@@ -106,7 +111,7 @@
 			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners, hostMemory] =
 				await Promise.allSettled([
 					rpcClient.minecraft.getMinecraftVersions({}),
-					rpcClient.minecraft.getModLoaders({}),
+					loadModLoaders(),
 					rpcClient.minecraft.getDockerImages({}),
 					rpcClient.proxy.getProxyStatus({}),
 					rpcClient.server.getNextAvailablePort({}),
@@ -121,7 +126,7 @@
 				throw versionsData.reason;
 			}
 			if (loadersData.status === 'fulfilled') {
-				modLoaders = loadersData.value.modloaders;
+				modLoaders = loadersData.value;
 			} else {
 				throw loadersData.reason;
 			}
@@ -155,9 +160,7 @@
 
 			if (portData.status === 'fulfilled') {
 				formData.port = portData.value.port;
-				usedPorts = Object.fromEntries(
-					portData.value.usedPorts?.map((p) => [p.port, p.inUse]) || []
-				);
+				usedPorts = Object.fromEntries(portData.value.usedPorts?.map((p) => [p.port, true]) || []);
 			} else {
 				console.error('Failed to load next available port:', portData.reason);
 			}
@@ -231,14 +234,20 @@
 		try {
 			const cfg = await rpcClient.modpack.getModpackConfig({ id: modpack.id });
 			const config = cfg.config ?? {};
-			const loaderKey = (config['mod_loader'] || '').toUpperCase();
+			const loaderName = (config['mod_loader'] || '').toLowerCase();
+			const loaderInfo = modLoaders.find((l) => l.name === loaderName);
+			if (!loaderInfo) {
+				toast.error(`Unsupported mod loader "${loaderName}"`);
+				selectedModpack = null;
+				return;
+			}
 			formData.name = modpack.name || '';
 			formData.description = modpack.summary || '';
-			formData.modLoader = ModLoader[loaderKey as keyof typeof ModLoader] ?? ModLoader.UNSPECIFIED;
+			formData.modLoader = loaderInfo.loader;
 			formData.mcVersion = config['mc_version'] || modpack.mcVersion || '';
 			// Backend floors modpack memory at 4 GB
 			formData.memory = Math.max(Number(config['memory']) || modpack.recommendedRam || 0, 4096);
-			formData.dockerImage = config['docker_image'] || modpack.dockerImage || '';
+			formData.dockerImage = config['docker_image'] || '';
 			await loadModpackVersions(modpack.id);
 		} catch (error) {
 			toast.error('Failed to load modpack configuration');
@@ -312,7 +321,7 @@
 		try {
 			const portData = await rpcClient.server.getNextAvailablePort({});
 			formData.port = portData.port;
-			usedPorts = Object.fromEntries(portData.usedPorts?.map((p) => [p.port, p.inUse]) || []);
+			usedPorts = Object.fromEntries(portData.usedPorts?.map((p) => [p.port, true]) || []);
 			portError = '';
 		} catch (error) {
 			console.error('Failed to get available port:', error);
@@ -374,10 +383,17 @@
 					? selectedVersion.versionNumber
 					: selectedVersionId;
 
+			let worldSessionId = '';
+			if (worldFile) {
+				const uploaded = await uploadFile(worldFile, {});
+				worldSessionId = uploaded.sessionId;
+			}
+
 			const createRequest = {
 				...formData,
 				modpackId: selectedModpack?.id || '',
 				modpackVersionId: versionToSend || '',
+				worldUploadSessionId: worldSessionId,
 				// Port zero routes through the proxy hostname
 				port: useProxyMode ? 0 : formData.port
 			};
@@ -1109,6 +1125,25 @@
 
 				{#if showAdvanced}
 					<div class="space-y-5 border-t p-4">
+						<div class="space-y-2">
+							<Label for="world_zip">Import world</Label>
+							<Input
+								id="world_zip"
+								type="file"
+								accept=".zip"
+								disabled={loading}
+								onchange={(e: Event) => {
+									const input = e.target as HTMLInputElement;
+									worldFile = input.files?.[0] ?? null;
+								}}
+							/>
+							<p class="text-xs text-muted-foreground">
+								{worldFile
+									? `${worldFile.name} imports at create`
+									: 'World folder zip with level.dat, version detected automatically'}
+							</p>
+						</div>
+
 						<div class="space-y-2">
 							<Label for="docker_image">Docker image</Label>
 							<Select

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"reflect"
@@ -25,8 +26,13 @@ type Store struct {
 func NewSQLiteStore(cfg *config.Config) (*Store, error) {
 	dsn := cfg.Database.Path
 	// Pragmas reduce locked database errors under load
-	if dsn != ":memory:" && !strings.Contains(dsn, "?") {
-		dsn += "?_busy_timeout=5000&_journal_mode=WAL&_synchronous=NORMAL"
+	if dsn != ":memory:" {
+		pragmas := "_busy_timeout=5000&_journal_mode=WAL&_synchronous=NORMAL&_foreign_keys=on"
+		if strings.Contains(dsn, "?") {
+			dsn += "&" + pragmas
+		} else {
+			dsn += "?" + pragmas
+		}
 	}
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -129,25 +135,79 @@ func (s *Store) UpdateServer(ctx context.Context, server *Server) error {
 	return s.SyncServerPropertiesWithServer(ctx, server)
 }
 
+// Background writers update named columns, never whole rows
+func (s *Store) UpdateServerFields(ctx context.Context, id string, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	res := s.db.WithContext(ctx).Model(&Server{}).Where("id = ?", id).Updates(fields)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("server not found")
+	}
+	return nil
+}
+
+func (s *Store) UpdateServerStatus(ctx context.Context, id string, status ServerStatus) error {
+	return s.UpdateServerFields(ctx, id, map[string]any{"status": status})
+}
+
+func (s *Store) UpdateServerContainer(ctx context.Context, id, containerID, dockerImage, runtimeDigest string) error {
+	return s.UpdateServerFields(ctx, id, map[string]any{
+		"container_id":   containerID,
+		"docker_image":   dockerImage,
+		"runtime_digest": runtimeDigest,
+	})
+}
+
+func (s *Store) UpdateServerLastStarted(ctx context.Context, id string, t time.Time) error {
+	return s.UpdateServerFields(ctx, id, map[string]any{"last_started": t})
+}
+
+func (s *Store) UpdateServerAgentTokenHash(ctx context.Context, id, hash string) error {
+	return s.UpdateServerFields(ctx, id, map[string]any{"agent_token_hash": hash})
+}
+
+func (s *Store) UpdateServerJavaVersion(ctx context.Context, id, javaVersion string) error {
+	return s.UpdateServerFields(ctx, id, map[string]any{"java_version": javaVersion})
+}
+
+func (s *Store) UpdateServerRouting(ctx context.Context, id string, proxyPort int, proxyHostname, proxyListenerID string) error {
+	return s.UpdateServerFields(ctx, id, map[string]any{
+		"proxy_port":        proxyPort,
+		"proxy_hostname":    proxyHostname,
+		"proxy_listener_id": proxyListenerID,
+	})
+}
+
+// Sweeps every child row explicitly, old tables lack live cascades
 func (s *Store) DeleteServer(ctx context.Context, id string) error {
-	// Delete with associations
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Delete mods
-		if err := tx.Where("server_id = ?", id).Delete(&Mod{}).Error; err != nil {
+		var tokenIDs []string
+		if err := tx.Model(&Module{}).Where("server_id = ? AND token_id != ''", id).Pluck("token_id", &tokenIDs).Error; err != nil {
 			return err
 		}
-
-		// Delete properties
-		if err := tx.Where("server_id = ?", id).Delete(&ServerProperties{}).Error; err != nil {
-			return err
+		if len(tokenIDs) > 0 {
+			if err := tx.Where("id IN ?", tokenIDs).Delete(&APIToken{}).Error; err != nil {
+				return err
+			}
 		}
-
-		// Delete metrics history
-		if err := tx.Where("server_id = ?", id).Delete(&MetricsSample{}).Error; err != nil {
-			return err
+		for _, child := range []any{
+			&TaskExecution{},
+			&ScheduledTask{},
+			&Module{},
+			&Mod{},
+			&ServerProperties{},
+			&MetricsSample{},
+			&ServerAction{},
+			&FindingDismissal{},
+		} {
+			if err := tx.Where("server_id = ?", id).Delete(child).Error; err != nil {
+				return err
+			}
 		}
-
-		// Delete server
 		return tx.Delete(&Server{}, "id = ?", id).Error
 	})
 }
@@ -166,15 +226,19 @@ func (s *Store) AddMetricsSamples(ctx context.Context, samples []*MetricsSample)
 
 // Scan target for bucketed metrics aggregation
 type metricsBucketRow struct {
-	ServerID   string  `gorm:"column:server_id"`
-	Bucket     int64   `gorm:"column:bucket"`
-	TPS        float64 `gorm:"column:tps"`
-	MSPT       float64 `gorm:"column:mspt"`
-	Players    int     `gorm:"column:players"`
-	CPUPercent float64 `gorm:"column:cpu_percent"`
-	MemoryMB   float64 `gorm:"column:memory_mb"`
-	HeapUsedMB float64 `gorm:"column:heap_used_mb"`
-	DiskBytes  int64   `gorm:"column:disk_bytes"`
+	ServerID         string  `gorm:"column:server_id"`
+	Bucket           int64   `gorm:"column:bucket"`
+	TPS              float64 `gorm:"column:tps"`
+	MSPT             float64 `gorm:"column:mspt"`
+	Players          int     `gorm:"column:players"`
+	CPUPercent       float64 `gorm:"column:cpu_percent"`
+	MemoryMB         float64 `gorm:"column:memory_mb"`
+	HeapUsedMB       float64 `gorm:"column:heap_used_mb"`
+	DiskBytes        int64   `gorm:"column:disk_bytes"`
+	ProxyActiveConns int64   `gorm:"column:proxy_active_conns"`
+	ProxyBytesIn     int64   `gorm:"column:proxy_bytes_in"`
+	ProxyBytesOut    int64   `gorm:"column:proxy_bytes_out"`
+	ProxyLogins      int64   `gorm:"column:proxy_logins"`
 }
 
 // Returns ordered samples, aggregated into buckets when bucketSeconds is positive
@@ -193,7 +257,9 @@ func (s *Store) GetMetricsHistory(ctx context.Context, serverID string, from, to
 			(CAST(strftime('%s', timestamp) AS INTEGER) / ?) * ? AS bucket,
 			AVG(tps) AS tps, AVG(mspt) AS mspt, MAX(players) AS players,
 			AVG(cpu_percent) AS cpu_percent, AVG(memory_mb) AS memory_mb,
-			AVG(heap_used_mb) AS heap_used_mb, MAX(disk_bytes) AS disk_bytes
+			AVG(heap_used_mb) AS heap_used_mb, MAX(disk_bytes) AS disk_bytes,
+			MAX(proxy_active_conns) AS proxy_active_conns, SUM(proxy_bytes_in) AS proxy_bytes_in,
+			SUM(proxy_bytes_out) AS proxy_bytes_out, SUM(proxy_logins) AS proxy_logins
 		FROM metrics_samples
 		WHERE server_id = ? AND datetime(timestamp) >= datetime(?) AND datetime(timestamp) <= datetime(?)
 		GROUP BY bucket
@@ -208,16 +274,20 @@ func (s *Store) GetMetricsHistory(ctx context.Context, serverID string, from, to
 	samples := make([]*MetricsSample, 0, len(rows))
 	for _, r := range rows {
 		samples = append(samples, &MetricsSample{
-			ServerID:   r.ServerID,
-			Resolution: bucketSeconds,
-			Timestamp:  time.Unix(r.Bucket, 0).UTC(),
-			TPS:        r.TPS,
-			MSPT:       r.MSPT,
-			Players:    r.Players,
-			CPUPercent: r.CPUPercent,
-			MemoryMB:   r.MemoryMB,
-			HeapUsedMB: r.HeapUsedMB,
-			DiskBytes:  r.DiskBytes,
+			ServerID:         r.ServerID,
+			Resolution:       bucketSeconds,
+			Timestamp:        time.Unix(r.Bucket, 0).UTC(),
+			TPS:              r.TPS,
+			MSPT:             r.MSPT,
+			Players:          r.Players,
+			CPUPercent:       r.CPUPercent,
+			MemoryMB:         r.MemoryMB,
+			HeapUsedMB:       r.HeapUsedMB,
+			DiskBytes:        r.DiskBytes,
+			ProxyActiveConns: r.ProxyActiveConns,
+			ProxyBytesIn:     r.ProxyBytesIn,
+			ProxyBytesOut:    r.ProxyBytesOut,
+			ProxyLogins:      r.ProxyLogins,
 		})
 	}
 	return samples, nil
@@ -227,10 +297,12 @@ func (s *Store) GetMetricsHistory(ctx context.Context, serverID string, from, to
 func (s *Store) RollupMetricsSamples(ctx context.Context, olderThan time.Time, bucketSeconds int) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		insert := `
-			INSERT INTO metrics_samples (server_id, resolution, timestamp, tps, mspt, players, cpu_percent, memory_mb, heap_used_mb, disk_bytes)
+			INSERT INTO metrics_samples (server_id, resolution, timestamp, tps, mspt, players, cpu_percent, memory_mb, heap_used_mb, disk_bytes,
+				proxy_active_conns, proxy_bytes_in, proxy_bytes_out, proxy_logins)
 			SELECT server_id, ?,
 				datetime((CAST(strftime('%s', timestamp) AS INTEGER) / ?) * ?, 'unixepoch'),
-				AVG(tps), AVG(mspt), MAX(players), AVG(cpu_percent), AVG(memory_mb), AVG(heap_used_mb), MAX(disk_bytes)
+				AVG(tps), AVG(mspt), MAX(players), AVG(cpu_percent), AVG(memory_mb), AVG(heap_used_mb), MAX(disk_bytes),
+				MAX(proxy_active_conns), SUM(proxy_bytes_in), SUM(proxy_bytes_out), SUM(proxy_logins)
 			FROM metrics_samples
 			WHERE resolution = 0 AND datetime(timestamp) < datetime(?)
 			GROUP BY server_id, CAST(strftime('%s', timestamp) AS INTEGER) / ?`
@@ -321,18 +393,12 @@ func (s *Store) CreateDefaultServerProperties(serverID string) *ServerProperties
 	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
 
-	// Start with basic defaults
-	rconPassword := "discopanel_default"
-	if serverID != "" && len(serverID) >= 8 {
-		rconPassword = fmt.Sprintf("discopanel_%s", serverID[:8])
-	}
-
 	config := &ServerProperties{
 		ID:           serverID + "-config",
 		ServerID:     serverID,
 		EULA:         stringPtr("TRUE"),
 		EnableRCON:   boolPtr(true),
-		RCONPassword: stringPtr(rconPassword),
+		RCONPassword: stringPtr(generateRCONPassword()),
 		RCONPort:     intPtr(25575),
 		Difficulty:   stringPtr("easy"),
 		Mode:         stringPtr("survival"),
@@ -357,7 +423,7 @@ func (s *Store) CreateDefaultServerProperties(serverID string) *ServerProperties
 			field := configType.Field(i)
 			// Skip these fields as they're server-specific
 			if field.Name == "ID" || field.Name == "ServerID" || field.Name == "UpdatedAt" ||
-				field.Name == "Server" || field.Name == "RCONPassword" ||
+				field.Name == "RCONPassword" ||
 				field.Name == "InitMemory" || field.Name == "MaxMemory" || field.Name == "ServerPort" ||
 				field.Name == "MaxPlayers" {
 				continue
@@ -371,6 +437,22 @@ func (s *Store) CreateDefaultServerProperties(serverID string) *ServerProperties
 	}
 
 	return config
+}
+
+// Server ids are public so the secret must be random
+const rconPasswordAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+// Generates the default RCON password once at properties creation
+func generateRCONPassword() string {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return ""
+	}
+	out := make([]byte, len(raw))
+	for i, b := range raw {
+		out[i] = rconPasswordAlphabet[int(b)%len(rconPasswordAlphabet)]
+	}
+	return string(out)
 }
 
 // Mod operations
@@ -591,6 +673,34 @@ func (s *Store) IsModpackFavorited(ctx context.Context, modpackID string) (bool,
 	var count int64
 	err := s.db.WithContext(ctx).Model(&ModpackFavorite{}).Where("modpack_id = ?", modpackID).Count(&count).Error
 	return count > 0, err
+}
+
+func (s *Store) FavoriteModpackIDs(ctx context.Context) (map[string]bool, error) {
+	var ids []string
+	if err := s.db.WithContext(ctx).Model(&ModpackFavorite{}).Pluck("modpack_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set, nil
+}
+
+func (s *Store) CountIndexedModpacksByIndexer(ctx context.Context) (map[string]int64, error) {
+	var rows []struct {
+		Indexer string
+		Count   int64
+	}
+	if err := s.db.WithContext(ctx).Model(&IndexedModpack{}).
+		Select("indexer, COUNT(*) as count").Group("indexer").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		counts[r.Indexer] = r.Count
+	}
+	return counts, nil
 }
 
 func (s *Store) ListFavoriteModpacks(ctx context.Context) ([]*IndexedModpack, error) {
@@ -870,6 +980,7 @@ func (s *Store) SeedSystemRoles() error {
 		{ID: "role-admin", Name: "admin", Description: "Full system access", IsSystem: true},
 		{ID: "role-user", Name: "user", Description: "Standard user access", IsSystem: true, IsDefault: true},
 		{ID: "role-anonymous", Name: "anonymous", Description: "Unauthenticated user access", IsSystem: true},
+		{ID: "role-module", Name: "module", Description: "Module container access", IsSystem: true},
 	}
 	for _, role := range roles {
 		var existing Role
@@ -978,7 +1089,7 @@ func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 
 func (s *Store) GetSession(ctx context.Context, token string) (*Session, error) {
 	var session Session
-	err := s.db.WithContext(ctx).Preload("User").Where("token = ? AND expires_at > ?", token, time.Now()).First(&session).Error
+	err := s.db.WithContext(ctx).Preload("User").Where("token = ? AND datetime(expires_at) > datetime(?)", token, time.Now().UTC()).First(&session).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("session not found or expired")
@@ -993,7 +1104,7 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 }
 
 func (s *Store) CleanExpiredSessions(ctx context.Context) error {
-	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
+	return s.db.WithContext(ctx).Where("datetime(expires_at) < datetime(?)", time.Now().UTC()).Delete(&Session{}).Error
 }
 
 // Deletes all sessions, used when JWT secret changes
@@ -1163,15 +1274,15 @@ func (s *Store) ListScheduledTasks(ctx context.Context, serverID string) ([]*Sch
 
 func (s *Store) ListAllScheduledTasks(ctx context.Context) ([]*ScheduledTask, error) {
 	var tasks []*ScheduledTask
-	err := s.db.WithContext(ctx).Order("next_run ASC NULLS LAST").Find(&tasks).Error
+	err := s.db.WithContext(ctx).Order("datetime(next_run) ASC NULLS LAST").Find(&tasks).Error
 	return tasks, err
 }
 
 func (s *Store) ListDueScheduledTasks(ctx context.Context, before time.Time) ([]*ScheduledTask, error) {
 	var tasks []*ScheduledTask
 	err := s.db.WithContext(ctx).
-		Where("status = ? AND next_run IS NOT NULL AND next_run <= ?", TaskStatusEnabled, before).
-		Order("next_run ASC").
+		Where("status = ? AND next_run IS NOT NULL AND datetime(next_run) <= datetime(?)", TaskStatusEnabled, before.UTC()).
+		Order("datetime(next_run) ASC").
 		Find(&tasks).Error
 	return tasks, err
 }
@@ -1191,12 +1302,15 @@ func (s *Store) DeleteScheduledTask(ctx context.Context, id string) error {
 	})
 }
 
-func (s *Store) UpdateTaskNextRun(ctx context.Context, taskID string, nextRun *time.Time, lastRun *time.Time) error {
+func (s *Store) UpdateTaskNextRun(ctx context.Context, taskID string, nextRun *time.Time, lastRun *time.Time, status TaskStatus) error {
 	updates := map[string]interface{}{
 		"next_run": nextRun,
 	}
 	if lastRun != nil {
 		updates["last_run"] = lastRun
+	}
+	if status != "" {
+		updates["status"] = status
 	}
 	return s.db.WithContext(ctx).Model(&ScheduledTask{}).Where("id = ?", taskID).Updates(updates).Error
 }
@@ -1269,13 +1383,13 @@ func (s *Store) CleanOldTaskExecutions(ctx context.Context, olderThan time.Time,
 			var keepIDs []string
 			s.db.WithContext(ctx).Model(&TaskExecution{}).
 				Where("task_id = ?", taskID).
-				Order("started_at DESC").
+				Order("datetime(started_at) DESC").
 				Limit(keepMinimum).
 				Pluck("id", &keepIDs)
 
 			// Delete old executions that are not in the keep list
 			s.db.WithContext(ctx).
-				Where("task_id = ? AND started_at < ? AND id NOT IN ?", taskID, olderThan, keepIDs).
+				Where("task_id = ? AND datetime(started_at) < datetime(?) AND id NOT IN ?", taskID, olderThan.UTC(), keepIDs).
 				Delete(&TaskExecution{})
 		}
 	}
@@ -1338,24 +1452,6 @@ func (s *Store) DeleteModuleTemplate(ctx context.Context, id string) error {
 		return fmt.Errorf("cannot delete template: %d modules are using it", count)
 	}
 	return s.db.WithContext(ctx).Delete(&ModuleTemplate{}, "id = ?", id).Error
-}
-
-// Creates or updates a module template by ID
-func (s *Store) UpsertModuleTemplate(ctx context.Context, template *ModuleTemplate) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existing ModuleTemplate
-		err := tx.Where("id = ?", template.ID).First(&existing).Error
-		if err == gorm.ErrRecordNotFound {
-			return tx.Create(template).Error
-		}
-		if err != nil {
-			return err
-		}
-		// Preserve created_at when updating
-		template.CreatedAt = existing.CreatedAt
-		// Selects all columns to update the JSON-serialized fields too
-		return tx.Model(&existing).Select("*").Omit("created_at").Updates(template).Error
-	})
 }
 
 // Module operations

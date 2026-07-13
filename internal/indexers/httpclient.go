@@ -42,6 +42,11 @@ func NewHTTPClient(indexer string, userAgent string, extraHeaders map[string]str
 	}
 }
 
+// Does GET request and returns the raw body
+func (h *HTTPClient) DoBytes(ctx context.Context, url string) ([]byte, error) {
+	return h.sharedGet(ctx, url)
+}
+
 // Does GET request and JSON-decodes into dest
 func (h *HTTPClient) DoJSON(ctx context.Context, url string, dest any) error {
 	data, err := h.sharedGet(ctx, url)
@@ -66,17 +71,22 @@ func (h *HTTPClient) PostJSON(ctx context.Context, url string, body any, dest an
 
 // Collapses identical concurrent GETs into one upstream request
 func (h *HTTPClient) sharedGet(ctx context.Context, url string) ([]byte, error) {
-	v, err, _ := h.state.flights.Do(url, func() (any, error) {
+	ch := h.state.flights.DoChan(url, func() (any, error) {
 		return h.fetch(ctx, http.MethodGet, url, nil)
 	})
-	if err != nil {
-		// Retry alone when another callers cancellation poisoned the flight
-		if ctx.Err() == nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
-			return h.fetch(ctx, http.MethodGet, url, nil)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			// Retry alone when another callers cancellation poisoned the flight
+			if ctx.Err() == nil && (errors.Is(res.Err, context.Canceled) || errors.Is(res.Err, context.DeadlineExceeded)) {
+				return h.fetch(ctx, http.MethodGet, url, nil)
+			}
+			return nil, res.Err
 		}
-		return nil, err
+		return res.Val.([]byte), nil
 	}
-	return v.([]byte), nil
 }
 
 // Runs paced request, retrying on 429, 5xx, network errors

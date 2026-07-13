@@ -50,7 +50,7 @@ func (m *ModJarMeta) HasModID(id string) bool {
 	return false
 }
 
-// Returns the declared version of a mod id, empty when unknown
+// Returns a mod id's declared version, empty unknown
 func (m *ModJarMeta) VersionOf(id string) string {
 	for i := range m.Mods {
 		if m.Mods[i].ID == id {
@@ -157,7 +157,9 @@ func readModJarMeta(jarPath string) (*ModJarMeta, error) {
 // Walks one jar's metadata files, recursing into bundled jars
 func parseJarEntries(meta *ModJarMeta, r *zip.Reader, depth int, topLevel bool) {
 	var nested []string
+	var mcmodData []byte
 	manifestVersion := ""
+	hasModsToml := false
 
 	for _, f := range r.File {
 		switch f.Name {
@@ -186,7 +188,12 @@ func parseJarEntries(meta *ModJarMeta, r *zip.Reader, depth int, topLevel bool) 
 			if strings.Contains(f.Name, "neoforge") {
 				dialect = "neoforge"
 			}
+			hasModsToml = true
 			applyModsToml(meta, data, topLevel, dialect)
+		case "mcmod.info":
+			if data, err := readJarFile(f); err == nil {
+				mcmodData = data
+			}
 		case "META-INF/jarjar/metadata.json":
 			var jj jarJarMetadata
 			if readJarJSON(f, &jj) == nil {
@@ -195,6 +202,11 @@ func parseJarEntries(meta *ModJarMeta, r *zip.Reader, depth int, topLevel bool) 
 				}
 			}
 		}
+	}
+
+	// Legacy metadata only speaks when no toml is present
+	if mcmodData != nil && !hasModsToml {
+		applyMcmodInfo(meta, mcmodData, topLevel)
 	}
 
 	resolveVersionPlaceholders(meta, manifestVersion)
@@ -398,6 +410,58 @@ func applyModsToml(meta *ModJarMeta, data []byte, topLevel bool, dialect string)
 	}
 }
 
+// One mod entry in a 1.12 era mcmod.info file
+type mcmodInfoEntry struct {
+	ModID                    string   `json:"modid"`
+	Version                  string   `json:"version"`
+	RequiredMods             []string `json:"requiredMods"`
+	UseDependencyInformation bool     `json:"useDependencyInformation"`
+}
+
+// Accepts the bare array and the wrapped modList forms
+func parseMcmodInfo(data []byte) []mcmodInfoEntry {
+	var list []mcmodInfoEntry
+	if json.Unmarshal(data, &list) == nil {
+		return list
+	}
+	var wrapped struct {
+		ModList []mcmodInfoEntry `json:"modList"`
+	}
+	if json.Unmarshal(data, &wrapped) == nil {
+		return wrapped.ModList
+	}
+	return nil
+}
+
+// Ids lowercase like legacy forge treats them
+func applyMcmodInfo(meta *ModJarMeta, data []byte, topLevel bool) {
+	for _, m := range parseMcmodInfo(data) {
+		id := strings.ToLower(strings.TrimSpace(m.ModID))
+		if id == "" {
+			continue
+		}
+		meta.Mods = append(meta.Mods, ModInfo{ID: id, Version: m.Version, Declared: topLevel, Dialect: "forge"})
+		if !topLevel || !m.UseDependencyInformation {
+			continue
+		}
+		for _, dep := range m.RequiredMods {
+			depID, depRange := splitMcmodDep(dep)
+			if depID == "" {
+				continue
+			}
+			meta.Deps = append(meta.Deps, ModDep{
+				Owner: id, ID: depID, Range: depRange, Mandatory: true, Dialect: "forge",
+			})
+		}
+	}
+}
+
+// Entries look like modid or modid@[1.0,)
+func splitMcmodDep(s string) (string, string) {
+	id, rng, _ := strings.Cut(strings.TrimSpace(s), "@")
+	return strings.ToLower(strings.TrimSpace(id)), strings.TrimSpace(rng)
+}
+
 // Gradle stamps real versions into the manifest, toml keeps ${...}
 func resolveVersionPlaceholders(meta *ModJarMeta, manifestVersion string) {
 	for i := range meta.Mods {
@@ -485,16 +549,11 @@ func MatchesPatterns(fileName string, patterns []string) bool {
 }
 
 func ForceIncludePatterns(loader models.ModLoader, cfg *models.ServerProperties) []string {
-	if cfg == nil {
+	pack := PackPlatformFor(loader)
+	if cfg == nil || pack == nil {
 		return nil
 	}
-	switch loader {
-	case models.ModLoaderModrinth:
-		return SplitPatterns(derefStr(cfg.ModrinthForceIncludeFiles))
-	case models.ModLoaderCurseForge, models.ModLoaderAutoCurseForge:
-		return SplitPatterns(derefStr(cfg.CFForceIncludeMods))
-	}
-	return nil
+	return SplitPatterns(derefStr(*pack.ForceIncludeField(cfg)))
 }
 
 func AppendPackExclude(loader models.ModLoader, cfg *models.ServerProperties, fileName string) {
@@ -519,7 +578,7 @@ func AppendPackExclude(loader models.ModLoader, cfg *models.ServerProperties, fi
 	*field = &joined
 }
 
-// Drops a file from the pack exclude list, reverse of append
+// Drops a file from the pack exclude list
 func RemovePackExclude(loader models.ModLoader, cfg *models.ServerProperties, fileName string) {
 	if cfg == nil {
 		return
@@ -552,13 +611,11 @@ func PackExcludePatterns(loader models.ModLoader, cfg *models.ServerProperties) 
 }
 
 func packExcludeField(loader models.ModLoader, cfg *models.ServerProperties) **string {
-	switch loader {
-	case models.ModLoaderModrinth:
-		return &cfg.ModrinthExcludeFiles
-	case models.ModLoaderCurseForge, models.ModLoaderAutoCurseForge:
-		return &cfg.CFExcludeMods
+	pack := PackPlatformFor(loader)
+	if pack == nil {
+		return nil
 	}
-	return nil
+	return pack.ExcludeField(cfg)
 }
 
 func derefStr(s *string) string {

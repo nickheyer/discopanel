@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ var (
 
 	chatPattern        = regexp.MustCompile(`^(?:\[Not Secure\] )?<([^>]{1,48})> (.*)$`)
 	advancementPattern = regexp.MustCompile(`^(.{1,48}?) has (?:made the advancement|reached the goal|completed the challenge) \[(.+)\]$`)
+
+	lagPattern = regexp.MustCompile(`^Can't keep up!.* Running ([0-9]+)ms(?: or [0-9]+ ticks)? behind\b`)
 )
 
 var deathPhrases = []string{
@@ -79,6 +82,12 @@ func (e *consoleEvents) handleLine(raw string) {
 		return
 	}
 
+	if m := lagPattern.FindStringSubmatch(msg); m != nil {
+		if ms, err := strconv.ParseFloat(m[1], 64); err == nil {
+			e.sup.recordLagLine(ms)
+		}
+		return
+	}
 	if m := uuidPattern.FindStringSubmatch(msg); m != nil {
 		e.setUUID(m[1], m[2])
 		return

@@ -6,18 +6,46 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
 
+	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/indexers/fuego"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"golang.org/x/sync/errgroup"
 )
+
+// CurseForge file release channels
+const (
+	cfChannelRelease = 1
+	cfChannelBeta    = 2
+	cfChannelAlpha   = 3
+)
+
+// Names the release channels present in a file list
+func cfChannelsOf(files []fuego.File) []string {
+	names := []struct {
+		id   int
+		name string
+	}{{cfChannelRelease, "release"}, {cfChannelBeta, "beta"}, {cfChannelAlpha, "alpha"}}
+	var out []string
+	for _, ch := range names {
+		for i := range files {
+			if files[i].ReleaseType == ch.id {
+				out = append(out, ch.name)
+				break
+			}
+		}
+	}
+	return out
+}
 
 // Bounds concurrent modpack file downloads
 const packDownloadConcurrency = 8
@@ -137,7 +165,7 @@ func (p *Provisioner) curseForgeClient(ctx context.Context, cfg *storage.ServerP
 	return fuego.NewClient(apiKey, p.cfg), nil
 }
 
-// Picks pinned id, main file, or newest pack file
+// Picks pinned id, main file, or newest release file
 func (p *Provisioner) resolveCurseForgeFile(ctx context.Context, client *fuego.Client, pack *fuego.Modpack, fileID string) (*fuego.File, error) {
 	if fileID != "" {
 		id, err := strconv.Atoi(fileID)
@@ -158,13 +186,20 @@ func (p *Provisioner) resolveCurseForgeFile(ctx context.Context, client *fuego.C
 	if len(files) == 0 {
 		return nil, fmt.Errorf("CurseForge pack %q has no files", pack.Slug)
 	}
-	newest := files[0]
-	for _, f := range files[1:] {
-		if f.FileDate.After(newest.FileDate) {
-			newest = f
+	var newest *fuego.File
+	for i := range files {
+		if files[i].ReleaseType != cfChannelRelease {
+			continue
+		}
+		if newest == nil || files[i].FileDate.After(newest.FileDate) {
+			newest = &files[i]
 		}
 	}
-	return &newest, nil
+	if newest == nil {
+		return nil, fmt.Errorf("CurseForge pack %q has no release files (available: %s), pin a CurseForge File ID to install one",
+			pack.Slug, strings.Join(cfChannelsOf(files), ", "))
+	}
+	return newest, nil
 }
 
 // Prefers a ready-made server pack over the client file
@@ -389,8 +424,10 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 		return nil, fmt.Errorf("pack manifest declares no mod loader")
 	}
 
-	name, version, _ := strings.Cut(loaderID, "-")
-	loader := storage.ModLoader(name)
+	loader, version, ok := minecraft.CutPackLoaderID(loaderID)
+	if !ok {
+		return nil, fmt.Errorf("pack declares unknown loader %q", loaderID)
+	}
 	if _, ok := packLoaderInstallers[loader]; !ok {
 		return nil, fmt.Errorf("pack declares unsupported loader %q", loaderID)
 	}
@@ -509,6 +546,7 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Se
 	}
 
 	if spec := detect(); spec != nil {
+		p.adoptServerPackVersion(ctx, server, spec)
 		return p.finishLaunch(server, spec, server.ModLoader, "", server.MCVersion)
 	}
 
@@ -522,6 +560,7 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Se
 			return nil, fmt.Errorf("bundled installer failed: %w", err)
 		}
 		if spec := detect(); spec != nil {
+			p.adoptServerPackVersion(ctx, server, spec)
 			return p.finishLaunch(server, spec, server.ModLoader, "", server.MCVersion)
 		}
 	}
@@ -533,4 +572,103 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Se
 	}
 
 	return nil, errNoLaunchTarget
+}
+
+// Extracted tree outranks the user MC version guess
+// Absent evidence changes nothing, uncertainty never reports
+func (p *Provisioner) adoptServerPackVersion(ctx context.Context, server *storage.Server, spec *runtimespec.LaunchSpec) {
+	evidence := serverPackMCVersion(server.DataPath, spec)
+	if evidence == "" || evidence == server.MCVersion {
+		return
+	}
+	javaVersion := strconv.Itoa(docker.RequiredJavaMajor(evidence))
+	p.action(ctx, server, "provisioner", "provision.mc_version",
+		activity.Attrs{"from": server.MCVersion, "to": evidence},
+		"server pack ships MC %s, replacing configured %s", evidence, server.MCVersion)
+	if err := p.store.UpdateServerFields(ctx, server.ID, map[string]any{
+		"mc_version":   evidence,
+		"java_version": javaVersion,
+	}); err != nil {
+		p.progress(server, "warning: could not persist detected MC version: %v", err)
+	}
+	server.MCVersion = evidence
+	server.JavaVersion = javaVersion
+}
+
+// Local MC version evidence inside an extracted server pack
+func serverPackMCVersion(dataPath string, spec *runtimespec.LaunchSpec) string {
+	switch spec.Kind {
+	case runtimespec.LaunchKindJar:
+		if v := jarMCVersion(joinData(dataPath, spec.Jar)); v != "" {
+			return v
+		}
+		if spec.Jar != "server.jar" {
+			return jarMCVersion(joinData(dataPath, "server.jar"))
+		}
+	case runtimespec.LaunchKindArgsFile:
+		return forgeArgsMCVersion(spec.ArgsFile)
+	}
+	return ""
+}
+
+// Reads the version.json a vanilla server jar carries
+// World version distinguishes it from forge launch profiles
+func jarMCVersion(jarPath string) string {
+	r, err := zip.OpenReader(jarPath)
+	if err != nil {
+		return ""
+	}
+	defer r.Close()
+	for _, f := range r.File {
+		if f.Name != "version.json" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return ""
+		}
+		var v struct {
+			ID           string `json:"id"`
+			WorldVersion int    `json:"world_version"`
+		}
+		err = json.NewDecoder(io.LimitReader(rc, 1<<20)).Decode(&v)
+		rc.Close()
+		if err != nil || v.WorldVersion <= 0 {
+			return ""
+		}
+		return strings.TrimSpace(v.ID)
+	}
+	return ""
+}
+
+// Parses MC version from a forge libraries args path
+func forgeArgsMCVersion(argsFile string) string {
+	segs := strings.Split(filepath.ToSlash(argsFile), "/")
+	if len(segs) < 2 {
+		return ""
+	}
+	mc, _, ok := strings.Cut(segs[len(segs)-2], "-")
+	if !ok || !mcVersionLike(mc) {
+		return ""
+	}
+	return mc
+}
+
+// Accepts only the numeric 1.x family shape
+func mcVersionLike(v string) bool {
+	parts := strings.Split(v, ".")
+	if parts[0] != "1" || len(parts) < 2 || len(parts) > 3 {
+		return false
+	}
+	for _, part := range parts[1:] {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }

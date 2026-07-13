@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
@@ -402,21 +404,108 @@ func TestTCPHalfCloseThroughProxy(t *testing.T) {
 	}
 }
 
-// Verifies pre-1.7 pings are dropped without hanging
-func TestLegacyPingDropped(t *testing.T) {
-	_, proxyAddr := newTestProxy(t, nil)
+// Encodes a string as big endian UTF-16 bytes
+func utf16be(s string) []byte {
+	units := utf16.Encode([]rune(s))
+	b := make([]byte, 2*len(units))
+	for i, u := range units {
+		binary.BigEndian.PutUint16(b[2*i:], u)
+	}
+	return b
+}
 
-	client, err := net.DialTimeout("tcp", proxyAddr, 2*time.Second)
+// Builds a 1.6 style ping carrying the hostname
+func legacy16Ping(hostname string) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{0xFE, 0x01, 0xFA})
+	binary.Write(&buf, binary.BigEndian, uint16(len("MC|PingHost")))
+	buf.Write(utf16be("MC|PingHost"))
+	host := utf16be(hostname)
+	binary.Write(&buf, binary.BigEndian, uint16(7+len(host)))
+	buf.WriteByte(78)
+	binary.Write(&buf, binary.BigEndian, uint16(len(hostname)))
+	buf.Write(host)
+	binary.Write(&buf, binary.BigEndian, uint32(25565))
+	return buf.Bytes()
+}
+
+// Sends a legacy ping and decodes the kick payload
+func legacyPingExchange(t *testing.T, addr string, ping []byte) string {
+	t.Helper()
+	client, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		t.Fatalf("client dial: %v", err)
 	}
 	defer client.Close()
 
-	client.Write([]byte{0xFE, 0x01, 0xFA})
+	client.Write(ping)
 	client.SetReadDeadline(time.Now().Add(3 * time.Second))
-	buf := make([]byte, 1)
-	if _, err := client.Read(buf); err != io.EOF {
-		t.Fatalf("expected connection close for legacy ping, got %v", err)
+	reply, err := io.ReadAll(client)
+	if err != nil {
+		t.Fatalf("client read: %v", err)
+	}
+	if len(reply) < 3 || reply[0] != 0xFF {
+		t.Fatalf("expected kick packet, got %x", reply)
+	}
+	if units := int(binary.BigEndian.Uint16(reply[1:3])); len(reply[3:]) != units*2 {
+		t.Fatalf("length mismatch: header %d units, body %d bytes", units, len(reply[3:]))
+	}
+	return decodeUTF16BE(reply[3:])
+}
+
+// Verifies routed 1.6 pings get status without holding
+func TestLegacyPingSynthesized(t *testing.T) {
+	p, proxyAddr := newTestProxy(t, nil)
+	p.UpsertServerRoute(Route{
+		ServerID:    "server-1",
+		Hostname:    "mc.example.com",
+		BackendHost: "10.0.0.9",
+		BackendPort: 25565,
+		State:       RouteOffline,
+		Wakeable:    true,
+		MOTD:        "join to wake",
+		MaxPlayers:  7,
+	})
+
+	fields := strings.Split(legacyPingExchange(t, proxyAddr, legacy16Ping("mc.example.com")), "\x00")
+	if len(fields) != 6 || fields[0] != "§1" {
+		t.Fatalf("unexpected legacy response fields %q", fields)
+	}
+	if fields[2] != "Offline" || fields[3] != "join to wake" || fields[5] != "7" {
+		t.Fatalf("unexpected legacy status %q", fields)
+	}
+
+	stats := p.StatsSnapshots()["server-1"]
+	if stats.TotalConns != 1 || stats.StatusPings != 1 {
+		t.Fatalf("legacy ping not counted: %+v", stats)
+	}
+}
+
+// Verifies bare 0xFE beta pings get the old format
+func TestLegacyBetaPingSynthesized(t *testing.T) {
+	p, proxyAddr := newTestProxy(t, nil)
+	p.UpsertServerRoute(Route{
+		ServerID:    "server-1",
+		Hostname:    "mc.example.com",
+		BackendHost: "10.0.0.9",
+		BackendPort: 25565,
+		State:       RouteOnline,
+		MaxPlayers:  11,
+	})
+
+	payload := legacyPingExchange(t, proxyAddr, []byte{0xFE})
+	if payload != "mc.example.com§0§11" {
+		t.Fatalf("unexpected beta ping payload %q", payload)
+	}
+}
+
+// Verifies unrouted legacy pings still get an answer
+func TestLegacyPingUnrouted(t *testing.T) {
+	_, proxyAddr := newTestProxy(t, nil)
+
+	fields := strings.Split(legacyPingExchange(t, proxyAddr, []byte{0xFE, 0x01, 0xFA}), "\x00")
+	if len(fields) != 6 || fields[0] != "§1" || fields[2] != "DiscoPanel" {
+		t.Fatalf("unexpected legacy response fields %q", fields)
 	}
 }
 

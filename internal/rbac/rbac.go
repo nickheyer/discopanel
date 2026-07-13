@@ -83,6 +83,11 @@ func (e *Enforcer) SeedDefaultPolicies(anonymousEnabled bool) error {
 			{"user", ResourceTasks, ActionRead, "*"},
 			{"user", ResourceProxy, ActionRead, "*"},
 		},
+		"module": {
+			{"module", ResourceServers, ActionRead, "*"},
+			{"module", ResourceServerProperties, ActionRead, "*"},
+			{"module", ResourceModpacks, ActionRead, "*"},
+		},
 		"anonymous": {
 			{"anonymous", ResourceServers, ActionRead, "*"},
 			{"anonymous", ResourceServerProperties, ActionRead, "*"},

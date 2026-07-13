@@ -37,6 +37,21 @@ export const SERVER_EVENT_TYPES: EventTypeMeta[] = [
 		type: TriggeredEventType.PLAYER_LEAVE,
 		label: 'Player Leave',
 		description: 'When a player leaves (the player name is available as {{.player}})'
+	},
+	{
+		type: TriggeredEventType.PLAYER_DEATH,
+		label: 'Player Death',
+		description: 'When a player dies ({{.player}}, death message as {{.detail}})'
+	},
+	{
+		type: TriggeredEventType.PLAYER_ADVANCEMENT,
+		label: 'Player Advancement',
+		description: 'When a player earns an advancement ({{.player}}, advancement as {{.detail}})'
+	},
+	{
+		type: TriggeredEventType.PLAYER_CHAT,
+		label: 'Player Chat',
+		description: 'When a player chats ({{.player}}, message as {{.detail}})'
 	}
 ];
 

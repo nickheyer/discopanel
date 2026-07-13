@@ -56,13 +56,17 @@ func (s *ServerService) GetServerMetricsHistory(ctx context.Context, req *connec
 
 func dbMetricsSampleToProto(m *storage.MetricsSample) *v1.MetricsSample {
 	return &v1.MetricsSample{
-		Timestamp:  timestamppb.New(m.Timestamp),
-		Tps:        m.TPS,
-		Mspt:       m.MSPT,
-		Players:    int32(m.Players),
-		CpuPercent: m.CPUPercent,
-		MemoryMb:   m.MemoryMB,
-		HeapUsedMb: m.HeapUsedMB,
-		DiskBytes:  m.DiskBytes,
+		Timestamp:        timestamppb.New(m.Timestamp),
+		Tps:              m.TPS,
+		Mspt:             m.MSPT,
+		Players:          int32(m.Players),
+		CpuPercent:       m.CPUPercent,
+		MemoryMb:         m.MemoryMB,
+		HeapUsedMb:       m.HeapUsedMB,
+		DiskBytes:        m.DiskBytes,
+		ProxyActiveConns: m.ProxyActiveConns,
+		ProxyBytesIn:     m.ProxyBytesIn,
+		ProxyBytesOut:    m.ProxyBytesOut,
+		ProxyLogins:      m.ProxyLogins,
 	}
 }

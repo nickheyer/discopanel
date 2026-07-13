@@ -8,13 +8,14 @@ option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;dis
 
 // Container runtime state
 enum ServerStatus {
+  reserved 6;
+  reserved "SERVER_STATUS_RESTARTING";
   SERVER_STATUS_UNSPECIFIED = 0;
   SERVER_STATUS_CREATING = 1;
   SERVER_STATUS_STARTING = 2;
   SERVER_STATUS_RUNNING = 3;
   SERVER_STATUS_STOPPING = 4;
   SERVER_STATUS_STOPPED = 5;
-  SERVER_STATUS_RESTARTING = 6;
   SERVER_STATUS_ERROR = 7;
   SERVER_STATUS_UNHEALTHY = 8;
   SERVER_STATUS_PROVISIONING = 9;
@@ -129,6 +130,7 @@ message Server {
   double heap_used_mb = 43;
   double heap_max_mb = 44;
   double cpu_throttle_percent = 45; // Share of CFS periods throttled (0-100)
+  int32 class_count = 46; // Loaded JVM classes (agent-sourced)
 
   // Runtime image digest recorded at container create
   string runtime_digest = 48;
@@ -185,15 +187,6 @@ message ProxyListener {
   bool is_default = 6;
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
-}
-
-// Global proxy settings
-message ProxyConfig {
-  string id = 1;
-  bool enabled = 2;
-  string base_url = 3;
-  google.protobuf.Timestamp created_at = 4;
-  google.protobuf.Timestamp updated_at = 5;
 }
 
 // One RBAC permission entry

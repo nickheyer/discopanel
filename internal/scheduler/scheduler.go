@@ -44,6 +44,7 @@ type Scheduler struct {
 
 	// Execution tracking
 	runningExecutions map[string]context.CancelFunc // Maps execution id to its cancel func
+	inFlightTasks     map[string]bool               // Task ids currently executing
 	executionMu       sync.RWMutex
 
 	// Cron parser
@@ -85,6 +86,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 		checkInterval:     cfg.CheckInterval,
 		stopChan:          make(chan struct{}),
 		runningExecutions: make(map[string]context.CancelFunc),
+		inFlightTasks:     make(map[string]bool),
 		cronParser:        cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
 	}
 }
@@ -256,9 +258,36 @@ func (s *Scheduler) executeTaskForEvent(task *storage.ScheduledTask, eventType v
 	s.executeTask(task, "event", eventType, eventData)
 }
 
+// Marks a task in flight unless it already is
+func (s *Scheduler) tryBeginTask(taskID string) bool {
+	s.executionMu.Lock()
+	defer s.executionMu.Unlock()
+	if s.inFlightTasks[taskID] {
+		return false
+	}
+	s.inFlightTasks[taskID] = true
+	return true
+}
+
+// Clears the task's in-flight mark
+func (s *Scheduler) endTask(taskID string) {
+	s.executionMu.Lock()
+	delete(s.inFlightTasks, taskID)
+	s.executionMu.Unlock()
+}
+
 // Runs a single task, trigger names what drove it
 func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any) (*storage.TaskExecution, error) {
 	ctx := context.Background()
+
+	if !s.tryBeginTask(task.ID) {
+		s.log.Debug("Task %s: skipped, previous run still in flight", task.Name)
+		return nil, fmt.Errorf("task %q is already running", task.Name)
+	}
+	defer s.endTask(task.ID)
+
+	// Advance schedule before running so re-listing never doubles
+	s.updateNextRun(task)
 
 	// Check if server exists
 	server, err := s.store.GetServer(ctx, task.ServerID)
@@ -284,9 +313,6 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 		now := time.Now()
 		execution.EndedAt = &now
 		s.store.CreateTaskExecution(ctx, execution)
-
-		// Update next run time
-		s.updateNextRun(task)
 		return execution, nil
 	}
 
@@ -376,9 +402,6 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 
 	s.store.UpdateTaskExecution(ctx, execution)
 
-	// Update next run time
-	s.updateNextRun(task)
-
 	return execution, execErr
 }
 
@@ -418,11 +441,12 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 	return nil
 }
 
-// Calculates and updates the next run time
+// Calculates and persists the next run time
 func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
 	ctx := context.Background()
 	now := time.Now()
 	var nextRun *time.Time
+	var status storage.TaskStatus
 
 	switch task.Schedule {
 	case storage.ScheduleTypeCron:
@@ -439,15 +463,18 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
 			nextRun = &next
 		}
 	case storage.ScheduleTypeOnce:
-		// Once tasks don't repeat, disable after execution
+		// Once tasks never repeat, disable on first fire
 		task.Status = storage.TaskStatusDisabled
+		status = storage.TaskStatusDisabled
 		nextRun = nil
 	case storage.ScheduleTypeEvent:
 		// Event-triggered tasks have no time-based next run
 		nextRun = nil
 	}
 
-	s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
+	if err := s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now, status); err != nil {
+		s.log.Error("Task %s: failed to persist next run: %v", task.Name, err)
+	}
 }
 
 // Task type executors
@@ -590,8 +617,7 @@ func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Serv
 		return "", fmt.Errorf("webhook URL is required")
 	}
 
-	// Determine which event drove this run. Event-triggered runs pass the
-	// firing event directly - otherwise fall back to the first subscribed event or "manual"
+	// Event runs pass the firing event, schedules fall back
 	var event string
 	switch {
 	case eventType != v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED:
@@ -622,7 +648,7 @@ func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Serv
 	return output, fmt.Errorf("%s", result.ErrorMessage)
 }
 
-// Maps a server event type to the lowercase event name used in webhook payloads
+// Maps event types to lowercase webhook event names
 func webhookEventName(t v1.TriggeredEventType) string {
 	switch t {
 	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START:

@@ -292,22 +292,40 @@ func applyPropertyUpdates(config any, updates map[string]string) error {
 	return nil
 }
 
+// Category slugs on struct tags mapped to display order
+var propertyCategorySlugs = []struct {
+	Slug string
+	Name string
+}{
+	{"jvm", "JVM"},
+	{"server", "Server Settings"},
+	{"game", "Game Settings"},
+	{"world", "World Generation"},
+	{"rcon", "RCON"},
+	{"resourcepack", "Resource Pack"},
+	{"management", "Management Server"},
+	{"ops", "Ops/Admins"},
+	{"whitelist", "Whitelist"},
+	{"autopause", "Auto-Pause"},
+	{"autostop", "Auto-Stop"},
+	{"curseforge", "CurseForge"},
+	{"modrinth", "Modrinth"},
+	{"proxy", "Proxy"},
+}
+
+func propertyCategoryIndex(slug string) int {
+	for i, c := range propertyCategorySlugs {
+		if c.Slug == slug {
+			return i
+		}
+	}
+	return -1
+}
+
 func buildPropertyCategories(config any) ([]*v1.PropertyCategory, error) {
-	categories := []*v1.PropertyCategory{
-		{Name: "JVM", Properties: []*v1.ServerProperty{}},
-		{Name: "Server Settings", Properties: []*v1.ServerProperty{}},
-		{Name: "Game Settings", Properties: []*v1.ServerProperty{}},
-		{Name: "World Generation", Properties: []*v1.ServerProperty{}},
-		{Name: "RCON", Properties: []*v1.ServerProperty{}},
-		{Name: "Resource Pack", Properties: []*v1.ServerProperty{}},
-		{Name: "Management Server", Properties: []*v1.ServerProperty{}},
-		{Name: "Ops/Admins", Properties: []*v1.ServerProperty{}},
-		{Name: "Whitelist", Properties: []*v1.ServerProperty{}},
-		{Name: "Auto-Pause", Properties: []*v1.ServerProperty{}},
-		{Name: "Auto-Stop", Properties: []*v1.ServerProperty{}},
-		{Name: "CurseForge", Properties: []*v1.ServerProperty{}},
-		{Name: "Modrinth", Properties: []*v1.ServerProperty{}},
-		{Name: "Proxy", Properties: []*v1.ServerProperty{}},
+	categories := make([]*v1.PropertyCategory, 0, len(propertyCategorySlugs))
+	for _, c := range propertyCategorySlugs {
+		categories = append(categories, &v1.PropertyCategory{Name: c.Name, Properties: []*v1.ServerProperty{}})
 	}
 
 	configValue := reflect.ValueOf(config).Elem()
@@ -375,8 +393,8 @@ func buildPropertyCategories(config any) ([]*v1.PropertyCategory, error) {
 			prop.Options = getSelectOptions(jsonTag)
 		}
 
-		categoryIndex := getCategoryIndex(jsonTag)
-		if categoryIndex >= 0 && categoryIndex < len(categories) {
+		categoryIndex := propertyCategoryIndex(field.Tag.Get("category"))
+		if categoryIndex >= 0 {
 			categories[categoryIndex].Properties = append(categories[categoryIndex].Properties, prop)
 		}
 	}
@@ -409,90 +427,5 @@ func getSelectOptions(key string) []string {
 		return minecraft.PackLoaderNames()
 	default:
 		return []string{}
-	}
-}
-
-// Category a property belongs to
-func getCategoryIndex(key string) int {
-	switch key {
-	// JVM (0)
-	case "uid", "gid", "initMemory", "maxMemory", "tz",
-		"enableJmx", "jmxHost", "useAikarFlags", "useMeowiceFlags", "useZgcFlags",
-		"useFlareFlags", "useSimdFlags", "enableAgent",
-		"jvmOpts", "jvmXxOpts", "jvmDdOpts", "extraArgs":
-		return 0
-
-	// Server Settings (1)
-	case "customServer", "customJarExec", "eula", "motd", "icon", "overrideIcon", "serverName",
-		"serverPort", "stopDuration", "stopServerAnnounceDelay", "forceProvision",
-		"serverPropertiesEscapeUnicode", "bugReportLink", "customServerProperties":
-		return 1
-
-	// Game Settings (2)
-	case "difficulty", "maxPlayers", "allowNether", "announcePlayerAchievements",
-		"enableCommandBlock", "forceGamemode", "hardcore", "snooperEnabled", "maxBuildHeight",
-		"spawnAnimals", "spawnMonsters", "spawnNpcs", "spawnProtection", "viewDistance",
-		"mode", "pvp", "onlineMode", "allowFlight", "playerIdleTimeout", "syncChunkWrites",
-		"enableStatus", "entityBroadcastRangePercentage", "functionPermissionLevel",
-		"networkCompressionThreshold", "opPermissionLevel", "preventProxyConnections",
-		"useNativeTransport", "simulationDistance", "enableQuery", "queryPort",
-		"acceptsTransfers", "broadcastConsoleToOps", "enforceSecureProfile",
-		"hideOnlinePlayers", "logIps", "maxChainedNeighborUpdates", "pauseWhenEmptySeconds",
-		"rateLimit", "statusHeartbeatInterval":
-		return 2
-
-	// World Generation (3)
-	case "generateStructures", "maxWorldSize", "seed", "levelType", "generatorSettings", "level",
-		"regionFileCompression":
-		return 3
-
-	// RCON (4)
-	case "enableRcon", "rconPassword", "rconPort", "broadcastRconToOps", "rconCmdsStartup",
-		"rconCmdsOnConnect", "rconCmdsFirstConnect", "rconCmdsOnDisconnect", "rconCmdsLastDisconnect":
-		return 4
-
-	// Resource Pack (5)
-	case "resourcePack", "resourcePackSha1", "resourcePackEnforce", "resourcePackId", "resourcePackPrompt":
-		return 5
-
-	// Management Server (6)
-	case "managementServerAllowedOrigins", "managementServerEnabled", "managementServerHost",
-		"managementServerPort", "managementServerSecret", "managementServerTlsEnabled",
-		"managementServerTlsKeystore", "managementServerTlsKeystorePassword":
-		return 6
-
-	// Ops/Admins (7)
-	case "ops":
-		return 7
-
-	// Whitelist (8)
-	case "enableWhitelist", "whitelist", "overrideWhitelist", "enforceWhitelist":
-		return 8
-
-	// Auto-Pause (9)
-	case "enableAutopause", "autopauseTimeoutEst", "autopauseTimeoutInit":
-		return 9
-
-	// Auto-Stop (10)
-	case "enableAutostop", "autostopTimeoutEst", "autostopTimeoutInit":
-		return 10
-
-	// CurseForge (11)
-	case "cfApiKey", "cfPageUrl", "cfSlug", "cfFileId", "cfModpackZip",
-		"cfExcludeMods", "cfForceIncludeMods", "forgeVersion", "forgeInstaller", "forgeInstallerUrl":
-		return 11
-
-	// Modrinth (12)
-	case "modrinthModpack", "modrinthModpackVersionType", "modrinthVersion", "modrinthLoader",
-		"modrinthExcludeFiles", "modrinthForceIncludeFiles",
-		"modrinthProjects", "modrinthDownloadDependencies", "modrinthProjectsDefaultVersionType":
-		return 12
-
-	// Proxy (13)
-	case "enableWakeOnConnect", "enableProxyProtocol", "proxyPreserveHostname":
-		return 13
-
-	default:
-		return -1 // Unknown
 	}
 }

@@ -30,7 +30,7 @@ import (
 
 const (
 	// Default Minecraft server port inside containers
-	DefaultMinecraftPort = 25565
+	DefaultMinecraftPort = models.MinecraftDefaultPort
 
 	// Default RCON port inside containers
 	DefaultRCONPort = 25575
@@ -277,10 +277,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 
 	// Proxy servers always use default port internally
 	useProxy := server.ProxyHostname != ""
-	containerPort := server.Port
-	if useProxy {
-		containerPort = DefaultMinecraftPort
-	}
+	containerPort := server.InContainerPort()
 
 	c.log.Debug("Creating container for server %s with image %s", server.ID, imageName)
 

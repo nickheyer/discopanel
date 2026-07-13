@@ -3,20 +3,26 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/nickheyer/discopanel/internal/activity"
+	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/indexers/fuego"
 	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	"github.com/nickheyer/discopanel/pkg/upload"
+	utils "github.com/nickheyer/discopanel/pkg/utils"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -27,23 +33,81 @@ var _ discopanelv1connect.ModServiceHandler = (*ModService)(nil)
 type ModService struct {
 	store         *storage.Store
 	docker        *docker.Client
+	config        *config.Config
 	rec           *activity.Recorder
 	log           *logger.Logger
 	uploadManager *upload.Manager
+
+	cfNamesMu sync.Mutex
+	cfNames   map[string]string
+	cfSweeps  map[string]bool
 }
 
 // NewModService creates a new mod service
-func NewModService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, rec *activity.Recorder, log *logger.Logger) *ModService {
+func NewModService(store *storage.Store, docker *docker.Client, cfg *config.Config, uploadManager *upload.Manager, rec *activity.Recorder, log *logger.Logger) *ModService {
 	return &ModService{
 		store:         store,
 		docker:        docker,
+		config:        cfg,
 		rec:           rec,
 		log:           log,
 		uploadManager: uploadManager,
+		cfNames:       map[string]string{},
+		cfSweeps:      map[string]bool{},
 	}
 }
 
-// ListMods lists mods for a server
+// Stable mod id from server and file name
+func modEntryID(serverID, fileName string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+fileName)).String()
+}
+
+// Display name from a jar file name
+func modDisplayName(fileName string) string {
+	if ext := filepath.Ext(fileName); ext != "" {
+		return fileName[:len(fileName)-len(ext)]
+	}
+	return fileName
+}
+
+// Builds mod entries for every jar in one directory
+func scanModDir(serverID, dir string, loader storage.ModLoader, enabled bool) []*v1.Mod {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var mods []*v1.Mod
+	for _, file := range entries {
+		if file.IsDir() || !minecraft.IsValidModFile(file.Name(), loader) {
+			continue
+		}
+		info, err := file.Info()
+		if err != nil {
+			continue
+		}
+		mod := &v1.Mod{
+			Id:          modEntryID(serverID, file.Name()),
+			ServerId:    serverID,
+			FileName:    file.Name(),
+			DisplayName: modDisplayName(file.Name()),
+			Enabled:     enabled,
+			FileSize:    info.Size(),
+			UploadedAt:  timestamppb.New(info.ModTime()),
+		}
+		if meta, err := minecraft.ReadModJar(filepath.Join(dir, file.Name())); err == nil {
+			for i := range meta.Mods {
+				if meta.Mods[i].Declared {
+					mod.ModId = meta.Mods[i].ID
+					mod.Version = meta.Mods[i].Version
+					break
+				}
+			}
+		}
+		mods = append(mods, mod)
+	}
+	return mods
+}
+
 func (s *ModService) ListMods(ctx context.Context, req *connect.Request[v1.ListModsRequest]) (*connect.Response[v1.ListModsResponse], error) {
 	msg := req.Msg
 
@@ -59,87 +123,130 @@ func (s *ModService) ListMods(ctx context.Context, req *connect.Request[v1.ListM
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("this server type does not support mods"))
 	}
 
-	// Check if mods directory exists
-	mods := []*v1.Mod{}
-
-	// Read mods from active directory
-	if files, err := os.ReadDir(modsDir); err == nil {
-		for _, file := range files {
-			if file.IsDir() {
-				continue
-			}
-
-			// Check if this is a valid mod file
-			if !minecraft.IsValidModFile(file.Name(), server.ModLoader) {
-				continue
-			}
-
-			info, err := file.Info()
-			if err != nil {
-				continue
-			}
-
-			// Extract display name from filename (remove extension)
-			displayName := file.Name()
-			if ext := filepath.Ext(displayName); ext != "" {
-				displayName = displayName[:len(displayName)-len(ext)]
-			}
-
-			// Create mod entry with consistent ID generation
-			mod := &v1.Mod{
-				Id:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+file.Name())).String(),
-				ServerId:    msg.ServerId,
-				FileName:    file.Name(),
-				DisplayName: displayName,
-				Enabled:     true,
-				FileSize:    info.Size(),
-				UploadedAt:  timestamppb.New(info.ModTime()),
-			}
-
-			mods = append(mods, mod)
-		}
-	}
-
-	// Also check disabled mods directory
-	disabledDir := modsDir + "_disabled"
-	if files, err := os.ReadDir(disabledDir); err == nil {
-		for _, file := range files {
-			if file.IsDir() {
-				continue
-			}
-
-			if !minecraft.IsValidModFile(file.Name(), server.ModLoader) {
-				continue
-			}
-
-			info, err := file.Info()
-			if err != nil {
-				continue
-			}
-
-			// Extract display name from filename
-			displayName := file.Name()
-			if ext := filepath.Ext(displayName); ext != "" {
-				displayName = displayName[:len(displayName)-len(ext)]
-			}
-
-			mod := &v1.Mod{
-				Id:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+file.Name())).String(),
-				ServerId:    msg.ServerId,
-				FileName:    file.Name(),
-				DisplayName: displayName,
-				Enabled:     false,
-				FileSize:    info.Size(),
-				UploadedAt:  timestamppb.New(info.ModTime()),
-			}
-
-			mods = append(mods, mod)
-		}
-	}
+	mods := scanModDir(msg.ServerId, modsDir, server.ModLoader, true)
+	mods = append(mods, scanModDir(msg.ServerId, modsDir+"_disabled", server.ModLoader, false)...)
+	s.applyCFNames(ctx, msg.ServerId, modsDir, mods)
 
 	return connect.NewResponse(&v1.ListModsResponse{
 		Mods: mods,
 	}), nil
+}
+
+// Cache key ties an identity verdict to one file state
+func cfNameKey(path string, size int64) string {
+	return fmt.Sprintf("%s|%d", path, size)
+}
+
+// Applies cached CurseForge names and sweeps unknown jars once
+func (s *ModService) applyCFNames(ctx context.Context, serverID, modsDir string, mods []*v1.Mod) {
+	apiKey := ""
+	if global, _, err := s.store.GetGlobalSettings(ctx); err == nil && global != nil && global.CFAPIKey != nil {
+		apiKey = *global.CFAPIKey
+	}
+	if apiKey == "" {
+		return
+	}
+
+	dirFor := func(m *v1.Mod) string {
+		if m.Enabled {
+			return modsDir
+		}
+		return modsDir + "_disabled"
+	}
+
+	var unknown []*v1.Mod
+	s.cfNamesMu.Lock()
+	for _, m := range mods {
+		key := cfNameKey(filepath.Join(dirFor(m), m.FileName), m.FileSize)
+		if name, ok := s.cfNames[key]; ok {
+			if name != "" {
+				m.DisplayName = name
+			}
+		} else {
+			unknown = append(unknown, m)
+		}
+	}
+	sweeping := s.cfSweeps[serverID]
+	if len(unknown) > 0 && !sweeping {
+		s.cfSweeps[serverID] = true
+	}
+	s.cfNamesMu.Unlock()
+
+	if len(unknown) == 0 || sweeping {
+		return
+	}
+	paths := make(map[uint32]string, len(unknown))
+	files := make([]struct {
+		path string
+		size int64
+	}, 0, len(unknown))
+	for _, m := range unknown {
+		files = append(files, struct {
+			path string
+			size int64
+		}{filepath.Join(dirFor(m), m.FileName), m.FileSize})
+	}
+	go s.sweepCFNames(serverID, apiKey, files, paths)
+}
+
+// Fingerprints jars and records their CurseForge project names
+func (s *ModService) sweepCFNames(serverID, apiKey string, files []struct {
+	path string
+	size int64
+}, paths map[uint32]string) {
+	defer func() {
+		s.cfNamesMu.Lock()
+		delete(s.cfSweeps, serverID)
+		s.cfNamesMu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	prints := make([]uint32, 0, len(files))
+	for _, f := range files {
+		data, err := os.ReadFile(f.path)
+		if err != nil {
+			continue
+		}
+		fp := utils.CFFingerprint(data)
+		paths[fp] = cfNameKey(f.path, f.size)
+		prints = append(prints, fp)
+	}
+	if len(prints) == 0 {
+		return
+	}
+
+	client := fuego.NewClient(apiKey, s.config)
+	matches, err := client.GetFingerprintMatches(ctx, prints)
+	if err != nil {
+		s.log.Debug("CF fingerprint sweep failed: %v", err)
+		return
+	}
+	modByKey := map[string]int{}
+	modIDs := make([]int, 0, len(matches))
+	for _, m := range matches {
+		key := paths[uint32(m.File.FileFingerprint)]
+		if key == "" {
+			continue
+		}
+		modByKey[key] = m.File.ModID
+		modIDs = append(modIDs, m.File.ModID)
+	}
+	names := map[int]string{}
+	if len(modIDs) > 0 {
+		if mods, err := client.GetModsByIDs(ctx, modIDs); err == nil {
+			for i := range mods {
+				names[mods[i].ID] = mods[i].Name
+			}
+		}
+	}
+
+	s.cfNamesMu.Lock()
+	for _, key := range paths {
+		s.cfNames[key] = names[modByKey[key]]
+	}
+	s.cfNamesMu.Unlock()
 }
 
 // GetMod gets a specific mod
@@ -163,7 +270,7 @@ func (s *ModService) GetMod(ctx context.Context, req *connect.Request[v1.GetModR
 		for _, file := range files {
 			if !file.IsDir() && minecraft.IsValidModFile(file.Name(), server.ModLoader) {
 				// Generate the same ID as in ListMods to match
-				fileID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+file.Name())).String()
+				fileID := modEntryID(msg.ServerId, file.Name())
 				if fileID == msg.ModId {
 					info, _ := file.Info()
 
@@ -193,7 +300,7 @@ func (s *ModService) GetMod(ctx context.Context, req *connect.Request[v1.GetModR
 	if files, err := os.ReadDir(disabledDir); err == nil {
 		for _, file := range files {
 			if !file.IsDir() && minecraft.IsValidModFile(file.Name(), server.ModLoader) {
-				fileID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+file.Name())).String()
+				fileID := modEntryID(msg.ServerId, file.Name())
 				if fileID == msg.ModId {
 					info, _ := file.Info()
 
@@ -282,22 +389,12 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get mod info"))
 	}
 
-	// Use provided display name or derive from filename
-	displayName := msg.DisplayName
-	if displayName == "" {
-		displayName = originalFilename
-		if ext := filepath.Ext(displayName); ext != "" {
-			displayName = displayName[:len(displayName)-len(ext)]
-		}
-	}
-
 	// Create mod record
 	mod := &v1.Mod{
-		Id:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+originalFilename)).String(),
+		Id:          modEntryID(msg.ServerId, originalFilename),
 		ServerId:    msg.ServerId,
 		FileName:    originalFilename,
-		DisplayName: displayName,
-		Description: msg.Description,
+		DisplayName: modDisplayName(originalFilename),
 		Enabled:     true,
 		FileSize:    info.Size(),
 		UploadedAt:  timestamppb.New(info.ModTime()),
@@ -336,7 +433,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 		for _, file := range files {
 			if !file.IsDir() && minecraft.IsValidModFile(file.Name(), server.ModLoader) {
 				// Generate the same ID as in ListMods to match
-				fileID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+file.Name())).String()
+				fileID := modEntryID(msg.ServerId, file.Name())
 				if fileID == msg.ModId {
 					modFileName = file.Name()
 					currentlyEnabled = true
@@ -352,7 +449,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 		if files, err := os.ReadDir(disabledDir); err == nil {
 			for _, file := range files {
 				if !file.IsDir() && minecraft.IsValidModFile(file.Name(), server.ModLoader) {
-					fileID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+file.Name())).String()
+					fileID := modEntryID(msg.ServerId, file.Name())
 					if fileID == msg.ModId {
 						modFileName = file.Name()
 						currentlyEnabled = false
@@ -401,23 +498,12 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 		displayName = displayName[:len(displayName)-len(ext)]
 	}
 
-	// Use provided display name if given
-	if msg.DisplayName != nil && *msg.DisplayName != "" {
-		displayName = *msg.DisplayName
-	}
-
-	description := ""
-	if msg.Description != nil {
-		description = *msg.Description
-	}
-
 	return connect.NewResponse(&v1.UpdateModResponse{
 		Mod: &v1.Mod{
 			Id:          msg.ModId,
 			ServerId:    msg.ServerId,
 			FileName:    modFileName,
 			DisplayName: displayName,
-			Description: description,
 			Enabled:     finalEnabled,
 			FileSize:    modInfo.Size(),
 			UploadedAt:  timestamppb.New(modInfo.ModTime()),
@@ -448,7 +534,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 	if files, err := os.ReadDir(modsDir); err == nil {
 		for _, file := range files {
 			if !file.IsDir() && minecraft.IsValidModFile(file.Name(), server.ModLoader) {
-				fileID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+file.Name())).String()
+				fileID := modEntryID(msg.ServerId, file.Name())
 				if fileID == msg.ModId {
 					modPath := filepath.Join(modsDir, file.Name())
 					if err := os.Remove(modPath); err != nil {
@@ -468,7 +554,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 		if files, err := os.ReadDir(disabledDir); err == nil {
 			for _, file := range files {
 				if !file.IsDir() && minecraft.IsValidModFile(file.Name(), server.ModLoader) {
-					fileID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+file.Name())).String()
+					fileID := modEntryID(msg.ServerId, file.Name())
 					if fileID == msg.ModId {
 						modPath := filepath.Join(disabledDir, file.Name())
 						if err := os.Remove(modPath); err != nil {

@@ -60,6 +60,9 @@ func NewContext() *Context {
 
 // Derived from host fields
 func (ctx *Context) populateComputed() {
+	if ctx.Server != nil {
+		ctx.Server.ContainerPort = ctx.Server.InContainerPort()
+	}
 	if ctx.Host == nil {
 		ctx.Host = &Host{UID: os.Getuid(), GID: os.Getgid()}
 	}
@@ -176,6 +179,9 @@ func generateAliasesFromValue(val reflect.Value, prefix string, category Categor
 			if !field.IsExported() {
 				continue
 			}
+			if isSecretField(field) {
+				continue
+			}
 			if strings.Contains(field.Tag.Get("gorm"), "-") {
 				continue
 			}
@@ -209,7 +215,7 @@ func generateAliasesFromValue(val reflect.Value, prefix string, category Categor
 		aliases = append(aliases, Info{
 			Alias:        "{{" + prefix + "}}",
 			Path:         prefix,
-			Description:  generateDescription(prefix, ""),
+			Description:  generateDescription(prefix),
 			Category:     category,
 			ExampleValue: formatValue(val),
 			FieldType:    val.Type().String(),
@@ -217,6 +223,11 @@ func generateAliasesFromValue(val reflect.Value, prefix string, category Categor
 	}
 
 	return aliases
+}
+
+// Marks fields whose values must never resolve
+func isSecretField(field reflect.StructField) bool {
+	return field.Tag.Get("alias") == "secret"
 }
 
 // Finds field by json tag, returns string value
@@ -233,6 +244,9 @@ func getFieldValueByJSONName(val reflect.Value, jsonName string) string {
 	t := val.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+		if isSecretField(field) {
+			continue
+		}
 		jsonTag := field.Tag.Get("json")
 		if jsonTag == "" {
 			continue
@@ -267,8 +281,15 @@ func formatValue(v reflect.Value) string {
 	}
 }
 
-// Creates human-readable description from field name
-func generateDescription(fieldName, prefix string) string {
+// Creates human-readable description from an alias path
+func generateDescription(path string) string {
+	prefix := path
+	fieldName := path
+	if i := strings.LastIndex(path, "."); i >= 0 {
+		prefix = path[:i]
+		fieldName = path[i+1:]
+	}
+
 	// Converts CamelCase to words, handles acronyms
 	var words []string
 	var current strings.Builder
@@ -298,7 +319,7 @@ func generateDescription(fieldName, prefix string) string {
 
 	// Join and format
 	desc := strings.Join(words, " ")
-	desc = strings.ToLower(desc)
+	desc = strings.ToLower(strings.ReplaceAll(desc, "_", " "))
 
 	// Capitalize first letter
 	if len(desc) > 0 {
@@ -433,7 +454,7 @@ func resolvePath(val reflect.Value, path []string) string {
 	}
 }
 
-// Finds struct field by json tag, returns value
+// Finds struct field by json tag, secret fields stay unresolved
 func getFieldByJSONTag(val reflect.Value, jsonName string) reflect.Value {
 	if val.Kind() != reflect.Struct {
 		return reflect.Value{}
@@ -441,6 +462,9 @@ func getFieldByJSONTag(val reflect.Value, jsonName string) reflect.Value {
 	t := val.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+		if isSecretField(field) {
+			continue
+		}
 		jsonTag := field.Tag.Get("json")
 		if jsonTag == "" {
 			continue

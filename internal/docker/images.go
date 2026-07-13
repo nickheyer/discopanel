@@ -11,10 +11,10 @@ import (
 // Default discopanel-runtime repo, overridable via docker.runtime_image
 const DefaultRuntimeImage = "nickheyer/discopanel-runtime"
 
-// Java majors the runtime image publishes, sync with Makefile
+// Java majors the runtime image publishes, cmd/javamajors feeds consumers
 var SupportedJavaVersions = []int{8, 11, 17, 21, 25}
 
-// Majors with a published GraalVM variant, sync with Makefile
+// Majors with a published GraalVM variant, cmd/javamajors feeds consumers
 var GraalJavaVersions = []int{21, 25}
 
 // Resolves needed Java major, rounded up to nearest published image
@@ -23,6 +23,11 @@ func RequiredJavaMajor(mcVersion string) int {
 	if v, err := minecraft.GetJavaVersion(mcVersion); err == nil {
 		required, _ = strconv.Atoi(v)
 	}
+	return publishedJavaMajor(required)
+}
+
+// Rounds a Java major up to the nearest published image
+func publishedJavaMajor(required int) int {
 	if required <= 0 {
 		return SupportedJavaVersions[len(SupportedJavaVersions)-1]
 	}
@@ -73,10 +78,13 @@ func (c *Client) RuntimeImageForTag(tag string) string {
 	return c.runtimeRepository() + ":" + tag
 }
 
-// Returns the stored tag, else one derived from MC version
+// Stored tag wins, then resolved Java, then network lookup
 func (c *Client) DesiredImage(server *models.Server) string {
 	if server.DockerImage != "" {
 		return c.RuntimeImageForTag(server.DockerImage)
+	}
+	if major, err := strconv.Atoi(server.JavaVersion); err == nil && major > 0 {
+		return c.RuntimeImage(publishedJavaMajor(major))
 	}
 	return c.RuntimeImage(RequiredJavaMajor(server.MCVersion))
 }

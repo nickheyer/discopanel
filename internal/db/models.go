@@ -18,7 +18,7 @@ const (
 	StatusUnhealthy    ServerStatus = "unhealthy"
 	StatusCreating     ServerStatus = "creating"     // Container is being created/image pulled
 	StatusProvisioning ServerStatus = "provisioning" // Server files are being installed/updated
-	StatusPaused       ServerStatus = "paused"       // Container paused by autopause; wakes on connect
+	StatusPaused       ServerStatus = "paused"       // Container paused by autopause, wakes on connect
 )
 
 type ModLoader string
@@ -105,6 +105,7 @@ type Server struct {
 	DockerOverrides *v1.DockerOverrides  `json:"docker_overrides" gorm:"column:docker_overrides;type:text;serializer:json"` // Docker container overrides
 
 	// Runtime stats (not persisted to DB)
+	ContainerPort int     `json:"container_port" gorm:"-"` // In-container listen port, alias computed
 	MemoryUsage   float64 `json:"memory_usage" gorm:"-"`   // Current memory usage in MB
 	CPUPercent    float64 `json:"cpu_percent" gorm:"-"`    // Current CPU usage percentage (docker stats scale, 100 per core)
 	CPUCores      int     `json:"cpu_cores" gorm:"-"`      // CPU cores visible to the container
@@ -131,6 +132,7 @@ type Server struct {
 	HeapUsedMB         float64 `json:"heap_used_mb" gorm:"-"`         // JVM used heap
 	HeapMaxMB          float64 `json:"heap_max_mb" gorm:"-"`          // JVM max heap
 	CPUThrottlePercent float64 `json:"cpu_throttle_percent" gorm:"-"` // Share of CFS periods throttled
+	ClassCount         int     `json:"class_count" gorm:"-"`          // Loaded JVM classes
 }
 
 // Icon provenance values, uploads always win over pack art
@@ -138,6 +140,16 @@ const (
 	IconSourceUpload  = "upload"
 	IconSourceModpack = "modpack"
 )
+
+const MinecraftDefaultPort = 25565
+
+// Port the server listens on inside its container
+func (s *Server) InContainerPort() int {
+	if s.ProxyHostname != "" {
+		return MinecraftDefaultPort
+	}
+	return s.Port
+}
 
 // Returns default JVM heap sizing for a container limit
 func DefaultHeapForMemory(memoryMB int) (initMB, maxMB int) {
@@ -173,175 +185,181 @@ type MetricsSample struct {
 	MemoryMB   float64   `json:"memory_mb" gorm:"column:memory_mb"`
 	HeapUsedMB float64   `json:"heap_used_mb" gorm:"column:heap_used_mb"`
 	DiskBytes  int64     `json:"disk_bytes" gorm:"column:disk_bytes"`
+
+	// Proxy traffic, conns gauge and per window deltas
+	ProxyActiveConns int64 `json:"proxy_active_conns" gorm:"column:proxy_active_conns"`
+	ProxyBytesIn     int64 `json:"proxy_bytes_in" gorm:"column:proxy_bytes_in"`
+	ProxyBytesOut    int64 `json:"proxy_bytes_out" gorm:"column:proxy_bytes_out"`
+	ProxyLogins      int64 `json:"proxy_logins" gorm:"column:proxy_logins"`
 }
 
 type ServerProperties struct {
+	// Global settings reuse this table under a pseudo server id
 	ID        string    `json:"id" gorm:"primaryKey"`
 	ServerID  string    `json:"server_id" gorm:"not null;index;column:server_id"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
-	Server    *Server   `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 
 	// JVM and runtime settings passed as environment variables
-	UID             *int    `json:"uid" env:"UID" default:"1000" desc:"The linux user id to run as" input:"number" label:"User ID"`
-	GID             *int    `json:"gid" env:"GID" default:"1000" desc:"The linux group id to run as" input:"number" label:"Group ID"`
-	InitMemory      *string `json:"initMemory" env:"INIT_MEMORY" default:"" desc:"Initial Java heap (Xms), computed from the server memory settings" input:"text" label:"Initial Memory" system:"true"`
-	MaxMemory       *string `json:"maxMemory" env:"MAX_MEMORY" default:"" desc:"Maximum Java heap (Xmx), computed from the server memory settings" input:"text" label:"Maximum Memory" system:"true"`
-	TZ              *string `json:"tz" env:"TZ" default:"UTC" desc:"Timezone configuration" input:"text" label:"Timezone"`
-	EnableJMX       *bool   `json:"enableJmx" env:"ENABLE_JMX" default:"false" desc:"Enable remote JMX for profiling (port 7091)" input:"checkbox" label:"Enable JMX"`
-	EnableAgent     *bool   `json:"enableAgent" default:"true" desc:"Enable the DiscoPanel agent (live telemetry, console during boot, crash reporting; attaches a telemetry javaagent to the server JVM, any loader or version)" input:"checkbox" label:"Enable DiscoPanel Agent"`
-	JMXHost         *string `json:"jmxHost" env:"JMX_HOST" default:"" desc:"IP/host running the Docker container for JMX" input:"text" label:"JMX Host"`
-	UseAikarFlags   *bool   `json:"useAikarFlags" env:"USE_AIKAR_FLAGS" default:"true" desc:"Use Aikar's optimized JVM flags for GC tuning (applied by default unless disabled or MeowIce flags are enabled)" input:"checkbox" label:"Use Aikar Flags"`
-	UseMeowiceFlags *bool   `json:"useMeowiceFlags" env:"USE_MEOWICE_FLAGS" default:"false" desc:"Use MeowIce's JVM flags optimized for Java 17+" input:"checkbox" label:"Use MeowIce Flags"`
-	UseZGCFlags     *bool   `json:"useZgcFlags" env:"USE_ZGC_FLAGS" default:"false" desc:"Use generational ZGC instead of G1 (Java 21+, sub-millisecond pauses; often better for large modpacks)" input:"checkbox" label:"Use ZGC Flags"`
-	UseFlareFlags   *bool   `json:"useFlareFlags" env:"USE_FLARE_FLAGS" default:"false" desc:"Enable JVM flags for Flare profiling suite" input:"checkbox" label:"Use Flare Flags"`
-	UseSimdFlags    *bool   `json:"useSimdFlags" env:"USE_SIMD_FLAGS" default:"false" desc:"Support for optimized SIMD operations (Java 16+)" input:"checkbox" label:"Use SIMD Flags"`
-	JVMOpts         *string `json:"jvmOpts" env:"JVM_OPTS" default:"" desc:"General JVM options" input:"text" label:"JVM Options"`
-	JVMXXOpts       *string `json:"jvmXxOpts" env:"JVM_XX_OPTS" default:"" desc:"JVM -XX options" input:"text" label:"JVM XX Options"`
-	JVMDDOpts       *string `json:"jvmDdOpts" env:"JVM_DD_OPTS" default:"" desc:"Comma separated list of system properties as name=value pairs" input:"text" label:"JVM DD Options"`
-	ExtraArgs       *string `json:"extraArgs" env:"EXTRA_ARGS" default:"" desc:"Arguments passed to the server after the jar/args file" input:"text" label:"Extra Arguments"`
+	UID             *int    `json:"uid" env:"UID" default:"1000" desc:"The linux user id to run as" input:"number" label:"User ID" category:"jvm"`
+	GID             *int    `json:"gid" env:"GID" default:"1000" desc:"The linux group id to run as" input:"number" label:"Group ID" category:"jvm"`
+	InitMemory      *string `json:"initMemory" env:"INIT_MEMORY" default:"" desc:"Initial Java heap (Xms), computed from the server memory settings" input:"text" label:"Initial Memory" system:"true" category:"jvm"`
+	MaxMemory       *string `json:"maxMemory" env:"MAX_MEMORY" default:"" desc:"Maximum Java heap (Xmx), computed from the server memory settings" input:"text" label:"Maximum Memory" system:"true" category:"jvm"`
+	TZ              *string `json:"tz" env:"TZ" default:"UTC" desc:"Timezone configuration" input:"text" label:"Timezone" category:"jvm"`
+	EnableJMX       *bool   `json:"enableJmx" env:"ENABLE_JMX" default:"false" desc:"Enable remote JMX for profiling (port 7091)" input:"checkbox" label:"Enable JMX" category:"jvm"`
+	EnableAgent     *bool   `json:"enableAgent" default:"true" desc:"Enable the DiscoPanel agent (live telemetry, console during boot, crash reporting; attaches a telemetry javaagent to the server JVM, any loader or version)" input:"checkbox" label:"Enable DiscoPanel Agent" category:"jvm"`
+	JMXHost         *string `json:"jmxHost" env:"JMX_HOST" default:"" desc:"IP/host running the Docker container for JMX" input:"text" label:"JMX Host" category:"jvm"`
+	UseAikarFlags   *bool   `json:"useAikarFlags" env:"USE_AIKAR_FLAGS" default:"true" desc:"Use Aikar's optimized JVM flags for GC tuning (applied by default unless disabled or MeowIce flags are enabled)" input:"checkbox" label:"Use Aikar Flags" category:"jvm"`
+	UseMeowiceFlags *bool   `json:"useMeowiceFlags" env:"USE_MEOWICE_FLAGS" default:"false" desc:"Use MeowIce's JVM flags optimized for Java 17+" input:"checkbox" label:"Use MeowIce Flags" category:"jvm"`
+	UseZGCFlags     *bool   `json:"useZgcFlags" env:"USE_ZGC_FLAGS" default:"false" desc:"Use generational ZGC instead of G1 (Java 21+, sub-millisecond pauses; often better for large modpacks)" input:"checkbox" label:"Use ZGC Flags" category:"jvm"`
+	UseFlareFlags   *bool   `json:"useFlareFlags" env:"USE_FLARE_FLAGS" default:"false" desc:"Enable JVM flags for Flare profiling suite" input:"checkbox" label:"Use Flare Flags" category:"jvm"`
+	UseSimdFlags    *bool   `json:"useSimdFlags" env:"USE_SIMD_FLAGS" default:"false" desc:"Support for optimized SIMD operations (Java 16+)" input:"checkbox" label:"Use SIMD Flags" category:"jvm"`
+	JVMOpts         *string `json:"jvmOpts" env:"JVM_OPTS" default:"" desc:"General JVM options" input:"text" label:"JVM Options" category:"jvm"`
+	JVMXXOpts       *string `json:"jvmXxOpts" env:"JVM_XX_OPTS" default:"" desc:"JVM -XX options" input:"text" label:"JVM XX Options" category:"jvm"`
+	JVMDDOpts       *string `json:"jvmDdOpts" env:"JVM_DD_OPTS" default:"" desc:"Comma separated list of system properties as name=value pairs" input:"text" label:"JVM DD Options" category:"jvm"`
+	ExtraArgs       *string `json:"extraArgs" env:"EXTRA_ARGS" default:"" desc:"Arguments passed to the server after the jar/args file" input:"text" label:"Extra Arguments" category:"jvm"`
 
 	// Provisioning (consumed by the DiscoPanel provisioner when preparing server files)
-	EULA           *string `json:"eula" default:"TRUE" desc:"This MUST be set to TRUE" input:"checkbox" required:"true" label:"Accept EULA" system:"true"`
-	CustomServer   *string `json:"customServer" default:"" desc:"URL or data-dir path to a custom server jar" input:"text" label:"Custom Server JAR"`
-	CustomJarExec  *string `json:"customJarExec" default:"" desc:"Custom jar execution command (e.g. -cp classpath MainClass or -jar file.jar)" input:"text" label:"Custom JAR Execution"`
-	Icon           *string `json:"icon" default:"" desc:"URL to a server icon image (converted to server-icon.png)" input:"text" label:"Server Icon"`
-	OverrideIcon   *bool   `json:"overrideIcon" default:"false" desc:"Override existing server icon" input:"checkbox" label:"Override Icon"`
-	ForceProvision *bool   `json:"forceProvision" default:"false" desc:"Force full re-provisioning of server files on next start (cleared after start)" input:"checkbox" label:"Force Re-Provision" ephemeral:"true"`
+	EULA           *string `json:"eula" default:"TRUE" desc:"This MUST be set to TRUE" input:"checkbox" required:"true" label:"Accept EULA" system:"true" category:"server"`
+	CustomServer   *string `json:"customServer" default:"" desc:"URL or data-dir path to a custom server jar" input:"text" label:"Custom Server JAR" category:"server"`
+	CustomJarExec  *string `json:"customJarExec" default:"" desc:"Custom jar execution command (e.g. -cp classpath MainClass or -jar file.jar)" input:"text" label:"Custom JAR Execution" category:"server"`
+	Icon           *string `json:"icon" default:"" desc:"URL to a server icon image (converted to server-icon.png)" input:"text" label:"Server Icon" category:"server"`
+	OverrideIcon   *bool   `json:"overrideIcon" default:"false" desc:"Override existing server icon" input:"checkbox" label:"Override Icon" category:"server"`
+	ForceProvision *bool   `json:"forceProvision" default:"false" desc:"Force full re-provisioning of server files on next start (cleared after start)" input:"checkbox" label:"Force Re-Provision" ephemeral:"true" category:"server"`
 
 	// Written to server.properties by the provisioner before start
-	MOTD                           *string `json:"motd" prop:"motd" default:"" desc:"Server log in message" input:"text" label:"Message of the Day"`
-	Difficulty                     *string `json:"difficulty" prop:"difficulty" default:"easy" desc:"Difficulty level (peaceful,easy,normal,hard)" input:"select" label:"Difficulty"`
-	MaxPlayers                     *int    `json:"maxPlayers" prop:"max-players" default:"20" desc:"Maximum number of players" input:"number" label:"Max Players" system:"true"`
-	MaxWorldSize                   *int    `json:"maxWorldSize" prop:"max-world-size" default:"0" desc:"Maximum world size in blocks (radius)" input:"number" label:"Max World Size"`
-	AllowNether                    *bool   `json:"allowNether" prop:"allow-nether" default:"true" desc:"Allow players to travel to the Nether" input:"checkbox" label:"Allow Nether"`
-	AnnouncePlayerAchievements     *bool   `json:"announcePlayerAchievements" prop:"announce-player-achievements" default:"true" desc:"Announce player achievements" input:"checkbox" label:"Announce Player Achievements"`
-	EnableCommandBlock             *bool   `json:"enableCommandBlock" prop:"enable-command-block" default:"false" desc:"Enable command blocks" input:"checkbox" label:"Enable Command Blocks"`
-	ForceGamemode                  *bool   `json:"forceGamemode" prop:"force-gamemode" default:"false" desc:"Force players to join in default game mode" input:"checkbox" label:"Force Gamemode"`
-	GenerateStructures             *bool   `json:"generateStructures" prop:"generate-structures" default:"true" desc:"Generate structures like villages" input:"checkbox" label:"Generate Structures"`
-	Hardcore                       *bool   `json:"hardcore" prop:"hardcore" default:"false" desc:"Players set to spectator mode on death" input:"checkbox" label:"Hardcore Mode"`
-	SnooperEnabled                 *bool   `json:"snooperEnabled" prop:"snooper-enabled" default:"false" desc:"Send data to snoop.minecraft.net (legacy versions)" input:"checkbox" label:"Enable Snooper"`
-	MaxBuildHeight                 *int    `json:"maxBuildHeight" prop:"max-build-height" default:"256" desc:"Maximum building height (legacy versions)" input:"number" label:"Max Build Height"`
-	SpawnAnimals                   *bool   `json:"spawnAnimals" prop:"spawn-animals" default:"true" desc:"Allow animals to spawn" input:"checkbox" label:"Spawn Animals"`
-	SpawnMonsters                  *bool   `json:"spawnMonsters" prop:"spawn-monsters" default:"true" desc:"Allow monsters to spawn" input:"checkbox" label:"Spawn Monsters"`
-	SpawnNPCs                      *bool   `json:"spawnNpcs" prop:"spawn-npcs" default:"true" desc:"Allow villagers to spawn" input:"checkbox" label:"Spawn NPCs"`
-	SpawnProtection                *int    `json:"spawnProtection" prop:"spawn-protection" default:"0" desc:"Area that non-ops cannot edit (0 to disable)" input:"number" label:"Spawn Protection"`
-	ViewDistance                   *int    `json:"viewDistance" prop:"view-distance" default:"0" desc:"Server-side viewing distance in chunks" input:"number" label:"View Distance"`
-	Seed                           *string `json:"seed" prop:"level-seed" default:"" desc:"World generation seed" input:"text" label:"World Seed"`
-	Mode                           *string `json:"mode" prop:"gamemode" default:"survival" desc:"Game mode (creative,survival,adventure,spectator)" input:"select" label:"Game Mode"`
-	PVP                            *bool   `json:"pvp" prop:"pvp" default:"true" desc:"Enable player-vs-player mode" input:"checkbox" label:"Enable PVP"`
-	LevelType                      *string `json:"levelType" prop:"level-type" default:"minecraft:default" desc:"World generation type" input:"text" label:"Level Type"`
-	GeneratorSettings              *string `json:"generatorSettings" prop:"generator-settings" default:"" desc:"Additional world generation settings" input:"text" label:"Generator Settings"`
-	Level                          *string `json:"level" prop:"level-name" default:"world" desc:"World save name" input:"text" label:"World Name"`
-	OnlineMode                     *bool   `json:"onlineMode" prop:"online-mode" default:"true" desc:"Authenticate players against Minecraft account database" input:"checkbox" label:"Online Mode"`
-	AllowFlight                    *bool   `json:"allowFlight" prop:"allow-flight" default:"false" desc:"Allow flight in survival mode with mods" input:"checkbox" label:"Allow Flight"`
-	ServerName                     *string `json:"serverName" prop:"server-name" default:"" desc:"The server name" input:"text" label:"Server Name"`
-	ServerPort                     *int    `json:"serverPort" prop:"server-port" default:"25565" desc:"Server port (managed by DiscoPanel)" input:"number" label:"Server Port" system:"true"`
-	PlayerIdleTimeout              *int    `json:"playerIdleTimeout" prop:"player-idle-timeout" default:"0" desc:"Player idle timeout" input:"number" label:"Player Idle Timeout"`
-	SyncChunkWrites                *bool   `json:"syncChunkWrites" prop:"sync-chunk-writes" default:"true" desc:"Sync chunk writes" input:"checkbox" label:"Sync Chunk Writes"`
-	EnableStatus                   *bool   `json:"enableStatus" prop:"enable-status" default:"true" desc:"Enable server status" input:"checkbox" label:"Enable Status"`
-	EntityBroadcastRangePercentage *int    `json:"entityBroadcastRangePercentage" prop:"entity-broadcast-range-percentage" default:"0" desc:"Entity broadcast range percentage" input:"number" label:"Entity Broadcast Range Percentage"`
-	FunctionPermissionLevel        *int    `json:"functionPermissionLevel" prop:"function-permission-level" default:"0" desc:"Function permission level" input:"number" label:"Function Permission Level"`
-	NetworkCompressionThreshold    *int    `json:"networkCompressionThreshold" prop:"network-compression-threshold" default:"0" desc:"Network compression threshold" input:"number" label:"Network Compression Threshold"`
-	OpPermissionLevel              *int    `json:"opPermissionLevel" prop:"op-permission-level" default:"0" desc:"OP permission level" input:"number" label:"OP Permission Level"`
-	PreventProxyConnections        *bool   `json:"preventProxyConnections" prop:"prevent-proxy-connections" default:"false" desc:"Prevent proxy connections" input:"checkbox" label:"Prevent Proxy Connections"`
-	UseNativeTransport             *bool   `json:"useNativeTransport" prop:"use-native-transport" default:"true" desc:"Use native transport" input:"checkbox" label:"Use Native Transport"`
-	SimulationDistance             *int    `json:"simulationDistance" prop:"simulation-distance" default:"0" desc:"Simulation distance" input:"number" label:"Simulation Distance"`
-	EnableQuery                    *bool   `json:"enableQuery" prop:"enable-query" default:"true" desc:"Enable GameSpy query protocol" input:"checkbox" label:"Enable Query"`
-	QueryPort                      *int    `json:"queryPort" prop:"query.port" default:"25565" desc:"UDP port for GameSpy query" input:"number" label:"Query Port"`
-	AcceptsTransfers               *bool   `json:"acceptsTransfers" prop:"accepts-transfers" default:"false" desc:"Allow player transfers between servers" input:"checkbox" label:"Accepts Transfers"`
-	BroadcastConsoleToOps          *bool   `json:"broadcastConsoleToOps" prop:"broadcast-console-to-ops" default:"true" desc:"Broadcast console messages to ops" input:"checkbox" label:"Broadcast Console to OPs"`
-	BugReportLink                  *string `json:"bugReportLink" prop:"bug-report-link" default:"" desc:"Custom bug report URL" input:"text" label:"Bug Report Link"`
-	EnforceSecureProfile           *bool   `json:"enforceSecureProfile" prop:"enforce-secure-profile" default:"true" desc:"Require secure chat/profile" input:"checkbox" label:"Enforce Secure Profile"`
-	HideOnlinePlayers              *bool   `json:"hideOnlinePlayers" prop:"hide-online-players" default:"false" desc:"Hide online players from the server list" input:"checkbox" label:"Hide Online Players"`
-	LogIPs                         *bool   `json:"logIps" prop:"log-ips" default:"true" desc:"Log connecting player IPs" input:"checkbox" label:"Log Player IPs"`
-	MaxChainedNeighborUpdates      *int    `json:"maxChainedNeighborUpdates" prop:"max-chained-neighbor-updates" default:"1000000" desc:"Maximum chained neighbor updates" input:"number" label:"Max Chained Neighbor Updates"`
-	PauseWhenEmptySeconds          *int    `json:"pauseWhenEmptySeconds" prop:"pause-when-empty-seconds" default:"0" desc:"Pause game loop when server empty (seconds, 1.21.2+)" input:"number" label:"Pause When Empty"`
-	RateLimit                      *int    `json:"rateLimit" prop:"rate-limit" default:"0" desc:"Rate limit in packets per second" input:"number" label:"Rate Limit"`
-	RegionFileCompression          *string `json:"regionFileCompression" prop:"region-file-compression" default:"deflate" desc:"Compression type for region files" input:"text" label:"Region File Compression"`
-	ResourcePackID                 *string `json:"resourcePackId" prop:"resource-pack-id" default:"" desc:"Custom resource pack ID" input:"text" label:"Resource Pack ID"`
-	ResourcePackPrompt             *string `json:"resourcePackPrompt" prop:"resource-pack-prompt" default:"" desc:"Prompt shown when resource pack offered" input:"text" label:"Resource Pack Prompt"`
-	StatusHeartbeatInterval        *int    `json:"statusHeartbeatInterval" prop:"status-heartbeat-interval" default:"0" desc:"Status heartbeat interval (ms)" input:"number" label:"Status Heartbeat Interval"`
-	ServerPropertiesEscapeUnicode  *bool   `json:"serverPropertiesEscapeUnicode" default:"false" desc:"Escape unicode in server.properties (pre-1.20 compatibility)" input:"checkbox" label:"Escape Unicode in Server Properties"`
-	CustomServerProperties         *string `json:"customServerProperties" default:"" desc:"Extra newline delimited name=value pairs to be added to \"server.properties\"" input:"text" label:"Custom Server Properties"`
+	MOTD                           *string `json:"motd" prop:"motd" default:"" desc:"Server log in message" input:"text" label:"Message of the Day" category:"server"`
+	Difficulty                     *string `json:"difficulty" prop:"difficulty" default:"easy" desc:"Difficulty level (peaceful,easy,normal,hard)" input:"select" label:"Difficulty" category:"game"`
+	MaxPlayers                     *int    `json:"maxPlayers" prop:"max-players" default:"20" desc:"Maximum number of players" input:"number" label:"Max Players" system:"true" category:"game"`
+	MaxWorldSize                   *int    `json:"maxWorldSize" prop:"max-world-size" default:"0" desc:"Maximum world size in blocks (radius)" input:"number" label:"Max World Size" category:"world"`
+	AllowNether                    *bool   `json:"allowNether" prop:"allow-nether" default:"true" desc:"Allow players to travel to the Nether" input:"checkbox" label:"Allow Nether" category:"game"`
+	AnnouncePlayerAchievements     *bool   `json:"announcePlayerAchievements" prop:"announce-player-achievements" default:"true" desc:"Announce player achievements" input:"checkbox" label:"Announce Player Achievements" category:"game"`
+	EnableCommandBlock             *bool   `json:"enableCommandBlock" prop:"enable-command-block" default:"false" desc:"Enable command blocks" input:"checkbox" label:"Enable Command Blocks" category:"game"`
+	ForceGamemode                  *bool   `json:"forceGamemode" prop:"force-gamemode" default:"false" desc:"Force players to join in default game mode" input:"checkbox" label:"Force Gamemode" category:"game"`
+	GenerateStructures             *bool   `json:"generateStructures" prop:"generate-structures" default:"true" desc:"Generate structures like villages" input:"checkbox" label:"Generate Structures" category:"world"`
+	Hardcore                       *bool   `json:"hardcore" prop:"hardcore" default:"false" desc:"Players set to spectator mode on death" input:"checkbox" label:"Hardcore Mode" category:"game"`
+	SnooperEnabled                 *bool   `json:"snooperEnabled" prop:"snooper-enabled" default:"false" desc:"Send data to snoop.minecraft.net (legacy versions)" input:"checkbox" label:"Enable Snooper" category:"game"`
+	MaxBuildHeight                 *int    `json:"maxBuildHeight" prop:"max-build-height" default:"256" desc:"Maximum building height (legacy versions)" input:"number" label:"Max Build Height" category:"game"`
+	SpawnAnimals                   *bool   `json:"spawnAnimals" prop:"spawn-animals" default:"true" desc:"Allow animals to spawn" input:"checkbox" label:"Spawn Animals" category:"game"`
+	SpawnMonsters                  *bool   `json:"spawnMonsters" prop:"spawn-monsters" default:"true" desc:"Allow monsters to spawn" input:"checkbox" label:"Spawn Monsters" category:"game"`
+	SpawnNPCs                      *bool   `json:"spawnNpcs" prop:"spawn-npcs" default:"true" desc:"Allow villagers to spawn" input:"checkbox" label:"Spawn NPCs" category:"game"`
+	SpawnProtection                *int    `json:"spawnProtection" prop:"spawn-protection" default:"0" desc:"Area that non-ops cannot edit (0 to disable)" input:"number" label:"Spawn Protection" category:"game"`
+	ViewDistance                   *int    `json:"viewDistance" prop:"view-distance" default:"0" desc:"Server-side viewing distance in chunks" input:"number" label:"View Distance" category:"game"`
+	Seed                           *string `json:"seed" prop:"level-seed" default:"" desc:"World generation seed" input:"text" label:"World Seed" category:"world"`
+	Mode                           *string `json:"mode" prop:"gamemode" default:"survival" desc:"Game mode (creative,survival,adventure,spectator)" input:"select" label:"Game Mode" category:"game"`
+	PVP                            *bool   `json:"pvp" prop:"pvp" default:"true" desc:"Enable player-vs-player mode" input:"checkbox" label:"Enable PVP" category:"game"`
+	LevelType                      *string `json:"levelType" prop:"level-type" default:"minecraft:default" desc:"World generation type" input:"text" label:"Level Type" category:"world"`
+	GeneratorSettings              *string `json:"generatorSettings" prop:"generator-settings" default:"" desc:"Additional world generation settings" input:"text" label:"Generator Settings" category:"world"`
+	Level                          *string `json:"level" prop:"level-name" default:"world" desc:"World save name" input:"text" label:"World Name" category:"world"`
+	OnlineMode                     *bool   `json:"onlineMode" prop:"online-mode" default:"true" desc:"Authenticate players against Minecraft account database" input:"checkbox" label:"Online Mode" category:"game"`
+	AllowFlight                    *bool   `json:"allowFlight" prop:"allow-flight" default:"false" desc:"Allow flight in survival mode with mods" input:"checkbox" label:"Allow Flight" category:"game"`
+	ServerName                     *string `json:"serverName" prop:"server-name" default:"" desc:"The server name" input:"text" label:"Server Name" category:"server"`
+	ServerPort                     *int    `json:"serverPort" prop:"server-port" default:"25565" desc:"Server port (managed by DiscoPanel)" input:"number" label:"Server Port" system:"true" category:"server"`
+	PlayerIdleTimeout              *int    `json:"playerIdleTimeout" prop:"player-idle-timeout" default:"0" desc:"Player idle timeout" input:"number" label:"Player Idle Timeout" category:"game"`
+	SyncChunkWrites                *bool   `json:"syncChunkWrites" prop:"sync-chunk-writes" default:"true" desc:"Sync chunk writes" input:"checkbox" label:"Sync Chunk Writes" category:"game"`
+	EnableStatus                   *bool   `json:"enableStatus" prop:"enable-status" default:"true" desc:"Enable server status" input:"checkbox" label:"Enable Status" category:"game"`
+	EntityBroadcastRangePercentage *int    `json:"entityBroadcastRangePercentage" prop:"entity-broadcast-range-percentage" default:"0" desc:"Entity broadcast range percentage" input:"number" label:"Entity Broadcast Range Percentage" category:"game"`
+	FunctionPermissionLevel        *int    `json:"functionPermissionLevel" prop:"function-permission-level" default:"0" desc:"Function permission level" input:"number" label:"Function Permission Level" category:"game"`
+	NetworkCompressionThreshold    *int    `json:"networkCompressionThreshold" prop:"network-compression-threshold" default:"0" desc:"Network compression threshold" input:"number" label:"Network Compression Threshold" category:"game"`
+	OpPermissionLevel              *int    `json:"opPermissionLevel" prop:"op-permission-level" default:"0" desc:"OP permission level" input:"number" label:"OP Permission Level" category:"game"`
+	PreventProxyConnections        *bool   `json:"preventProxyConnections" prop:"prevent-proxy-connections" default:"false" desc:"Prevent proxy connections" input:"checkbox" label:"Prevent Proxy Connections" category:"game"`
+	UseNativeTransport             *bool   `json:"useNativeTransport" prop:"use-native-transport" default:"true" desc:"Use native transport" input:"checkbox" label:"Use Native Transport" category:"game"`
+	SimulationDistance             *int    `json:"simulationDistance" prop:"simulation-distance" default:"0" desc:"Simulation distance" input:"number" label:"Simulation Distance" category:"game"`
+	EnableQuery                    *bool   `json:"enableQuery" prop:"enable-query" default:"true" desc:"Enable GameSpy query protocol" input:"checkbox" label:"Enable Query" category:"game"`
+	QueryPort                      *int    `json:"queryPort" prop:"query.port" default:"25565" desc:"UDP port for GameSpy query" input:"number" label:"Query Port" category:"game"`
+	AcceptsTransfers               *bool   `json:"acceptsTransfers" prop:"accepts-transfers" default:"false" desc:"Allow player transfers between servers" input:"checkbox" label:"Accepts Transfers" category:"game"`
+	BroadcastConsoleToOps          *bool   `json:"broadcastConsoleToOps" prop:"broadcast-console-to-ops" default:"true" desc:"Broadcast console messages to ops" input:"checkbox" label:"Broadcast Console to OPs" category:"game"`
+	BugReportLink                  *string `json:"bugReportLink" prop:"bug-report-link" default:"" desc:"Custom bug report URL" input:"text" label:"Bug Report Link" category:"server"`
+	EnforceSecureProfile           *bool   `json:"enforceSecureProfile" prop:"enforce-secure-profile" default:"true" desc:"Require secure chat/profile" input:"checkbox" label:"Enforce Secure Profile" category:"game"`
+	HideOnlinePlayers              *bool   `json:"hideOnlinePlayers" prop:"hide-online-players" default:"false" desc:"Hide online players from the server list" input:"checkbox" label:"Hide Online Players" category:"game"`
+	LogIPs                         *bool   `json:"logIps" prop:"log-ips" default:"true" desc:"Log connecting player IPs" input:"checkbox" label:"Log Player IPs" category:"game"`
+	MaxChainedNeighborUpdates      *int    `json:"maxChainedNeighborUpdates" prop:"max-chained-neighbor-updates" default:"1000000" desc:"Maximum chained neighbor updates" input:"number" label:"Max Chained Neighbor Updates" category:"game"`
+	PauseWhenEmptySeconds          *int    `json:"pauseWhenEmptySeconds" prop:"pause-when-empty-seconds" default:"0" desc:"Pause game loop when server empty (seconds, 1.21.2+)" input:"number" label:"Pause When Empty" category:"game"`
+	RateLimit                      *int    `json:"rateLimit" prop:"rate-limit" default:"0" desc:"Rate limit in packets per second" input:"number" label:"Rate Limit" category:"game"`
+	RegionFileCompression          *string `json:"regionFileCompression" prop:"region-file-compression" default:"deflate" desc:"Compression type for region files" input:"text" label:"Region File Compression" category:"world"`
+	ResourcePackID                 *string `json:"resourcePackId" prop:"resource-pack-id" default:"" desc:"Custom resource pack ID" input:"text" label:"Resource Pack ID" category:"resourcepack"`
+	ResourcePackPrompt             *string `json:"resourcePackPrompt" prop:"resource-pack-prompt" default:"" desc:"Prompt shown when resource pack offered" input:"text" label:"Resource Pack Prompt" category:"resourcepack"`
+	StatusHeartbeatInterval        *int    `json:"statusHeartbeatInterval" prop:"status-heartbeat-interval" default:"0" desc:"Status heartbeat interval (ms)" input:"number" label:"Status Heartbeat Interval" category:"game"`
+	ServerPropertiesEscapeUnicode  *bool   `json:"serverPropertiesEscapeUnicode" default:"false" desc:"Escape unicode in server.properties (pre-1.20 compatibility)" input:"checkbox" label:"Escape Unicode in Server Properties" category:"server"`
+	CustomServerProperties         *string `json:"customServerProperties" default:"" desc:"Extra newline delimited name=value pairs to be added to \"server.properties\"" input:"text" label:"Custom Server Properties" category:"server"`
 
 	// Shutdown behavior (panel-side stop flow)
-	StopDuration            *int `json:"stopDuration" default:"60" desc:"Seconds to wait for graceful shutdown before force kill" input:"number" label:"Stop Duration"`
-	StopServerAnnounceDelay *int `json:"stopServerAnnounceDelay" default:"0" desc:"Seconds between in-game shutdown announcement and stop" input:"number" label:"Stop Server Announce Delay"`
+	StopDuration            *int `json:"stopDuration" default:"60" desc:"Seconds to wait for graceful shutdown before force kill" input:"number" label:"Stop Duration" category:"server"`
+	StopServerAnnounceDelay *int `json:"stopServerAnnounceDelay" default:"0" desc:"Seconds between in-game shutdown announcement and stop" input:"number" label:"Stop Server Announce Delay" category:"server"`
 
 	// Custom Resource Pack
-	ResourcePack        *string `json:"resourcePack" prop:"resource-pack" default:"" desc:"Link to custom resource pack" input:"text" label:"Resource Pack URL"`
-	ResourcePackSHA1    *string `json:"resourcePackSha1" prop:"resource-pack-sha1" default:"" desc:"Checksum for custom resource pack" input:"text" label:"Resource Pack SHA1"`
-	ResourcePackEnforce *bool   `json:"resourcePackEnforce" prop:"require-resource-pack" default:"false" desc:"Enforce resource pack on clients" input:"checkbox" label:"Enforce Resource Pack"`
+	ResourcePack        *string `json:"resourcePack" prop:"resource-pack" default:"" desc:"Link to custom resource pack" input:"text" label:"Resource Pack URL" category:"resourcepack"`
+	ResourcePackSHA1    *string `json:"resourcePackSha1" prop:"resource-pack-sha1" default:"" desc:"Checksum for custom resource pack" input:"text" label:"Resource Pack SHA1" category:"resourcepack"`
+	ResourcePackEnforce *bool   `json:"resourcePackEnforce" prop:"require-resource-pack" default:"false" desc:"Enforce resource pack on clients" input:"checkbox" label:"Enforce Resource Pack" category:"resourcepack"`
 
 	// Management Server (vanilla 1.21.9+ server.properties)
-	ManagementServerAllowedOrigins      *string `json:"managementServerAllowedOrigins" prop:"management-server-allowed-origins" default:"" desc:"Allowed CORS origins for management server" input:"text" label:"Management Server Allowed Origins"`
-	ManagementServerEnabled             *bool   `json:"managementServerEnabled" prop:"management-server-enabled" default:"false" desc:"Enable management server interface" input:"checkbox" label:"Enable Management Server"`
-	ManagementServerHost                *string `json:"managementServerHost" prop:"management-server-host" default:"0.0.0.0" desc:"Host address for management server" input:"text" label:"Management Server Host"`
-	ManagementServerPort                *int    `json:"managementServerPort" prop:"management-server-port" default:"0" desc:"Port for management server" input:"number" label:"Management Server Port"`
-	ManagementServerSecret              *string `json:"managementServerSecret" prop:"management-server-secret" default:"" desc:"Shared secret for management server authentication" input:"password" label:"Management Server Secret"`
-	ManagementServerTLSEnabled          *bool   `json:"managementServerTlsEnabled" prop:"management-server-tls-enabled" default:"false" desc:"Enable TLS for management server" input:"checkbox" label:"Management Server TLS Enabled"`
-	ManagementServerTLSKeystore         *string `json:"managementServerTlsKeystore" prop:"management-server-tls-keystore" default:"" desc:"Path to TLS keystore" input:"text" label:"Management Server TLS Keystore"`
-	ManagementServerTLSKeystorePassword *string `json:"managementServerTlsKeystorePassword" prop:"management-server-tls-keystore-password" default:"" desc:"Password for TLS keystore" input:"password" label:"Management Server TLS Keystore Password"`
+	ManagementServerAllowedOrigins      *string `json:"managementServerAllowedOrigins" prop:"management-server-allowed-origins" default:"" desc:"Allowed CORS origins for management server" input:"text" label:"Management Server Allowed Origins" category:"management"`
+	ManagementServerEnabled             *bool   `json:"managementServerEnabled" prop:"management-server-enabled" default:"false" desc:"Enable management server interface" input:"checkbox" label:"Enable Management Server" category:"management"`
+	ManagementServerHost                *string `json:"managementServerHost" prop:"management-server-host" default:"0.0.0.0" desc:"Host address for management server" input:"text" label:"Management Server Host" category:"management"`
+	ManagementServerPort                *int    `json:"managementServerPort" prop:"management-server-port" default:"0" desc:"Port for management server" input:"number" label:"Management Server Port" category:"management"`
+	ManagementServerSecret              *string `json:"managementServerSecret" prop:"management-server-secret" default:"" desc:"Shared secret for management server authentication" input:"password" label:"Management Server Secret" category:"management"`
+	ManagementServerTLSEnabled          *bool   `json:"managementServerTlsEnabled" prop:"management-server-tls-enabled" default:"false" desc:"Enable TLS for management server" input:"checkbox" label:"Management Server TLS Enabled" category:"management"`
+	ManagementServerTLSKeystore         *string `json:"managementServerTlsKeystore" prop:"management-server-tls-keystore" default:"" desc:"Path to TLS keystore" input:"text" label:"Management Server TLS Keystore" category:"management"`
+	ManagementServerTLSKeystorePassword *string `json:"managementServerTlsKeystorePassword" prop:"management-server-tls-keystore-password" default:"" desc:"Password for TLS keystore" input:"password" label:"Management Server TLS Keystore Password" category:"management"`
 
 	// Ops / Admins (provisioner writes ops.json, resolving usernames to UUIDs)
-	Ops *string `json:"ops" default:"" desc:"Comma-separated list of operator usernames/UUIDs" input:"text" label:"Operators"`
+	Ops *string `json:"ops" default:"" desc:"Comma-separated list of operator usernames/UUIDs" input:"text" label:"Operators" category:"ops"`
 
 	// Whitelist (provisioner writes whitelist.json, resolving usernames to UUIDs)
-	EnableWhitelist   *bool   `json:"enableWhitelist" prop:"white-list" default:"false" desc:"Enable server whitelist" input:"checkbox" label:"Enable Whitelist"`
-	Whitelist         *string `json:"whitelist" default:"" desc:"Comma-separated list of usernames/UUIDs" input:"text" label:"Whitelist Players"`
-	OverrideWhitelist *bool   `json:"overrideWhitelist" default:"false" desc:"Regenerate whitelist on each startup" input:"checkbox" label:"Override Whitelist"`
-	EnforceWhitelist  *bool   `json:"enforceWhitelist" prop:"enforce-whitelist" default:"false" desc:"Enforce whitelist changes immediately" input:"checkbox" label:"Enforce Whitelist"`
+	EnableWhitelist   *bool   `json:"enableWhitelist" prop:"white-list" default:"false" desc:"Enable server whitelist" input:"checkbox" label:"Enable Whitelist" category:"whitelist"`
+	Whitelist         *string `json:"whitelist" default:"" desc:"Comma-separated list of usernames/UUIDs" input:"text" label:"Whitelist Players" category:"whitelist"`
+	OverrideWhitelist *bool   `json:"overrideWhitelist" default:"false" desc:"Regenerate whitelist on each startup" input:"checkbox" label:"Override Whitelist" category:"whitelist"`
+	EnforceWhitelist  *bool   `json:"enforceWhitelist" prop:"enforce-whitelist" default:"false" desc:"Enforce whitelist changes immediately" input:"checkbox" label:"Enforce Whitelist" category:"whitelist"`
 
 	// RCON
-	EnableRCON             *bool   `json:"enableRcon" prop:"enable-rcon" default:"true" desc:"Enable RCON support (required for console, metrics and backups)" input:"checkbox" label:"Enable RCON"`
-	RCONPassword           *string `json:"rconPassword" prop:"rcon.password" default:"" desc:"RCON password (MUST be changed)" input:"password" required:"true" label:"RCON Password"`
-	RCONPort               *int    `json:"rconPort" prop:"rcon.port" default:"25575" desc:"RCON port" input:"number" label:"RCON Port"`
-	BroadcastRCONToOps     *bool   `json:"broadcastRconToOps" prop:"broadcast-rcon-to-ops" default:"false" desc:"Broadcast RCON to ops" input:"checkbox" label:"Broadcast RCON to OPs"`
-	RCONCmdsStartup        *string `json:"rconCmdsStartup" default:"" desc:"RCON commands to execute when the server becomes healthy" input:"text" label:"RCON Commands on Startup"`
-	RCONCmdsOnConnect      *string `json:"rconCmdsOnConnect" default:"" desc:"RCON commands to execute on client connect" input:"text" label:"RCON Commands on Connect"`
-	RCONCmdsFirstConnect   *string `json:"rconCmdsFirstConnect" default:"" desc:"RCON commands to execute on first client connect" input:"text" label:"RCON Commands on First Connect"`
-	RCONCmdsOnDisconnect   *string `json:"rconCmdsOnDisconnect" default:"" desc:"RCON commands to execute on client disconnect" input:"text" label:"RCON Commands on Disconnect"`
-	RCONCmdsLastDisconnect *string `json:"rconCmdsLastDisconnect" default:"" desc:"RCON commands to execute on last client disconnect" input:"text" label:"RCON Commands on Last Disconnect"`
+	EnableRCON             *bool   `json:"enableRcon" prop:"enable-rcon" default:"true" desc:"Enable RCON support (required for console, metrics and backups)" input:"checkbox" label:"Enable RCON" category:"rcon"`
+	RCONPassword           *string `json:"rconPassword" prop:"rcon.password" default:"" desc:"RCON password (MUST be changed)" input:"password" required:"true" label:"RCON Password" category:"rcon"`
+	RCONPort               *int    `json:"rconPort" prop:"rcon.port" default:"25575" desc:"RCON port" input:"number" label:"RCON Port" category:"rcon"`
+	BroadcastRCONToOps     *bool   `json:"broadcastRconToOps" prop:"broadcast-rcon-to-ops" default:"false" desc:"Broadcast RCON to ops" input:"checkbox" label:"Broadcast RCON to OPs" category:"rcon"`
+	RCONCmdsStartup        *string `json:"rconCmdsStartup" default:"" desc:"RCON commands to execute when the server becomes healthy" input:"text" label:"RCON Commands on Startup" category:"rcon"`
+	RCONCmdsOnConnect      *string `json:"rconCmdsOnConnect" default:"" desc:"RCON commands to execute on client connect" input:"text" label:"RCON Commands on Connect" category:"rcon"`
+	RCONCmdsFirstConnect   *string `json:"rconCmdsFirstConnect" default:"" desc:"RCON commands to execute on first client connect" input:"text" label:"RCON Commands on First Connect" category:"rcon"`
+	RCONCmdsOnDisconnect   *string `json:"rconCmdsOnDisconnect" default:"" desc:"RCON commands to execute on client disconnect" input:"text" label:"RCON Commands on Disconnect" category:"rcon"`
+	RCONCmdsLastDisconnect *string `json:"rconCmdsLastDisconnect" default:"" desc:"RCON commands to execute on last client disconnect" input:"text" label:"RCON Commands on Last Disconnect" category:"rcon"`
 
 	// Auto-Pause, panel-side, requires server behind the DiscoPanel proxy
-	EnableAutopause      *bool `json:"enableAutopause" default:"false" desc:"Pause the container when idle; wakes on player connect (proxied servers only)" input:"checkbox" label:"Enable Auto-Pause"`
-	AutopauseTimeoutEst  *int  `json:"autopauseTimeoutEst" default:"3600" desc:"Time between last disconnect and pausing (seconds)" input:"number" label:"Auto-Pause Timeout (Established)"`
-	AutopauseTimeoutInit *int  `json:"autopauseTimeoutInit" default:"600" desc:"Time between server start and pausing if no client connects (seconds)" input:"number" label:"Auto-Pause Timeout (Initial)"`
+	EnableAutopause      *bool `json:"enableAutopause" default:"false" desc:"Pause the container when idle; wakes on player connect (proxied servers only)" input:"checkbox" label:"Enable Auto-Pause" category:"autopause"`
+	AutopauseTimeoutEst  *int  `json:"autopauseTimeoutEst" default:"3600" desc:"Time between last disconnect and pausing (seconds)" input:"number" label:"Auto-Pause Timeout (Established)" category:"autopause"`
+	AutopauseTimeoutInit *int  `json:"autopauseTimeoutInit" default:"600" desc:"Time between server start and pausing if no client connects (seconds)" input:"number" label:"Auto-Pause Timeout (Initial)" category:"autopause"`
 
 	// Auto-Stop (panel-side)
-	EnableAutostop      *bool `json:"enableAutostop" default:"false" desc:"Stop the server when idle" input:"checkbox" label:"Enable Auto-Stop"`
-	AutostopTimeoutEst  *int  `json:"autostopTimeoutEst" default:"3600" desc:"Time between last disconnect and stopping (seconds)" input:"number" label:"Auto-Stop Timeout (Established)"`
-	AutostopTimeoutInit *int  `json:"autostopTimeoutInit" default:"1800" desc:"Time between server start and stopping if no client connects (seconds)" input:"number" label:"Auto-Stop Timeout (Initial)"`
+	EnableAutostop      *bool `json:"enableAutostop" default:"false" desc:"Stop the server when idle" input:"checkbox" label:"Enable Auto-Stop" category:"autostop"`
+	AutostopTimeoutEst  *int  `json:"autostopTimeoutEst" default:"3600" desc:"Time between last disconnect and stopping (seconds)" input:"number" label:"Auto-Stop Timeout (Established)" category:"autostop"`
+	AutostopTimeoutInit *int  `json:"autostopTimeoutInit" default:"1800" desc:"Time between server start and stopping if no client connects (seconds)" input:"number" label:"Auto-Stop Timeout (Initial)" category:"autostop"`
 
 	// Proxy (panel-side, requires the DiscoPanel proxy)
-	EnableWakeOnConnect   *bool `json:"enableWakeOnConnect" default:"false" desc:"Keep this server joinable while stopped; joining starts it up (proxied servers only)" input:"checkbox" label:"Wake on Connect"`
-	EnableProxyProtocol   *bool `json:"enableProxyProtocol" default:"false" desc:"Send PROXY protocol v2 headers so the server sees real client IPs; the server software must expect proxy protocol (e.g. Paper's proxy-protocol setting) or connections will fail" input:"checkbox" label:"Send PROXY Protocol"`
-	ProxyPreserveHostname *bool `json:"proxyPreserveHostname" default:"false" desc:"Forward the hostname players connected with instead of rewriting it to localhost (needed by hostname-aware plugins and Floodgate)" input:"checkbox" label:"Preserve Client Hostname"`
+	EnableWakeOnConnect   *bool `json:"enableWakeOnConnect" default:"false" desc:"Keep this server joinable while stopped; joining starts it up (proxied servers only)" input:"checkbox" label:"Wake on Connect" category:"proxy"`
+	EnableProxyProtocol   *bool `json:"enableProxyProtocol" default:"false" desc:"Send PROXY protocol v2 headers so the server sees real client IPs; the server software must expect proxy protocol (e.g. Paper's proxy-protocol setting) or connections will fail" input:"checkbox" label:"Send PROXY Protocol" category:"proxy"`
+	ProxyPreserveHostname *bool `json:"proxyPreserveHostname" default:"false" desc:"Forward the hostname players connected with instead of rewriting it to localhost (needed by hostname-aware plugins and Floodgate)" input:"checkbox" label:"Preserve Client Hostname" category:"proxy"`
 
 	// Forge / NeoForge
-	ForgeVersion      *string `json:"forgeVersion" default:"" desc:"Specific Forge/NeoForge version to install" input:"text" label:"Forge Version"`
-	ForgeInstaller    *string `json:"forgeInstaller" default:"" desc:"Data-dir path to a pre-downloaded Forge installer" input:"text" label:"Forge Installer"`
-	ForgeInstallerURL *string `json:"forgeInstallerUrl" default:"" desc:"URL to download Forge installer" input:"text" label:"Forge Installer URL"`
+	ForgeVersion      *string `json:"forgeVersion" default:"" desc:"Specific Forge/NeoForge version to install" input:"text" label:"Forge Version" category:"curseforge"`
+	ForgeInstaller    *string `json:"forgeInstaller" default:"" desc:"Data-dir path to a pre-downloaded Forge installer" input:"text" label:"Forge Installer" category:"curseforge"`
+	ForgeInstallerURL *string `json:"forgeInstallerUrl" default:"" desc:"URL to download Forge installer" input:"text" label:"Forge Installer URL" category:"curseforge"`
 
 	// CurseForge modpacks
-	CFAPIKey           *string `json:"cfApiKey" default:"" desc:"CurseForge API Key (https://console.curseforge.com/#/api-keys)" input:"password" label:"CurseForge API Key"`
-	CFPageURL          *string `json:"cfPageUrl" default:"" desc:"URL to modpack or specific file" input:"text" label:"CurseForge Page URL"`
-	CFSlug             *string `json:"cfSlug" default:"" desc:"Modpack slug identifier" input:"text" label:"CurseForge Slug"`
-	CFFileID           *string `json:"cfFileId" default:"" desc:"Modpack file numerical ID" input:"text" label:"CurseForge File ID"`
-	CFModpackZip       *string `json:"cfModpackZip" default:"" desc:"Data-dir path to unpublished modpack zip" input:"text" label:"CurseForge Modpack Zip"`
-	CFExcludeMods      *string `json:"cfExcludeMods" default:"" desc:"Comma/space delimited list of mod slugs/IDs to exclude" input:"text" label:"CurseForge Exclude Mods"`
-	CFForceIncludeMods *string `json:"cfForceIncludeMods" default:"" desc:"Comma/space delimited list of mod slugs/IDs to include" input:"text" label:"CurseForge Force Include Mods"`
+	CFAPIKey           *string `json:"cfApiKey" default:"" desc:"CurseForge API Key (https://console.curseforge.com/#/api-keys)" input:"password" label:"CurseForge API Key" category:"curseforge"`
+	CFPageURL          *string `json:"cfPageUrl" default:"" desc:"URL to modpack or specific file" input:"text" label:"CurseForge Page URL" category:"curseforge"`
+	CFSlug             *string `json:"cfSlug" default:"" desc:"Modpack slug identifier" input:"text" label:"CurseForge Slug" category:"curseforge"`
+	CFFileID           *string `json:"cfFileId" default:"" desc:"Modpack file numerical ID" input:"text" label:"CurseForge File ID" category:"curseforge"`
+	CFModpackZip       *string `json:"cfModpackZip" default:"" desc:"Data-dir path to unpublished modpack zip" input:"text" label:"CurseForge Modpack Zip" category:"curseforge"`
+	CFExcludeMods      *string `json:"cfExcludeMods" default:"" desc:"Comma/space delimited list of mod slugs/IDs to exclude" input:"text" label:"CurseForge Exclude Mods" category:"curseforge"`
+	CFForceIncludeMods *string `json:"cfForceIncludeMods" default:"" desc:"Comma/space delimited list of mod slugs/IDs to include" input:"text" label:"CurseForge Force Include Mods" category:"curseforge"`
 
 	// Modrinth modpacks and projects
-	ModrinthModpack                    *string `json:"modrinthModpack" default:"" desc:"Modrinth modpack project slug, ID, or URL" input:"text" label:"Modrinth Modpack"`
-	ModrinthModpackVersionType         *string `json:"modrinthModpackVersionType" default:"release" desc:"Version type for modpack (release, beta, alpha)" input:"select" label:"Modrinth Modpack Version Type"`
-	ModrinthVersion                    *string `json:"modrinthVersion" default:"" desc:"Specific version ID or number" input:"text" label:"Modrinth Version"`
-	ModrinthLoader                     *string `json:"modrinthLoader" default:"" desc:"Mod loader for narrowing versions (forge, neoforge, fabric, quilt)" input:"select" label:"Modrinth Loader"`
-	ModrinthExcludeFiles               *string `json:"modrinthExcludeFiles" default:"" desc:"Comma or newline delimited list of partial file names to exclude" input:"text" label:"Exclude Files"`
-	ModrinthForceIncludeFiles          *string `json:"modrinthForceIncludeFiles" default:"" desc:"Comma or newline delimited list of partial file names to force include" input:"text" label:"Force Include Files"`
-	ModrinthProjects                   *string `json:"modrinthProjects" default:"" desc:"Comma or newline delimited list of Modrinth project slugs or IDs to install as mods" input:"text" label:"Modrinth Projects"`
-	ModrinthDownloadDependencies       *string `json:"modrinthDownloadDependencies" default:"none" desc:"Dependency download mode (none, required, optional)" input:"select" label:"Modrinth Download Dependencies"`
-	ModrinthProjectsDefaultVersionType *string `json:"modrinthProjectsDefaultVersionType" default:"release" desc:"Default version type to select (release, beta, alpha)" input:"select" label:"Modrinth Default Version Type"`
+	ModrinthModpack                    *string `json:"modrinthModpack" default:"" desc:"Modrinth modpack project slug, ID, or URL" input:"text" label:"Modrinth Modpack" category:"modrinth"`
+	ModrinthModpackVersionType         *string `json:"modrinthModpackVersionType" default:"release" desc:"Version type for modpack (release, beta, alpha)" input:"select" label:"Modrinth Modpack Version Type" category:"modrinth"`
+	ModrinthVersion                    *string `json:"modrinthVersion" default:"" desc:"Specific version ID or number" input:"text" label:"Modrinth Version" category:"modrinth"`
+	ModrinthLoader                     *string `json:"modrinthLoader" default:"" desc:"Mod loader for narrowing versions (forge, neoforge, fabric, quilt)" input:"select" label:"Modrinth Loader" category:"modrinth"`
+	ModrinthExcludeFiles               *string `json:"modrinthExcludeFiles" default:"" desc:"Comma or newline delimited list of partial file names to exclude" input:"text" label:"Exclude Files" category:"modrinth"`
+	ModrinthForceIncludeFiles          *string `json:"modrinthForceIncludeFiles" default:"" desc:"Comma or newline delimited list of partial file names to force include" input:"text" label:"Force Include Files" category:"modrinth"`
+	ModrinthProjects                   *string `json:"modrinthProjects" default:"" desc:"Comma or newline delimited list of Modrinth project slugs or IDs to install as mods" input:"text" label:"Modrinth Projects" category:"modrinth"`
+	ModrinthDownloadDependencies       *string `json:"modrinthDownloadDependencies" default:"none" desc:"Dependency download mode (none, required, optional)" input:"select" label:"Modrinth Download Dependencies" category:"modrinth"`
+	ModrinthProjectsDefaultVersionType *string `json:"modrinthProjectsDefaultVersionType" default:"release" desc:"Default version type to select (release, beta, alpha)" input:"select" label:"Modrinth Default Version Type" category:"modrinth"`
 }
 
 type Mod struct {
@@ -757,7 +775,7 @@ type Module struct {
 	// Creator tracking and module API token
 	CreatedBy      string `json:"created_by" gorm:"column:created_by"`
 	TokenID        string `json:"token_id" gorm:"column:token_id"`
-	TokenPlaintext string `json:"-" gorm:"column:token_plaintext"`
+	TokenPlaintext string `json:"-" gorm:"-"`
 
 	// Relationships
 	Server   *Server         `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`

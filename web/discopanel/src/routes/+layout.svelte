@@ -130,33 +130,48 @@
 					}
 				}
 			}
-			if (page.url.pathname !== '/login') {
-				// Full first fetch seeds live statuses for the sidebar
-				serversStore.fetchServers(false, true).catch((err) => {
-					console.error('Failed to fetch initial servers:', err);
-				});
-				if (!statusPollingInterval) {
-					statusPollingInterval = setInterval(() => {
-						if (page.url.pathname !== '/login') {
-							serversStore.fetchServers(true);
-						}
-					}, 10000);
-				}
-			}
 		} catch (err) {
 			loading = false;
 			console.debug(`DiscoPanel auth bootstrap error: ${err}`);
 		}
 	}
 
+	function stopPolling() {
+		if (statusPollingInterval) {
+			clearInterval(statusPollingInterval);
+			statusPollingInterval = null;
+		}
+	}
+
+	let sessionKey = $derived.by(() => {
+		if (loading) return null;
+		if (page.url.pathname === '/login') return null;
+		const auth = $authStore;
+		const enabled = auth.localAuthEnabled || auth.oidcEnabled;
+		if (enabled && !auth.isAuthenticated && !auth.anonymousAccessEnabled) return null;
+		return auth.token ?? 'anon';
+	});
+
+	let activeSessionKey: string | null = null;
+
+	$effect(() => {
+		const key = sessionKey;
+		if (key === activeSessionKey) return;
+		activeSessionKey = key;
+		stopPolling();
+		if (key === null) return;
+		// Full first fetch seeds live statuses for the sidebar
+		serversStore.fetchServers(false, true).catch((err) => {
+			console.error('Failed to fetch initial servers:', err);
+		});
+		statusPollingInterval = setInterval(() => {
+			serversStore.fetchServers(true);
+		}, 10000);
+	});
+
 	onMount(() => {
 		bootstrap();
-		return () => {
-			if (statusPollingInterval) {
-				clearInterval(statusPollingInterval);
-				statusPollingInterval = null;
-			}
-		};
+		return () => stopPolling();
 	});
 </script>
 

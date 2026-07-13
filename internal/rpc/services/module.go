@@ -76,39 +76,6 @@ func dbModuleTemplateTypeToProto(t storage.ModuleTemplateType) v1.ModuleTemplate
 	}
 }
 
-// func protoModuleTemplateTypeToDB(t v1.ModuleTemplateType) storage.ModuleTemplateType {
-// 	switch t {
-// 	case v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN:
-// 		return storage.ModuleTemplateTypeBuiltin
-// 	case v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_CUSTOM:
-// 		return storage.ModuleTemplateTypeCustom
-// 	default:
-// 		return storage.ModuleTemplateTypeCustom
-// 	}
-// }
-
-// func dbModuleProtocolToProto(p storage.ModuleProtocol) v1.ModuleProtocol {
-// 	switch p {
-// 	case storage.ModuleProtocolTCP:
-// 		return v1.ModuleProtocol_MODULE_PROTOCOL_TCP
-// 	case storage.ModuleProtocolUDP:
-// 		return v1.ModuleProtocol_MODULE_PROTOCOL_UDP
-// 	default:
-// 		return v1.ModuleProtocol_MODULE_PROTOCOL_UNSPECIFIED
-// 	}
-// }
-
-// func protoModuleProtocolToDB(p v1.ModuleProtocol) storage.ModuleProtocol {
-// 	switch p {
-// 	case v1.ModuleProtocol_MODULE_PROTOCOL_TCP:
-// 		return storage.ModuleProtocolTCP
-// 	case v1.ModuleProtocol_MODULE_PROTOCOL_UDP:
-// 		return storage.ModuleProtocolUDP
-// 	default:
-// 		return storage.ModuleProtocolTCP
-// 	}
-// }
-
 func dbModuleStatusToProto(s storage.ModuleStatus) v1.ModuleStatus {
 	switch s {
 	case storage.ModuleStatusStopped:
@@ -230,7 +197,7 @@ func (s *ModuleService) applyModuleStats(ctx context.Context, m *storage.Module)
 	m.MemoryUsage = stats.MemoryUsage
 }
 
-// resolveCreatedByUsername looks up the username for a module's CreatedBy user ID
+// Looks up the username behind a module's creator id
 func (s *ModuleService) resolveCreatedByUsername(ctx context.Context, userID string) string {
 	if userID == "" {
 		return ""
@@ -477,42 +444,50 @@ func (s *ModuleService) ListModules(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list modules: %w", err))
 	}
 
-	// Enrich with server and template names, and update status from Docker
+	servers, err := s.store.ListServers(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list servers: %w", err))
+	}
+	serversByID := make(map[string]*storage.Server, len(servers))
+	for _, srv := range servers {
+		serversByID[srv.ID] = srv
+	}
+	templates, err := s.store.ListModuleTemplates(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list templates: %w", err))
+	}
+	templateNames := make(map[string]string, len(templates))
+	for _, t := range templates {
+		templateNames[t.ID] = t.Name
+	}
+	usernames := map[string]string{}
+
+	fullStats := msg.FullStats != nil && *msg.FullStats
 	var protoModules []*v1.Module
 	for _, m := range modules {
-		// Get actual status from Docker and update if different
-		if m.ContainerID != "" {
-			actualStatus, err := s.moduleManager.GetModuleStatus(ctx, m.ID)
-			if err == nil && actualStatus != m.Status {
+		// Live docker state serves the response, never the row
+		if fullStats && m.ContainerID != "" {
+			if actualStatus, err := s.moduleManager.GetModuleStatus(ctx, m.ID); err == nil {
 				m.Status = actualStatus
-				s.store.UpdateModule(ctx, m)
-			}
-		} else if m.Status == storage.ModuleStatusCreating {
-			// If no container but status is Creating, check if creation stalled
-			// This can happen if container creation failed silently
-			// Give it some grace period (30 seconds) before marking as error
-			if time.Since(m.UpdatedAt) > 30*time.Second {
-				m.Status = storage.ModuleStatusError
-				s.store.UpdateModule(ctx, m)
 			}
 		}
-
-		s.applyModuleStats(ctx, m)
+		if m.ContainerID == "" && m.Status == storage.ModuleStatusCreating && time.Since(m.UpdatedAt) > 30*time.Second {
+			m.Status = storage.ModuleStatusError
+		}
+		if fullStats {
+			s.applyModuleStats(ctx, m)
+		}
 
 		serverName := ""
 		serverProxyHostname := ""
-		if server, err := s.store.GetServer(ctx, m.ServerID); err == nil {
-			serverName = server.Name
-			serverProxyHostname = server.ProxyHostname
+		if srv := serversByID[m.ServerID]; srv != nil {
+			serverName = srv.Name
+			serverProxyHostname = srv.ProxyHostname
 		}
-
-		templateName := ""
-		if template, err := s.store.GetModuleTemplate(ctx, m.TemplateID); err == nil {
-			templateName = template.Name
+		if _, ok := usernames[m.CreatedBy]; !ok {
+			usernames[m.CreatedBy] = s.resolveCreatedByUsername(ctx, m.CreatedBy)
 		}
-
-		createdByUsername := s.resolveCreatedByUsername(ctx, m.CreatedBy)
-		protoModules = append(protoModules, dbModuleToProto(m, serverName, templateName, serverProxyHostname, createdByUsername))
+		protoModules = append(protoModules, dbModuleToProto(m, serverName, templateNames[m.TemplateID], serverProxyHostname, usernames[m.CreatedBy]))
 	}
 
 	return connect.NewResponse(&v1.ListModulesResponse{
@@ -658,18 +633,9 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		RestartAfterInit:      msg.RestartAfterInit,
 	}
 
-	// Generate module API token tied to the creating user
+	// Manager mints a scoped token at container create
 	if user := auth.GetUserFromContext(ctx); user != nil {
 		module.CreatedBy = user.ID
-		if s.authManager != nil {
-			plaintext, token, err := s.authManager.GenerateModuleToken(ctx, user.ID, msg.Name, moduleID)
-			if err != nil {
-				s.log.Error("Failed to generate module token: %v", err)
-			} else {
-				module.TokenID = token.ID
-				module.TokenPlaintext = plaintext
-			}
-		}
 	}
 
 	// Use template defaults for access URLs if not provided
@@ -731,8 +697,6 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
 
-	needsRecreate := false
-
 	// Update fields if provided
 	if msg.Name != nil {
 		module.Name = *msg.Name
@@ -741,22 +705,13 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		module.Config = *msg.Config
 	}
 	if msg.EnvOverrides != nil {
-		if *msg.EnvOverrides != module.EnvOverrides {
-			module.EnvOverrides = *msg.EnvOverrides
-			needsRecreate = true
-		}
+		module.EnvOverrides = *msg.EnvOverrides
 	}
 	if msg.VolumeOverrides != nil {
-		if *msg.VolumeOverrides != module.VolumeOverrides {
-			module.VolumeOverrides = *msg.VolumeOverrides
-			needsRecreate = true
-		}
+		module.VolumeOverrides = *msg.VolumeOverrides
 	}
 	if msg.Memory != nil {
-		if int(*msg.Memory) != module.Memory {
-			module.Memory = int(*msg.Memory)
-			needsRecreate = true
-		}
+		module.Memory = int(*msg.Memory)
 	}
 	if msg.CpuLimit != nil {
 		module.CPULimit = *msg.CpuLimit
@@ -796,7 +751,6 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		}
 
 		module.Ports = msg.Ports
-		needsRecreate = true
 	}
 	if len(msg.Dependencies) > 0 {
 		module.Dependencies = msg.Dependencies
@@ -817,25 +771,16 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		module.Metadata = msg.Metadata
 	}
 	if msg.CmdOverride != nil {
-		if *msg.CmdOverride != module.CmdOverride {
-			module.CmdOverride = *msg.CmdOverride
-			needsRecreate = true
-		}
+		module.CmdOverride = *msg.CmdOverride
 	}
 	if len(msg.AccessUrls) > 0 {
 		module.AccessUrls = msg.AccessUrls
 	}
 	if msg.Uid != nil {
-		if *msg.Uid != module.UID {
-			module.UID = *msg.Uid
-			needsRecreate = true
-		}
+		module.UID = *msg.Uid
 	}
 	if msg.Gid != nil {
-		if *msg.Gid != module.GID {
-			module.GID = *msg.Gid
-			needsRecreate = true
-		}
+		module.GID = *msg.Gid
 	}
 	if msg.InitCommand != nil {
 		module.InitCommand = *msg.InitCommand
@@ -851,8 +796,8 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update module: %w", err))
 	}
 
-	// Recreate container if needed
-	if needsRecreate && module.ContainerID != "" {
+	// Config hash decides whether the container must rebuild
+	if needsRecreate, err := s.moduleManager.NeedsRecreate(ctx, module.ID); err == nil && needsRecreate {
 		go func() {
 			bgCtx := context.Background()
 			if err := s.moduleManager.RecreateModule(bgCtx, module.ID); err != nil {
@@ -1027,8 +972,7 @@ func (s *ModuleService) GetNextAvailableModulePort(ctx context.Context, req *con
 	var protoUsedPorts []*v1.UsedPort
 	for _, p := range usedPorts {
 		protoUsedPorts = append(protoUsedPorts, &v1.UsedPort{
-			Port:  int32(p),
-			InUse: true,
+			Port: int32(p),
 		})
 	}
 

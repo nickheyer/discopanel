@@ -17,17 +17,9 @@ type uploadStreamResponse struct {
 	SessionID     string `json:"session_id"`
 	BytesReceived int64  `json:"bytes_received"`
 	Completed     bool   `json:"completed"`
-	TempPath      string `json:"temp_path,omitempty"`
 }
 
-// NewUploadStreamHandler creates an HTTP handler for streaming file uploads.
-//
-//	PUT /api/v1/upload/{sessionId}
-//	Headers:
-//	  Authorization: Bearer <token>
-//	  Content-Type: application/octet-stream
-//	  X-Upload-Offset: <byte offset for resume> (optional, default 0)
-//	Body: raw file bytes (or file slice for resume)
+// Handles PUT upload streaming with bearer auth and resume offset
 func NewUploadStreamHandler(uploadManager *upload.Manager, authManager *auth.Manager, enforcer *rbac.Enforcer, log *logger.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
@@ -49,13 +41,11 @@ func NewUploadStreamHandler(uploadManager *upload.Manager, authManager *auth.Man
 			return
 		}
 
-		// Check RBAC permission (uploads:create)
-		if enforcer != nil {
-			allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceUploads, rbac.ActionCreate, "*")
-			if rbacErr != nil || !allowed {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
+		// Check RBAC uploads create permission
+		allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceUploads, rbac.ActionCreate, "*")
+		if rbacErr != nil || !allowed {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
 		}
 
 		// Parse resume offset
@@ -96,12 +86,6 @@ func NewUploadStreamHandler(uploadManager *upload.Manager, authManager *auth.Man
 			SessionID:     sessionID,
 			BytesReceived: offset + bytesWritten,
 			Completed:     completed,
-		}
-
-		if completed {
-			if tempPath, _, tempErr := uploadManager.GetTempPath(sessionID); tempErr == nil {
-				resp.TempPath = tempPath
-			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")

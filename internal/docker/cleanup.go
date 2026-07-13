@@ -8,7 +8,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
-// CleanupOrphanedContainers removes containers that are no longer tracked in the database
+// Removes containers no longer tracked in the database
 func (c *Client) CleanupOrphanedContainers(ctx context.Context, trackedContainerIDs map[string]bool, log *logger.Logger) error {
 	// List all containers managed by discopanel
 	filterArgs := filters.NewArgs()

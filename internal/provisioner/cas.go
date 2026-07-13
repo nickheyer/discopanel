@@ -1,6 +1,7 @@
 package provisioner
 
 import (
+	"encoding/hex"
 	"io"
 	"io/fs"
 	"os"
@@ -37,12 +38,18 @@ func casCacheable(sum *checksum) bool {
 }
 
 // Materializes cached artifact at dest, false on miss
+// Rot gets dropped so the caller refetches from origin
 func (p *Provisioner) casGet(dest string, sum *checksum) bool {
 	if !casCacheable(sum) {
 		return false
 	}
 	entry := casPath(p.cacheRoot(), sum.algo, sum.value)
 	if _, err := os.Stat(entry); err != nil {
+		return false
+	}
+	if !verifyChecksum(entry, sum) {
+		p.log.Warn("provisioner: cache entry %s failed verification, dropping it", entry)
+		_ = os.Remove(entry)
 		return false
 	}
 	if err := cloneOrCopy(entry, dest); err != nil {
@@ -52,6 +59,23 @@ func (p *Provisioner) casGet(dest string, sum *checksum) bool {
 	now := time.Now()
 	_ = os.Chtimes(entry, now, now)
 	return true
+}
+
+// Recomputes the hash of a file against its claimed checksum
+func verifyChecksum(path string, sum *checksum) bool {
+	hasher := newHasher(sum.algo)
+	if hasher == nil {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return false
+	}
+	return strings.EqualFold(hex.EncodeToString(hasher.Sum(nil)), sum.value)
 }
 
 // Admits a checksum verified file, best effort
@@ -109,9 +133,10 @@ func (p *Provisioner) pruneCaches() {
 		return
 	}
 	go func() {
+		root := p.cacheRoot()
 		cutoff := now.Add(-casMaxAge)
 		removed := 0
-		_ = filepath.WalkDir(p.cacheRoot(), func(path string, d fs.DirEntry, err error) error {
+		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return nil
 			}
@@ -124,8 +149,23 @@ func (p *Provisioner) pruneCaches() {
 			}
 			return nil
 		})
+		removeEmptyDirs(root)
 		if removed > 0 {
 			p.log.Info("provisioner: pruned %d stale cache entries", removed)
 		}
 	}()
+}
+
+// Deepest first so emptied parents fall too
+func removeEmptyDirs(root string) {
+	var dirs []string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() && path != root {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	for i := len(dirs) - 1; i >= 0; i-- {
+		_ = os.Remove(dirs[i])
+	}
 }

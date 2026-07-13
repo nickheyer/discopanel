@@ -4,6 +4,7 @@ import { resolve } from '$app/paths';
 import { browser } from '$app/environment';
 import { create } from '@bufbuild/protobuf';
 import { rpcClient } from '$lib/api/rpc-client';
+import { wsClient } from '$lib/stores/websocket.svelte';
 import type { User, Permission } from '$lib/proto/discopanel/v1/common_pb';
 import {
 	LoginRequestSchema,
@@ -187,6 +188,8 @@ function createAuthStore() {
 				allowRegistration: currentState.allowRegistration,
 				anonymousAccessEnabled: currentState.anonymousAccessEnabled
 			});
+
+			wsClient.disconnect();
 
 			// Redirect to login
 			goto(resolve('/login'));

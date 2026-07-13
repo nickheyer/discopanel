@@ -344,7 +344,7 @@ func (s *supervisor) runProcSampler(gcTail *gcLogTail) {
 			prevCg = cg
 		}
 
-		// Gc field absence signals fallback to javaagent MX deltas
+		// Java 8 lacks gc log, MX deltas cover it
 		if gcTail != nil && gcTail.enabled {
 			count, totalMs, maxMs := gcTail.drain()
 			sample.Gc = &agentv1.GcWindow{Count: count, TotalMs: totalMs, MaxMs: maxMs}

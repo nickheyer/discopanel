@@ -36,6 +36,7 @@ message PanelMessage {
   oneof payload {
     ConsoleCommand console_command = 1;
     ChatMessage chat_message = 2;
+    ExitAck exit_ack = 3;
   }
 }
 
@@ -98,6 +99,7 @@ message Exited {
 }
 
 // Signals the javaagent hooked the game's error logging
+// Loopback only, the hub does not forward this signal
 message CaptureArmed {
   // Log4j contexts hooked so far
   int32 contexts_hooked = 1;
@@ -227,6 +229,8 @@ message JvmSample {
   int32 thread_count = 3;
   // Loaded class count
   int32 class_count = 4;
+  // GC pauses since last sample, MX bean deltas, max unknown
+  GcWindow gc = 5;
 }
 
 // Player lifecycle or activity event from console lines
@@ -276,4 +280,10 @@ message ChatMessage {
   string sender = 1;
   // The chat text
   string message = 2;
+}
+
+// Confirms the panel recorded an exit report
+message ExitAck {
+  // Echoes exited_at_unix_ms of the recorded report
+  int64 exited_at_unix_ms = 1;
 }

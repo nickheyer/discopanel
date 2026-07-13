@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -11,7 +12,12 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
-const udpSessionIdleTimeout = 5 * time.Minute
+const (
+	udpSessionIdleTimeout = 5 * time.Minute
+	maxUDPSessions        = 1024
+)
+
+var errUDPSessionsFull = errors.New("udp session table full")
 
 // Forwards UDP per client, tracking one backend socket each
 type UDPProxy struct {
@@ -100,12 +106,7 @@ func (p *UDPProxy) Stop() error {
 	p.cancel()
 	p.running = false
 
-	p.sessionsMu.Lock()
-	for _, session := range p.sessions {
-		session.backendConn.Close()
-	}
-	p.sessions = make(map[string]*udpSession)
-	p.sessionsMu.Unlock()
+	p.flushSessions()
 
 	if p.conn != nil {
 		p.conn.Close()
@@ -118,10 +119,14 @@ func (p *UDPProxy) Stop() error {
 // Sets the backend, only one route supported
 func (p *UDPProxy) AddRoute(serverID, hostname, backendHost string, backendPort int) {
 	p.mu.Lock()
+	changed := p.backendHost != backendHost || p.backendPort != backendPort
 	p.serverID = serverID
 	p.backendHost = backendHost
 	p.backendPort = backendPort
 	p.mu.Unlock()
+	if changed {
+		p.flushSessions()
+	}
 	p.logger.Info("UDP proxy route set: %s -> %s:%d", p.listenAddr, backendHost, backendPort)
 }
 
@@ -135,12 +140,16 @@ func (p *UDPProxy) RemoveRoute(hostname string) {
 	p.logger.Info("UDP proxy route removed: %s", p.listenAddr)
 }
 
-// Updates the backend address
+// Updates the backend address, dropping sessions on change
 func (p *UDPProxy) UpdateRoute(hostname, backendHost string, backendPort int) {
 	p.mu.Lock()
+	changed := p.backendHost != backendHost || p.backendPort != backendPort
 	p.backendHost = backendHost
 	p.backendPort = backendPort
 	p.mu.Unlock()
+	if changed {
+		p.flushSessions()
+	}
 	p.logger.Info("UDP proxy route updated: %s -> %s:%d", p.listenAddr, backendHost, backendPort)
 }
 
@@ -159,7 +168,6 @@ func (p *UDPProxy) GetRoutes() map[string]*Route {
 			Hostname:    "udp",
 			BackendHost: p.backendHost,
 			BackendPort: p.backendPort,
-			Active:      true,
 		},
 	}
 }
@@ -189,7 +197,11 @@ func (p *UDPProxy) proxyLoop(conn *net.UDPConn) {
 
 		session, err := p.getOrCreateSession(clientAddr)
 		if err != nil {
-			p.logger.Error("Failed to create session for %s: %v", clientAddr, err)
+			if errors.Is(err, errUDPSessionsFull) {
+				p.logger.Debug("Dropping packet from %s: %v", clientAddr, err)
+			} else {
+				p.logger.Error("Failed to create session for %s: %v", clientAddr, err)
+			}
 			continue
 		}
 
@@ -208,9 +220,13 @@ func (p *UDPProxy) getOrCreateSession(clientAddr *net.UDPAddr) (*udpSession, err
 
 	p.sessionsMu.Lock()
 	session, exists := p.sessions[clientKey]
+	full := len(p.sessions) >= maxUDPSessions
 	p.sessionsMu.Unlock()
 	if exists {
 		return session, nil
+	}
+	if full {
+		return nil, errUDPSessionsFull
 	}
 
 	p.mu.RLock()
@@ -245,6 +261,11 @@ func (p *UDPProxy) getOrCreateSession(clientAddr *net.UDPAddr) (*udpSession, err
 		p.sessionsMu.Unlock()
 		backendConn.Close()
 		return existing, nil
+	}
+	if len(p.sessions) >= maxUDPSessions {
+		p.sessionsMu.Unlock()
+		backendConn.Close()
+		return nil, errUDPSessionsFull
 	}
 	p.sessions[clientKey] = session
 	p.sessionsMu.Unlock()
@@ -293,6 +314,17 @@ func (p *UDPProxy) removeSession(clientKey string) {
 		session.backendConn.Close()
 		delete(p.sessions, clientKey)
 		p.logger.Debug("Removed UDP session for %s", clientKey)
+	}
+}
+
+// Closes every session, used on stop and backend change
+func (p *UDPProxy) flushSessions() {
+	p.sessionsMu.Lock()
+	defer p.sessionsMu.Unlock()
+
+	for key, session := range p.sessions {
+		session.backendConn.Close()
+		delete(p.sessions, key)
 	}
 }
 

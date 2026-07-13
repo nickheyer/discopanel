@@ -51,7 +51,6 @@ type Route struct {
 	Hostname    string
 	BackendHost string
 	BackendPort int
-	Active      bool
 
 	// Selects relay, synthetic status, or wake handling
 	State RouteState

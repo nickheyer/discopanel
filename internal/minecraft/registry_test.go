@@ -7,7 +7,7 @@ import (
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
-// The proto enum is the source of truth, rows must match it
+// Rows must match the proto enum exactly
 func TestRegistryCoversProtoEnum(t *testing.T) {
 	for val, name := range v1.ModLoader_name {
 		p := v1.ModLoader(val)

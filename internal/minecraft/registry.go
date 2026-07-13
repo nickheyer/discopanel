@@ -10,7 +10,7 @@ import (
 	utils "github.com/nickheyer/discopanel/pkg/utils"
 )
 
-// One row of loader facts, the proto enum is the key
+// One row of loader facts keyed by proto enum
 // Adding a loader is one enum value plus one row
 // Dialects nil means the install on disk testifies instead
 // Builtins, MavenRanges, Facets, Markers live on defining rows
@@ -21,11 +21,31 @@ type LoaderInfo struct {
 	Description   string
 	Category      string
 	ModsDirectory string
-	Dialects      []string // Manifest formats read, native first
-	Builtins      []string // Dep ids the platform itself provides
-	MavenRanges   bool     // Native manifest speaks maven ranges
-	Facets        []string // Indexer loader names that source jars
-	Markers       []string // Data-dir paths proving the platform installed
+	Dialects      []string      // Manifest formats read, native first
+	Builtins      []string      // Dep ids the platform itself provides
+	MavenRanges   bool          // Native manifest speaks maven ranges
+	Facets        []string      // Indexer loader names that source jars
+	Markers       []string      // Data-dir paths proving the platform installed
+	Pack          *PackPlatform // Present on loaders that install packs
+}
+
+// Pack platform facts shared by every loader on that platform
+type PackPlatform struct {
+	Source            string
+	ExcludeField      func(cfg *models.ServerProperties) **string
+	ForceIncludeField func(cfg *models.ServerProperties) **string
+}
+
+var curseforgePlatform = &PackPlatform{
+	Source:            "curseforge",
+	ExcludeField:      func(cfg *models.ServerProperties) **string { return &cfg.CFExcludeMods },
+	ForceIncludeField: func(cfg *models.ServerProperties) **string { return &cfg.CFForceIncludeMods },
+}
+
+var modrinthPlatform = &PackPlatform{
+	Source:            "modrinth",
+	ExcludeField:      func(cfg *models.ServerProperties) **string { return &cfg.ModrinthExcludeFiles },
+	ForceIncludeField: func(cfg *models.ServerProperties) **string { return &cfg.ModrinthForceIncludeFiles },
 }
 
 // Rows in display order, forks precede nothing they depend on
@@ -275,6 +295,7 @@ var registry = []LoaderInfo{
 		Description:   "Automatic CurseForge modpack installer",
 		Category:      "Modpack",
 		ModsDirectory: "mods",
+		Pack:          curseforgePlatform,
 	},
 	{
 		Loader:        models.ModLoaderCurseForge,
@@ -283,6 +304,7 @@ var registry = []LoaderInfo{
 		Description:   "Popular modpack platform",
 		Category:      "Modpack",
 		ModsDirectory: "mods",
+		Pack:          curseforgePlatform,
 	},
 	{
 		Loader:        models.ModLoaderFTBA,
@@ -299,7 +321,16 @@ var registry = []LoaderInfo{
 		Description:   "Modern open-source modpack platform",
 		Category:      "Modpack",
 		ModsDirectory: "mods",
+		Pack:          modrinthPlatform,
 	},
+}
+
+// Pack platform for a loader, nil when packs never install
+func PackPlatformFor(loader models.ModLoader) *PackPlatform {
+	if row, ok := loaderIndex[loader]; ok {
+		return row.Pack
+	}
+	return nil
 }
 
 var (
@@ -329,7 +360,7 @@ func Loaders() []LoaderInfo {
 	return slices.Clone(registry)
 }
 
-// Returns the row for a loader, unknown yields a bare row
+// Returns a loader's row, unknown yields bare
 func LoaderFor(loader models.ModLoader) LoaderInfo {
 	if row, ok := loaderIndex[loader]; ok {
 		return *row
@@ -351,6 +382,27 @@ func LoaderFromProto(p v1.ModLoader) (models.ModLoader, bool) {
 		return row.Loader, true
 	}
 	return "", false
+}
+
+// Maps an indexed modpack to the loader a server runs
+func ServerLoaderForModpack(indexer string) (models.ModLoader, bool) {
+	switch indexer {
+	case "fuego", "manual":
+		return models.ModLoaderAutoCurseForge, true
+	case "modrinth":
+		return models.ModLoaderModrinth, true
+	}
+	return "", false
+}
+
+// Splits manifest loader ids like forge-47.2.0
+func CutPackLoaderID(loaderID string) (models.ModLoader, string, bool) {
+	name, version, _ := strings.Cut(loaderID, "-")
+	loader := models.ModLoader(strings.ToLower(name))
+	if _, ok := loaderIndex[loader]; !ok {
+		return "", "", false
+	}
+	return loader, version, true
 }
 
 // Loaders that define a manifest format, modpacks build on these

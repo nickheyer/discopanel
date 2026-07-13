@@ -57,7 +57,7 @@ func (m *Manager) TempDir() string {
 	return m.tempDir
 }
 
-// Registers a file that is ready to be downloaded. Deletes file on cleanup if deleteAfter is true
+// Registers a downloadable file, optionally deleted on cleanup
 func (m *Manager) InitSession(filePath, filename string, totalSize int64, deleteAfter bool) *Session {
 	session := &Session{
 		ID:          uuid.New().String(),

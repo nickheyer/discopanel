@@ -14,12 +14,15 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 // Encodes live throwables into structured fatal error reports
 final class FatalErrors {
@@ -134,6 +137,9 @@ final class FatalErrors {
                     mods.add(mod);
                 }
             }
+            if (mods.isEmpty()) {
+                fabricFailedMods(cause, mods);
+            }
             if (!mods.isEmpty()) {
                 return mods;
             }
@@ -152,6 +158,66 @@ final class FatalErrors {
             }
         }
         return Collections.emptyList();
+    }
+
+    /** Quoted display name then parenthesized id, fabric's mod reference */
+    private static final Pattern FABRIC_MOD_REF = Pattern.compile("'([^']+)' \\(([a-z][a-z0-9_-]*)\\)");
+
+    /** Fabric resolution failures carry their result in the message */
+    private static void fabricFailedMods(Throwable error, List<AgentProto.FailedMod> mods) {
+        String type = error.getClass().getName();
+        if (!type.endsWith("ModResolutionException") && !type.endsWith("ModSolvingException")) {
+            return;
+        }
+        String message = error.getMessage();
+        if (message == null) {
+            return;
+        }
+        Set<String> seenIds = new HashSet<String>();
+        for (String rawLine : message.split("\n")) {
+            if (mods.size() >= MAX_FAILED_MODS) {
+                return;
+            }
+            String line = rawLine.trim();
+            while (line.startsWith("-") || line.startsWith("\t")) {
+                line = line.substring(1).trim();
+            }
+            if (!isFabricIssueLine(line)) {
+                continue;
+            }
+            Matcher m = FABRIC_MOD_REF.matcher(line);
+            if (!m.find()) {
+                continue;
+            }
+            String modId = m.group(2);
+            if (!seenIds.add(modId)) {
+                continue;
+            }
+            AgentProto.FailedMod.Builder mod = AgentProto.FailedMod.newBuilder()
+                    .setModId(modId)
+                    .setErrorType(type)
+                    .setErrorMessage(line);
+            if (isFabricMissingDep(line)) {
+                mod.setReason("fabric.modresolution.missingdependency");
+            }
+            while (m.find() && mod.getReasonArgsCount() < MAX_REASON_ARGS) {
+                mod.addReasonArgs(m.group(2));
+            }
+            mods.add(mod.build());
+        }
+    }
+
+    /** Dependency relation lines blame their first named mod */
+    private static boolean isFabricIssueLine(String line) {
+        return line.contains(" requires ") || line.contains(" is incompatible with ")
+                || line.contains(" breaks ") || line.contains(" conflicts with ")
+                || line.contains(" depends on ");
+    }
+
+    /** Missing and unmatched dependency phrasings from the fabric result */
+    private static boolean isFabricMissingDep(String line) {
+        return line.contains("which is missing") || line.contains("is not present")
+                || line.contains("wrong version is present");
     }
 
     /** Pulls mod id and owning jar out of one loader issue */

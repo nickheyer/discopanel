@@ -28,12 +28,15 @@ FROM --platform=$BUILDPLATFORM golang:alpine AS builder
 # Set by BuildKit, empty under legacy builder
 ARG TARGETOS TARGETARCH
 
+# Stamped into the runtime hello for build identification
+ARG RUNTIME_VERSION=dev
+
 WORKDIR /build
 COPY go.mod go.sum ./
 COPY pkg/runtimespec ./pkg/runtimespec
 COPY --from=proto-builder /app/pkg/proto ./pkg/proto
 COPY cmd/runtime ./cmd/runtime
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /runtime-entrypoint ./cmd/runtime
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w -X main.runtimeVersion=${RUNTIME_VERSION}" -o /runtime-entrypoint ./cmd/runtime
 
 # Builds one disco-agent jar shared by every loader
 FROM --platform=$BUILDPLATFORM gradle:9-jdk21 AS agent-builder

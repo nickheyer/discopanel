@@ -44,7 +44,7 @@ func (i DepIssue) Describe() string {
 	return string(i.Kind) + " " + i.ModID
 }
 
-// Everything installed that can satisfy or clash with a dep id
+// Installed things that satisfy or clash with deps
 type depIndex struct {
 	providers map[string][]providerRef
 	declared  map[string][]providerRef
@@ -56,8 +56,11 @@ type providerRef struct {
 }
 
 // Finds provable dependency violations, uncertainty never reports
-// Dialects name the metadata the platform reads, empty checks all
+// Dialects name the metadata the platform reads, empty solves nothing
 func SolveDeps(metas []ModJarMeta, dialects []string) []DepIssue {
+	if len(dialects) == 0 {
+		return nil
+	}
 	metas = activeMetas(metas, dialects)
 	idx := buildDepIndex(metas)
 	var issues []DepIssue
@@ -87,9 +90,6 @@ func SolveDeps(metas []ModJarMeta, dialects []string) []DepIssue {
 // Filters each jar to the manifest the platform actually reads
 // A universal jar's other dialects are inert at runtime
 func activeMetas(metas []ModJarMeta, dialects []string) []ModJarMeta {
-	if len(dialects) == 0 {
-		return metas
-	}
 	out := make([]ModJarMeta, 0, len(metas))
 	for i := range metas {
 		m := metas[i]
@@ -163,7 +163,7 @@ func buildDepIndex(metas []ModJarMeta) *depIndex {
 	return idx
 }
 
-// Two jars declaring the same mod id refuse to load together
+// Jars declaring the same mod id refuse coexistence
 func duplicateIssues(idx *depIndex) []DepIssue {
 	var issues []DepIssue
 	ids := make([]string, 0, len(idx.declared))
@@ -253,7 +253,7 @@ func checkDep(meta *ModJarMeta, dep ModDep, idx *depIndex) *DepIssue {
 }
 
 // Reports whether a version satisfies a raw range, unparseable satisfies
-// Dialect picks the range grammar, maven for forge kin else semver
+// Dialect picks range grammar, maven or semver
 func VersionSatisfies(version, rawRange, dialect string) bool {
 	rawRange = strings.TrimSpace(rawRange)
 	if version == "" || rawRange == "" || rawRange == "*" {
@@ -336,7 +336,7 @@ func parseMavenIntervals(s string) ([]mavenInterval, bool) {
 	return intervals, len(intervals) > 0
 }
 
-// Fabric predicates OR on ||, AND on spaces inside a group
+// Fabric predicates OR on pipes, AND on spaces
 func semverSatisfies(version, rawRange string) bool {
 	for _, group := range strings.Split(rawRange, "||") {
 		group = strings.TrimSpace(group)

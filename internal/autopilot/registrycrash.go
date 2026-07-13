@@ -104,7 +104,10 @@ func (r *CrashResponder) planRegistry(server *storage.Server, m *metrics.ServerM
 		actions = append(actions, a)
 	}
 
-	disabledMetas := minecraft.ScanModsDir(modsDir + "_disabled")
+	var disabledMetas []minecraft.ModJarMeta
+	if modsDir != "" {
+		disabledMetas = minecraft.ScanModsDir(modsDir + "_disabled")
+	}
 	for _, ns := range namespaces {
 		if nsProvider(metas, ns) != "" {
 			continue
@@ -113,6 +116,10 @@ func (r *CrashResponder) planRegistry(server *storage.Server, m *metrics.ServerM
 		if file := nsProvider(disabledMetas, ns); file != "" && !minecraft.MatchesPatterns(file, excludes) {
 			add(doctorAction{Kind: actionEnable, File: file, ModID: ns, Reason: "provides the missing " + ns + " content", Evidence: evidenceRegistry})
 			continue
+		}
+		// Sourcing the provider beats disabling its dependents
+		if modsDir != "" {
+			add(doctorAction{Kind: actionInstall, ModID: ns, Reason: "provides the missing " + ns + " content", Evidence: evidenceRegistry})
 		}
 		ids := make([]string, 0, len(byNS[ns]))
 		for _, ref := range byNS[ns] {

@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
+	"unicode/utf16"
 )
 
 // Bounds handshake size, generous for modded Forge FML data
@@ -195,6 +198,61 @@ func writeFramed(w io.Writer, data []byte) error {
 	}
 	buf.Write(data)
 	_, err := w.Write(buf.Bytes())
+	return err
+}
+
+// Pulls the hostname out of a 1.6 ping payload
+func legacyPingHostname(raw []byte) (string, bool) {
+	if len(raw) < 3 || raw[0] != legacyPingByte || raw[1] != 0x01 || raw[2] != 0xFA {
+		return "", false
+	}
+	buf := raw[3:]
+	if len(buf) < 2 {
+		return "", false
+	}
+	channelLen := int(binary.BigEndian.Uint16(buf)) * 2
+	buf = buf[2:]
+	if len(buf) < channelLen+3 {
+		return "", false
+	}
+	buf = buf[channelLen+3:]
+	if len(buf) < 2 {
+		return "", false
+	}
+	hostLen := int(binary.BigEndian.Uint16(buf)) * 2
+	buf = buf[2:]
+	if len(buf) < hostLen {
+		return "", false
+	}
+	return decodeUTF16BE(buf[:hostLen]), true
+}
+
+// Decodes big endian UTF-16 bytes into a string
+func decodeUTF16BE(b []byte) string {
+	units := make([]uint16, 0, len(b)/2)
+	for i := 0; i+1 < len(b); i += 2 {
+		units = append(units, binary.BigEndian.Uint16(b[i:]))
+	}
+	return string(utf16.Decode(units))
+}
+
+// Sends the pre-1.7 kick packet carrying status fields
+func WriteLegacyKick(w io.Writer, modern bool, motd, version string, maxPlayers int) error {
+	var payload string
+	if modern {
+		payload = strings.Join([]string{"§1", "127", version, motd, "0", strconv.Itoa(maxPlayers)}, "\x00")
+	} else {
+		payload = strings.ReplaceAll(motd, "§", "") + "§0§" + strconv.Itoa(maxPlayers)
+	}
+
+	units := utf16.Encode([]rune(payload))
+	packet := make([]byte, 3+2*len(units))
+	packet[0] = 0xFF
+	binary.BigEndian.PutUint16(packet[1:3], uint16(len(units)))
+	for i, u := range units {
+		binary.BigEndian.PutUint16(packet[3+2*i:], u)
+	}
+	_, err := w.Write(packet)
 	return err
 }
 

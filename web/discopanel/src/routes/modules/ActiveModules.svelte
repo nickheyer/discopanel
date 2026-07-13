@@ -81,7 +81,7 @@
 			if (!silent) loading = true;
 			// Empty request fetches modules across all servers
 			const response = await rpcClient.module.listModules(
-				{},
+				{ fullStats: true },
 				silent ? silentCallOptions : undefined
 			);
 			modules = response.modules;

@@ -2,7 +2,6 @@ package module
 
 import (
 	"context"
-	"strconv"
 	"strings"
 	"time"
 
@@ -67,7 +66,7 @@ func (m *Manager) stopLifecycleModules(ctx context.Context, serverID string) {
 	}
 }
 
-// Runs every module event hook subscribed to eventType for the server
+// Runs every module hook subscribed to the event
 func (m *Manager) dispatchHooks(ctx context.Context, serverID string, eventType v1.TriggeredEventType) {
 	modules, err := m.store.ListServerModules(ctx, serverID)
 	if err != nil {
@@ -158,11 +157,11 @@ func (m *Manager) execInModule(ctx context.Context, module *storage.Module, comm
 		return nil // Cannot exec in non-existent container
 	}
 
-	_, _, err := m.docker.Exec(ctx, module.ContainerID, []string{command})
+	_, _, err := m.docker.Exec(ctx, module.ContainerID, []string{"sh", "-c", command})
 	return err
 }
 
-// Sends an RCON command to the parent server via the command sender
+// Sends an RCON command to the parent server
 func (m *Manager) sendRCON(ctx context.Context, serverID string, command string) error {
 	server, err := m.store.GetServer(ctx, serverID)
 	if err != nil {
@@ -178,89 +177,19 @@ func (m *Manager) sendRCON(ctx context.Context, serverID string, command string)
 	return err
 }
 
-// evaluateCondition evaluates a simple condition expression using the alias system.
-// Condition format: <alias> <operator> <value>
-// Examples:
-//   - "{{server.players_online}} == 0"
-//   - "{{server.players_online}} > 5"
-//   - "{{server.status}} == running"
-//   - "{{module.status}} == stopped"
-//
-// The alias system dynamically resolves any field from Server or Module structs.
-// See alias.GetAvailableAliases() for all available aliases.
+// Evaluates a hook condition like {{server.players_online}} > 5
 func (m *Manager) evaluateCondition(condition string, server *storage.Server, module *storage.Module) bool {
 	condition = strings.TrimSpace(condition)
 	if condition == "" {
 		return true
 	}
-
-	// Build alias context for resolution
-	ctx := &alias.Context{
+	result, err := alias.EvaluateCondition(condition, &alias.Context{
 		Server: server,
 		Module: module,
-	}
-
-	// Resolve all aliases in the condition string first
-	resolved := alias.Substitute(condition, ctx)
-
-	// Parse condition: <resolved_value> <operator> <expected_value>
-	var actualValue, operator, expectedValue string
-
-	// Try different operators in order of specificity
-	operators := []string{"==", "!=", "<=", ">=", "<", ">"}
-	for _, op := range operators {
-		if parts := strings.SplitN(resolved, op, 2); len(parts) == 2 {
-			actualValue = strings.TrimSpace(parts[0])
-			operator = op
-			expectedValue = strings.TrimSpace(parts[1])
-			break
-		}
-	}
-
-	if operator == "" {
-		m.logger.Warn("Invalid condition format (no operator found): %s", condition)
+	})
+	if err != nil {
+		m.logger.Warn("Invalid hook condition %q: %v", condition, err)
 		return false
 	}
-
-	// Compare values
-	return m.compareValues(actualValue, operator, expectedValue)
-}
-
-// Compares two values using the specified operator
-// TODO: Move all of these hacky comparators to a pkg where they belond...
-func (m *Manager) compareValues(actual, operator, expected string) bool {
-	// Try numeric comparison first
-	actualNum, actualErr := strconv.ParseFloat(actual, 64)
-	expectedNum, expectedErr := strconv.ParseFloat(expected, 64)
-
-	if actualErr == nil && expectedErr == nil {
-		// Both are numeric
-		switch operator {
-		case "==":
-			return actualNum == expectedNum
-		case "!=":
-			return actualNum != expectedNum
-		case "<":
-			return actualNum < expectedNum
-		case ">":
-			return actualNum > expectedNum
-		case "<=":
-			return actualNum <= expectedNum
-		case ">=":
-			return actualNum >= expectedNum
-		}
-	}
-
-	// String comparison
-	actual = strings.ToLower(actual)
-	expected = strings.ToLower(expected)
-	switch operator {
-	case "==":
-		return actual == expected
-	case "!=":
-		return actual != expected
-	default:
-		m.logger.Warn("Operator %s not supported for string comparison", operator)
-		return false
-	}
+	return result
 }

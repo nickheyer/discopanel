@@ -55,6 +55,8 @@ func buildJavaArgs(spec *runtimespec.LaunchSpec, agentPort int) ([]string, error
 		}
 	}
 
+	userOpts := os.Getenv("JVM_XX_OPTS") + " " + os.Getenv("JVM_OPTS")
+
 	// ZGC beats MeowIce beats Aikar, Aikar is default
 	useZGC := envBool("USE_ZGC_FLAGS")
 	if useZGC && spec.JavaMajor < 21 {
@@ -63,7 +65,7 @@ func buildJavaArgs(spec *runtimespec.LaunchSpec, agentPort int) ([]string, error
 	}
 	useAikar := envBool("USE_AIKAR_FLAGS")
 	useMeowice := envBool("USE_MEOWICE_FLAGS")
-	if os.Getenv("USE_AIKAR_FLAGS") == "" && os.Getenv("USE_MEOWICE_FLAGS") == "" {
+	if os.Getenv("USE_AIKAR_FLAGS") == "" && os.Getenv("USE_MEOWICE_FLAGS") == "" && !userSelectsGC(userOpts) {
 		useAikar = true
 	}
 	if useZGC {
@@ -73,8 +75,6 @@ func buildJavaArgs(spec *runtimespec.LaunchSpec, agentPort int) ([]string, error
 	} else if useAikar {
 		args = append(args, aikarFlags(heapMB)...)
 	}
-
-	userOpts := os.Getenv("JVM_XX_OPTS") + os.Getenv("JVM_OPTS")
 
 	// Pins the processor count to the detected cgroup quota
 	if !strings.Contains(userOpts, "ActiveProcessorCount") {
@@ -109,11 +109,13 @@ func buildJavaArgs(spec *runtimespec.LaunchSpec, agentPort int) ([]string, error
 		}
 	}
 
-	// App CDS is unsound under class transformation, archives dumped
-	// by one boot poison the next once the mod set shifts
+	// App CDS is unsound under class transformation
 	if err := os.Remove(filepath.Join(dataDir, runtimespec.StateDir, "cds.jsa")); err == nil {
 		fmt.Printf("[discopanel-runtime] removed stale class data archive\n")
 	}
+
+	// Stale gc log from the last run must never replay
+	_ = os.Remove(gcLogPath())
 
 	if envBool("USE_FLARE_FLAGS") {
 		args = append(args, "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints")
@@ -192,6 +194,16 @@ func buildJavaArgs(spec *runtimespec.LaunchSpec, agentPort int) ([]string, error
 	}
 
 	return args, nil
+}
+
+// Reports whether user jvm opts already pick a collector
+func userSelectsGC(opts string) bool {
+	for _, f := range strings.Fields(opts) {
+		if strings.HasPrefix(f, "-XX:+Use") && strings.HasSuffix(f, "GC") {
+			return true
+		}
+	}
+	return false
 }
 
 // Returns Aikar's G1GC tuning flags for the given heap

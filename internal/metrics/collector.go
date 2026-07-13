@@ -2,7 +2,7 @@ package metrics
 
 import (
 	"context"
-	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -46,16 +46,19 @@ type ServerMetrics struct {
 	AgentReady         bool      // Agent reported server ready this run
 	AgentTickUpdated   time.Time // Freshness of TPS/MSPT below
 	AgentRosterUpdated time.Time // Freshness of PlayerSample/PlayersOnline
+	AgentProcUpdated   time.Time // Freshness of java process attribution below
 	MSPT               float64   // Mean ms per tick
 	MSPTMax            float64   // Worst tick in the sample window
 	HeapUsedMB         float64
 	HeapMaxMB          float64
 	ThreadCount        int
+	ClassCount         int
 	CPUQuotaCores      float64 // Cgroup CPU quota (0 = unlimited)
 	CPUThrottlePercent float64 // Share of CFS periods throttled (0-100)
 	GCPauseCount       int64   // Pauses in the last sample window
 	GCPauseTotalMs     float64
 	GCPauseMaxMs       float64
+	GCLogWindowAt      time.Time // Last gc.log sourced window arrival
 	StartupSeconds     float64
 	HostTHPMode        string // Host transparent hugepage mode from the runtime hello
 	PSIAvailable       bool   // Kernel exposes pressure stall info for the cgroup
@@ -77,12 +80,24 @@ type ServerMetrics struct {
 
 	// Crash-loop bookkeeping fed by exit reports
 	CrashExits         []time.Time // Recent crash exit times, pruned
+	UnexpectedExits    []time.Time // Clean exits nobody requested, pruned
 	CrashLoopStoppedAt time.Time   // When the panel broke a crash loop
 	LastAgentSessionAt time.Time   // Last time an agent session attached
 
-	// Crash doctor autonomy trail
-	LastAutoRepairAt      time.Time // When the doctor last disabled mods
-	LastAutoRepairSummary string    // What it disabled, shown in findings
+	// Live proxied connection count from the routing layer
+	ProxyActiveConns int64
+}
+
+// Copies the metrics with slices, safe outside the lock
+func (m *ServerMetrics) snapshot() *ServerMetrics {
+	if m == nil {
+		return nil
+	}
+	cp := *m
+	cp.PlayerSample = slices.Clone(m.PlayerSample)
+	cp.CrashExits = slices.Clone(m.CrashExits)
+	cp.UnexpectedExits = slices.Clone(m.UnexpectedExits)
+	return &cp
 }
 
 // Counts crash exits inside the given window
@@ -90,9 +105,21 @@ func (m *ServerMetrics) CrashesWithin(window time.Duration) int {
 	if m == nil {
 		return 0
 	}
+	return countWithin(m.CrashExits, window)
+}
+
+// Counts crash and unexpected exits inside the window
+func (m *ServerMetrics) ExitsWithin(window time.Duration) int {
+	if m == nil {
+		return 0
+	}
+	return countWithin(m.CrashExits, window) + countWithin(m.UnexpectedExits, window)
+}
+
+func countWithin(times []time.Time, window time.Duration) int {
 	cutoff := time.Now().Add(-window)
 	n := 0
-	for _, t := range m.CrashExits {
+	for _, t := range times {
 		if t.After(cutoff) {
 			n++
 		}
@@ -201,11 +228,33 @@ type Collector struct {
 	health   map[string]*containerHealth
 	healthMu sync.Mutex
 
+	// Containers owned by minecraft servers, modules stay out
+	serverContainers   map[string]bool
+	serverContainersMu sync.Mutex
+
+	// Proxy counter totals feeding per-window history deltas
+	proxyTraffic    func() map[string]ProxyTraffic
+	lastProxyTotals map[string]ProxyTraffic
+
 	running  bool
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 
 	collectorConfig CollectorConfig
+}
+
+// Monotonic per-server proxy counters plus the live conn gauge
+type ProxyTraffic struct {
+	ActiveConns    int64
+	TotalConns     int64
+	Logins         int64
+	BytesToBackend int64
+	BytesToClient  int64
+}
+
+// Wires the proxy counter source after construction
+func (c *Collector) SetProxyTrafficSource(fn func() map[string]ProxyTraffic) {
+	c.proxyTraffic = fn
 }
 
 // Creates a new metrics collector
@@ -237,6 +286,10 @@ func (c *Collector) Start() error {
 	c.mu.Unlock()
 
 	c.log.Info("Starting metrics collector")
+
+	initCtx, initCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	c.refreshServerContainers(initCtx)
+	initCancel()
 
 	// Disk samples refresh on start and stop too
 	if c.bus != nil {
@@ -275,20 +328,22 @@ func (c *Collector) Stop() {
 	c.log.Info("Metrics collector stopped")
 }
 
-// Get metrics for a specific server
+// Returns an isolated metrics snapshot, nil for unknown servers
 func (c *Collector) GetMetrics(serverID string) *ServerMetrics {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.metrics[serverID]
+	return c.metrics[serverID].snapshot()
 }
 
-// Gets a copy of all metrics
+// Returns isolated snapshots of every server's metrics
 func (c *Collector) GetAllMetrics() map[string]*ServerMetrics {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	result := make(map[string]*ServerMetrics, len(c.metrics))
-	maps.Copy(result, c.metrics)
+	for id, m := range c.metrics {
+		result[id] = m.snapshot()
+	}
 	return result
 }
 
@@ -332,6 +387,33 @@ func (c *Collector) collectDiskUsageLoop() {
 	}
 }
 
+// Rebuilds the server container set from the store
+func (c *Collector) refreshServerContainers(ctx context.Context) {
+	servers, err := c.store.ListServers(ctx)
+	if err != nil {
+		return
+	}
+	c.setServerContainers(servers)
+}
+
+func (c *Collector) setServerContainers(servers []*storage.Server) {
+	ids := make(map[string]bool, len(servers))
+	for _, server := range servers {
+		if server.ContainerID != "" {
+			ids[server.ContainerID] = true
+		}
+	}
+	c.serverContainersMu.Lock()
+	c.serverContainers = ids
+	c.serverContainersMu.Unlock()
+}
+
+func (c *Collector) isServerContainer(containerID string) bool {
+	c.serverContainersMu.Lock()
+	defer c.serverContainersMu.Unlock()
+	return c.serverContainers[containerID]
+}
+
 // Collects CPU and memory stats from Docker
 func (c *Collector) collectDockerStats() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -341,6 +423,12 @@ func (c *Collector) collectDockerStats() {
 	if err != nil {
 		c.log.Debug("Metrics collector: failed to list servers: %v", err)
 		return
+	}
+	c.setServerContainers(servers)
+
+	var traffic map[string]ProxyTraffic
+	if c.proxyTraffic != nil {
+		traffic = c.proxyTraffic()
 	}
 
 	for _, server := range servers {
@@ -377,9 +465,12 @@ func (c *Collector) collectDockerStats() {
 		}
 
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {
-			m.CPUPercent = stats.CPUPercent
+			if time.Since(m.AgentProcUpdated) > 45*time.Second {
+				m.CPUPercent = stats.CPUPercent
+				m.MemoryUsage = stats.MemoryUsage
+			}
 			m.CPUCount = stats.CPUCount
-			m.MemoryUsage = stats.MemoryUsage
+			m.ProxyActiveConns = traffic[server.ID].ActiveConns
 			m.LastUpdated = time.Now()
 		})
 	}
@@ -507,6 +598,10 @@ func (c *Collector) clearHealth(containerID string) {
 
 // Implements docker.HealthChecker using the SLP ping record
 func (c *Collector) ContainerHealth(containerID string, startedAt time.Time) docker.HealthState {
+	// Module containers skip SLP health, docker state decides
+	if !c.isServerContainer(containerID) {
+		return docker.HealthUnknown
+	}
 	c.healthMu.Lock()
 	h := c.health[containerID]
 	var record containerHealth

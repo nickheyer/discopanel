@@ -15,13 +15,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nickheyer/discopanel/internal/alias"
 	storage "github.com/nickheyer/discopanel/internal/db"
 )
 
 // Builds, signs, and delivers HTTP webhooks for server events
-// NOTE: Concurrency is a scheduler concern, this is sync!
+// Concurrency is a scheduler concern, this stays sync
 
-// Controls a single webhook delivery - built from json config blob on webhook task
+// Controls one delivery, built from task config json
 type Config struct {
 	URL             string            `json:"url"`
 	Secret          string            `json:"secret"`
@@ -48,6 +49,8 @@ type Payload struct {
 	Timestamp time.Time      `json:"timestamp"`
 	Server    *ServerPayload `json:"server,omitempty"`
 	Data      map[string]any `json:"data,omitempty"`
+
+	vars map[string]any
 }
 
 // Server snapshot embedded in a webhook payload
@@ -62,7 +65,7 @@ type ServerPayload struct {
 	Port       int    `json:"port"`
 }
 
-// Renders the payload, signs it, POSTs it, and retries on failure - returned res reflects final attempt made
+// Renders, signs, POSTs, and retries one delivery
 func Deliver(ctx context.Context, cfg Config, payload *Payload) Result {
 	start := time.Now()
 	maxAttempts := cfg.MaxRetries
@@ -86,7 +89,7 @@ func Deliver(ctx context.Context, cfg Config, payload *Payload) Result {
 		if attempt == maxAttempts {
 			break
 		}
-		// Exponential backoff: base * 2^(attempt-1)
+		// Exponential backoff doubles the base per attempt
 		delay := time.Duration(retryBaseMs) * time.Millisecond * time.Duration(1<<(attempt-1))
 		select {
 		case <-ctx.Done():
@@ -169,61 +172,41 @@ func sign(body []byte, secret string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Builds a flat map of variables available to payload templates
-// TODO: Use the alias package!!!
-func templateData(p *Payload) map[string]any {
-	titles := map[string]string{
-		"test":           "Webhook Test",
-		"server_start":   "Server Started",
-		"server_stop":    "Server Stopped",
-		"server_restart": "Server Restarted",
+// Flattens alias paths into template vars, one shared vocabulary
+func templateVars(event string, timestamp time.Time, server *storage.Server, data map[string]any) map[string]any {
+	vars := map[string]any{
+		"event":       event,
+		"is_" + event: true,
+		"timestamp":   timestamp.Format(time.RFC3339),
+		"title":       humanizeEvent(event),
+		"player":      "",
 	}
-	colors := map[string]int{
-		"test":           0x5865F2,
-		"server_start":   0x57F287,
-		"server_stop":    0xED4245,
-		"server_restart": 0xFEE75C,
+	rctx := alias.NewContext()
+	rctx.Server = server
+	for k, v := range alias.GetResolvedAliases(rctx) {
+		path := strings.TrimSuffix(strings.TrimPrefix(k, "{{"), "}}")
+		if strings.HasPrefix(path, "server.config.") {
+			continue
+		}
+		if strings.HasPrefix(path, "server.") || strings.HasPrefix(path, "host.") {
+			vars[strings.ReplaceAll(path, ".", "_")] = v
+		}
 	}
+	for k, v := range data {
+		vars[k] = v
+	}
+	return vars
+}
 
-	title := titles[p.Event]
-	if title == "" {
-		title = p.Event
+// Turns event keys into readable titles
+func humanizeEvent(event string) string {
+	words := strings.Split(event, "_")
+	for i, w := range words {
+		if w != "" {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
 	}
-	color := colors[p.Event]
-	if color == 0 {
-		color = 0x5865F2
-	}
-
-	data := map[string]any{
-		"event":     p.Event,
-		"timestamp": p.Timestamp.Format(time.RFC3339),
-		"title":     title,
-		"color":     color,
-		"player":    "",
-	}
-	if p.Server != nil {
-		data["server_id"] = p.Server.ID
-		data["server_name"] = p.Server.Name
-		data["server_status"] = p.Server.Status
-		data["server_mc_version"] = p.Server.MCVersion
-		data["server_mod_loader"] = p.Server.ModLoader
-		data["server_players"] = p.Server.Players
-		data["server_max_players"] = p.Server.MaxPlayers
-		data["server_port"] = p.Server.Port
-	} else {
-		data["server_id"] = ""
-		data["server_name"] = ""
-		data["server_status"] = ""
-		data["server_mc_version"] = ""
-		data["server_mod_loader"] = ""
-		data["server_players"] = 0
-		data["server_max_players"] = 0
-		data["server_port"] = 0
-	}
-	for k, v := range p.Data {
-		data[k] = v
-	}
-	return data
+	return strings.Join(words, " ")
 }
 
 func renderTemplate(tmplStr string, p *Payload) ([]byte, error) {
@@ -232,7 +215,7 @@ func renderTemplate(tmplStr string, p *Payload) ([]byte, error) {
 		return nil, fmt.Errorf("invalid template: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, templateData(p)); err != nil {
+	if err := tmpl.Execute(&buf, p.vars); err != nil {
 		return nil, fmt.Errorf("template execution failed: %w", err)
 	}
 	out := buf.Bytes()
@@ -242,20 +225,16 @@ func renderTemplate(tmplStr string, p *Payload) ([]byte, error) {
 	return out, nil
 }
 
-// Verifies a template string parses and produces valid JSON when rendered with sample data
+// Verifies a template renders valid JSON from samples
 func ValidateTemplate(tmplStr string) error {
 	if strings.TrimSpace(tmplStr) == "" {
 		return nil
 	}
-	sample := &Payload{
-		Event:     "test",
-		Timestamp: time.Now().UTC(),
-		Server: &ServerPayload{
-			ID: "test-id", Name: "Test Server", Status: "running",
-			MCVersion: "1.21", ModLoader: "vanilla",
-			Players: 0, MaxPlayers: 20, Port: 25565,
-		},
-	}
+	sample := BuildPayload("test", &storage.Server{
+		ID: "test-id", Name: "Test Server", Status: storage.StatusRunning,
+		MCVersion: "1.21", ModLoader: "vanilla",
+		MaxPlayers: 20, Port: 25565,
+	}, nil)
 	_, err := renderTemplate(tmplStr, sample)
 	return err
 }
@@ -275,10 +254,12 @@ func BuildPayload(event string, server *storage.Server, data map[string]any) *Pa
 			Port:       server.Port,
 		}
 	}
-	return &Payload{
+	p := &Payload{
 		Event:     event,
 		Timestamp: time.Now().UTC(),
 		Server:    sp,
 		Data:      data,
 	}
+	p.vars = templateVars(event, p.Timestamp, server, data)
+	return p
 }

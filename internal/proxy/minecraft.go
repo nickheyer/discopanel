@@ -142,7 +142,6 @@ func (p *MinecraftProxy) AddRoute(serverID, hostname, backendHost string, backen
 // Installs or replaces a route, silent when unchanged
 func (p *MinecraftProxy) UpsertServerRoute(route Route) {
 	route.Hostname = normalizeHostname(route.Hostname)
-	route.Active = true
 
 	p.routesMu.Lock()
 	old, exists := p.routes[route.Hostname]
@@ -191,24 +190,12 @@ func (p *MinecraftProxy) UpdateRoute(hostname, backendHost string, backendPort i
 	p.routesMu.Unlock()
 }
 
-// Enables or disables a route
-func (p *MinecraftProxy) SetRouteActive(hostname string, active bool) {
-	hostname = normalizeHostname(hostname)
-
-	p.routesMu.Lock()
-	if route, exists := p.routes[hostname]; exists {
-		route.Active = active
-		p.logger.Info("Set route active: hostname=%s active=%v", hostname, active)
-	}
-	p.routesMu.Unlock()
-}
-
-// Returns a snapshot of the active route for hostname
+// Returns a snapshot of the route for hostname
 func (p *MinecraftProxy) lookupRoute(hostname string) (Route, bool) {
 	p.routesMu.RLock()
 	defer p.routesMu.RUnlock()
 	route, exists := p.routes[hostname]
-	if !exists || !route.Active {
+	if !exists {
 		return Route{}, false
 	}
 	return *route, true
@@ -290,9 +277,9 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 	if first, err := br.Peek(1); err != nil {
 		return
 	} else if first[0] == legacyPingByte {
-		hdr, err := br.Peek(3)
-		if err != nil || hdr[2] != 0x00 {
-			p.logger.Debug("Dropping legacy (pre-1.7) ping from %s", clientConn.RemoteAddr())
+		raw, _ := br.Peek(br.Buffered())
+		if len(raw) < 3 || raw[2] != 0x00 {
+			p.serveLegacyPing(clientConn, raw)
 			return
 		}
 	}
@@ -517,4 +504,58 @@ func (p *MinecraftProxy) serveSyntheticStatus(conn net.Conn, r io.Reader, handsh
 			return
 		}
 	}
+}
+
+// Answers a pre-1.7 ping with a kick style status
+func (p *MinecraftProxy) serveLegacyPing(conn net.Conn, raw []byte) {
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	motd, version, maxPlayers := p.legacyStatus(raw)
+	WriteLegacyKick(conn, len(raw) > 1, motd, version, maxPlayers)
+}
+
+// Derives legacy status fields from the routed server
+func (p *MinecraftProxy) legacyStatus(raw []byte) (string, string, int) {
+	route, ok := p.legacyPingRoute(raw)
+	if !ok {
+		return "Powered by DiscoPanel", "DiscoPanel", 0
+	}
+
+	stats := p.statsFor(route.ServerID)
+	stats.TotalConns.Add(1)
+	stats.StatusPings.Add(1)
+
+	if gate := p.getGate(); gate != nil {
+		if info, sleeping := gate.SleepingInfo(route.ServerID); sleeping {
+			return info.MOTD, "Sleeping", info.MaxPlayers
+		}
+	}
+
+	motd := route.MOTD
+	if motd == "" {
+		motd = route.Hostname
+	}
+	version := "Online"
+	switch route.State {
+	case RouteStarting:
+		version = "Starting"
+	case RouteOffline:
+		version = "Offline"
+	}
+	return motd, version, route.MaxPlayers
+}
+
+// Resolves the route a legacy ping is asking about
+func (p *MinecraftProxy) legacyPingRoute(raw []byte) (Route, bool) {
+	if hostname, ok := legacyPingHostname(raw); ok {
+		return p.lookupRoute(normalizeHostname(hostname))
+	}
+
+	p.routesMu.RLock()
+	defer p.routesMu.RUnlock()
+	if len(p.routes) == 1 {
+		for _, route := range p.routes {
+			return *route, true
+		}
+	}
+	return Route{}, false
 }

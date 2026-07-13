@@ -57,11 +57,11 @@ var ResourceScopeSource = map[string]string{
 	ResourceServerProperties: ResourceServers,
 	ResourceFiles:            ResourceServers,
 	ResourceMods:             ResourceServers,
-	ResourceModules:          ResourceModules,
+	ResourceModules:          ResourceServers,
 	ResourceModuleTemplates:  ResourceModuleTemplates,
 	ResourceModpacks:         ResourceModpacks,
 	ResourceProxy:            ResourceProxy,
-	ResourceTasks:            ResourceTasks,
+	ResourceTasks:            ResourceServers,
 }
 
 // Derives valid actions per resource from ProcedurePermissions mapping

@@ -34,6 +34,7 @@
 	} from '$lib/proto/discopanel/v1/modpack_pb';
 	import { SearchModpacksRequestSchema } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { loadModLoaders } from '$lib/stores/loaders';
 	import { debounce } from 'lodash-es';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 	import { formatBytes } from '$lib/utils';
@@ -85,7 +86,7 @@
 			loadFavorites(),
 			loadUploadedPacks(),
 			loadMinecraftVersions(),
-			loadModLoaders(),
+			loadLoaderFilters(),
 			searchModpacks()
 		]);
 
@@ -109,16 +110,12 @@
 		}
 	}
 
-	async function loadModLoaders() {
+	async function loadLoaderFilters() {
 		try {
-			const response = await rpcClient.minecraft.getModLoaders({});
-			const loaders = response.modloaders || [];
+			const loaders = await loadModLoaders();
 			modLoaders = [
 				{ value: '', label: 'All loaders' },
-				...loaders.map((loader) => ({
-					value: loader.name,
-					label: loader.displayName || loader.name
-				}))
+				...loaders.map((loader) => ({ value: loader.name, label: loader.displayName }))
 			];
 		} catch (error) {
 			console.error('Failed to load mod loaders:', error);
@@ -134,7 +131,28 @@
 		}
 	}
 
+	function isPackURL(q: string): boolean {
+		return /^https?:\/\/(www\.)?(curseforge\.com|modrinth\.com)\//.test(q.trim());
+	}
+
+	async function openModpackURL(url: string) {
+		try {
+			const resp = await rpcClient.modpack.getModpackByURL({ url: url.trim() });
+			if (resp.modpack) {
+				goto(resolve(`/servers/new?modpack=${resp.modpack.id}`));
+				return;
+			}
+			toast.error('No indexed modpack matches that link');
+		} catch {
+			toast.error('Modpack lookup failed');
+		}
+	}
+
 	async function searchModpacks(resetPage = true) {
+		if (isPackURL(searchParams.query)) {
+			await openModpackURL(searchParams.query);
+			return;
+		}
 		loading = true;
 		try {
 			// Fresh searches always restart at page one
@@ -433,7 +451,7 @@
 				<Search class="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
 				<Input
 					type="search"
-					placeholder="Search modpacks..."
+					placeholder="Search modpacks or paste a link..."
 					class="pl-8"
 					bind:value={searchParams.query}
 					onkeydown={(e) => e.key === 'Enter' && searchModpacks()}

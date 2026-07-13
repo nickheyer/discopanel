@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
 	shellparse "github.com/arkady-emelyanov/go-shellparse"
 	"github.com/docker/docker/api/types/container"
@@ -14,6 +18,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/alias"
 	"github.com/nickheyer/discopanel/internal/config"
 	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/files"
 )
 
 // Represents a volume mount from module configuration
@@ -84,20 +89,29 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 
 	// Build mounts from module configuration only (frontend sends complete config)
 	vols := c.parseModuleVolumes(module.VolumeOverrides, aliasCtx)
+	resolveWorldSources(vols, server.DataPath)
 
-	// Pre-create bind mounts
+	// Pre-create bind sources, read-only ones must exist before create
 	for _, vol := range vols {
-		if vol.CreateDir && !vol.ReadOnly && (vol.Type == "" || vol.Type == "bind") {
-			if _, err := os.Stat(vol.Source); os.IsNotExist(err) {
-				if err := os.MkdirAll(vol.Source, 0755); err != nil {
-					c.log.Warn("Failed to pre-create mount directory %s: %v", vol.Source, err)
-				}
+		if vol.Type != "" && vol.Type != "bind" {
+			continue
+		}
+		if !vol.CreateDir && !vol.ReadOnly {
+			continue
+		}
+		if _, err := os.Stat(vol.Source); os.IsNotExist(err) {
+			if err := os.MkdirAll(vol.Source, 0755); err != nil {
+				c.log.Warn("Failed to pre-create mount directory %s: %v", vol.Source, err)
 			}
 		}
 	}
 
 	mounts := c.moduleVolumesToMounts(vols)
 
+	siblings := map[string]*models.Module{}
+	if len(siblingModules) > 0 && siblingModules[0] != nil {
+		siblings = siblingModules[0]
+	}
 	config := &container.Config{
 		Image:        imageName,
 		Env:          env,
@@ -111,6 +125,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 			"discopanel.module.server_id":   module.ServerID,
 			"discopanel.module.template_id": module.TemplateID,
 			"discopanel.managed":            "true",
+			LabelModuleConfigHash:           c.DesiredModuleConfigHash(module, template, server, serverConfig, cfg, siblings),
 		},
 	}
 
@@ -193,7 +208,7 @@ func (c *Client) buildModuleEnv(module *models.Module, server *models.Server, al
 		fmt.Sprintf("DISCOPANEL_SERVER_ID=%s", server.ID),
 		fmt.Sprintf("DISCOPANEL_SERVER_NAME=%s", server.Name),
 		fmt.Sprintf("DISCOPANEL_SERVER_HOST=discopanel-server-%s", server.ID),
-		fmt.Sprintf("DISCOPANEL_SERVER_PORT=%d", DefaultMinecraftPort),
+		fmt.Sprintf("DISCOPANEL_SERVER_PORT=%d", server.InContainerPort()),
 		fmt.Sprintf("DISCOPANEL_MODULE_ID=%s", module.ID),
 		fmt.Sprintf("DISCOPANEL_MODULE_NAME=%s", module.Name),
 	)
@@ -203,18 +218,41 @@ func (c *Client) buildModuleEnv(module *models.Module, server *models.Server, al
 		env = append(env, fmt.Sprintf("DISCOPANEL_API_TOKEN=%s", module.TokenPlaintext))
 	}
 
-	// Adds env vars, frontend already resolved alias substitution
+	// Adds env vars sorted for a stable config hash
 	if module.EnvOverrides != "" {
 		var envOverrides map[string]string
 		if err := json.Unmarshal([]byte(module.EnvOverrides), &envOverrides); err == nil {
-			for key, value := range envOverrides {
-				resolvedValue := alias.Substitute(value, aliasCtx)
+			for _, key := range slices.Sorted(maps.Keys(envOverrides)) {
+				resolvedValue := alias.Substitute(envOverrides[key], aliasCtx)
 				env = append(env, fmt.Sprintf("%s=%s", key, resolvedValue))
 			}
 		}
 	}
 
 	return env
+}
+
+// Repoints default world binds at the server's real world dir
+func resolveWorldSources(vols []ModuleVolumeMount, dataPath string) {
+	worldDir, err := files.FindWorldDir(dataPath)
+	if err != nil || worldDir == "" {
+		return
+	}
+	declared := filepath.Join(dataPath, "world")
+	if filepath.Clean(worldDir) == declared {
+		return
+	}
+	for i := range vols {
+		if vols[i].Type != "" && vols[i].Type != "bind" {
+			continue
+		}
+		src := filepath.Clean(vols[i].Source)
+		if src == declared {
+			vols[i].Source = worldDir
+		} else if strings.HasPrefix(src, declared+string(filepath.Separator)) {
+			vols[i].Source = filepath.Join(worldDir, src[len(declared):])
+		}
+	}
 }
 
 // JSON volume configuration and substitutes
@@ -256,17 +294,18 @@ func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount) []mount.Moun
 
 		// Translates bind mount sources to host paths in-container
 		source := vol.Source
+		m := mount.Mount{
+			Type:     mountType,
+			Source:   source,
+			Target:   vol.Target,
+			ReadOnly: vol.ReadOnly,
+		}
 		if mountType == mount.TypeBind {
-			source = TranslateToHostPath(source)
+			m.Source = TranslateToHostPath(source)
+			m.BindOptions = &mount.BindOptions{CreateMountpoint: true}
 		}
 
-		mounts = append(mounts, mount.Mount{
-			Type:        mountType,
-			Source:      source,
-			Target:      vol.Target,
-			ReadOnly:    vol.ReadOnly,
-			BindOptions: &mount.BindOptions{CreateMountpoint: !vol.ReadOnly},
-		})
+		mounts = append(mounts, m)
 	}
 
 	return mounts

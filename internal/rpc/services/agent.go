@@ -47,15 +47,19 @@ func (s *AgentService) Session(ctx context.Context, stream *connect.BidiStream[a
 		return connect.NewError(connect.CodePermissionDenied, errors.New("hello server id does not match token"))
 	}
 
-	sess := s.hub.Attach(server.ID, hello)
+	// Displacement cancels this context, ending both pump loops
+	sessCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sess := s.hub.Attach(server.ID, hello, cancel)
 	defer s.hub.Detach(server.ID, sess)
 
-	// Pumps panel-to-agent messages while this goroutine consumes telemetry
+	// Pumps panel-to-agent messages while the main loop consumes telemetry
 	sendErr := make(chan error, 1)
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-sessCtx.Done():
 				return
 			case <-sess.Closed():
 				sendErr <- nil
@@ -69,20 +73,38 @@ func (s *AgentService) Session(ctx context.Context, stream *connect.BidiStream[a
 		}
 	}()
 
+	// Receives on its own goroutine so cancellation is honored
+	recvMsg := make(chan *agentv1.AgentMessage)
+	recvErr := make(chan error, 1)
+	go func() {
+		for {
+			msg, err := stream.Receive()
+			if err != nil {
+				recvErr <- err
+				return
+			}
+			select {
+			case recvMsg <- msg:
+			case <-sessCtx.Done():
+				return
+			}
+		}
+	}()
+
 	for {
 		select {
 		case err := <-sendErr:
 			return err
-		default:
-		}
-		msg, err := stream.Receive()
-		if err != nil {
+		case <-sessCtx.Done():
+			return nil
+		case err := <-recvErr:
 			if errors.Is(err, io.EOF) || connect.CodeOf(err) == connect.CodeCanceled {
 				return nil
 			}
 			return err
+		case msg := <-recvMsg:
+			s.hub.HandleMessage(sessCtx, server.ID, msg)
 		}
-		s.hub.HandleMessage(ctx, server.ID, msg)
 	}
 }
 

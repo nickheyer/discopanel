@@ -2,6 +2,9 @@ package app.discopanel.agent;
 
 import app.discopanel.agent.proto.AgentProto;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadInfo;
+import java.lang.management.ThreadMXBean;
 import java.util.concurrent.locks.LockSupport;
 
 // Measures tick thread busy time via JVM thread state
@@ -15,6 +18,10 @@ final class TickSampler {
     private static final long MAX_GAP_NANOS = 1_000_000_000L;
     /** Samples between rescans while the tick thread is missing */
     private static final int RESCAN_INTERVAL = 1024;
+    /** Wait-site stack walks are rate limited to this */
+    private static final long PARK_CLASSIFY_INTERVAL_NANOS = 100_000_000L;
+    /** Park chain plus one caller fits well within this */
+    private static final int PARK_STACK_DEPTH = 16;
 
     // Window state shared with drain, guarded by lock
     private final Object lock = new Object();
@@ -27,6 +34,9 @@ final class TickSampler {
     private Thread target;
     private long lastSampleNanos;
     private int samplesUntilRescan;
+    private final ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+    private boolean parkVerdictIdle;
+    private long parkVerdictAtNanos;
 
     void start() {
         Thread t = new Thread(new Runnable() {
@@ -60,7 +70,14 @@ final class TickSampler {
             }
 
             Thread.State state = target.getState();
-            boolean busy = state == Thread.State.RUNNABLE || state == Thread.State.BLOCKED;
+            boolean busy;
+            if (state == Thread.State.RUNNABLE || state == Thread.State.BLOCKED) {
+                busy = true;
+            } else if (state == Thread.State.WAITING || state == Thread.State.TIMED_WAITING) {
+                busy = !parkedBetweenTicks(now);
+            } else {
+                busy = false;
+            }
 
             synchronized (lock) {
                 windowNanos += elapsed;
@@ -102,6 +119,60 @@ final class TickSampler {
                     .setWindowSec(windowSec)
                     .build();
         }
+    }
+
+    /** Reuses the last wait-site verdict between rate-limited stack walks */
+    private boolean parkedBetweenTicks(long now) {
+        if (parkVerdictAtNanos != 0 && now - parkVerdictAtNanos < PARK_CLASSIFY_INTERVAL_NANOS) {
+            return parkVerdictIdle;
+        }
+        parkVerdictAtNanos = now;
+        parkVerdictIdle = classifyWaitSite();
+        return parkVerdictIdle;
+    }
+
+    /** Game code parking itself is the between-ticks idle wait */
+    private boolean classifyWaitSite() {
+        StackTraceElement[] frames;
+        try {
+            ThreadInfo info = threadBean.getThreadInfo(target.getId(), PARK_STACK_DEPTH);
+            if (info == null) {
+                return false;
+            }
+            frames = info.getStackTrace();
+        } catch (Throwable t) {
+            return false;
+        }
+        for (int i = 0; i < frames.length; i++) {
+            if (isWaitPrimitive(frames[i].getClassName(), frames[i].getMethodName())) {
+                continue;
+            }
+            return !isJdkClass(frames[i].getClassName());
+        }
+        return false;
+    }
+
+    /** Wait plumbing frames sit above the real wait site */
+    private static boolean isWaitPrimitive(String cls, String method) {
+        if (cls.equals("jdk.internal.misc.Unsafe") || cls.equals("sun.misc.Unsafe")) {
+            return true;
+        }
+        if (cls.equals("java.util.concurrent.locks.LockSupport")) {
+            return true;
+        }
+        if (cls.equals("java.lang.Object")) {
+            return method.startsWith("wait");
+        }
+        if (cls.equals("java.lang.Thread")) {
+            return method.startsWith("sleep") || method.startsWith("join")
+                    || method.equals("yield") || method.equals("onSpinWait");
+        }
+        return false;
+    }
+
+    private static boolean isJdkClass(String cls) {
+        return cls.startsWith("java.") || cls.startsWith("jdk.")
+                || cls.startsWith("sun.") || cls.startsWith("com.sun.");
     }
 
     private static Thread findServerThread() {

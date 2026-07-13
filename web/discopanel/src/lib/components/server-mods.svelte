@@ -102,9 +102,7 @@
 
 				await rpcClient.mod.importUploadedMod({
 					serverId: server.id,
-					uploadSessionId: result.sessionId,
-					displayName: file.name,
-					description: ''
+					uploadSessionId: result.sessionId
 				});
 			}
 			toast.success(`Uploaded ${files.length} ${files.length === 1 ? 'file' : 'files'}`);
@@ -153,9 +151,7 @@
 			await rpcClient.mod.updateMod({
 				serverId: server.id,
 				modId: mod.id,
-				enabled: !mod.enabled,
-				displayName: mod.displayName,
-				description: mod.description
+				enabled: !mod.enabled
 			});
 			toast.success(`Mod ${!mod.enabled ? 'enabled' : 'disabled'}`);
 			await loadMods();
@@ -219,7 +215,7 @@
 			(m) =>
 				m.displayName.toLowerCase().includes(q) ||
 				m.fileName.toLowerCase().includes(q) ||
-				m.description.toLowerCase().includes(q)
+				m.modId.toLowerCase().includes(q)
 		);
 	});
 </script>
@@ -395,8 +391,10 @@
 											<span class="shrink-0">{formatDate(mod.uploadedAt)}</span>
 										{/if}
 									</div>
-									{#if mod.description}
-										<p class="mt-1 line-clamp-1 text-xs text-muted-foreground">{mod.description}</p>
+									{#if mod.modId}
+										<p class="mt-1 line-clamp-1 text-xs text-muted-foreground">
+											{mod.modId}{mod.version ? ` ${mod.version}` : ''}
+										</p>
 									{/if}
 								</div>
 

@@ -59,7 +59,7 @@ func (s *ProxyService) GetProxyRoutes(ctx context.Context, req *connect.Request[
 			Hostname:         route.Hostname,
 			BackendHost:      route.BackendHost,
 			BackendPort:      int32(route.BackendPort),
-			Active:           route.Active,
+			Active:           true,
 			State:            routeStateToProto(route.State),
 			Wakeable:         route.Wakeable,
 			ProxyProtocol:    route.ProxyProtocol,
@@ -179,16 +179,23 @@ func (s *ProxyService) UpdateProxyConfig(ctx context.Context, req *connect.Reque
 
 	s.log.Info("Proxy configuration saved to database: enabled=%v, base_url=%v", msg.Enabled, msg.BaseUrl)
 
-	// Ensures default listener exists, starts proxy if enabling
-	if msg.Enabled && s.proxyManager != nil {
-		if _, err := s.proxyManager.EnsureDefaultListener(); err != nil {
-			s.log.Error("Failed to ensure default listener: %v", err)
-		}
+	// Starts or stops the manager to match enabled
+	if s.proxyManager != nil {
+		if msg.Enabled {
+			if _, err := s.proxyManager.EnsureDefaultListener(); err != nil {
+				s.log.Error("Failed to ensure default listener: %v", err)
+			}
 
-		if !s.proxyManager.IsRunning() {
-			if err := s.proxyManager.Start(); err != nil {
-				s.log.Error("Failed to start proxy manager: %v", err)
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start proxy: %w", err))
+			if !s.proxyManager.IsRunning() {
+				if err := s.proxyManager.Start(); err != nil {
+					s.log.Error("Failed to start proxy manager: %v", err)
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start proxy: %w", err))
+				}
+			}
+		} else if s.proxyManager.IsRunning() {
+			if err := s.proxyManager.Stop(); err != nil {
+				s.log.Error("Failed to stop proxy manager: %v", err)
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop proxy: %w", err))
 			}
 		}
 	}
@@ -430,7 +437,7 @@ func (s *ProxyService) GetServerRouting(ctx context.Context, req *connect.Reques
 			if route.ServerID == server.ID {
 				currentRoute = &v1.ServerRoute{
 					Hostname: hostname,
-					Active:   route.Active,
+					Active:   true,
 				}
 				break
 			}
@@ -543,6 +550,10 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 	// Update server fields
 	server.ProxyHostname = hostname
 	server.ProxyListenerID = listenerID
+	fields := map[string]any{
+		"proxy_hostname":    hostname,
+		"proxy_listener_id": listenerID,
+	}
 
 	// Handle container recreation if needed
 	if needsRecreation && server.ContainerID != "" && s.docker != nil {
@@ -575,6 +586,9 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 			}
 		}
 
+		fields["container_id"] = server.ContainerID
+		fields["status"] = server.Status
+
 		s.log.Info("Container recreated for server %s (proxy: %q -> %q, listener: %s -> %s)",
 			server.Name, oldProxyHostname, hostname, oldProxyListenerID, listenerID)
 	}
@@ -587,8 +601,8 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 		s.rec.Record(ctx, server.ID, "routing.update", activity.Attrs{"hostname": hostname, "listener": listenerID}, "%s", msgText)
 	}
 
-	// Save server to database
-	if err := s.store.UpdateServer(ctx, server); err != nil {
+	// Save only the columns this request owns
+	if err := s.store.UpdateServerFields(ctx, server.ID, fields); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
 	}
 

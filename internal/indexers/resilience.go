@@ -1,6 +1,7 @@
 package indexers
 
 import (
+	"container/list"
 	"context"
 	"math/rand/v2"
 	"net/http"
@@ -35,37 +36,49 @@ var (
 	maxRetryAfter    = 2 * time.Minute
 	maxResponseBytes = int64(64 << 20)
 	maxCachedBody    = 2 << 20
-	maxEtagEntries   = 256
+	maxEtagBytes     = 16 << 20
+	maxStates        = 8
 )
 
 // Pacing, dedupe, and validator state for one indexer credential
 type sharedState struct {
 	limiter *rate.Limiter
 	flights singleflight.Group
+	lruEl   *list.Element
 
 	mu            sync.Mutex
 	cooldownUntil time.Time
 
-	etagMu sync.Mutex
-	etags  map[string]etagEntry
+	etagMu    sync.Mutex
+	etags     map[string]*list.Element
+	etagLRU   *list.List
+	etagBytes int
 }
 
 type etagEntry struct {
+	url  string
 	etag string
 	body []byte
 }
 
+// Bytes an entry charges against the cache budget
+func (e *etagEntry) size() int {
+	return len(e.url) + len(e.etag) + len(e.body)
+}
+
 var (
-	statesMu sync.Mutex
-	states   = map[string]*sharedState{}
+	statesMu  sync.Mutex
+	states    = map[string]*sharedState{}
+	statesLRU = list.New()
 )
 
-// Returns process wide shared state for an indexer credential
+// Returns shared state per credential, evicting stale credentials
 func stateFor(indexer, credential string) *sharedState {
 	statesMu.Lock()
 	defer statesMu.Unlock()
 	key := indexer + "\x00" + credential
 	if s, ok := states[key]; ok {
+		statesLRU.MoveToFront(s.lruEl)
 		return s
 	}
 	spec, ok := indexerRates[indexer]
@@ -74,9 +87,15 @@ func stateFor(indexer, credential string) *sharedState {
 	}
 	s := &sharedState{
 		limiter: rate.NewLimiter(spec.perSec, spec.burst),
-		etags:   map[string]etagEntry{},
+		etags:   map[string]*list.Element{},
+		etagLRU: list.New(),
 	}
+	s.lruEl = statesLRU.PushFront(key)
 	states[key] = s
+	for len(states) > maxStates {
+		oldest := statesLRU.Back()
+		delete(states, statesLRU.Remove(oldest).(string))
+	}
 	return s
 }
 
@@ -119,24 +138,42 @@ func (s *sharedState) startCooldown(d time.Duration) {
 func (s *sharedState) cachedETag(url string) (string, []byte, bool) {
 	s.etagMu.Lock()
 	defer s.etagMu.Unlock()
-	e, ok := s.etags[url]
-	return e.etag, e.body, ok
+	el, ok := s.etags[url]
+	if !ok {
+		return "", nil, false
+	}
+	s.etagLRU.MoveToFront(el)
+	e := el.Value.(*etagEntry)
+	return e.etag, e.body, true
 }
 
-// Remembers validator and body for url, bounded
+// Remembers validator and body for url within byte budget
 func (s *sharedState) storeETag(url, etag string, body []byte) {
 	if etag == "" || len(body) > maxCachedBody {
 		return
 	}
 	s.etagMu.Lock()
 	defer s.etagMu.Unlock()
-	if _, exists := s.etags[url]; !exists && len(s.etags) >= maxEtagEntries {
-		for k := range s.etags {
-			delete(s.etags, k)
-			break
-		}
+	if el, ok := s.etags[url]; ok {
+		e := el.Value.(*etagEntry)
+		s.etagBytes -= e.size()
+		e.etag, e.body = etag, body
+		s.etagBytes += e.size()
+		s.etagLRU.MoveToFront(el)
+	} else {
+		e := &etagEntry{url: url, etag: etag, body: body}
+		s.etags[url] = s.etagLRU.PushFront(e)
+		s.etagBytes += e.size()
 	}
-	s.etags[url] = etagEntry{etag: etag, body: body}
+	for s.etagBytes > maxEtagBytes {
+		oldest := s.etagLRU.Back()
+		if oldest == nil {
+			return
+		}
+		e := s.etagLRU.Remove(oldest).(*etagEntry)
+		delete(s.etags, e.url)
+		s.etagBytes -= e.size()
+	}
 }
 
 // Parses Retry-After as seconds or an http date

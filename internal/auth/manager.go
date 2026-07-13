@@ -372,7 +372,7 @@ func (m *Manager) UpdateSettings(ctx context.Context, localEnabled, allowReg, an
 	return nil
 }
 
-// Creates a new API token for a user. Plaintext is returned, SHA-256 hash is stored
+// Creates an API token, plaintext returned and hash stored
 func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, expiresInDays *int32) (string, *db.APIToken, error) {
 	// Generate 32 random bytes
 	raw := make([]byte, 32)
@@ -407,7 +407,7 @@ func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, exp
 	return plaintext, token, nil
 }
 
-// Creates API token for a module, tied to the creating user's identity
+// Creates a module API token under the creating user
 func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID string) (string, *db.APIToken, error) {
 	tokenName := fmt.Sprintf("module:%s:%s", moduleName, moduleID)
 	plaintext, token, err := m.GenerateAPIToken(ctx, userID, tokenName, nil)
@@ -424,7 +424,7 @@ func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, m
 	return plaintext, token, nil
 }
 
-// Validates a raw API token (dp_...) and returns the authenticated user.
+// Validates a raw dp token and returns the user
 func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*AuthenticatedUser, error) {
 	if !strings.HasPrefix(rawToken, "dp_") {
 		return nil, ErrInvalidToken
@@ -455,10 +455,15 @@ func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*Authe
 		return nil, ErrUserNotActive
 	}
 
-	// Get roles
-	roleNames, err := m.store.GetUserRoleNames(ctx, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user roles: %w", err)
+	// Module tokens carry the narrow module role, never the creator's
+	var roleNames []string
+	if apiToken.IsModuleToken {
+		roleNames = []string{"module"}
+	} else {
+		roleNames, err = m.store.GetUserRoleNames(ctx, user.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user roles: %w", err)
+		}
 	}
 
 	// Background-update last_used_at

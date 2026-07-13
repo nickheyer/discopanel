@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"hash"
 	"io"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/indexers"
 )
 
 type checksum struct {
@@ -165,50 +165,23 @@ func (p *Provisioner) download(ctx context.Context, rawURL, dest string, sum *ch
 	return os.Rename(tmpPath, dest)
 }
 
-// Fetches and decodes JSON using the panel user agent
+// Fetches JSON through the shared resilience client
 func (p *Provisioner) getJSON(ctx context.Context, rawURL string, dest any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", p.cfg.Server.UserAgent)
-	req.Header.Set("Accept", "application/json")
+	return p.metaClient(rawURL).DoJSON(ctx, rawURL, dest)
+}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed for %s: %w", rawURL, err)
+// Resilience client with pacing and etag state per host
+func (p *Provisioner) metaClient(rawURL string) *indexers.HTTPClient {
+	host := "distro-meta"
+	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+		host = u.Host
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("request failed for %s: status %d: %s", rawURL, resp.StatusCode, string(body))
-	}
-
-	return json.NewDecoder(resp.Body).Decode(dest)
+	return indexers.NewHTTPClient(host, p.cfg.Server.UserAgent, nil)
 }
 
 // Fetches a small text document, e.g. checksum sidecars
 func (p *Provisioner) getText(ctx context.Context, rawURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", p.cfg.Server.UserAgent)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed for %s: %w", rawURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("request failed for %s: status %d", rawURL, resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	body, err := p.metaClient(rawURL).DoBytes(ctx, rawURL)
 	if err != nil {
 		return "", err
 	}

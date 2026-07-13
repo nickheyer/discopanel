@@ -7,7 +7,7 @@ import (
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
-// Creates or updates built-in templates with real Docker images
+// Seeds missing built-in templates, never touches existing rows
 func InitBuiltinTemplates(store *storage.Store) error {
 	ctx := context.Background()
 
@@ -36,7 +36,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				"BEDROCK_MOTD2": "Minecraft Server",
 				"BEDROCK_SERVERNAME": "Geyser",
 				"REMOTE_ADDRESS": "discopanel-server-{{server.id}}",
-				"REMOTE_PORT": "25565",
+				"REMOTE_PORT": "{{server.container_port}}",
 				"REMOTE_AUTH_TYPE": "offline"
 			}`,
 			DefaultVolumes:  `[{"source": "{{server.data_path}}/modules/geyser", "target": "/data", "read_only": false}]`,
@@ -59,7 +59,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			},
 			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Metrics.host_port}}/metrics"},
 			DefaultEnv: `{
-				"EXPORT_SERVERS": "discopanel-server-{{server.id}}:25565",
+				"EXPORT_SERVERS": "discopanel-server-{{server.id}}:{{server.container_port}}",
 				"EXPORT_PORT": "{{module.ports.Metrics.container_port}}"
 			}`,
 			DefaultVolumes:  `[]`,
@@ -127,9 +127,12 @@ func InitBuiltinTemplates(store *storage.Store) error {
 		},
 	}
 
-	// Upsert each template
+	// Insert only when missing so user edits survive restarts
 	for _, template := range templates {
-		if err := store.UpsertModuleTemplate(ctx, &template); err != nil {
+		if _, err := store.GetModuleTemplate(ctx, template.ID); err == nil {
+			continue
+		}
+		if err := store.CreateModuleTemplate(ctx, &template); err != nil {
 			return err
 		}
 	}

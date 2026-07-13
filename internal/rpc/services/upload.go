@@ -75,7 +75,7 @@ func (s *UploadService) GetUploadStatus(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("session_id is required"))
 	}
 
-	bytesReceived, totalBytes, chunksReceived, totalChunks, completed, tempPath, err := s.manager.GetSessionStatus(msg.SessionId)
+	bytesReceived, totalBytes, chunksReceived, totalChunks, completed, _, err := s.manager.GetSessionStatus(msg.SessionId)
 	if err != nil {
 		if errors.Is(err, upload.ErrSessionNotFound) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found"))
@@ -100,7 +100,6 @@ func (s *UploadService) GetUploadStatus(ctx context.Context, req *connect.Reques
 		TotalChunks:    totalChunks,
 		MissingChunks:  missing,
 		Completed:      completed,
-		TempPath:       tempPath,
 	}), nil
 }
 
@@ -135,14 +134,13 @@ func (s *UploadService) UploadChunk(ctx context.Context, req *connect.Request[v1
 	}
 
 	// Get updated session status
-	bytesReceived, _, chunksReceived, _, _, tempPath, _ := s.manager.GetSessionStatus(msg.SessionId)
+	bytesReceived, _, chunksReceived, _, _, _, _ := s.manager.GetSessionStatus(msg.SessionId)
 
 	return connect.NewResponse(&v1.UploadChunkResponse{
 		SessionId:      msg.SessionId,
 		BytesReceived:  bytesReceived,
 		ChunksReceived: chunksReceived,
 		Completed:      completed,
-		TempPath:       tempPath,
 	}), nil
 }
 

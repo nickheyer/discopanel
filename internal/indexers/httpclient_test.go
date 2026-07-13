@@ -1,6 +1,7 @@
 package indexers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -189,6 +190,77 @@ func TestSingleflightCollapsesConcurrentGets(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("want 1 upstream call, got %d", calls.Load())
+	}
+}
+
+func TestSingleflightFollowerCancels(t *testing.T) {
+	fastRetries(t)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(t, nil)
+	winnerErr := make(chan error, 1)
+	go func() {
+		var dest any
+		winnerErr <- c.DoJSON(context.Background(), srv.URL, &dest)
+	}()
+	// Let the winner claim the flight
+	time.Sleep(50 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	var dest any
+	start := time.Now()
+	err := c.DoJSON(ctx, srv.URL, &dest)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want deadline exceeded, got %v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("follower stayed blocked past its deadline")
+	}
+
+	close(release)
+	if err := <-winnerErr; err != nil {
+		t.Fatalf("winner: %v", err)
+	}
+}
+
+func TestETagCacheEvictsByBytes(t *testing.T) {
+	orig := maxEtagBytes
+	maxEtagBytes = 60
+	t.Cleanup(func() { maxEtagBytes = orig })
+
+	s := stateFor("test-"+t.Name(), "")
+	s.storeETag("u1", `"a"`, []byte("0123456789"))
+	s.storeETag("u2", `"b"`, []byte("0123456789"))
+	s.storeETag("u3", `"c"`, []byte("0123456789"))
+	if _, _, ok := s.cachedETag("u1"); !ok {
+		t.Fatal("u1 should be cached")
+	}
+	s.storeETag("u4", `"d"`, []byte("0123456789abcdefghij"))
+	if _, _, ok := s.cachedETag("u2"); ok {
+		t.Fatal("least recently used u2 should be evicted")
+	}
+	if _, _, ok := s.cachedETag("u1"); !ok {
+		t.Fatal("recently used u1 should survive eviction")
+	}
+	if s.etagBytes > maxEtagBytes {
+		t.Fatalf("cache over budget: %d > %d", s.etagBytes, maxEtagBytes)
+	}
+}
+
+func TestStateEvictsRotatedCredentials(t *testing.T) {
+	indexer := "test-" + t.Name()
+	first := stateFor(indexer, "cred-0")
+	for i := 1; i <= maxStates; i++ {
+		stateFor(indexer, fmt.Sprintf("cred-%d", i))
+	}
+	if stateFor(indexer, "cred-0") == first {
+		t.Fatal("rotated credential state should have been evicted")
 	}
 }
 

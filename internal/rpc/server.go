@@ -64,22 +64,20 @@ type Server struct {
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, agentHub *agent.Hub, rec *activity.Recorder, log *logger.Logger) *Server {
-	// Initialize RBAC enforcer
+func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, agentHub *agent.Hub, rec *activity.Recorder, log *logger.Logger) (*Server, error) {
+	// RBAC init failure is fatal, authz must never silently vanish
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
-		log.Error("Failed to initialize RBAC enforcer: %v", err)
+		return nil, fmt.Errorf("failed to initialize RBAC enforcer: %w", err)
 	}
-	if enforcer != nil {
-		if err := enforcer.SeedDefaultPolicies(cfg.Auth.AnonymousAccess); err != nil {
-			log.Error("Failed to seed default policies: %v", err)
-		}
+	if err := enforcer.SeedDefaultPolicies(cfg.Auth.AnonymousAccess); err != nil {
+		return nil, fmt.Errorf("failed to seed default policies: %w", err)
 	}
 
 	// Initialize auth manager
 	authManager, err := auth.NewManager(store, enforcer, &cfg.Auth)
 	if err != nil {
-		log.Error("Failed to initialize auth manager: %v", err)
+		return nil, fmt.Errorf("failed to initialize auth manager: %w", err)
 	}
 
 	// Initialize OIDC handler
@@ -93,6 +91,8 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 	logStreamer := logger.NewLogStreamer(docker.GetDockerClient(), log, 10000)
 	lifecycleManager.SetLogStreamer(logStreamer)
 	moduleManager.SetLogStreamer(logStreamer)
+	moduleManager.SetTokenMinter(authManager)
+	sender.SetJournal(rec, logStreamer)
 
 	// Initialize upload manager
 	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
@@ -129,7 +129,7 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 	}
 
 	s.setupHandler()
-	return s
+	return s, nil
 }
 
 // Setup all Connect RPC handlers
@@ -206,10 +206,10 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	propertiesService := services.NewPropertiesService(s.store, s.config, s.docker, s.lifecycle, s.rec, s.log)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.rec, s.log)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
-	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.rec, s.log)
+	modService := services.NewModService(s.store, s.docker, s.config, s.uploadManager, s.rec, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.proxyManager, s.config, s.rec, s.log)
-	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.lifecycle, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.rec, s.log)
+	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.lifecycle, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.uploadManager, s.rec, s.log)
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.rec, s.log)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
@@ -304,7 +304,7 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 
 			// Set user in context
 			ctx = auth.WithUser(ctx, user)
-			// Ledger events in this request carry the user and one trace
+			// Ledger events in one request share user and trace
 			ctx = activity.WithTrace(activity.WithSource(ctx, user.Username))
 
 			// Authenticated-only procedures (no specific resource permission needed)
@@ -312,22 +312,31 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 				return next(ctx, req)
 			}
 
-			// Check resource permission
-			if perm, ok := rbac.ProcedurePermissions[procedure]; ok {
-				if s.enforcer != nil {
-					objectID := "*"
-					if perm.ObjectIDField != "" {
-						objectID = extractObjectID(req, perm.ObjectIDField)
-					}
-					allowed, err := s.enforcer.Enforce(user.Roles, perm.Resource, perm.Action, objectID)
+			// Unmapped procedures fail closed
+			perm, ok := rbac.ProcedurePermissions[procedure]
+			if !ok {
+				s.log.Error("RBAC mapping missing for %s", procedure)
+				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("no permission mapping for %s", procedure))
+			}
+
+			objectID := "*"
+			if perm.ObjectIDField != "" {
+				objectID = extractObjectID(req, perm.ObjectIDField)
+				if objectID != "*" {
+					resolved, err := s.resolveScopeObject(ctx, perm.Scope, objectID)
 					if err != nil {
-						s.log.Error("RBAC enforcement error: %v", err)
-						return nil, connect.NewError(connect.CodeInternal, err)
+						return nil, connect.NewError(connect.CodeNotFound, err)
 					}
-					if !allowed {
-						return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("insufficient permissions for %s/%s", perm.Resource, perm.Action))
-					}
+					objectID = resolved
 				}
+			}
+			allowed, err := s.enforcer.Enforce(user.Roles, perm.Resource, perm.Action, objectID)
+			if err != nil {
+				s.log.Error("RBAC enforcement error: %v", err)
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
+			if !allowed {
+				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("insufficient permissions for %s/%s", perm.Resource, perm.Action))
 			}
 
 			return next(ctx, req)
@@ -431,6 +440,32 @@ func isConnectPath(path string) bool {
 		}
 	}
 	return false
+}
+
+// Resolves scoped ids to the owning server id
+func (s *Server) resolveScopeObject(ctx context.Context, scope rbac.ObjectScope, objectID string) (string, error) {
+	switch scope {
+	case rbac.ScopeTask:
+		task, err := s.store.GetScheduledTask(ctx, objectID)
+		if err != nil {
+			return "", fmt.Errorf("task not found")
+		}
+		return task.ServerID, nil
+	case rbac.ScopeTaskExecution:
+		execution, err := s.store.GetTaskExecution(ctx, objectID)
+		if err != nil {
+			return "", fmt.Errorf("task execution not found")
+		}
+		return execution.ServerID, nil
+	case rbac.ScopeModule:
+		mod, err := s.store.GetModule(ctx, objectID)
+		if err != nil {
+			return "", fmt.Errorf("module not found")
+		}
+		return mod.ServerID, nil
+	default:
+		return objectID, nil
+	}
 }
 
 // Extracts a named string field from a protobuf request message

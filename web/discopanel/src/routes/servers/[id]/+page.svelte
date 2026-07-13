@@ -28,16 +28,14 @@
 	} from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 	import {
 		GetServerRequestSchema,
-		DeleteServerRequestSchema,
-		StartServerRequestSchema,
-		StopServerRequestSchema,
-		RestartServerRequestSchema,
-		RecreateServerRequestSchema
+		DeleteServerRequestSchema
 	} from '$lib/proto/discopanel/v1/server_pb';
-	import { loaderLabel, canStop, canRestart } from '$lib/server-status';
+	import { canStop, canRestart } from '$lib/server-status';
+	import { runServerAction, type ServerAction } from '$lib/server-actions';
+	import { loaderDisplayName } from '$lib/stores/loaders';
 	import { formatDate } from '$lib/utils/time';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import StatusPanel from '$lib/components/server/overview/status-panel.svelte';
@@ -49,6 +47,7 @@
 	import ServerProperties from '$lib/components/server-properties.svelte';
 	import ServerMods from '$lib/components/server-mods.svelte';
 	import ServerFiles from '$lib/components/files/server-files.svelte';
+	import ServerBackups from '$lib/components/server-backups.svelte';
 	import ServerRouting from '$lib/components/server-routing.svelte';
 	import ServerTasks from '$lib/components/server-tasks.svelte';
 	import ServerModules from '$lib/components/server/ServerModules.svelte';
@@ -146,42 +145,11 @@
 		}
 	}
 
-	async function handleServerAction(action: 'start' | 'stop' | 'restart' | 'recreate') {
+	async function handleServerAction(action: ServerAction) {
 		if (!server) return;
 		actionLoading = true;
-		try {
-			switch (action) {
-				case 'start': {
-					await rpcClient.server.startServer(create(StartServerRequestSchema, { id: server.id }));
-					toast.success('Server is starting...');
-					break;
-				}
-				case 'stop': {
-					await rpcClient.server.stopServer(create(StopServerRequestSchema, { id: server.id }));
-					toast.success('Server is stopping...');
-					break;
-				}
-				case 'restart': {
-					await rpcClient.server.restartServer(
-						create(RestartServerRequestSchema, { id: server.id })
-					);
-					toast.success('Server is restarting...');
-					break;
-				}
-				case 'recreate': {
-					await rpcClient.server.recreateServer(
-						create(RecreateServerRequestSchema, { id: server.id })
-					);
-					toast.success('Server is being recreated...');
-					break;
-				}
-			}
-			await loadServer();
-		} catch {
-			// Interceptor already toasts the failure
-		} finally {
-			actionLoading = false;
-		}
+		await runServerAction(action, server, () => loadServer());
+		actionLoading = false;
 	}
 
 	async function confirmDelete() {
@@ -206,7 +174,6 @@
 		if (!server) return null;
 		if (server.status === ServerStatus.STOPPING) return 'Stopping...';
 		if (server.status === ServerStatus.CREATING) return 'Creating...';
-		if (server.status === ServerStatus.RESTARTING) return 'Restarting...';
 		return null;
 	});
 </script>
@@ -236,9 +203,15 @@
 								class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
 							>
 								<span>{server.mcVersion}</span>
-								{#if server.modLoader !== ModLoader.UNSPECIFIED}
+								{#if server.slpAvailable && server.serverVersion && server.serverVersion !== server.mcVersion}
 									<span>·</span>
-									<span>{loaderLabel(server.modLoader)}</span>
+									<span title="protocol {server.protocolVersion}">
+										running {server.serverVersion}
+									</span>
+								{/if}
+								{#if $loaderDisplayName(server.modLoader)}
+									<span>·</span>
+									<span>{$loaderDisplayName(server.modLoader)}</span>
 								{/if}
 								{#if server.javaVersion}
 									<span>·</span>
@@ -359,7 +332,10 @@
 				{#if activeTab === 'console'}
 					<ServerConsole {server} active={true} />
 				{:else if activeTab === 'files'}
-					<ServerFiles {server} active={true} />
+					<div class="flex min-h-0 flex-1 flex-col gap-4">
+						<ServerFiles {server} active={true} />
+						<ServerBackups {server} />
+					</div>
 				{:else if activeTab === 'mods'}
 					<ServerMods {server} active={true} />
 				{:else if activeTab === 'properties'}

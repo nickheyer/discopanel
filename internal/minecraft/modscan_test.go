@@ -133,3 +133,76 @@ side = "CLIENT"
 		t.Fatalf("missing dir should scan nil, got %+v", metas)
 	}
 }
+
+func TestScanMcmodInfo(t *testing.T) {
+	dir := t.TempDir()
+	writeTestJar(t, dir, "legacy.jar", map[string]string{
+		"mcmod.info": `[{
+			"modid": "IC2",
+			"version": "2.8.222",
+			"mcversion": "1.12.2",
+			"requiredMods": ["Forge", "cofhcore@[4.6.0,)"],
+			"useDependencyInformation": true
+		}]`,
+	})
+	writeTestJar(t, dir, "wrapped.jar", map[string]string{
+		"mcmod.info": `{"modListVersion": 2, "modList": [{
+			"modid": "jei",
+			"version": "4.16.1",
+			"requiredMods": ["ignoredmod"],
+			"useDependencyInformation": false
+		}]}`,
+	})
+	// A jar carrying both formats only speaks toml
+	writeTestJar(t, dir, "dual.jar", map[string]string{
+		"META-INF/mods.toml": "[[mods]]\nmodId = \"dualmod\"\nversion = \"2.0\"\n",
+		"mcmod.info":         `[{"modid": "dualmod", "version": "1.0"}]`,
+	})
+
+	byFile := map[string]ModJarMeta{}
+	for _, m := range ScanModsDir(dir) {
+		byFile[m.FileName] = m
+	}
+
+	legacy := byFile["legacy.jar"]
+	if !legacy.HasModID("ic2") || legacy.VersionOf("ic2") != "2.8.222" {
+		t.Fatalf("legacy.jar should declare ic2 2.8.222, got %+v", legacy)
+	}
+	var cofh *ModDep
+	for i := range legacy.Deps {
+		switch legacy.Deps[i].ID {
+		case "cofhcore":
+			cofh = &legacy.Deps[i]
+		case "ignoredmod":
+			t.Fatalf("unexpected dep: %+v", legacy.Deps[i])
+		}
+	}
+	if cofh == nil || cofh.Range != "[4.6.0,)" || !cofh.Mandatory || cofh.Dialect != "forge" {
+		t.Fatalf("expected mandatory forge dep cofhcore [4.6.0,), got %+v", legacy.Deps)
+	}
+
+	// The forge builtin never convicts, cofhcore does
+	issues := SolveDeps([]ModJarMeta{legacy}, []string{"forge"})
+	if !hasIssue(issues, DepMissing, "ic2", "cofhcore") {
+		t.Fatalf("expected missing cofhcore, got %+v", issues)
+	}
+	if hasIssue(issues, DepMissing, "ic2", "forge") {
+		t.Fatalf("forge builtin must not convict, got %+v", issues)
+	}
+
+	wrapped := byFile["wrapped.jar"]
+	if !wrapped.HasModID("jei") {
+		t.Fatalf("wrapped.jar should declare jei, got %+v", wrapped)
+	}
+	if len(wrapped.Deps) != 0 {
+		t.Fatalf("deps need useDependencyInformation, got %+v", wrapped.Deps)
+	}
+
+	dual := byFile["dual.jar"]
+	if dual.VersionOf("dualmod") != "2.0" {
+		t.Fatalf("mods.toml should outrank mcmod.info, got %+v", dual)
+	}
+	if len(dual.Mods) != 1 {
+		t.Fatalf("dual.jar should declare dualmod once, got %+v", dual.Mods)
+	}
+}

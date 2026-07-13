@@ -19,6 +19,8 @@ type HTTPProxy struct {
 	server       *http.Server
 	routes       map[string]*Route
 	routesMutex  sync.RWMutex
+	proxies      map[string]*httputil.ReverseProxy
+	proxiesMutex sync.Mutex
 	logger       *logger.Logger
 	listenAddr   string
 	running      bool
@@ -29,6 +31,7 @@ type HTTPProxy struct {
 func NewHTTPProxy(cfg *Config) *HTTPProxy {
 	p := &HTTPProxy{
 		routes:     make(map[string]*Route),
+		proxies:    make(map[string]*httputil.ReverseProxy),
 		logger:     cfg.Logger,
 		listenAddr: cfg.ListenAddr,
 	}
@@ -56,8 +59,8 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	route, exists := p.routes[hostname]
 	p.routesMutex.RUnlock()
 
-	if !exists || !route.Active {
-		p.logger.Debug("No active route found for hostname: %s", hostname)
+	if !exists {
+		p.logger.Debug("No route found for hostname: %s", hostname)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
@@ -68,26 +71,40 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Regular HTTP request - use reverse proxy
-	target := &url.URL{
-		Scheme: "http",
-		Host:   fmt.Sprintf("%s:%d", route.BackendHost, route.BackendPort),
+	backendAddr := net.JoinHostPort(route.BackendHost, fmt.Sprintf("%d", route.BackendPort))
+	p.proxyFor(backendAddr).ServeHTTP(w, r)
+}
+
+// Returns the cached reverse proxy for a backend
+func (p *HTTPProxy) proxyFor(backendAddr string) *httputil.ReverseProxy {
+	p.proxiesMutex.Lock()
+	defer p.proxiesMutex.Unlock()
+
+	if proxy, ok := p.proxies[backendAddr]; ok {
+		return proxy
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(target)
-
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = r.Host
+	target := &url.URL{Scheme: "http", Host: backendAddr}
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			pr.SetXForwarded()
+			pr.Out.Host = pr.In.Host
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			p.logger.Error("Proxy error for %s: %v", r.Host, err)
+			http.Error(w, "Bad Gateway", http.StatusBadGateway)
+		},
 	}
+	p.proxies[backendAddr] = proxy
+	return proxy
+}
 
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		p.logger.Error("Proxy error for %s: %v", hostname, err)
-		http.Error(w, "Bad Gateway", http.StatusBadGateway)
-	}
-
-	proxy.ServeHTTP(w, r)
+// Drops cached reverse proxies after route changes
+func (p *HTTPProxy) dropProxies() {
+	p.proxiesMutex.Lock()
+	p.proxies = make(map[string]*httputil.ReverseProxy)
+	p.proxiesMutex.Unlock()
 }
 
 // Handles WebSocket upgrade requests
@@ -119,6 +136,14 @@ func (p *HTTPProxy) handleWebSocket(w http.ResponseWriter, r *http.Request, rout
 	defer backendConn.Close()
 
 	// Forward the original HTTP upgrade request to backend
+	if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		r.Header.Set("X-Forwarded-For", clientIP)
+	}
+	proto := "http"
+	if r.TLS != nil {
+		proto = "https"
+	}
+	r.Header.Set("X-Forwarded-Proto", proto)
 	if err := r.Write(backendConn); err != nil {
 		p.logger.Error("WebSocket: Failed to forward upgrade request: %v", err)
 		return
@@ -141,43 +166,42 @@ func (p *HTTPProxy) handleWebSocket(w http.ResponseWriter, r *http.Request, rout
 // Adds a new routing rule
 func (p *HTTPProxy) AddRoute(serverID, hostname, backendHost string, backendPort int) {
 	p.routesMutex.Lock()
-	defer p.routesMutex.Unlock()
-
 	hostname = strings.ToLower(strings.Split(hostname, ":")[0])
-
 	p.routes[hostname] = &Route{
 		ServerID:    serverID,
 		Hostname:    hostname,
 		BackendHost: backendHost,
 		BackendPort: backendPort,
-		Active:      true,
 	}
+	p.routesMutex.Unlock()
 
+	p.dropProxies()
 	p.logger.Info("HTTP proxy added route: hostname=%s backend=%s:%d", hostname, backendHost, backendPort)
 }
 
 // Removes a routing rule
 func (p *HTTPProxy) RemoveRoute(hostname string) {
 	p.routesMutex.Lock()
-	defer p.routesMutex.Unlock()
-
 	hostname = strings.ToLower(strings.Split(hostname, ":")[0])
 	delete(p.routes, hostname)
+	p.routesMutex.Unlock()
 
+	p.dropProxies()
 	p.logger.Info("HTTP proxy removed route: hostname=%s", hostname)
 }
 
 // Updates the backend for a route
 func (p *HTTPProxy) UpdateRoute(hostname, backendHost string, backendPort int) {
 	p.routesMutex.Lock()
-	defer p.routesMutex.Unlock()
-
 	hostname = strings.ToLower(strings.Split(hostname, ":")[0])
 	if route, exists := p.routes[hostname]; exists {
 		route.BackendHost = backendHost
 		route.BackendPort = backendPort
 		p.logger.Info("HTTP proxy updated route: hostname=%s backend=%s:%d", hostname, backendHost, backendPort)
 	}
+	p.routesMutex.Unlock()
+
+	p.dropProxies()
 }
 
 // Returns a copy of all current routes

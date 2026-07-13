@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
@@ -101,6 +103,11 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 		return nil, fmt.Errorf("failed to create server data directory: %w", err)
 	}
 
+	// Free gate belongs before any multi gigabyte install
+	if !strings.EqualFold(strVal(cfg.EULA), "true") {
+		return nil, fmt.Errorf("the Minecraft EULA must be accepted before the server can start")
+	}
+
 	force := cfg.ForceProvision != nil && *cfg.ForceProvision
 	manifest, err := runtimespec.ReadManifest(server.DataPath)
 	if err != nil {
@@ -112,6 +119,7 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 
 	var result *Result
 	if p.needsInstall(server, manifest, desired, force) {
+		p.snapshotWorld(server)
 		result, err = p.install(ctx, server, cfg, desired, force)
 		if err != nil {
 			return nil, err
@@ -160,7 +168,7 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 	p.preflightMods(ctx, server, cfg)
 
 	// Config files are cheap and authoritative, always applied
-	if err := p.applyConfigFiles(ctx, server, cfg, result.MCVersion); err != nil {
+	if err := p.applyConfigFiles(ctx, server, cfg, result.MCVersion, force); err != nil {
 		return nil, fmt.Errorf("failed to apply configuration files: %w", err)
 	}
 
@@ -260,16 +268,48 @@ func (p *Provisioner) needsInstall(server *storage.Server, manifest *runtimespec
 	return !launchTargetExists(server.DataPath, spec)
 }
 
+// Archives world dirs before a reinstall rewrites the tree
+func (p *Provisioner) snapshotWorld(server *storage.Server) {
+	if p.cfg == nil || p.cfg.Storage.BackupDir == "" {
+		return
+	}
+	worldDirs, err := files.FindWorldDirs(server.DataPath)
+	if err != nil || len(worldDirs) == 0 {
+		return
+	}
+	rels := make([]string, 0, len(worldDirs))
+	for _, w := range worldDirs {
+		if rel, err := filepath.Rel(server.DataPath, w); err == nil {
+			rels = append(rels, rel)
+		}
+	}
+	destDir := filepath.Join(p.cfg.Storage.BackupDir, filepath.Base(server.DataPath))
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		p.log.Warn("Pre-provision snapshot skipped: %v", err)
+		return
+	}
+	dest := filepath.Join(destDir, fmt.Sprintf("pre-provision_%s.zip", time.Now().UTC().Format("20060102-150405")))
+	if _, err := files.CreateZipArchive(rels, server.DataPath, dest, true); err != nil {
+		p.log.Warn("Pre-provision snapshot failed: %v", err)
+		return
+	}
+	p.progress(server, "world snapshot saved (%s)", filepath.Base(dest))
+}
+
 // Derives the modpack identity from server and config
 func (p *Provisioner) desiredModpackFor(server *storage.Server, cfg *storage.ServerProperties) *desiredModpack {
-	switch server.ModLoader {
-	case storage.ModLoaderAutoCurseForge, storage.ModLoaderCurseForge:
+	pack := minecraft.PackPlatformFor(server.ModLoader)
+	if pack == nil {
+		return nil
+	}
+	switch pack.Source {
+	case "curseforge":
 		if v := strVal(cfg.CFModpackZip); v != "" {
 			return &desiredModpack{source: "zip", id: v}
 		}
 		slug, fileID := parseCurseForgeRef(strVal(cfg.CFPageURL), strVal(cfg.CFSlug), strVal(cfg.CFFileID))
 		return &desiredModpack{source: "curseforge", id: slug, versionID: fileID}
-	case storage.ModLoaderModrinth:
+	case "modrinth":
 		project, version := parseModrinthRef(strVal(cfg.ModrinthModpack), strVal(cfg.ModrinthVersion))
 		return &desiredModpack{source: "modrinth", id: project, versionID: version}
 	default:

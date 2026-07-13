@@ -129,6 +129,31 @@ func TestLibTreeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCASGetDropsRottenEntries(t *testing.T) {
+	p := testProvisioner(t)
+	content := []byte("pristine artifact")
+	sum := &checksum{algo: "sha256", value: sha256Of(content)}
+
+	src := filepath.Join(t.TempDir(), "src.jar")
+	if err := os.WriteFile(src, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	p.casPut(src, sum)
+
+	entry := casPath(p.cacheRoot(), sum.algo, sum.value)
+	if err := os.WriteFile(entry, []byte("bit rot"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "dest.jar")
+	if p.casGet(dest, sum) {
+		t.Fatal("rotten entry must miss")
+	}
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatal("rotten entry must be dropped")
+	}
+}
+
 func TestPruneCaches(t *testing.T) {
 	p := testProvisioner(t)
 	content := []byte("old artifact")
@@ -147,12 +172,18 @@ func TestPruneCaches(t *testing.T) {
 
 	pruneGate.Store(0)
 	p.pruneCaches()
+	shard := filepath.Dir(entry)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(entry); os.IsNotExist(err) {
+		_, entryErr := os.Stat(entry)
+		_, shardErr := os.Stat(shard)
+		if os.IsNotExist(entryErr) && os.IsNotExist(shardErr) {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatal("stale entry survived pruning")
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatal("stale entry survived pruning")
+	}
+	t.Fatal("empty shard dir survived pruning")
 }

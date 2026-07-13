@@ -19,13 +19,11 @@ export interface ChunkedUploadOptions {
 
 export interface UploadResult {
 	sessionId: string;
-	tempPath: string;
 }
 
 export interface UploadStatus extends UploadProgress {
 	missingChunks: number[];
 	completed: boolean;
-	tempPath?: string;
 }
 
 const SESSION_STORAGE_KEY = 'chunked_upload_sessions';
@@ -93,7 +91,7 @@ export async function uploadFile(
 			const status = await getUploadStatus(sessionId);
 			if (status.completed) {
 				removeSessionFromStorage(file.name);
-				return { sessionId, tempPath: status.tempPath || '' };
+				return { sessionId };
 			}
 			offset = status.bytesUploaded;
 		} catch {
@@ -180,11 +178,8 @@ function streamUpload(
 		xhr.onload = () => {
 			if (xhr.status >= 200 && xhr.status < 300) {
 				try {
-					const result = JSON.parse(xhr.responseText);
-					resolve({
-						sessionId,
-						tempPath: result.temp_path || ''
-					});
+					JSON.parse(xhr.responseText);
+					resolve({ sessionId });
 				} catch {
 					reject(new Error('Invalid upload response'));
 				}
@@ -225,8 +220,7 @@ export async function getUploadStatus(sessionId: string): Promise<UploadStatus> 
 		totalChunks: response.totalChunks,
 		percentComplete: (Number(response.bytesReceived) / Number(response.totalBytes)) * 100,
 		missingChunks: response.missingChunks,
-		completed: response.completed,
-		tempPath: response.tempPath
+		completed: response.completed
 	};
 }
 

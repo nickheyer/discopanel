@@ -1,4 +1,4 @@
-import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
 
 export type StatusTone = 'ok' | 'busy' | 'warn' | 'danger' | 'sleep' | 'idle';
 
@@ -45,12 +45,6 @@ const STATUS_META: Record<ServerStatus, StatusMeta> = {
 		tone: 'idle',
 		desc: 'Offline, start it to play',
 		transitional: false
-	},
-	[ServerStatus.RESTARTING]: {
-		label: 'Restarting',
-		tone: 'busy',
-		desc: 'Back in a moment',
-		transitional: true
 	},
 	[ServerStatus.ERROR]: {
 		label: 'Error',
@@ -134,44 +128,6 @@ export function canRestart(status: ServerStatus): boolean {
 
 export function isUp(status: ServerStatus): boolean {
 	return status === ServerStatus.RUNNING || status === ServerStatus.UNHEALTHY;
-}
-
-const LOADER_LABELS: Partial<Record<ModLoader, string>> = {
-	[ModLoader.VANILLA]: 'Vanilla',
-	[ModLoader.FORGE]: 'Forge',
-	[ModLoader.FABRIC]: 'Fabric',
-	[ModLoader.QUILT]: 'Quilt',
-	[ModLoader.PAPER]: 'Paper',
-	[ModLoader.SPIGOT]: 'Spigot',
-	[ModLoader.BUKKIT]: 'Bukkit',
-	[ModLoader.PURPUR]: 'Purpur',
-	[ModLoader.SPONGE_VANILLA]: 'Sponge',
-	[ModLoader.SPONGE_FORGE]: 'SpongeForge',
-	[ModLoader.MOHIST]: 'Mohist',
-	[ModLoader.CATSERVER]: 'CatServer',
-	[ModLoader.ARCLIGHT]: 'Arclight',
-	[ModLoader.AUTO_CURSEFORGE]: 'CurseForge',
-	[ModLoader.CURSEFORGE]: 'CurseForge (Auto)',
-	[ModLoader.MODRINTH]: 'Modrinth',
-	[ModLoader.NEOFORGE]: 'NeoForge',
-	[ModLoader.FOLIA]: 'Folia',
-	[ModLoader.CUSTOM]: 'Custom',
-	[ModLoader.PUFFERFISH]: 'Pufferfish',
-	[ModLoader.MAGMA]: 'Magma',
-	[ModLoader.MAGMA_MAINTAINED]: 'Magma Maintained',
-	[ModLoader.KETTING]: 'Ketting',
-	[ModLoader.YOUER]: 'Youer',
-	[ModLoader.BANNER]: 'Banner',
-	[ModLoader.LIMBO]: 'Limbo',
-	[ModLoader.NANO_LIMBO]: 'NanoLimbo',
-	[ModLoader.CRUCIBLE]: 'Crucible',
-	[ModLoader.GLOWSTONE]: 'Glowstone',
-	[ModLoader.FTBA]: 'Feed The Beast'
-};
-
-export function loaderLabel(loader: ModLoader): string {
-	if (loader === ModLoader.UNSPECIFIED) return '';
-	return LOADER_LABELS[loader] ?? ModLoader[loader]?.replace(/_/g, ' ').toLowerCase() ?? '';
 }
 
 export function tpsTone(tps: number | undefined): StatusTone {

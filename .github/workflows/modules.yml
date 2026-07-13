@@ -86,16 +86,23 @@ jobs:
 
           echo "Module builds complete!"
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       - name: Build and push runtime images
         run: |
-          # Must stay in sync with RUNTIME_JAVA_VERSIONS in the Makefile and
-          # docker.SupportedJavaVersions (internal/docker/images.go).
-          for java in 8 11 17 21 25; do
+          RUNTIME_VERSION=$(git rev-parse --short HEAD)
+
+          # docker.SupportedJavaVersions (internal/docker/images.go) is the source.
+          for java in $(go run ./cmd/javamajors); do
             echo "Building nickheyer/discopanel-runtime:java$java (linux/amd64,linux/arm64)..."
             docker buildx build \
               --platform linux/amd64,linux/arm64 \
               --file docker/Dockerfile.runtime \
               --build-arg JAVA_VERSION=$java \
+              --build-arg RUNTIME_VERSION=$RUNTIME_VERSION \
               --tag "nickheyer/discopanel-runtime:java$java" \
               --push \
               .
@@ -103,15 +110,15 @@ jobs:
             echo "Pushed nickheyer/discopanel-runtime:java$java"
           done
 
-          # Must stay in sync with RUNTIME_GRAAL_VERSIONS in the Makefile and
-          # docker.GraalJavaVersions (internal/docker/images.go).
-          for java in 21 25; do
+          # docker.GraalJavaVersions (internal/docker/images.go) is the source.
+          for java in $(go run ./cmd/javamajors -graal); do
             echo "Building nickheyer/discopanel-runtime:java$java-graal (linux/amd64,linux/arm64)..."
             docker buildx build \
               --platform linux/amd64,linux/arm64 \
               --file docker/Dockerfile.runtime \
               --build-arg JAVA_VERSION=$java \
               --build-arg RUNTIME_FLAVOR=graal \
+              --build-arg RUNTIME_VERSION=$RUNTIME_VERSION \
               --tag "nickheyer/discopanel-runtime:java$java-graal" \
               --push \
               .

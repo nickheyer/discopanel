@@ -26,7 +26,7 @@
 	} from '$lib/server-status';
 	import { formatUptime, formatRelative } from '$lib/utils/time';
 	import { formatBytes } from '$lib/utils';
-	import { toast } from 'svelte-sonner';
+	import { runServerAction } from '$lib/server-actions';
 	import {
 		Plus,
 		Play,
@@ -157,20 +157,8 @@
 
 	async function power(server: Server, start: boolean) {
 		actioningId = server.id;
-		try {
-			if (start) {
-				await rpcClient.server.startServer({ id: server.id });
-				toast.success(`Starting ${server.name}...`);
-			} else {
-				await rpcClient.server.stopServer({ id: server.id });
-				toast.success(`Stopping ${server.name}...`);
-			}
-			await serversStore.fetchServers(true, true);
-		} catch {
-			// Interceptor already toasts the failure
-		} finally {
-			actioningId = '';
-		}
+		await runServerAction(start ? 'start' : 'stop', server);
+		actioningId = '';
 	}
 </script>
 

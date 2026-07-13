@@ -23,7 +23,6 @@
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { serversStore, sortServersByActivity, claimFullStats } from '$lib/stores/servers';
 	import {
-		loaderLabel,
 		tpsTone,
 		TONE_TEXT,
 		canStart,
@@ -32,7 +31,9 @@
 		isUp,
 		statusMeta
 	} from '$lib/server-status';
+	import { loaderDisplayName } from '$lib/stores/loaders';
 	import { formatUptime } from '$lib/utils/time';
+	import { runServerAction, type ServerAction } from '$lib/server-actions';
 	import { toast } from 'svelte-sonner';
 	import {
 		Plus,
@@ -132,7 +133,7 @@
 				s.name.toLowerCase().includes(q) ||
 				s.description.toLowerCase().includes(q) ||
 				s.mcVersion.toLowerCase().includes(q) ||
-				loaderLabel(s.modLoader).toLowerCase().includes(q)
+				$loaderDisplayName(s.modLoader).toLowerCase().includes(q)
 		);
 	});
 
@@ -145,33 +146,10 @@
 		}
 	}
 
-	async function handleAction(action: 'start' | 'stop' | 'restart' | 'recreate', server: Server) {
+	async function handleAction(action: ServerAction, server: Server) {
 		actioningId = server.id;
-		try {
-			switch (action) {
-				case 'start':
-					await rpcClient.server.startServer({ id: server.id });
-					toast.success(`Starting ${server.name}...`);
-					break;
-				case 'stop':
-					await rpcClient.server.stopServer({ id: server.id });
-					toast.success(`Stopping ${server.name}...`);
-					break;
-				case 'restart':
-					await rpcClient.server.restartServer({ id: server.id });
-					toast.success(`Restarting ${server.name}...`);
-					break;
-				case 'recreate':
-					await rpcClient.server.recreateServer({ id: server.id });
-					toast.success(`Recreating ${server.name}...`);
-					break;
-			}
-			await serversStore.fetchServers(true, true);
-		} catch {
-			// Interceptor already toasts the failure
-		} finally {
-			actioningId = '';
-		}
+		await runServerAction(action, server);
+		actioningId = '';
 	}
 
 	function requestDelete(server: Server) {
@@ -306,9 +284,9 @@
 									class="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground"
 								>
 									<span>{server.mcVersion}</span>
-									{#if server.modLoader !== ModLoader.UNSPECIFIED && server.modLoader !== ModLoader.VANILLA}
+									{#if server.modLoader !== ModLoader.VANILLA && $loaderDisplayName(server.modLoader)}
 										<span>·</span>
-										<span>{loaderLabel(server.modLoader)}</span>
+										<span>{$loaderDisplayName(server.modLoader)}</span>
 									{/if}
 									<span>·</span>
 									<span class="font-mono">{connectionLabel(server)}</span>

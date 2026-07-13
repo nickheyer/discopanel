@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
@@ -38,8 +39,14 @@ func allModels() []any {
 }
 
 func (s *Store) Migrate() error {
-	if err := s.backupDB(); err != nil {
-		return fmt.Errorf("pre-migration backup failed: %w", err)
+	pending, err := s.pendingMigrations()
+	if err != nil {
+		return fmt.Errorf("failed to check pending migrations: %w", err)
+	}
+	if pending {
+		if err := s.backupDB(); err != nil {
+			return fmt.Errorf("pre-migration backup failed: %w", err)
+		}
 	}
 
 	// Create all tables/columns
@@ -295,7 +302,135 @@ func migrations() []*gormigrate.Migration {
 				return nil
 			},
 		},
+		{
+			// Enforced properties FK rejects the global settings pseudo row
+			ID: "20260712_001_fk_enforcement_cleanup",
+			Migrate: func(tx *gorm.DB) error {
+				var ddl string
+				if err := tx.Raw("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'server_properties'").Scan(&ddl).Error; err != nil {
+					return err
+				}
+				fkClause := regexp.MustCompile("(?i),\\s*CONSTRAINT\\s+`?\\w+`?\\s+FOREIGN\\s+KEY\\s*\\(`?server_id`?\\)\\s*REFERENCES\\s*`?servers`?\\s*\\(`?id`?\\)(\\s+ON\\s+(DELETE|UPDATE)\\s+\\w+(\\s\\w+)?)*")
+				if ddl != "" && fkClause.MatchString(ddl) {
+					newDDL := fkClause.ReplaceAllString(ddl, "")
+					newDDL = regexp.MustCompile("(?i)^CREATE TABLE\\s+`?server_properties`?").ReplaceAllString(newDDL, "CREATE TABLE `server_properties_fkfree`")
+					for _, stmt := range []string{
+						newDDL,
+						"INSERT INTO server_properties_fkfree SELECT * FROM server_properties",
+						"DROP TABLE server_properties",
+						"ALTER TABLE server_properties_fkfree RENAME TO server_properties",
+						"CREATE INDEX IF NOT EXISTS idx_server_properties_server_id ON server_properties(server_id)",
+					} {
+						if err := tx.Exec(stmt).Error; err != nil {
+							return err
+						}
+					}
+					log.Println("[migrate] Rebuilt server_properties without the servers foreign key")
+				}
+
+				removed := int64(0)
+				for _, stmt := range []string{
+					"DELETE FROM api_tokens WHERE id IN (SELECT token_id FROM modules WHERE token_id != '' AND server_id NOT IN (SELECT id FROM servers))",
+					"DELETE FROM modules WHERE server_id NOT IN (SELECT id FROM servers)",
+					"DELETE FROM task_executions WHERE server_id NOT IN (SELECT id FROM servers) OR task_id NOT IN (SELECT id FROM scheduled_tasks)",
+					"DELETE FROM scheduled_tasks WHERE server_id NOT IN (SELECT id FROM servers)",
+					"DELETE FROM mods WHERE server_id NOT IN (SELECT id FROM servers)",
+					"DELETE FROM metrics_samples WHERE server_id NOT IN (SELECT id FROM servers)",
+					"DELETE FROM server_actions WHERE server_id NOT IN (SELECT id FROM servers)",
+					"DELETE FROM finding_dismissals WHERE server_id NOT IN (SELECT id FROM servers)",
+					"DELETE FROM server_properties WHERE server_id != '" + GlobalSettingsID + "' AND server_id NOT IN (SELECT id FROM servers)",
+				} {
+					res := tx.Exec(stmt)
+					if res.Error != nil {
+						return res.Error
+					}
+					removed += res.RowsAffected
+				}
+				if removed > 0 {
+					log.Printf("[migrate] Purged %d orphaned server-scoped row(s)", removed)
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return nil
+			},
+		},
+		{
+			// Module tokens rotate per container create, plaintext never persists
+			ID: "20260712_002_drop_module_token_plaintext",
+			Migrate: func(tx *gorm.DB) error {
+				var count int64
+				if err := tx.Raw("SELECT COUNT(*) FROM pragma_table_info('modules') WHERE name = 'token_plaintext'").Scan(&count).Error; err != nil {
+					return err
+				}
+				if count == 0 {
+					return nil
+				}
+				return tx.Exec("ALTER TABLE modules DROP COLUMN token_plaintext").Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return nil
+			},
+		},
+		{
+			// Existing template rows learn the container port alias
+			ID: "20260713_001_container_port_alias",
+			Migrate: func(tx *gorm.DB) error {
+				for _, stmt := range []string{
+					`UPDATE module_templates SET default_env = REPLACE(default_env, '"REMOTE_PORT": "25565"', '"REMOTE_PORT": "{{server.container_port}}"')`,
+					`UPDATE module_templates SET default_env = REPLACE(default_env, '{{server.id}}:25565', '{{server.id}}:{{server.container_port}}')`,
+				} {
+					if err := tx.Exec(stmt).Error; err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return nil
+			},
+		},
+		{
+			// Webhook vars now follow alias names, color moved into presets
+			ID: "20260712_003_webhook_template_vocab",
+			Migrate: func(tx *gorm.DB) error {
+				colorCond := "{{if .is_server_start}}5763719{{else if .is_server_stop}}15548997{{else if .is_server_restart}}16705372{{else}}5793266{{end}}"
+				for _, stmt := range []string{
+					"UPDATE scheduled_tasks SET config = REPLACE(config, '{{.server_players}}', '{{.server_players_online}}') WHERE task_type = 'webhook'",
+					"UPDATE scheduled_tasks SET config = REPLACE(config, '{{.color}}', '" + colorCond + "') WHERE task_type = 'webhook'",
+				} {
+					if err := tx.Exec(stmt).Error; err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return nil
+			},
+		},
 	}
+}
+
+// Reports whether any registered migration has not run yet
+func (s *Store) pendingMigrations() (bool, error) {
+	if !s.db.Migrator().HasTable("migrations") {
+		return true, nil
+	}
+	var applied []string
+	if err := s.db.Table("migrations").Pluck("id", &applied).Error; err != nil {
+		return false, err
+	}
+	appliedSet := make(map[string]bool, len(applied))
+	for _, id := range applied {
+		appliedSet[id] = true
+	}
+	for _, m := range migrations() {
+		if !appliedSet[m.ID] {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Store) backupDB() error {

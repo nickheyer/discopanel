@@ -115,8 +115,21 @@ func (p *Provisioner) resolveModrinthVersion(ctx context.Context, client *modrin
 	}
 
 	// Picks latest version within allowed release channel
+	channel := strVal(cfg.ModrinthModpackVersionType)
+	if channel == "" {
+		channel = "release"
+	}
+	if pick := pickAllowedVersion(versions, channel); pick != nil {
+		return pick, nil
+	}
+	return nil, fmt.Errorf("Modrinth pack %q has no %s versions (available: %s), adjust the Modrinth Modpack Version Type property",
+		desired.id, channel, strings.Join(versionTypesOf(versions), ", "))
+}
+
+// Picks the newest version inside the allowed release channel
+func pickAllowedVersion(versions []modrinth.Version, channel string) *modrinth.Version {
 	allowed := map[string]bool{"release": true}
-	switch strVal(cfg.ModrinthModpackVersionType) {
+	switch channel {
 	case "beta":
 		allowed["beta"] = true
 	case "alpha":
@@ -125,10 +138,33 @@ func (p *Provisioner) resolveModrinthVersion(ctx context.Context, client *modrin
 	}
 	for i := range versions {
 		if allowed[versions[i].VersionType] {
-			return &versions[i], nil
+			return &versions[i]
 		}
 	}
-	return &versions[0], nil
+	return nil
+}
+
+// Names the distinct release channels present, stable first
+func versionTypesOf(versions []modrinth.Version) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(t string) {
+		if t != "" && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	for _, want := range []string{"release", "beta", "alpha"} {
+		for i := range versions {
+			if versions[i].VersionType == want {
+				add(want)
+			}
+		}
+	}
+	for i := range versions {
+		add(versions[i].VersionType)
+	}
+	return out
 }
 
 // Extracts mrpack, downloads files then applies overrides
@@ -314,8 +350,53 @@ func (p *Provisioner) installPackLoader(ctx context.Context, server *storage.Ser
 	return nil, fmt.Errorf("modpack declares no supported loader (dependencies: %v)", index.Dependencies)
 }
 
+// Remembers what a project resolved to on a past boot
+type modrinthProjectState struct {
+	VersionID    string   `json:"version_id"`
+	FileName     string   `json:"file_name"`
+	MCVersion    string   `json:"mc_version"`
+	Loader       string   `json:"loader"`
+	RequiredDeps []string `json:"required_deps,omitempty"`
+	OptionalDeps []string `json:"optional_deps,omitempty"`
+}
+
+type modrinthInstallState struct {
+	Version  int                             `json:"version"`
+	Projects map[string]modrinthProjectState `json:"projects"`
+}
+
+func modrinthStatePath(dataPath string) string {
+	return filepath.Join(dataPath, ".discopanel", "modrinth-projects.json")
+}
+
+func readModrinthState(dataPath string) *modrinthInstallState {
+	empty := &modrinthInstallState{Version: 1, Projects: map[string]modrinthProjectState{}}
+	data, err := os.ReadFile(modrinthStatePath(dataPath))
+	if err != nil {
+		return empty
+	}
+	var state modrinthInstallState
+	if json.Unmarshal(data, &state) != nil || state.Projects == nil {
+		return empty
+	}
+	return &state
+}
+
+func writeModrinthState(dataPath string, state *modrinthInstallState) error {
+	path := modrinthStatePath(dataPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
 // Installs individual Modrinth mods, optionally resolving dependencies
-func (p *Provisioner) installModrinthProjects(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, mcVersion string) error {
+// Presence decides first, the network only fills what is missing
+func (p *Provisioner) installModrinthProjects(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, mcVersion string, force bool) error {
 	projects := minecraft.SplitPatterns(strVal(cfg.ModrinthProjects))
 	if len(projects) == 0 {
 		return nil
@@ -335,47 +416,59 @@ func (p *Provisioner) installModrinthProjects(ctx context.Context, server *stora
 	}
 	loaderName := facets[0]
 
-	client := modrinth.NewClient(p.cfg)
 	depMode := strVal(cfg.ModrinthDownloadDependencies)
 	versionType := strVal(cfg.ModrinthProjectsDefaultVersionType)
 	if versionType == "" {
 		versionType = "release"
 	}
 
-	installed := map[string]bool{}
+	state := readModrinthState(server.DataPath)
+	stateDirty := false
+	var client *modrinth.Client
+	visited := map[string]bool{}
 	queue := append([]string{}, projects...)
+	var installErr error
+
 	for len(queue) > 0 {
 		project := queue[0]
 		queue = queue[1:]
-		if project == "" || installed[project] {
+		if project == "" || visited[project] {
 			continue
 		}
-		installed[project] = true
+		visited[project] = true
 
-		versions, err := client.GetProjectVersionsFiltered(ctx, project, facets, []string{mcVersion})
-		if err != nil {
-			return fmt.Errorf("failed to resolve Modrinth project %q: %w", project, err)
-		}
-		var pick *modrinth.Version
-		allowed := map[string]bool{"release": true}
-		if versionType == "beta" {
-			allowed["beta"] = true
-		}
-		if versionType == "alpha" {
-			allowed["beta"] = true
-			allowed["alpha"] = true
-		}
-		for i := range versions {
-			if allowed[versions[i].VersionType] {
-				pick = &versions[i]
-				break
+		// Recorded installs with jars on disk need no network
+		if !force {
+			if entry, ok := state.Projects[project]; ok &&
+				entry.MCVersion == mcVersion && entry.Loader == loaderName &&
+				fileExists(filepath.Join(modsDir, entry.FileName)) {
+				if depMode == "required" || depMode == "optional" {
+					queue = append(queue, entry.RequiredDeps...)
+					if depMode == "optional" {
+						queue = append(queue, entry.OptionalDeps...)
+					}
+				}
+				continue
 			}
 		}
-		if pick == nil && len(versions) > 0 {
-			pick = &versions[0]
+
+		if client == nil {
+			client = modrinth.NewClient(p.cfg)
 		}
+		versions, err := client.GetProjectVersionsFiltered(ctx, project, facets, []string{mcVersion})
+		if err != nil {
+			installErr = fmt.Errorf("failed to resolve Modrinth project %q: %w", project, err)
+			break
+		}
+		if len(versions) == 0 {
+			installErr = fmt.Errorf("Modrinth project %q has no version for %s %s", project, loaderName, mcVersion)
+			break
+		}
+		pick := pickAllowedVersion(versions, versionType)
 		if pick == nil {
-			return fmt.Errorf("Modrinth project %q has no version for %s %s", project, loaderName, mcVersion)
+			installErr = fmt.Errorf("Modrinth project %q has no %s versions for %s %s (available: %s), adjust the Modrinth Default Version Type property",
+				project, versionType, loaderName, mcVersion, strings.Join(versionTypesOf(versions), ", "))
+			break
 		}
 
 		var file *modrinth.File
@@ -393,27 +486,52 @@ func (p *Provisioner) installModrinthProjects(ctx context.Context, server *stora
 		}
 
 		dest := filepath.Join(modsDir, file.Filename)
-		if !fileExists(dest) {
+		if force || !fileExists(dest) {
 			p.progress(server, "installing mod %s (%s)...", project, pick.VersionNumber)
 			var sum *checksum
 			if file.Hashes.SHA512 != "" {
 				sum = &checksum{algo: "sha512", value: file.Hashes.SHA512}
 			}
 			if err := p.download(ctx, file.URL, dest, sum, nil, nil); err != nil {
-				return fmt.Errorf("failed to download Modrinth project %q: %w", project, err)
+				installErr = fmt.Errorf("failed to download Modrinth project %q: %w", project, err)
+				break
 			}
 		}
 
+		var requiredDeps, optionalDeps []string
+		for _, dep := range pick.Dependencies {
+			if dep.ProjectID == nil {
+				continue
+			}
+			switch dep.DependencyType {
+			case "required":
+				requiredDeps = append(requiredDeps, *dep.ProjectID)
+			case "optional":
+				optionalDeps = append(optionalDeps, *dep.ProjectID)
+			}
+		}
+		state.Projects[project] = modrinthProjectState{
+			VersionID:    pick.ID,
+			FileName:     file.Filename,
+			MCVersion:    mcVersion,
+			Loader:       loaderName,
+			RequiredDeps: requiredDeps,
+			OptionalDeps: optionalDeps,
+		}
+		stateDirty = true
+
 		if depMode == "required" || depMode == "optional" {
-			for _, dep := range pick.Dependencies {
-				if dep.ProjectID == nil {
-					continue
-				}
-				if dep.DependencyType == "required" || (depMode == "optional" && dep.DependencyType == "optional") {
-					queue = append(queue, *dep.ProjectID)
-				}
+			queue = append(queue, requiredDeps...)
+			if depMode == "optional" {
+				queue = append(queue, optionalDeps...)
 			}
 		}
 	}
-	return nil
+
+	if stateDirty {
+		if err := writeModrinthState(server.DataPath, state); err != nil && installErr == nil {
+			installErr = fmt.Errorf("failed to record installed Modrinth projects: %w", err)
+		}
+	}
+	return installErr
 }

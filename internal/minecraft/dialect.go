@@ -10,7 +10,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
-// A dialect is one mod manifest format, named for its defining loader
+// One mod manifest format named for its loader
 // The registry declares which formats every loader reads
 // Detection exists only for loaders whose row declares nothing
 
@@ -23,7 +23,7 @@ func ResolveDialects(loader models.ModLoader, dataPath, modsDir string) []string
 }
 
 // Dialects observed from the install when nothing is declared
-// The launch spec, the framework on disk, and the jars testify
+// Launch spec, disk framework, and jars testify
 func DetectDialects(dataPath, modsDir string) []string {
 	if dataPath != "" {
 		if spec, err := runtimespec.ReadLaunchSpec(dataPath); err == nil && spec != nil {
@@ -43,7 +43,7 @@ func DetectDialects(dataPath, modsDir string) []string {
 }
 
 // Probes disk markers, the longest dialect chain wins
-// A fork reads its base, so its chain outranks the base hit
+// A fork's chain outranks its base's hit
 func markerHit(dataPath string) *LoaderInfo {
 	var best *LoaderInfo
 	for i := range registry {
@@ -60,7 +60,7 @@ func markerHit(dataPath string) *LoaderInfo {
 	return best
 }
 
-// Reports whether a dep id is supplied by the platform itself
+// Reports whether the platform supplies a dep id
 // The declaring manifest's format names the platform, chain included
 func dialectBuiltin(dialect, id string) bool {
 	if dialect == "" {
@@ -146,7 +146,7 @@ func inferDialect(metas []ModJarMeta) string {
 	return dominantFamily(present)
 }
 
-// Falls back to the base dialect when one family owns the dir
+// Base dialect wins when one family owns the dir
 func dominantFamily(present map[string]bool) string {
 	families := make(map[string]bool)
 	for d := range present {

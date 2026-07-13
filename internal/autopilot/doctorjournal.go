@@ -20,6 +20,7 @@ type doctorState struct {
 // One repair campaign, opened on crash and closed on outcome
 type doctorIncident struct {
 	OpenedAt time.Time      `json:"opened_at"`
+	ClosedAt time.Time      `json:"closed_at,omitzero"`
 	Passes   int            `json:"passes"`
 	Budget   int            `json:"budget"`
 	Actions  []doctorAction `json:"actions"`
@@ -56,7 +57,7 @@ type doctorAction struct {
 	Reverted  bool      `json:"reverted,omitempty"`
 }
 
-// Installs key on the mod id, file is unknown until sourced
+// Installs key on mod id until file sourced
 func (a *doctorAction) key() string {
 	if a.Kind == actionInstall {
 		return a.Kind + ":" + a.ModID

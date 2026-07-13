@@ -28,7 +28,7 @@ type Config struct {
 type AuthConfig struct {
 	SessionTimeout  int         `mapstructure:"session_timeout" json:"session_timeout"`
 	AnonymousAccess bool        `mapstructure:"anonymous_access" json:"anonymous_access"`
-	JWTSecret       string      `mapstructure:"jwt_secret" json:"jwt_secret"`
+	JWTSecret       string      `mapstructure:"jwt_secret" json:"jwt_secret" alias:"secret"`
 	OIDC            OIDCConfig  `mapstructure:"oidc" json:"oidc"`
 	Local           LocalConfig `mapstructure:"local" json:"local"`
 }
@@ -37,7 +37,7 @@ type OIDCConfig struct {
 	Enabled         bool              `mapstructure:"enabled" json:"enabled"`
 	IssuerURI       string            `mapstructure:"issuer_uri" json:"issuer_uri"`
 	ClientID        string            `mapstructure:"client_id" json:"client_id"`
-	ClientSecret    string            `mapstructure:"client_secret" json:"client_secret"`
+	ClientSecret    string            `mapstructure:"client_secret" json:"client_secret" alias:"secret"`
 	RedirectURL     string            `mapstructure:"redirect_url" json:"redirect_url"`
 	Scopes          []string          `mapstructure:"scopes" json:"scopes"`
 	RoleClaim       string            `mapstructure:"role_claim" json:"role_claim"`

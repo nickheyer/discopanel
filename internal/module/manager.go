@@ -24,8 +24,14 @@ type Manager struct {
 	proxyManager *proxy.Manager
 	logger       *logger.Logger
 	logStreamer  *logger.LogStreamer
+	tokenMinter  TokenMinter
 	mu           sync.Mutex
 	running      bool
+}
+
+// Mints scoped API tokens for module containers
+type TokenMinter interface {
+	GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID string) (string, *storage.APIToken, error)
 }
 
 // Creates a new module manager
@@ -38,6 +44,11 @@ func NewManager(store *storage.Store, docker *docker.Client, sender *command.Sen
 		proxyManager: proxyManager,
 		logger:       log,
 	}
+}
+
+// Sets the module token minter
+func (m *Manager) SetTokenMinter(minter TokenMinter) {
+	m.tokenMinter = minter
 }
 
 // Sets log streamer for module containers
@@ -120,6 +131,21 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 		return fmt.Errorf("failed to get server: %w", err)
 	}
 
+	// Fresh scoped token each create, plaintext lives only in env
+	if m.tokenMinter != nil && module.CreatedBy != "" {
+		if module.TokenID != "" {
+			if err := m.store.DeleteAPITokenByID(ctx, module.TokenID); err != nil {
+				m.logger.Warn("Failed to delete stale module token: %v", err)
+			}
+		}
+		plaintext, token, err := m.tokenMinter.GenerateModuleToken(ctx, module.CreatedBy, module.Name, module.ID)
+		if err != nil {
+			return fmt.Errorf("failed to mint module token: %w", err)
+		}
+		module.TokenID = token.ID
+		module.TokenPlaintext = plaintext
+	}
+
 	// Update status to creating
 	module.Status = storage.ModuleStatusCreating
 	if err := m.store.UpdateModule(ctx, module); err != nil {
@@ -129,19 +155,8 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	// Fetch server config for alias resolution
 	serverConfig, _ := m.store.GetServerProperties(ctx, server.ID)
 
-	// Fetch sibling modules for inter-module alias resolution
-	siblingModules := make(map[string]*storage.Module)
-	serverModules, err := m.store.ListServerModules(ctx, module.ServerID)
-	if err == nil {
-		for _, sibling := range serverModules {
-			if sibling.ID != module.ID {
-				siblingModules[sibling.Name] = sibling
-			}
-		}
-	}
-
 	// Create the container
-	containerID, err := m.docker.CreateModuleContainer(ctx, module, template, server, serverConfig, m.config, siblingModules)
+	containerID, err := m.docker.CreateModuleContainer(ctx, module, template, server, serverConfig, m.config, m.siblingModules(ctx, module))
 	if err != nil {
 		module.Status = storage.ModuleStatusError
 		m.store.UpdateModule(ctx, module)
@@ -164,6 +179,46 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	return nil
 }
 
+// Sibling modules by name for inter-module alias references
+func (m *Manager) siblingModules(ctx context.Context, module *storage.Module) map[string]*storage.Module {
+	siblings := make(map[string]*storage.Module)
+	serverModules, err := m.store.ListServerModules(ctx, module.ServerID)
+	if err == nil {
+		for _, sibling := range serverModules {
+			if sibling.ID != module.ID {
+				siblings[sibling.Name] = sibling
+			}
+		}
+	}
+	return siblings
+}
+
+// True when the container's create-time hash drifted from config
+func (m *Manager) NeedsRecreate(ctx context.Context, moduleID string) (bool, error) {
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return false, err
+	}
+	if module.ContainerID == "" {
+		return false, nil
+	}
+	template, err := m.store.GetModuleTemplate(ctx, module.TemplateID)
+	if err != nil {
+		return false, err
+	}
+	server, err := m.store.GetServer(ctx, module.ServerID)
+	if err != nil {
+		return false, err
+	}
+	serverConfig, _ := m.store.GetServerProperties(ctx, server.ID)
+	current, err := m.docker.ModuleContainerConfigHash(ctx, module.ContainerID)
+	if err != nil {
+		return false, err
+	}
+	desired := m.docker.DesiredModuleConfigHash(module, template, server, serverConfig, m.config, m.siblingModules(ctx, module))
+	return current != desired, nil
+}
+
 // Starts an existing module container
 func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
@@ -180,6 +235,19 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 	if err != nil {
 		// Container doesn't exist, recreate it
 		m.logger.Info("Container for module %s no longer exists, recreating", module.Name)
+		module.ContainerID = ""
+		if err := m.store.UpdateModule(ctx, module); err != nil {
+			return fmt.Errorf("failed to clear module container ID: %w", err)
+		}
+		return m.CreateAndStartModule(ctx, moduleID, true)
+	}
+
+	// Stale config hash rebuilds the container before start
+	if stale, err := m.NeedsRecreate(ctx, moduleID); err == nil && stale {
+		m.logger.Info("Container for module %s has stale config, recreating", module.Name)
+		if err := m.docker.RemoveContainer(ctx, module.ContainerID); err != nil {
+			m.logger.Error("Failed to remove stale module container: %v", err)
+		}
 		module.ContainerID = ""
 		if err := m.store.UpdateModule(ctx, module); err != nil {
 			return fmt.Errorf("failed to clear module container ID: %w", err)
@@ -349,10 +417,11 @@ func (m *Manager) waitForHealthy(ctx context.Context, moduleID string, timeoutSe
 	}
 
 	// Perform HTTP health check
-	ticker := time.NewTicker(time.Duration(module.HealthCheckInterval) * time.Second)
-	if module.HealthCheckInterval == 0 {
-		ticker = time.NewTicker(5 * time.Second) // Default 5 second interval
+	interval := time.Duration(module.HealthCheckInterval) * time.Second
+	if interval <= 0 {
+		interval = 5 * time.Second
 	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	timeout := time.After(time.Duration(timeoutSeconds) * time.Second)

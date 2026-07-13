@@ -2,14 +2,24 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	rcon "github.com/nickheyer/discopanel/internal/rcon"
+	"github.com/nickheyer/discopanel/pkg/logger"
+)
+
+var (
+	ErrEmptyCommand   = errors.New("command is required")
+	ErrServerNotFound = errors.New("server not found")
+	ErrNoContainer    = errors.New("server has no container")
+	ErrNotRunning     = errors.New("server is not running")
 )
 
 // Runtime agent hub's console path, used when RCON cannot serve
@@ -19,10 +29,12 @@ type ConsoleAgent interface {
 }
 
 type Sender struct {
-	store  *storage.Store
-	docker *docker.Client
-	config *config.Config
-	agent  ConsoleAgent
+	store    *storage.Store
+	docker   *docker.Client
+	config   *config.Config
+	agent    ConsoleAgent
+	rec      *activity.Recorder
+	streamer *logger.LogStreamer
 }
 
 func NewSender(store *storage.Store, dockerClient *docker.Client, cfg *config.Config) *Sender {
@@ -36,6 +48,44 @@ func NewSender(store *storage.Store, dockerClient *docker.Client, cfg *config.Co
 // Wires agent hub after construction due to dependency order
 func (s *Sender) SetAgent(agent ConsoleAgent) {
 	s.agent = agent
+}
+
+// Wires ledger and console echo after construction
+func (s *Sender) SetJournal(rec *activity.Recorder, streamer *logger.LogStreamer) {
+	s.rec = rec
+	s.streamer = streamer
+}
+
+// Gates, echoes, sends, and records one console command
+func (s *Sender) Run(ctx context.Context, serverID, cmd string, silent bool) (string, error) {
+	if cmd == "" {
+		return "", ErrEmptyCommand
+	}
+	server, err := s.store.GetServer(ctx, serverID)
+	if err != nil {
+		return "", ErrServerNotFound
+	}
+	if server.ContainerID == "" {
+		return "", ErrNoContainer
+	}
+	status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
+	if err != nil || (status != storage.StatusRunning && status != storage.StatusUnhealthy) {
+		return "", ErrNotRunning
+	}
+
+	commandTime := time.Now()
+	if !silent && s.streamer != nil {
+		s.streamer.AddCommandEntry(server.ID, cmd, commandTime)
+	}
+
+	output, err := s.SendCommand(ctx, server.ID, cmd)
+	if err == nil {
+		s.rec.Record(ctx, server.ID, "command.run", activity.Attrs{"command": cmd}, "ran command %q", cmd)
+	}
+	if !silent && s.streamer != nil && (output != "" || err != nil) {
+		s.streamer.AddCommandOutput(server.ID, output, err == nil, commandTime)
+	}
+	return output, err
 }
 
 // Falls back to agent console, stdin has no captured response
@@ -99,13 +149,6 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 	}
 	if serverCfg.RCONPassword != nil {
 		rconPassword = *serverCfg.RCONPassword
-	}
-	if rconPassword == "" {
-		// Mirrors the provisioner's enforced default in server.properties
-		rconPassword = "discopanel_default"
-		if len(server.ID) >= 8 {
-			rconPassword = "discopanel_" + server.ID[:8]
-		}
 	}
 
 	ip, err := s.docker.ContainerIP(ctx, server.ContainerID)

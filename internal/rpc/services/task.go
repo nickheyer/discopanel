@@ -580,7 +580,7 @@ func (s *TaskService) CancelExecution(ctx context.Context, req *connect.Request[
 	}), nil
 }
 
-// validateWebhookConfig parses a webhook task config JSON and validates required fields.
+// Parses webhook task config and validates required fields
 func validateWebhookConfig(cfg string) error {
 	if cfg == "" {
 		return fmt.Errorf("webhook config is required")

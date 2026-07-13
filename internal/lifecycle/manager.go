@@ -130,10 +130,18 @@ func (m *Manager) IsStarting(serverID string) bool {
 
 func (m *Manager) setStatus(ctx context.Context, server *storage.Server, status storage.ServerStatus) {
 	server.Status = status
-	if err := m.store.UpdateServer(ctx, server); err != nil {
+	if err := m.store.UpdateServerStatus(ctx, server.ID, status); err != nil {
 		m.log.Error("lifecycle: failed to persist status %s for %s: %v", status, server.Name, err)
 	}
 	m.syncRoute(server)
+}
+
+// Persists container identity columns for the server row
+func (m *Manager) persistContainer(ctx context.Context, server *storage.Server) error {
+	return m.store.UpdateServerFields(ctx, server.ID, map[string]any{
+		"container_id":   server.ContainerID,
+		"runtime_digest": server.RuntimeDigest,
+	})
 }
 
 // Reconciles proxy route after status change for pinging clients
@@ -194,11 +202,21 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 	}
 
 	// Sync resolved facts (modpacks are authoritative for MC version)
+	resolved := map[string]any{}
 	if result.MCVersion != "" && result.MCVersion != server.MCVersion {
 		m.log.Info("lifecycle: %s resolved MC version %s (was %s)", server.Name, result.MCVersion, server.MCVersion)
 		server.MCVersion = result.MCVersion
+		resolved["mc_version"] = server.MCVersion
 	}
-	server.JavaVersion = strconv.Itoa(result.JavaMajor)
+	if java := strconv.Itoa(result.JavaMajor); java != server.JavaVersion {
+		server.JavaVersion = java
+		resolved["java_version"] = server.JavaVersion
+	}
+	if len(resolved) > 0 {
+		if err := m.store.UpdateServerFields(ctx, server.ID, resolved); err != nil {
+			m.log.Error("lifecycle: failed to persist resolved versions for %s: %v", server.Name, err)
+		}
+	}
 
 	// Provisions agent connection, non-fatal, falls back to SLP/RCON
 	if err := m.writeAgentSpec(ctx, server, serverCfg); err != nil {
@@ -225,6 +243,9 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 		if rerr != nil {
 			if recreated != nil && recreated.NewContainerID != "" {
 				server.ContainerID = recreated.NewContainerID
+				if perr := m.persistContainer(ctx, server); perr != nil {
+					m.log.Error("lifecycle: failed to persist container for %s: %v", server.Name, perr)
+				}
 			}
 			m.setStatus(ctx, server, storage.StatusError)
 			m.rec.Announce(ctx, server.ID, "server.start", activity.Attrs{"error": rerr.Error()}, "container start failed: %v", rerr)
@@ -232,6 +253,9 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 		}
 		server.ContainerID = recreated.NewContainerID
 		m.recordRuntimeDigest(ctx, server)
+		if perr := m.persistContainer(ctx, server); perr != nil {
+			m.log.Error("lifecycle: failed to persist container for %s: %v", server.Name, perr)
+		}
 		if err := m.docker.StartContainer(ctx, server.ContainerID); err != nil {
 			m.setStatus(ctx, server, storage.StatusError)
 			m.rec.Announce(ctx, server.ID, "server.start", activity.Attrs{"error": err.Error()}, "container start failed: %v", err)
@@ -250,7 +274,10 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 	now := time.Now()
 	server.Status = storage.StatusStarting
 	server.LastStarted = &now
-	if err := m.store.UpdateServer(ctx, server); err != nil {
+	if err := m.store.UpdateServerFields(ctx, server.ID, map[string]any{
+		"status":       storage.StatusStarting,
+		"last_started": now,
+	}); err != nil {
 		m.log.Error("lifecycle: failed to update server after start: %v", err)
 	}
 
@@ -259,7 +286,6 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 	}
 
 	m.setPaused(server.ID, false)
-	m.resetRoster(server.ID)
 	m.resetIdle(server.ID)
 
 	if m.proxy != nil && server.ProxyHostname != "" {
@@ -289,7 +315,7 @@ func (m *Manager) ensureContainer(ctx context.Context, server *storage.Server, s
 			currentHash, herr := m.docker.ContainerConfigHash(ctx, server.ContainerID)
 			if herr == nil && currentHash == m.docker.DesiredConfigHash(server, serverCfg) {
 				if m.recordRuntimeDigest(ctx, server) {
-					return m.store.UpdateServer(ctx, server)
+					return m.persistContainer(ctx, server)
 				}
 				return nil
 			}
@@ -308,7 +334,7 @@ func (m *Manager) ensureContainer(ctx context.Context, server *storage.Server, s
 		}
 		server.ContainerID = result.NewContainerID
 		m.recordRuntimeDigest(ctx, server)
-		return m.store.UpdateServer(ctx, server)
+		return m.persistContainer(ctx, server)
 	}
 
 	m.console(server.ID, "creating container (image %s)...", desired)
@@ -318,7 +344,7 @@ func (m *Manager) ensureContainer(ctx context.Context, server *storage.Server, s
 	}
 	server.ContainerID = containerID
 	m.recordRuntimeDigest(ctx, server)
-	return m.store.UpdateServer(ctx, server)
+	return m.persistContainer(ctx, server)
 }
 
 // Records the container image digest, reports true when it changed
@@ -400,13 +426,15 @@ func (m *Manager) Stop(ctx context.Context, serverID string) error {
 	if !found {
 		m.log.Warn("lifecycle: container %s not found, cleaning up stale reference", server.ContainerID)
 		server.ContainerID = ""
+		if err := m.store.UpdateServerFields(ctx, server.ID, map[string]any{"container_id": ""}); err != nil {
+			m.log.Error("lifecycle: failed to clear stale container for %s: %v", server.Name, err)
+		}
 	}
 	// Reconciles proxy route, keeps wake-on-connect servers joinable
 	m.setStatus(ctx, server, storage.StatusStopped)
 	m.rec.Announce(ctx, server.ID, "server.stop", nil, "stopped the server")
 
 	m.setPaused(server.ID, false)
-	m.resetRoster(server.ID)
 	m.resetIdle(server.ID)
 
 	if m.bus != nil {
@@ -423,6 +451,13 @@ func (m *Manager) Stop(ctx context.Context, serverID string) error {
 func (m *Manager) Restart(ctx context.Context, serverID string) error {
 	if err := m.Stop(ctx, serverID); err != nil {
 		return err
+	}
+	// Yields when another actor claimed the server mid restart
+	if src := m.StopRequestedBy(serverID); src != activity.SourceFrom(ctx) {
+		if src == "" {
+			return fmt.Errorf("restart aborted, another start took over")
+		}
+		return fmt.Errorf("restart aborted, %s requested a stop", src)
 	}
 	if err := m.Start(ctx, serverID); err != nil {
 		return err
@@ -452,7 +487,7 @@ func (m *Manager) Recreate(ctx context.Context, serverID string) error {
 			m.log.Debug("lifecycle: failed to remove container during recreate (may not exist): %v", err)
 		}
 		server.ContainerID = ""
-		if err := m.store.UpdateServer(ctx, server); err != nil {
+		if err := m.store.UpdateServerFields(ctx, server.ID, map[string]any{"container_id": ""}); err != nil {
 			return err
 		}
 	}
@@ -507,10 +542,18 @@ func (m *Manager) Wake(ctx context.Context, serverID string) error {
 	return nil
 }
 
+// Matches the crash doctor's activity source
+const repairSource = "crash doctor"
+
 func (m *Manager) setStopIntent(serverID, source string) {
 	m.stopIntentMu.Lock()
+	defer m.stopIntentMu.Unlock()
+	cur := m.stopIntents[serverID]
+	// Doctor never overwrites another actor's stop
+	if source == repairSource && cur != "" && cur != repairSource {
+		return
+	}
 	m.stopIntents[serverID] = source
-	m.stopIntentMu.Unlock()
 }
 
 func (m *Manager) clearStopIntent(serverID string) {
@@ -564,7 +607,7 @@ func (m *Manager) writeAgentSpec(ctx context.Context, server *storage.Server, cf
 	token := "dpa_" + hex.EncodeToString(raw)
 	sum := sha256.Sum256([]byte(token))
 	server.AgentTokenHash = hex.EncodeToString(sum[:])
-	if err := m.store.UpdateServer(ctx, server); err != nil {
+	if err := m.store.UpdateServerAgentTokenHash(ctx, server.ID, server.AgentTokenHash); err != nil {
 		return fmt.Errorf("failed to persist agent token hash: %w", err)
 	}
 

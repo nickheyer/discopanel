@@ -143,6 +143,15 @@ func (s *ServerService) ApplyPerformanceFix(ctx context.Context, req *connect.Re
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load server config: %w", err))
 	}
 
+	var m *metrics.ServerMetrics
+	if s.metricsCollector != nil {
+		m = s.metricsCollector.GetMetrics(server.ID)
+	}
+	if autopilot.FindingForFix(autopilot.Analyze(server, serverCfg, m), req.Msg.FixId, req.Msg.FixArgs) == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("fix does not match a current finding"))
+	}
+
+	prevMemoryMin, prevMemoryMax := server.MemoryMin, server.MemoryMax
 	message, err := autopilot.ApplyFix(server, serverCfg, req.Msg.FixId, req.Msg.FixArgs)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -150,7 +159,14 @@ func (s *ServerService) ApplyPerformanceFix(ctx context.Context, req *connect.Re
 	if err := s.store.SaveServerProperties(ctx, serverCfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save server config: %w", err))
 	}
-	if err := s.store.UpdateServer(ctx, server); err != nil {
+	fields := map[string]any{}
+	if server.MemoryMin != prevMemoryMin {
+		fields["memory_min"] = server.MemoryMin
+	}
+	if server.MemoryMax != prevMemoryMax {
+		fields["memory_max"] = server.MemoryMax
+	}
+	if err := s.store.UpdateServerFields(ctx, server.ID, fields); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save server: %w", err))
 	}
 

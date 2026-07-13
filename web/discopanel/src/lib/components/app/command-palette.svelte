@@ -10,7 +10,6 @@
 	} from '$lib/components/ui/command';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { toast } from 'svelte-sonner';
 	import { toggleMode } from 'mode-watcher';
 	import {
 		House,
@@ -25,10 +24,10 @@
 		Play,
 		Square
 	} from '@lucide/svelte';
-	import { rpcClient } from '$lib/api/rpc-client';
-	import { serversStore, activitySortedServers } from '$lib/stores/servers';
+	import { activitySortedServers } from '$lib/stores/servers';
 	import { canAccessSettings } from '$lib/stores/auth';
 	import { canStart, canStop, statusMeta } from '$lib/server-status';
+	import { runServerAction } from '$lib/server-actions';
 	import StatusDot from './status-dot.svelte';
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
@@ -46,21 +45,6 @@
 	function run(action: () => void) {
 		open = false;
 		action();
-	}
-
-	async function power(id: string, name: string, start: boolean) {
-		try {
-			if (start) {
-				await rpcClient.server.startServer({ id });
-				toast.success(`Starting ${name}...`);
-			} else {
-				await rpcClient.server.stopServer({ id });
-				toast.success(`Stopping ${name}...`);
-			}
-			await serversStore.fetchServers(true);
-		} catch {
-			// Interceptor already toasts the failure
-		}
 	}
 </script>
 
@@ -92,7 +76,7 @@
 						<CommandItem
 							value={`start ${server.name} ${server.id}`}
 							keywords={[server.name]}
-							onSelect={() => run(() => power(server.id, server.name, true))}
+							onSelect={() => run(() => runServerAction('start', server))}
 						>
 							<Play class="size-4 text-status-ok" />
 							<span>Start <span class="font-medium">{server.name}</span></span>
@@ -101,7 +85,7 @@
 						<CommandItem
 							value={`stop ${server.name} ${server.id}`}
 							keywords={[server.name]}
-							onSelect={() => run(() => power(server.id, server.name, false))}
+							onSelect={() => run(() => runServerAction('stop', server))}
 						>
 							<Square class="size-4 text-status-danger" />
 							<span>Stop <span class="font-medium">{server.name}</span></span>

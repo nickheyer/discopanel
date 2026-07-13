@@ -205,10 +205,11 @@ func classifyFailedMod(fm *agentv1.FailedMod) failReason {
 }
 
 const (
-	crashLoopThreshold = 3
-	maxDoctorPasses    = 8
-	minDisableBudget   = 8
-	repairTimeout      = 15 * time.Minute
+	crashLoopThreshold   = 3
+	maxDoctorPasses      = 8
+	minDisableBudget     = 8
+	repairTimeout        = 15 * time.Minute
+	doctorRestartTimeout = 2 * time.Hour
 )
 
 // Caps how much of a pack one incident may disable
@@ -234,7 +235,7 @@ type CrashStore interface {
 	SaveServerProperties(ctx context.Context, cfg *storage.ServerProperties) error
 }
 
-// Sources a missing dependency into the mods dir by mod id
+// Sources a missing dependency into the mods dir
 type DepInstaller interface {
 	InstallModByID(ctx context.Context, server *storage.Server, modID, versionRange string, dialects []string) (string, error)
 }
@@ -247,8 +248,9 @@ type CrashResponder struct {
 	Rec       *activity.Recorder
 	Log       *logger.Logger
 
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	mu      sync.Mutex
+	locks   map[string]*sync.Mutex
+	handled map[string]time.Time
 }
 
 // One repair or adopt runs per server at a time
@@ -264,9 +266,38 @@ func (r *CrashResponder) serverLock(serverID string) *sync.Mutex {
 	return r.locks[serverID]
 }
 
-// Repairs run off the stream handler, installs may take a while
-func (r *CrashResponder) OnCrashExit(ctx context.Context, serverID string) {
-	_ = ctx
+// Claims one fresh exit, false for already handled ones
+func (r *CrashResponder) takeExit(serverID string, exitedAt time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.handled == nil {
+		r.handled = make(map[string]time.Time)
+	}
+	if !exitedAt.After(r.handled[serverID]) {
+		return false
+	}
+	r.handled[serverID] = exitedAt
+	return true
+}
+
+// Swallows exits that landed while this pass was repairing
+func (r *CrashResponder) absorbExits(serverID string) {
+	m := r.Collector.GetMetrics(serverID)
+	if m == nil || m.LastExitedAt.IsZero() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.handled == nil {
+		r.handled = make(map[string]time.Time)
+	}
+	if m.LastExitedAt.After(r.handled[serverID]) {
+		r.handled[serverID] = m.LastExitedAt
+	}
+}
+
+// Repairs run off the stream handler, installs crawl
+func (r *CrashResponder) OnCrashExit(_ context.Context, serverID string) {
 	go r.respond(serverID)
 }
 
@@ -290,7 +321,7 @@ func (r *CrashResponder) OnServerReady(ctx context.Context, serverID string) {
 	if inc == nil {
 		return
 	}
-	ctx = activity.WithTraceID(activity.WithSource(ctx, "crash doctor"), incidentTrace(inc))
+	ctx = activity.WithTraceID(activity.WithSource(ctx, doctorSource), incidentTrace(inc))
 	cfg, err := r.Store.GetServerProperties(ctx, serverID)
 	if err != nil {
 		return
@@ -316,13 +347,13 @@ func (r *CrashResponder) OnServerReady(ctx context.Context, serverID string) {
 	}
 
 	inc.Outcome = "repaired"
+	inc.ClosedAt = time.Now()
 	inc.Summary = summarizeIncident(inc)
 	j.Resolved, j.Incident = inc, nil
 	if err := saveDoctor(server.DataPath, j); err != nil {
 		r.Log.Error("autopilot: crash doctor journal save failed for server %s: %v", serverID, err)
 	}
 
-	r.Collector.RecordAutoRepair(serverID, inc.Summary)
 	r.Rec.Announce(ctx, serverID, "doctor.resolve", activity.Attrs{"summary": inc.Summary, "passes": strconv.Itoa(inc.Passes)}, "server is up (%s)", inc.Summary)
 	r.Log.Info("autopilot: crash doctor resolved incident for server %s (%s)", serverID, inc.Summary)
 }
@@ -369,12 +400,25 @@ func (r *CrashResponder) respond(serverID string) {
 	lock.Lock()
 	defer lock.Unlock()
 
+	m := r.Collector.GetMetrics(serverID)
+	if m == nil || m.LastExitedAt.IsZero() {
+		return
+	}
+	// Replayed and superseded exits never open a pass
+	if time.Since(m.LastExitedAt) > crashLoopWindow || !r.takeExit(serverID, m.LastExitedAt) {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), repairTimeout)
 	defer cancel()
 	ctx = activity.WithSource(ctx, doctorSource)
 
-	m := r.Collector.GetMetrics(serverID)
-	if m == nil || !m.LastExitCrashed {
+	// Exits without a crash verdict still get loop breaking
+	if !m.LastExitCrashed {
+		if r.Lifecycle.StopRequestedBy(serverID) == "" {
+			r.Collector.RecordUnexpectedExit(serverID, m.LastExitedAt)
+		}
+		r.breakCrashLoop(serverID)
 		return
 	}
 	// Memory exits are a sizing problem, not a mod problem
@@ -386,9 +430,10 @@ func (r *CrashResponder) respond(serverID string) {
 	if err != nil {
 		return
 	}
-	// A wanted stop stays stopped, the user overrides the doctor
-	if src := r.userStop(serverID); src != "" {
+	// A wanted stop stays stopped, loop breaking still applies
+	if src := r.Lifecycle.StopRequestedBy(serverID); src != "" {
 		r.standDown(ctx, serverID, server, src)
+		r.breakCrashLoop(serverID)
 		return
 	}
 	cfg, err := r.Store.GetServerProperties(ctx, serverID)
@@ -396,10 +441,6 @@ func (r *CrashResponder) respond(serverID string) {
 		return
 	}
 	modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
-	if modsDir == "" {
-		r.breakCrashLoop(serverID)
-		return
-	}
 
 	j := loadDoctor(server.DataPath)
 	opened := false
@@ -437,34 +478,32 @@ func (r *CrashResponder) respond(serverID string) {
 	}
 
 	for _, a := range actions {
-		if !r.apply(ctx, serverID, server, modsDir, a, inc) {
-			continue
-		}
+		r.apply(ctx, serverID, server, modsDir, a, inc)
 	}
 	if err := saveDoctor(server.DataPath, j); err != nil {
 		r.Log.Error("autopilot: crash doctor journal save failed for server %s: %v", serverID, err)
 	}
 
-	// The user may have stopped it while this pass repaired
-	if src := r.userStop(serverID); src != "" {
+	// A stop landing during this pass wins over the restart
+	if src := r.Lifecycle.StopRequestedBy(serverID); src != "" {
 		r.standDown(ctx, serverID, server, src)
 		return
 	}
 	r.Rec.Announce(ctx, serverID, "doctor.restart", activity.Attrs{"attempt": strconv.Itoa(inc.Passes), "max_attempts": strconv.Itoa(maxDoctorPasses)}, "restarting to verify the repair (attempt %d of %d)", inc.Passes, maxDoctorPasses)
-	if err := r.Lifecycle.Restart(ctx, serverID); err != nil {
+	rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), doctorRestartTimeout)
+	defer rcancel()
+	err = r.Lifecycle.Restart(rctx, serverID)
+	r.absorbExits(serverID)
+	if err != nil {
+		if src := r.Lifecycle.StopRequestedBy(serverID); src != "" {
+			r.standDown(ctx, serverID, server, src)
+			return
+		}
 		r.Log.Error("autopilot: crash doctor restart failed for server %s: %v", serverID, err)
 	}
 }
 
-// Reports a pending stop request that was not the doctor's own
-func (r *CrashResponder) userStop(serverID string) string {
-	if src := r.Lifecycle.StopRequestedBy(serverID); src != "" && src != doctorSource {
-		return src
-	}
-	return ""
-}
-
-// Leaves a stopped server stopped, repairs wait for the user
+// Leaves a wanted stop stopped, repairs resume on next start
 func (r *CrashResponder) standDown(ctx context.Context, serverID string, server *storage.Server, src string) {
 	r.Log.Info("autopilot: crash doctor standing down for server %s, stopped by %s", serverID, src)
 	j := loadDoctor(server.DataPath)
@@ -510,6 +549,9 @@ func (r *CrashResponder) apply(ctx context.Context, serverID string, server *sto
 		}
 		r.Rec.Announce(ctx, serverID, "doctor.disable_pack", activity.Attrs{"file": a.File, "reason": a.Reason, "evidence": a.Evidence}, "disabled data pack %s (%s)", a.File, a.Reason)
 	case actionInstall:
+		if r.Installer == nil {
+			return false
+		}
 		file, err := r.Installer.InstallModByID(ctx, server, a.ModID, a.Range, dialectsFor(a.Dialect))
 		if err != nil {
 			r.Log.Info("autopilot: crash doctor could not source %s: %v", a.ModID, err)
@@ -571,18 +613,20 @@ func (r *CrashResponder) exhaust(ctx context.Context, serverID string, server *s
 	r.revertAll(server.DataPath, modsDir, inc)
 
 	inc.Outcome = "gave_up"
+	inc.ClosedAt = time.Now()
 	inc.Summary = why + ", all changes were undone"
 	j.Resolved, j.Incident = inc, nil
 	if err := saveDoctor(server.DataPath, j); err != nil {
 		r.Log.Error("autopilot: crash doctor journal save failed for server %s: %v", serverID, err)
 	}
 
-	r.Collector.RecordAutoRepair(serverID, inc.Summary)
 	r.Collector.MarkCrashLoopStopped(serverID)
 	r.Rec.Announce(ctx, serverID, "doctor.give_up", activity.Attrs{"reason": why}, "%s, stopping the server", inc.Summary)
 	r.Log.Warn("autopilot: crash doctor gave up on server %s (%s)", serverID, why)
 
-	if err := r.Lifecycle.Stop(ctx, serverID); err != nil {
+	sctx, scancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	defer scancel()
+	if err := r.Lifecycle.Stop(sctx, serverID); err != nil {
 		r.Log.Error("autopilot: crash doctor stop failed for server %s: %v", serverID, err)
 	}
 }
@@ -594,7 +638,7 @@ func (r *CrashResponder) plan(server *storage.Server, cfg *storage.ServerPropert
 	excludes := minecraft.PackExcludePatterns(server.ModLoader, cfg)
 
 	fatal := effectiveFatal(server, m)
-	if failed := fatal.GetFailedMods(); len(failed) > 0 {
+	if failed := fatal.GetFailedMods(); modsDir != "" && len(failed) > 0 {
 		return r.planVerdicts(server, failed, metas, modsDir, force, excludes, inc)
 	}
 	// Runtime crashes stay hands-off, world data is at stake
@@ -671,7 +715,7 @@ func (r *CrashResponder) planVerdicts(server *storage.Server, failed []*agentv1.
 				}
 			}
 		case failJava:
-			// A jar cannot fix the JVM, the finding says so instead
+			// Jars cannot fix the JVM, findings say so
 		case failModError:
 			if file != "" && !minecraft.MatchesPatterns(file, force) {
 				add(doctorAction{Kind: actionDisable, File: file, ModID: fm.GetModId(), Reason: "the loader reported it cannot load", Evidence: evidenceVerdict})
@@ -718,7 +762,7 @@ func (r *CrashResponder) revertGuesses(modsDir string, inc *doctorIncident) {
 	}
 }
 
-// A mod named by the crash frames is a guess worth one try
+// Crash frame mods are guesses worth one try
 func planFrameGuess(fatal *agentv1.FatalError, metas []minecraft.ModJarMeta, force []string, inc *doctorIncident) []doctorAction {
 	_, file := attributeFatal(fatal, metas)
 	if file == "" || minecraft.MatchesPatterns(file, force) {
@@ -738,7 +782,7 @@ func serverDialects(server *storage.Server) []string {
 
 func (r *CrashResponder) breakCrashLoop(serverID string) {
 	m := r.Collector.GetMetrics(serverID)
-	if m == nil || m.CrashesWithin(crashLoopWindow) < crashLoopThreshold {
+	if m == nil || m.ExitsWithin(crashLoopWindow) < crashLoopThreshold {
 		return
 	}
 	if !m.CrashLoopStoppedAt.IsZero() && time.Since(m.CrashLoopStoppedAt) < crashLoopWindow {
@@ -746,11 +790,15 @@ func (r *CrashResponder) breakCrashLoop(serverID string) {
 	}
 	r.Collector.MarkCrashLoopStopped(serverID)
 
-	ctx := activity.WithTrace(activity.WithSource(context.Background(), "crash doctor"))
+	verb := "exited unexpectedly"
+	if m.LastExitCrashed {
+		verb = "crashed"
+	}
+	ctx := activity.WithTrace(activity.WithSource(context.Background(), doctorSource))
 	r.Rec.Announce(ctx, serverID, "doctor.loop_break",
 		activity.Attrs{"crashes": strconv.Itoa(crashLoopThreshold), "window_minutes": strconv.Itoa(int(crashLoopWindow.Minutes()))},
-		"server crashed %d times in %d minutes, stopping it to break the loop",
-		crashLoopThreshold, int(crashLoopWindow.Minutes()))
+		"server %s %d times in %d minutes, stopping it to break the loop",
+		verb, crashLoopThreshold, int(crashLoopWindow.Minutes()))
 	r.Log.Warn("autopilot: crash loop detected for server %s, stopping it", serverID)
 
 	go func() {

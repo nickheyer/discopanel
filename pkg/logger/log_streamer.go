@@ -17,14 +17,14 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// LogStream holds the log buffer and the active container follow for one key
+// Holds the buffer and active follow for one key
 type LogStream struct {
 	key         string
 	logs        []*v1.LogEntry
 	maxEntries  int
 	containerID string
 	active      bool
-	gen         int // Follow generation - stale follow goroutines check it before touching state
+	gen         int // Stale follows check generation before touching state
 	cancelFunc  context.CancelFunc
 	mu          sync.RWMutex
 }
@@ -87,7 +87,7 @@ func (ls *LogStreamer) StartStreaming(key, containerID string) error {
 		stream.cancelFunc()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	// Unfollowed container have no lines in buffer - resume from container start time
+	// Unfollowed containers resume from container start time
 	newContainer := stream.containerID != containerID
 	stream.containerID = containerID
 	stream.cancelFunc = cancel
@@ -136,7 +136,7 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *LogStream, contai
 		options.Tail = "500"
 	} else {
 		if since.IsZero() {
-			// New container for this stream - capture from its actual start
+			// New containers capture from their actual start
 			if started, perr := time.Parse(time.RFC3339Nano, inspect.State.StartedAt); perr == nil {
 				since = started
 			} else {
@@ -153,7 +153,7 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *LogStream, contai
 	}
 	defer reader.Close()
 
-	// If TTY is disabled, Docker sends multiplexed stream that needs demultiplexing
+	// Without TTY docker multiplexes the stream
 	var logReader io.Reader
 	if !inspect.Config.Tty {
 		pr, pw := io.Pipe()
@@ -166,7 +166,7 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *LogStream, contai
 		}()
 		logReader = pr
 	} else {
-		// TTY enabled: raw stream, no headers
+		// TTY streams arrive raw without headers
 		logReader = reader
 	}
 
@@ -206,7 +206,7 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *LogStream, contai
 
 			stream.mu.Lock()
 			if stream.gen != gen {
-				// A newer follow replaced this one; stop writing
+				// A newer follow replaced this one, stop writing
 				stream.mu.Unlock()
 				return
 			}
@@ -222,7 +222,7 @@ func (ls *LogStreamer) streamLogs(ctx context.Context, stream *LogStream, contai
 	}
 }
 
-// appendLocked appends an entry and trims the buffer; callers hold stream.mu
+// Appends an entry and trims, callers hold mu
 func (s *LogStream) appendLocked(entry *v1.LogEntry) {
 	s.logs = append(s.logs, entry)
 	if len(s.logs) > s.maxEntries {
@@ -273,9 +273,7 @@ func (ls *LogStreamer) shouldFilterLine(line string) bool {
 	return false
 }
 
-// AddSystemEntry records a panel-side lifecycle/provisioning line in the
-// stream so setup steps appear in the server console alongside container
-// output. Lines carry a uniform "[setup]" prefix.
+// Records a panel side setup line in the console
 func (ls *LogStreamer) AddSystemEntry(key, message string) {
 	stream := ls.getOrCreateStream(key)
 
@@ -324,7 +322,7 @@ func (ls *LogStreamer) AddCommandOutput(key, output string, success bool, timest
 
 	stream.mu.Lock()
 
-	// Add output entry if present + ANSI to prevent color bleed
+	// Adds output entry, ANSI reset prevents color bleed
 	if output != "" {
 		output = "\u001b[0m" + output + "\u001b[0m"
 		lines := strings.Split(strings.TrimSpace(output), "\n")
@@ -401,7 +399,7 @@ func (ls *LogStreamer) ClearLogs(key string) {
 	}
 }
 
-// Subscribe creates a channel that receives new log entries for a key
+// Creates a channel receiving new entries for a key
 func (ls *LogStreamer) Subscribe(key string) chan *v1.LogEntry {
 	ls.subMu.Lock()
 	defer ls.subMu.Unlock()
@@ -433,7 +431,7 @@ func (ls *LogStreamer) Unsubscribe(key string, ch chan *v1.LogEntry) {
 	}
 }
 
-// broadcast sends a log entry to all subscribers for a key
+// Sends a log entry to all key subscribers
 func (ls *LogStreamer) broadcast(key string, entry *v1.LogEntry) {
 	ls.subMu.RLock()
 	subs, ok := ls.subscribers[key]

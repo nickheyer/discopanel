@@ -98,7 +98,7 @@
 		try {
 			if (!silent) loading = true;
 			const response = await rpcClient.module.listModules(
-				{ serverId: server.id },
+				{ serverId: server.id, fullStats: true },
 				silent ? silentCallOptions : undefined
 			);
 			modules = response.modules;

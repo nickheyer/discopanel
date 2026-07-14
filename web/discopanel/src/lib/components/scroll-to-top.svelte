@@ -9,6 +9,12 @@
 	onMount(() => {
 		// Function to find the scrollable element
 		const findScrollableElement = () => {
+			// Pages with a pinned header mark their own scroll pane
+			const marked = document.querySelector('[data-scroll-root]');
+			if (marked) {
+				return marked;
+			}
+
 			// Check the main element
 			const mainElement = document.querySelector('main');
 			if (mainElement) {

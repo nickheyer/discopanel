@@ -38,7 +38,9 @@
 		</div>
 
 		{#if server.motd}
-			<div class="rounded-lg bg-terminal px-3 py-2.5 text-xs leading-relaxed text-zinc-300">
+			<div
+				class="rounded-lg bg-terminal px-3 py-2.5 text-xs leading-relaxed text-terminal-foreground transition-colors duration-300"
+			>
 				<MotdText motd={server.motd} />
 			</div>
 		{/if}

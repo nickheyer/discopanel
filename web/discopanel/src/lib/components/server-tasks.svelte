@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import { toast } from 'svelte-sonner';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
@@ -20,7 +21,6 @@
 		CheckCircle2,
 		XCircle,
 		AlertCircle,
-		RefreshCw,
 		Terminal,
 		RotateCcw,
 		Square,
@@ -64,7 +64,6 @@
 	let { server, active }: { server: Server; active?: boolean } = $props();
 
 	let loading = $state(true);
-	let refreshing = $state(false);
 	let tasks = $state<ScheduledTask[]>([]);
 	let initialized = $state(false);
 	// svelte-ignore state_referenced_locally
@@ -343,6 +342,11 @@
 		}
 	});
 
+	$effect(() => {
+		if (!active) return;
+		return registerRefresh(loadTasks);
+	});
+
 	function toggleEventTrigger(trigger: TriggeredEventType) {
 		if (eventTriggers.includes(trigger)) {
 			eventTriggers = eventTriggers.filter((t) => t !== trigger);
@@ -369,15 +373,6 @@
 			toast.error('Failed to load tasks');
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function refresh() {
-		refreshing = true;
-		try {
-			await loadTasks();
-		} finally {
-			refreshing = false;
 		}
 	}
 
@@ -917,10 +912,6 @@
 		<Button variant="outline" size="sm" onclick={viewServerHistory}>
 			<History class="size-4" />
 			History
-		</Button>
-		<Button variant="outline" size="sm" onclick={refresh} disabled={refreshing}>
-			<RefreshCw class="size-4 {refreshing ? 'animate-spin' : ''}" />
-			Refresh
 		</Button>
 		<Button size="sm" onclick={openCreateDialog}>
 			<Plus class="size-4" />

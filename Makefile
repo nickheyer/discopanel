@@ -74,10 +74,10 @@ image:
 	@bash scripts/build.sh
 
 # Published Java majors, docker.SupportedJavaVersions is the source
-RUNTIME_JAVA_VERSIONS := $(shell go run ./cmd/javamajors 2>/dev/null)
+RUNTIME_JAVA_VERSIONS := $(shell go run ./cmd/javamajors)
 
 # Published Graal majors, docker.GraalJavaVersions is the source
-RUNTIME_GRAAL_VERSIONS := $(shell go run ./cmd/javamajors -graal 2>/dev/null)
+RUNTIME_GRAAL_VERSIONS := $(shell go run ./cmd/javamajors -graal)
 
 # Git identity stamped into runtime images
 RUNTIME_VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev)
@@ -96,12 +96,23 @@ RUNTIME_SRC := docker/Dockerfile.runtime go.mod go.sum \
 MODULE_SRC := go.mod go.sum \
 	$(shell find cmd internal pkg proto -type f 2>/dev/null | grep -v '_test.go')
 
-# Stamps for tags someone removed by hand die at parse time
+# Image goals refuse to run on an empty version list
+ifneq ($(filter images runtime,$(MAKECMDGOALS)),)
+ifeq ($(strip $(RUNTIME_JAVA_VERSIONS)),)
+$(error go run ./cmd/javamajors produced no versions, runtime targets would silently no-op)
+endif
+ifeq ($(strip $(RUNTIME_GRAAL_VERSIONS)),)
+$(error go run ./cmd/javamajors -graal produced no versions, runtime targets would silently no-op)
+endif
+endif
+
+# Stamps die at parse when their tag is missing or replaced
 ifneq ($(filter images runtime modules module-%,$(MAKECMDGOALS)),)
 _STAMP_SYNC := $(shell mkdir -p $(STAMP_DIR); \
-	for v in $(RUNTIME_JAVA_VERSIONS); do docker image inspect "nickheyer/discopanel-runtime:java$$v" >/dev/null 2>&1 || rm -f $(STAMP_DIR)/runtime-java$$v; done; \
-	for v in $(RUNTIME_GRAAL_VERSIONS); do docker image inspect "nickheyer/discopanel-runtime:java$$v-graal" >/dev/null 2>&1 || rm -f $(STAMP_DIR)/runtime-graal-java$$v; done; \
-	for m in $(MODULE_NAMES); do docker image inspect "nickheyer/discopanel-$$m:latest" >/dev/null 2>&1 || rm -f $(STAMP_DIR)/module-$$m; done)
+	sync() { id=$$(docker image inspect -f '{{.Id}}' "$$1" 2>/dev/null); [ -n "$$id" ] && [ "$$id" = "$$(cat "$$2" 2>/dev/null)" ] || rm -f "$$2"; }; \
+	for v in $(RUNTIME_JAVA_VERSIONS); do sync "nickheyer/discopanel-runtime:java$$v" $(STAMP_DIR)/runtime-java$$v; done; \
+	for v in $(RUNTIME_GRAAL_VERSIONS); do sync "nickheyer/discopanel-runtime:java$$v-graal" $(STAMP_DIR)/runtime-graal-java$$v; done; \
+	for m in $(MODULE_NAMES); do sync "nickheyer/discopanel-$$m:latest" $(STAMP_DIR)/module-$$m; done)
 endif
 
 # Rebuilds a local tag and deletes the image it displaced
@@ -116,7 +127,7 @@ define build_image
 endef
 
 # Everything discopanel needs at runtime, built locally when stale
-images: runtime modules
+images: agent runtime modules
 	@echo "All local images up to date!"
 
 # Builds every runtime image variant locally when inputs changed
@@ -128,13 +139,13 @@ $(STAMP_DIR)/runtime-java%: $(RUNTIME_SRC)
 	@mkdir -p $(STAMP_DIR)
 	@echo "Building nickheyer/discopanel-runtime:java$*..."
 	$(call build_image,nickheyer/discopanel-runtime:java$*,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_VERSION=$(RUNTIME_VERSION),docker/Dockerfile.runtime)
-	@touch $@
+	@docker image inspect -f '{{.Id}}' "nickheyer/discopanel-runtime:java$*" > $@
 
 $(STAMP_DIR)/runtime-graal-java%: $(RUNTIME_SRC)
 	@mkdir -p $(STAMP_DIR)
 	@echo "Building nickheyer/discopanel-runtime:java$*-graal..."
 	$(call build_image,nickheyer/discopanel-runtime:java$*-graal,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_FLAVOR=graal --build-arg RUNTIME_VERSION=$(RUNTIME_VERSION),docker/Dockerfile.runtime)
-	@touch $@
+	@docker image inspect -f '{{.Id}}' "nickheyer/discopanel-runtime:java$*-graal" > $@
 
 # Builds all module images locally when inputs changed
 modules: $(addprefix $(STAMP_DIR)/module-,$(MODULE_NAMES))
@@ -144,7 +155,7 @@ $(STAMP_DIR)/module-%: docker/Dockerfile.% $(MODULE_SRC)
 	@mkdir -p $(STAMP_DIR)
 	@echo "Building nickheyer/discopanel-$*:latest..."
 	$(call build_image,nickheyer/discopanel-$*:latest,,docker/Dockerfile.$*)
-	@touch $@
+	@docker image inspect -f '{{.Id}}' "nickheyer/discopanel-$*:latest" > $@
 
 # Builds one module image locally (e.g., make module-status)
 module-%: $(STAMP_DIR)/module-%

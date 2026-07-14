@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { ScrollText, RefreshCw, Download, Loader2, AlertCircle, ArrowDown } from '@lucide/svelte';
+	import { ScrollText, Download, Loader2, AlertCircle, ArrowDown } from '@lucide/svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { toast } from 'svelte-sonner';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { registerRefresh } from '$lib/stores/refresh';
 
 	let loading = $state(true);
 	let refreshing = $state(false);
@@ -14,6 +15,7 @@
 	let pinned = $state(true);
 	let logContainer: HTMLPreElement | null = $state(null);
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let unregisterRefresh: (() => void) | null = null;
 
 	async function loadLogs(showToast = false) {
 		if (refreshing) return;
@@ -87,6 +89,7 @@
 
 	onMount(() => {
 		loadLogs();
+		unregisterRefresh = registerRefresh(() => loadLogs(true));
 		// Refreshes logs every 5 seconds
 		refreshInterval = setInterval(() => loadLogs(), 5000);
 	});
@@ -95,12 +98,17 @@
 		if (refreshInterval) {
 			clearInterval(refreshInterval);
 		}
+		unregisterRefresh?.();
 	});
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col gap-3">
-	<div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-terminal shadow-sm">
-		<div class="flex shrink-0 items-center gap-3 border-b border-white/8 bg-white/3 px-3 py-2">
+	<div
+		class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-terminal shadow-sm transition-colors duration-300"
+	>
+		<div
+			class="flex shrink-0 items-center gap-3 border-b border-terminal-foreground/8 bg-terminal-foreground/4 px-3 py-2 transition-colors duration-300"
+		>
 			<div class="flex min-w-0 items-center gap-2">
 				<span class="relative flex size-2 shrink-0">
 					<span
@@ -108,11 +116,13 @@
 					></span>
 					<span class="relative inline-flex size-2 rounded-full bg-status-ok"></span>
 				</span>
-				<span class="truncate font-mono text-xs font-medium tracking-wide text-white/80">
+				<span
+					class="truncate font-mono text-xs font-medium tracking-wide text-terminal-foreground/85"
+				>
 					{filename || 'discopanel.log'}
 				</span>
 				{#if fileSize > 0}
-					<span class="tabular shrink-0 font-mono text-[11px] text-white/35">
+					<span class="tabular shrink-0 font-mono text-[11px] text-terminal-foreground/40">
 						{formatFileSize(fileSize)}
 					</span>
 				{/if}
@@ -124,27 +134,9 @@
 						<Button
 							size="icon"
 							variant="ghost"
-							onclick={() => loadLogs(true)}
-							disabled={refreshing}
-							class="size-6.5 text-white/45 hover:bg-white/10 hover:text-white"
-						>
-							{#if refreshing}
-								<Loader2 class="size-3.5 animate-spin" />
-							{:else}
-								<RefreshCw class="size-3.5" />
-							{/if}
-						</Button>
-					</Tooltip.Trigger>
-					<Tooltip.Content>Refresh now</Tooltip.Content>
-				</Tooltip.Root>
-				<Tooltip.Root>
-					<Tooltip.Trigger>
-						<Button
-							size="icon"
-							variant="ghost"
 							onclick={downloadLogs}
 							disabled={!logs}
-							class="size-6.5 text-white/45 hover:bg-white/10 hover:text-white"
+							class="size-6.5 text-terminal-foreground/45 hover:bg-terminal-foreground/10 hover:text-terminal-foreground"
 						>
 							<Download class="size-3.5" />
 						</Button>
@@ -156,12 +148,16 @@
 
 		<div class="relative min-h-0 flex-1">
 			{#if loading}
-				<div class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-white/30">
+				<div
+					class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-terminal-foreground/35"
+				>
 					<Loader2 class="mb-2 size-6 animate-spin" />
 					<p class="font-mono text-sm">Loading logs...</p>
 				</div>
 			{:else if !logs}
-				<div class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-white/30">
+				<div
+					class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-terminal-foreground/35"
+				>
 					<AlertCircle class="mb-2 size-6" />
 					<p class="font-mono text-sm">No logs available</p>
 					<p class="font-mono text-xs">File logging may not be enabled in your configuration.</p>
@@ -170,11 +166,11 @@
 				<pre
 					bind:this={logContainer}
 					onscroll={handleScroll}
-					class="absolute inset-0 overflow-auto p-4 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-zinc-300">{logs}</pre>
+					class="absolute inset-0 overflow-auto p-4 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-terminal-foreground">{logs}</pre>
 
 				{#if !pinned}
 					<button
-						class="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-white/15 bg-terminal/95 px-3 py-1 font-mono text-xs text-white/80 shadow-lg backdrop-blur-sm transition-colors hover:bg-white/10"
+						class="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-terminal-foreground/15 bg-terminal/95 px-3 py-1 font-mono text-xs text-terminal-foreground/80 shadow-lg backdrop-blur-sm transition-colors hover:bg-terminal-foreground/10"
 						onclick={scrollToBottom}
 					>
 						<ArrowDown class="size-3" />

@@ -38,6 +38,7 @@
 	} from '@lucide/svelte';
 	import { getRoleBadgeVariant } from '$lib/utils/role-colors';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { formatDate, formatDateTime, timestampToDate } from '$lib/utils/time';
 	import { TONE_BADGE } from '$lib/server-status';
@@ -81,6 +82,7 @@
 
 	onMount(() => {
 		loadTokens();
+		return registerRefresh(loadTokens);
 	});
 
 	async function loadTokens() {
@@ -471,7 +473,7 @@
 				<div class="space-y-1.5">
 					<p class="stat-label">Example usage</p>
 					<pre
-						class="overflow-x-auto rounded-lg border bg-terminal p-3 font-mono text-xs whitespace-pre text-zinc-300">curl {window
+						class="overflow-x-auto rounded-lg border bg-terminal p-3 font-mono text-xs whitespace-pre text-terminal-foreground transition-colors duration-300">curl {window
 							.location.origin}/discopanel.v1.UserService/ListUsers \
   -X POST \
   -H 'Content-Type: application/json' \

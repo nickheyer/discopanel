@@ -4,6 +4,7 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { SectionCard, EmptyState, ConfirmDialog } from '$lib/components/app';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { Module, ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
@@ -24,7 +25,6 @@
 		Cpu,
 		ExternalLink,
 		Package,
-		RefreshCw,
 		Puzzle,
 		Link,
 		Zap,
@@ -92,6 +92,11 @@
 		if (!active || !hasLoaded) return;
 		const interval = setInterval(() => loadModules(true), 5000);
 		return () => clearInterval(interval);
+	});
+
+	$effect(() => {
+		if (!active) return;
+		return registerRefresh(() => Promise.all([loadModules(true), loadTemplates()]));
 	});
 
 	async function loadModules(silent = false) {
@@ -249,16 +254,6 @@
 
 <SectionCard title="Server modules" description="Companion services attached to this server">
 	{#snippet action()}
-		<Button
-			variant="ghost"
-			size="icon"
-			class="size-8"
-			onclick={() => loadModules()}
-			disabled={loading}
-			title="Refresh"
-		>
-			<RefreshCw class="size-4 {loading ? 'animate-spin' : ''}" />
-		</Button>
 		<Button variant="outline" size="sm" onclick={() => (templateCreateDialogOpen = true)}>
 			<Puzzle class="size-4" />
 			Create template

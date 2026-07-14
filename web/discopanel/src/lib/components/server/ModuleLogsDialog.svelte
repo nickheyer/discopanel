@@ -10,17 +10,12 @@
 	import { TONE_BG } from '$lib/server-status';
 	import { moduleStatusMeta } from '$lib/module-status';
 	import { Download, Trash2, RefreshCw, Loader2, X, ArrowDown } from '@lucide/svelte';
-	import AnsiToHtml from 'ansi-to-html';
+	import { mode } from 'mode-watcher';
+	import { themedAnsiConverter } from '$lib/ansi-console';
 	import { toast } from 'svelte-sonner';
 
 	// Renders ansi escape codes as colored html
-	const ansiConverter = new AnsiToHtml({
-		fg: '#e8e8e8',
-		bg: '#000000',
-		newline: false,
-		escapeXML: true,
-		stream: true
-	});
+	let ansiConverter = $derived(themedAnsiConverter(mode.current));
 
 	const TAIL_OPTIONS = [100, 500, 1000, 2000];
 
@@ -144,10 +139,12 @@
 
 <Dialog bind:open>
 	<DialogContent
-		class="flex h-[80vh]! w-[90vw]! max-w-4xl! flex-col gap-0! overflow-hidden border-white/10 bg-terminal p-0!"
+		class="flex h-[80vh]! w-[90vw]! max-w-4xl! flex-col gap-0! overflow-hidden border-terminal-foreground/10 bg-terminal p-0!"
 		showCloseButton={false}
 	>
-		<DialogHeader class="shrink-0 border-b border-white/8 bg-white/3 px-3 py-2">
+		<DialogHeader
+			class="shrink-0 border-b border-terminal-foreground/8 bg-terminal-foreground/4 px-3 py-2"
+		>
 			<div class="flex items-center gap-3">
 				<div class="flex min-w-0 items-center gap-2">
 					<span class="relative flex size-2 shrink-0">
@@ -161,29 +158,31 @@
 						<span class="relative inline-flex size-2 rounded-full {TONE_BG[statusMeta.tone]}"
 						></span>
 					</span>
-					<DialogTitle class="truncate font-mono text-xs font-medium tracking-wide text-white/80">
+					<DialogTitle
+						class="truncate font-mono text-xs font-medium tracking-wide text-terminal-foreground/85"
+					>
 						{module.name}
 					</DialogTitle>
-					<span class="shrink-0 font-mono text-xs text-white/40">
+					<span class="shrink-0 font-mono text-xs text-terminal-foreground/40">
 						{statusMeta.label.toLowerCase()}
 					</span>
 				</div>
 
 				<div class="ml-auto flex shrink-0 items-center gap-2">
-					<span class="tabular hidden font-mono text-[11px] text-white/35 sm:inline">
+					<span class="tabular hidden font-mono text-[11px] text-terminal-foreground/40 sm:inline">
 						{logEntries.length} lines
 					</span>
 					<select
 						bind:value={tailLines}
 						onchange={fetchLogs}
 						title="Lines of history to keep"
-						class="h-6 rounded border border-white/10 bg-transparent px-1.5 font-mono text-[11px] text-white/60 focus:outline-none"
+						class="h-6 rounded border border-terminal-foreground/10 bg-transparent px-1.5 font-mono text-[11px] text-terminal-foreground/60 focus:outline-none"
 					>
 						{#each TAIL_OPTIONS as option (option)}
 							<option value={option} class="bg-terminal">tail {option}</option>
 						{/each}
 					</select>
-					<div class="flex items-center gap-0.5 border-l border-white/10 pl-2">
+					<div class="flex items-center gap-0.5 border-l border-terminal-foreground/10 pl-2">
 						<Tooltip.Root>
 							<Tooltip.Trigger>
 								<Button
@@ -191,7 +190,7 @@
 									variant="ghost"
 									onclick={fetchLogs}
 									disabled={fetching}
-									class="size-6.5 text-white/45 hover:bg-white/10 hover:text-white"
+									class="size-6.5 text-terminal-foreground/45 hover:bg-terminal-foreground/10 hover:text-terminal-foreground"
 								>
 									{#if fetching}
 										<Loader2 class="size-3.5 animate-spin" />
@@ -209,7 +208,7 @@
 									variant="ghost"
 									onclick={downloadLogs}
 									disabled={logEntries.length === 0}
-									class="size-6.5 text-white/45 hover:bg-white/10 hover:text-white"
+									class="size-6.5 text-terminal-foreground/45 hover:bg-terminal-foreground/10 hover:text-terminal-foreground"
 								>
 									<Download class="size-3.5" />
 								</Button>
@@ -223,7 +222,7 @@
 									variant="ghost"
 									onclick={clearLogs}
 									disabled={logEntries.length === 0}
-									class="size-6.5 text-white/45 hover:bg-white/10 hover:text-white"
+									class="size-6.5 text-terminal-foreground/45 hover:bg-terminal-foreground/10 hover:text-terminal-foreground"
 								>
 									<Trash2 class="size-3.5" />
 								</Button>
@@ -231,12 +230,12 @@
 							<Tooltip.Content>Clear view (local only)</Tooltip.Content>
 						</Tooltip.Root>
 					</div>
-					<div class="h-4 w-px bg-white/10"></div>
+					<div class="h-4 w-px bg-terminal-foreground/10"></div>
 					<Button
 						size="icon"
 						variant="ghost"
 						onclick={() => (open = false)}
-						class="size-6.5 text-white/45 hover:bg-white/10 hover:text-white"
+						class="size-6.5 text-terminal-foreground/45 hover:bg-terminal-foreground/10 hover:text-terminal-foreground"
 					>
 						<X class="size-3.5" />
 					</Button>
@@ -250,9 +249,9 @@
 				bind:this={scrollAreaRef}
 				onscroll={handleScroll}
 			>
-				<div class="font-mono text-xs leading-relaxed text-zinc-300">
+				<div class="font-mono text-xs leading-relaxed text-terminal-foreground">
 					{#if logEntries.length === 0}
-						<div class="py-8 text-center font-mono text-white/30">
+						<div class="py-8 text-center font-mono text-terminal-foreground/35">
 							{#if module.status === ModuleStatus.STOPPED}
 								No logs available. Start the module to see output.
 							{:else if module.status === ModuleStatus.STARTING || module.status === ModuleStatus.CREATING}
@@ -274,7 +273,7 @@
 
 			{#if !autoScroll}
 				<button
-					class="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-white/15 bg-terminal/95 px-3 py-1 font-mono text-xs text-white/80 shadow-lg backdrop-blur-sm transition-colors hover:bg-white/10"
+					class="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-terminal-foreground/15 bg-terminal/95 px-3 py-1 font-mono text-xs text-terminal-foreground/80 shadow-lg backdrop-blur-sm transition-colors hover:bg-terminal-foreground/10"
 					onclick={jumpToBottom}
 				>
 					<ArrowDown class="size-3" />
@@ -292,6 +291,6 @@
 	}
 
 	.log-line:hover {
-		background-color: rgba(255, 255, 255, 0.04);
+		background-color: color-mix(in oklab, var(--terminal-foreground) 6%, transparent);
 	}
 </style>

@@ -113,6 +113,9 @@ func classifyFatal(fatal *agentv1.FatalError) string {
 		}
 	}
 	for _, c := range fatal.GetCauses() {
+		if strings.Contains(c.GetMessage(), "in environment type SERVER") {
+			return "A client-only mod tried to load client code that does not exist on a dedicated server."
+		}
 		for _, f := range c.GetFrames() {
 			if simpleTypeName(f.GetClassName()) == "RuntimeDistCleaner" {
 				return "A client-only mod tried to load client code that does not exist on a dedicated server."

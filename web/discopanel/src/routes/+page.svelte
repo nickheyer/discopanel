@@ -204,9 +204,13 @@
 	</div>
 {/snippet}
 
-<div class="mx-auto w-full max-w-6xl space-y-5 p-4 sm:p-6 2xl:max-w-7xl">
-	<PageHeader title={greeting} description={headline} />
+<div class="border-b bg-card/40">
+	<div class="mx-auto w-full max-w-6xl px-4 pt-5 sm:px-6 2xl:max-w-7xl">
+		<PageHeader title={greeting} description={headline} class="pb-4" />
+	</div>
+</div>
 
+<div class="mx-auto w-full max-w-6xl space-y-5 p-4 sm:p-6 2xl:max-w-7xl">
 	{#if initialLoading && servers.length === 0}
 		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 			{#each Array(4) as _, i (i)}

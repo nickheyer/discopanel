@@ -20,12 +20,12 @@
 		Terminal,
 		Cpu,
 		Server,
-		Package,
-		RefreshCw
+		Package
 	} from '@lucide/svelte';
 	import ModuleDialog from '$lib/components/server/ModuleDialog.svelte';
 	import ModuleLogsDialog from '$lib/components/server/ModuleLogsDialog.svelte';
 	import { onMount } from 'svelte';
+	import { registerRefresh } from '$lib/stores/refresh';
 
 	interface Props {
 		active?: boolean;
@@ -68,6 +68,11 @@
 		if (!active || !hasLoaded || !pageVisible) return;
 		const interval = setInterval(() => loadModules(true), 5000);
 		return () => clearInterval(interval);
+	});
+
+	$effect(() => {
+		if (!active) return;
+		return registerRefresh(() => loadModules(true));
 	});
 
 	// Refreshes once the page turns visible again
@@ -173,23 +178,6 @@
 <svelte:document onvisibilitychange={handleVisibilityChange} />
 
 <div class="space-y-4">
-	<div class="flex flex-wrap items-center justify-between gap-3">
-		<span class="tabular text-xs text-muted-foreground">
-			{modules.length}
-			{modules.length === 1 ? 'instance' : 'instances'}
-		</span>
-		<Button
-			variant="ghost"
-			size="icon"
-			class="size-8"
-			onclick={() => loadModules()}
-			disabled={loading}
-			title="Refresh"
-		>
-			<RefreshCw class="size-4 {loading ? 'animate-spin' : ''}" />
-		</Button>
-	</div>
-
 	{#if loading && modules.length === 0}
 		<div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
 			{#each Array(3) as _, i (i)}
@@ -342,6 +330,10 @@
 				</div>
 			{/each}
 		</div>
+		<p class="tabular text-xs text-muted-foreground">
+			{modules.length}
+			{modules.length === 1 ? 'instance' : 'instances'}
+		</p>
 	{/if}
 </div>
 

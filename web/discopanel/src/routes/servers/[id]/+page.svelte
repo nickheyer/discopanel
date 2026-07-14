@@ -6,7 +6,7 @@
 	import { serversStore } from '$lib/stores/servers';
 	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
-	import { Tabs, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -14,7 +14,7 @@
 		DropdownMenuSeparator,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
-	import { StatusBadge, ServerAvatar, ConfirmDialog } from '$lib/components/app';
+	import { StatusBadge, ServerAvatar, ConfirmDialog, TabRail } from '$lib/components/app';
 	import { toast } from 'svelte-sonner';
 	import {
 		Play,
@@ -111,6 +111,11 @@
 	});
 
 	$effect(() => {
+		if (!serverId) return;
+		return registerRefresh(() => loadServer(true));
+	});
+
+	$effect(() => {
 		if (serverId) {
 			if (interval) clearInterval(interval);
 			const prev = untrack(() => prevServerId);
@@ -187,42 +192,43 @@
 		<Loader2 class="size-8 animate-spin text-muted-foreground" />
 	</div>
 {:else if server}
+	{@const srv = server}
 	{@const fillTab = FILL_TABS.includes(activeTab)}
 	<div class="flex min-h-0 flex-1 flex-col">
-		<div class="shrink-0 border-b bg-card/40">
-			<div class="mx-auto w-full max-w-6xl px-4 pt-5 sm:px-6 2xl:max-w-7xl">
-				<div class="flex items-start justify-between gap-4 pb-4">
+		<TabRail tabs={TABS} value={activeTab} onValueChange={setTab}>
+			{#snippet header()}
+				<div class="flex items-start justify-between gap-4 pt-5 pb-4">
 					<div class="flex min-w-0 items-center gap-3.5">
-						<ServerAvatar name={server.name} favicon={server.favicon} size="lg" />
+						<ServerAvatar name={srv.name} favicon={srv.favicon} size="lg" />
 						<div class="min-w-0">
 							<div class="flex flex-wrap items-center gap-2.5">
-								<h1 class="truncate text-xl font-semibold tracking-tight">{server.name}</h1>
-								<StatusBadge status={server.status} />
+								<h1 class="truncate text-xl font-semibold tracking-tight">{srv.name}</h1>
+								<StatusBadge status={srv.status} />
 							</div>
 							<div
 								class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
 							>
-								<span>{server.mcVersion}</span>
-								{#if server.slpAvailable && server.serverVersion && server.serverVersion !== server.mcVersion}
+								<span>{srv.mcVersion}</span>
+								{#if srv.slpAvailable && srv.serverVersion && srv.serverVersion !== srv.mcVersion}
 									<span>·</span>
-									<span title="protocol {server.protocolVersion}">
-										running {server.serverVersion}
+									<span title="protocol {srv.protocolVersion}">
+										running {srv.serverVersion}
 									</span>
 								{/if}
-								{#if $loaderDisplayName(server.modLoader)}
+								{#if $loaderDisplayName(srv.modLoader)}
 									<span>·</span>
-									<span>{$loaderDisplayName(server.modLoader)}</span>
+									<span>{$loaderDisplayName(srv.modLoader)}</span>
 								{/if}
-								{#if server.javaVersion}
+								{#if srv.javaVersion}
 									<span>·</span>
-									<span>Java {server.javaVersion}</span>
+									<span>Java {srv.javaVersion}</span>
 								{/if}
 								<span>·</span>
-								<span>created {formatDate(server.createdAt)}</span>
+								<span>created {formatDate(srv.createdAt)}</span>
 							</div>
-							{#if server.description}
+							{#if srv.description}
 								<p class="mt-1 line-clamp-1 text-xs text-muted-foreground/80">
-									{server.description}
+									{srv.description}
 								</p>
 							{/if}
 						</div>
@@ -234,7 +240,7 @@
 								<Loader2 class="size-4 animate-spin" />
 								{transitionalLabel}
 							</Button>
-						{:else if showStart || server.status === ServerStatus.ERROR}
+						{:else if showStart || srv.status === ServerStatus.ERROR}
 							<Button
 								size="sm"
 								class="bg-status-ok text-white hover:bg-status-ok/90"
@@ -249,7 +255,7 @@
 								Start
 							</Button>
 						{/if}
-						{#if !transitionalLabel && canStop(server.status) && !showStart}
+						{#if !transitionalLabel && canStop(srv.status) && !showStart}
 							<Button
 								variant="destructive"
 								size="sm"
@@ -264,7 +270,7 @@
 								Stop
 							</Button>
 						{/if}
-						{#if !transitionalLabel && canRestart(server.status)}
+						{#if !transitionalLabel && canRestart(srv.status)}
 							<Button
 								variant="outline"
 								size="sm"
@@ -309,23 +315,8 @@
 						</DropdownMenu>
 					</div>
 				</div>
-
-				<Tabs value={activeTab} onValueChange={setTab}>
-					<div class="overflow-x-auto">
-						<TabsList class="h-auto w-max justify-start gap-1 bg-transparent p-0">
-							{#each TABS as tab (tab.key)}
-								<TabsTrigger
-									value={tab.key}
-									class="rounded-none border-0 border-b-2 border-transparent px-3 pt-1.5 pb-2 text-sm text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
-								>
-									{tab.label}
-								</TabsTrigger>
-							{/each}
-						</TabsList>
-					</div>
-				</Tabs>
-			</div>
-		</div>
+			{/snippet}
+		</TabRail>
 
 		{#if fillTab}
 			<div class="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col p-4 sm:p-6 2xl:max-w-7xl">

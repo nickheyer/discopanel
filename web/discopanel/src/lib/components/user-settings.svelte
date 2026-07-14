@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import { authStore, canCreateUsers, canUpdateUsers, canDeleteUsers } from '$lib/stores/auth';
 	import { EmptyState, ConfirmDialog } from '$lib/components/app';
 	import { Button } from '$lib/components/ui/button';
@@ -314,6 +315,7 @@
 	onMount(() => {
 		loadUsers();
 		loadInvites();
+		return registerRefresh(() => Promise.all([loadUsers(), loadInvites()]));
 	});
 </script>
 

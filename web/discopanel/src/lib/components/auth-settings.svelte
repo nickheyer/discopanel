@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import { create } from '@bufbuild/protobuf';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -109,6 +110,7 @@
 
 	onMount(() => {
 		loadConfig();
+		return registerRefresh(loadConfig);
 	});
 </script>
 

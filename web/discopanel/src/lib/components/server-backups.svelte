@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import { Button } from '$lib/components/ui/button';
 	import { ConfirmDialog } from '$lib/components/app';
 	import { toast } from 'svelte-sonner';
-	import { Archive, RotateCcw, RefreshCw } from '@lucide/svelte';
+	import { Archive, RotateCcw } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import type { Backup } from '$lib/proto/discopanel/v1/server_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
@@ -76,19 +77,18 @@
 	$effect(() => {
 		if (server.id) loadBackups();
 	});
+
+	$effect(() => {
+		return registerRefresh(loadBackups);
+	});
 </script>
 
 <div class="rounded-xl border bg-card p-4">
-	<div class="mb-3 flex items-center justify-between">
-		<div>
-			<h3 class="stat-label">World backups</h3>
-			<p class="mt-0.5 text-xs text-muted-foreground">
-				{serverStopped ? 'Restore rewinds the world' : 'Stop the server to restore'}
-			</p>
-		</div>
-		<Button variant="ghost" size="sm" class="h-7 px-2" onclick={loadBackups}>
-			<RefreshCw class="size-3.5" />
-		</Button>
+	<div class="mb-3">
+		<h3 class="stat-label">World backups</h3>
+		<p class="mt-0.5 text-xs text-muted-foreground">
+			{serverStopped ? 'Restore rewinds the world' : 'Stop the server to restore'}
+		</p>
 	</div>
 
 	{#if loading}

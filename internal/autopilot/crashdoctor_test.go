@@ -162,6 +162,16 @@ func TestClassifyFatalTypes(t *testing.T) {
 	}
 }
 
+func TestClassifyFatalFabricEnvironment(t *testing.T) {
+	fatal := &agentv1.FatalError{Causes: []*agentv1.CrashCause{{
+		Type:    "java.lang.RuntimeException",
+		Message: "Cannot load class net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents in environment type SERVER",
+	}}}
+	if got := classifyFatal(fatal); !strings.Contains(got, "client-only") {
+		t.Errorf("classifyFatal = %q, want client-only mention", got)
+	}
+}
+
 func TestJarFromLocation(t *testing.T) {
 	cases := map[string]string{
 		"union:/data/mods/badmod-1.0.jar%23245!/": "badmod-1.0.jar",

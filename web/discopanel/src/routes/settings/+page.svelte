@@ -9,9 +9,9 @@
 	import AuthSettings from '$lib/components/auth-settings.svelte';
 	import SupportSettings from '$lib/components/support-settings.svelte';
 	import LogsSettings from '$lib/components/logs-settings.svelte';
-	import { PageHeader, EmptyState } from '$lib/components/app';
+	import { PageHeader, EmptyState, TabRail } from '$lib/components/app';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { Tabs, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import { toast } from 'svelte-sonner';
 	import { Settings } from '@lucide/svelte';
 	import type { PropertyCategory } from '$lib/proto/discopanel/v1/properties_pb';
@@ -83,8 +83,8 @@
 		goto(target, { noScroll: true, keepFocus: true });
 	}
 
-	async function loadGlobalSettings() {
-		loading = true;
+	async function loadGlobalSettings(silent = false) {
+		if (!silent) loading = true;
 		try {
 			const response = await rpcClient.properties.getGlobalSettings({});
 			globalConfig = response.categories;
@@ -121,6 +121,11 @@
 			loadGlobalSettings();
 		}
 	});
+
+	$effect(() => {
+		if (activeTab !== 'server-defaults' || !showSettings) return;
+		return registerRefresh(() => loadGlobalSettings(true));
+	});
 </script>
 
 <svelte:head>
@@ -128,32 +133,16 @@
 </svelte:head>
 
 <div class="flex min-h-0 flex-1 flex-col">
-	<div class="shrink-0 border-b bg-card/40">
-		<div class="mx-auto w-full max-w-6xl px-4 pt-5 sm:px-6 2xl:max-w-7xl">
+	<TabRail tabs={visibleTabs} value={activeTab} onValueChange={setTab}>
+		{#snippet header()}
 			<PageHeader
 				title="Settings"
 				description={visibleTabs.find((t) => t.key === activeTab)?.desc ??
 					'Configure DiscoPanel and default server settings'}
-				class="pb-4"
+				class="pt-5 pb-4"
 			/>
-			{#if visibleTabs.length > 0}
-				<Tabs value={activeTab} onValueChange={setTab}>
-					<div class="overflow-x-auto">
-						<TabsList class="h-auto w-max justify-start gap-1 bg-transparent p-0">
-							{#each visibleTabs as tab (tab.key)}
-								<TabsTrigger
-									value={tab.key}
-									class="rounded-none border-0 border-b-2 border-transparent px-3 pt-1.5 pb-2 text-sm text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
-								>
-									{tab.label}
-								</TabsTrigger>
-							{/each}
-						</TabsList>
-					</div>
-				</Tabs>
-			{/if}
-		</div>
-	</div>
+		{/snippet}
+	</TabRail>
 
 	{#if showSettings && (activeTab === 'server-defaults' || activeTab === 'logs')}
 		<div class="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col p-4 sm:p-6 2xl:max-w-7xl">

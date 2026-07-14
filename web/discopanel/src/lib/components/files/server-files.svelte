@@ -16,6 +16,7 @@
 	import { ConfirmDialog, EmptyState } from '$lib/components/app';
 	import { Loader2, Folder, Upload, X } from '@lucide/svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import { authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
@@ -172,6 +173,11 @@
 			loadFiles();
 			hasLoaded = true;
 		}
+	});
+
+	$effect(() => {
+		if (!active) return;
+		return registerRefresh(loadFiles);
 	});
 
 	onDestroy(() => {
@@ -870,7 +876,6 @@
 	<!-- Toolbar -->
 	<FileToolbar
 		{filterText}
-		onRefresh={loadFiles}
 		onNewFile={() => {
 			dialogTargetPath = '';
 			newItemName = '';

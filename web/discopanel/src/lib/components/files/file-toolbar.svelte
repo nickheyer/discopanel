@@ -1,18 +1,17 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { FilePlus, FolderPlus, Upload, RefreshCw, Search, X } from '@lucide/svelte';
+	import { FilePlus, FolderPlus, Upload, Search, X } from '@lucide/svelte';
 
 	interface Props {
 		filterText: string;
-		onRefresh: () => void;
 		onNewFile: () => void;
 		onNewFolder: () => void;
 		onUpload: () => void;
 		onFilterChange: (value: string) => void;
 	}
 
-	let { filterText, onRefresh, onNewFile, onNewFolder, onUpload, onFilterChange }: Props = $props();
+	let { filterText, onNewFile, onNewFolder, onUpload, onFilterChange }: Props = $props();
 
 	let showSearch = $state(false);
 </script>
@@ -63,8 +62,5 @@
 				<Search class="size-3.5" />
 			</Button>
 		{/if}
-		<Button size="icon" variant="ghost" class="size-7" onclick={onRefresh} title="Refresh">
-			<RefreshCw class="size-3.5" />
-		</Button>
 	</div>
 </div>

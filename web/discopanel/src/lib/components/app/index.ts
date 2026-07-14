@@ -3,6 +3,7 @@ export { default as StatusBadge } from './status-badge.svelte';
 export { default as Equalizer } from './equalizer.svelte';
 export { default as ServerAvatar } from './server-avatar.svelte';
 export { default as PageHeader } from './page-header.svelte';
+export { default as TabRail } from './tab-rail.svelte';
 export { default as EmptyState } from './empty-state.svelte';
 export { default as ConfirmDialog } from './confirm-dialog.svelte';
 export { default as CopyButton } from './copy-button.svelte';

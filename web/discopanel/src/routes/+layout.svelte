@@ -31,6 +31,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import { get } from 'svelte/store';
 	import { serversStore, activitySortedServers } from '$lib/stores/servers';
+	import { runPageRefreshers } from '$lib/stores/refresh';
 	import { authStore, currentUser, canAccessSettings, authEnabled } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
@@ -70,7 +71,7 @@
 		refreshing = true;
 		const spin = new Promise((r) => setTimeout(r, 600));
 		try {
-			await Promise.all([serversStore.fetchServers(true, true), spin]);
+			await Promise.all([serversStore.fetchServers(true, true), runPageRefreshers(), spin]);
 		} finally {
 			refreshing = false;
 		}

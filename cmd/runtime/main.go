@@ -260,6 +260,7 @@ const (
 	consoleIdleWindow = 60 * time.Second
 	cpuIdleWindow     = 30 * time.Second
 	cpuIdleCores      = 0.02
+	bootIdleCores     = 0.25
 	evidenceInterval  = 5 * time.Second
 )
 
@@ -271,7 +272,7 @@ func (s *supervisor) armBootFailure() {
 	}
 	s.bootFailedAt = time.Now()
 	s.mu.Unlock()
-	fmt.Printf("[discopanel-runtime] fatal boot error, ending the JVM once it goes idle\n")
+	fmt.Printf("[discopanel-runtime] fatal boot error, ending the JVM once idle or at the watch deadline\n")
 	go s.endBootFailedAfterGrace()
 }
 
@@ -319,7 +320,7 @@ func (s *supervisor) consoleIdleFor() time.Duration {
 }
 
 // Waits for console silence plus CPU idle, false means survival
-func (s *supervisor) awaitDeathEvidence() bool {
+func (s *supervisor) awaitDeathEvidence(maxIdleCores float64) bool {
 	type cpuPoint struct {
 		at    time.Time
 		ticks int64
@@ -352,7 +353,7 @@ func (s *supervisor) awaitDeathEvidence() bool {
 			continue
 		}
 		cores := float64(window[len(window)-1].ticks-window[0].ticks) / clockTicksPerSecond / span.Seconds()
-		if cores < cpuIdleCores {
+		if cores < maxIdleCores {
 			return true
 		}
 	}
@@ -361,7 +362,7 @@ func (s *supervisor) awaitDeathEvidence() bool {
 // Ends a crashed JVM only when it stops showing life
 func (s *supervisor) endWedgedCrash() bool {
 	fmt.Printf("[discopanel-runtime] crash report written, watching the JVM for death evidence\n")
-	if !s.awaitDeathEvidence() {
+	if !s.awaitDeathEvidence(cpuIdleCores) {
 		if !s.exiting() {
 			fmt.Printf("[discopanel-runtime] server survived its crash report, leaving it running\n")
 		}
@@ -401,7 +402,8 @@ func (s *supervisor) endBootFailedAfterGrace() {
 	if s.isReady() {
 		return
 	}
-	if !s.awaitDeathEvidence() || s.isReady() {
+	idle := s.awaitDeathEvidence(bootIdleCores)
+	if s.exiting() || s.isReady() {
 		return
 	}
 
@@ -412,7 +414,11 @@ func (s *supervisor) endBootFailedAfterGrace() {
 	if proc == nil {
 		return
 	}
-	fmt.Printf("[discopanel-runtime] boot failed and the JVM went idle, shutting it down\n")
+	if idle {
+		fmt.Printf("[discopanel-runtime] boot failed and the JVM went idle, shutting it down\n")
+	} else {
+		fmt.Printf("[discopanel-runtime] boot failed and the JVM stayed busy past the deadline, shutting it down\n")
+	}
 	_ = proc.Signal(syscall.SIGTERM)
 
 	select {

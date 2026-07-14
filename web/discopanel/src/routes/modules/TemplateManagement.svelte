@@ -8,14 +8,24 @@
 	import { toast } from 'svelte-sonner';
 	import type { ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
 	import { ModuleTemplateType } from '$lib/proto/discopanel/v1/module_pb';
-	import { Plus, Trash2, Settings, RefreshCw, Layers, Search } from '@lucide/svelte';
+	import { Plus, Trash2, Settings, Layers, Search } from '@lucide/svelte';
 	import ModuleTemplateCreateDialog from '$lib/components/server/ModuleTemplateCreateDialog.svelte';
 	import { onMount } from 'svelte';
+	import { registerRefresh } from '$lib/stores/refresh';
+
+	let {
+		createOpen = $bindable(false),
+		category = $bindable(null),
+		categories = $bindable([])
+	}: {
+		createOpen?: boolean;
+		category?: string | null;
+		categories?: string[];
+	} = $props();
 
 	let templates = $state<ModuleTemplate[]>([]);
 	let loading = $state(true);
 
-	let createDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let selectedTemplate = $state<ModuleTemplate | null>(null);
 	let deleteTarget = $state<ModuleTemplate | null>(null);
@@ -23,6 +33,7 @@
 
 	onMount(() => {
 		loadTemplates();
+		return registerRefresh(() => loadTemplates(true));
 	});
 
 	async function loadTemplates(silent = false) {
@@ -61,76 +72,29 @@
 		editDialogOpen = true;
 	}
 
-	let categories = $derived.by(() => {
+	// Shares the category list with the page submenu
+	$effect(() => {
 		const cats: string[] = [];
 		templates.forEach((t) => {
 			if (t.category && !cats.includes(t.category)) cats.push(t.category);
 		});
-		return cats.sort();
+		categories = cats.sort();
 	});
-
-	let selectedCategory = $state<string | null>(null);
 
 	// Clears filter when its category disappears
 	$effect(() => {
-		if (selectedCategory && !categories.includes(selectedCategory)) {
-			selectedCategory = null;
+		if (category && !categories.includes(category)) {
+			category = null;
 		}
 	});
 
 	let filteredTemplates = $derived.by(() => {
-		if (!selectedCategory) return templates;
-		return templates.filter((t) => t.category === selectedCategory);
+		if (!category) return templates;
+		return templates.filter((t) => t.category === category);
 	});
 </script>
 
 <div class="space-y-4">
-	<div class="flex flex-wrap items-center justify-between gap-3">
-		<span class="tabular text-xs text-muted-foreground">
-			{templates.length}
-			{templates.length === 1 ? 'template' : 'templates'}
-		</span>
-		<div class="flex items-center gap-2">
-			<Button
-				variant="ghost"
-				size="icon"
-				class="size-8"
-				onclick={() => loadTemplates()}
-				disabled={loading}
-				title="Refresh"
-			>
-				<RefreshCw class="size-4 {loading ? 'animate-spin' : ''}" />
-			</Button>
-			<Button size="sm" onclick={() => (createDialogOpen = true)}>
-				<Plus class="size-4" />
-				Create template
-			</Button>
-		</div>
-	</div>
-
-	{#if categories.length > 0}
-		<div class="flex flex-wrap items-center gap-1">
-			<Button
-				variant={selectedCategory === null ? 'secondary' : 'ghost'}
-				size="sm"
-				class="h-8"
-				onclick={() => (selectedCategory = null)}
-			>
-				All
-			</Button>
-			{#each categories as cat (cat)}
-				<Button
-					variant={selectedCategory === cat ? 'secondary' : 'ghost'}
-					size="sm"
-					class="h-8"
-					onclick={() => (selectedCategory = cat)}
-				>
-					{cat}
-				</Button>
-			{/each}
-		</div>
-	{/if}
-
 	{#if loading && templates.length === 0}
 		<div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
 			{#each Array(3) as _, i (i)}
@@ -144,7 +108,7 @@
 				title="No templates found"
 				description="You don't have any module templates configured yet."
 			>
-				<Button size="sm" onclick={() => (createDialogOpen = true)}>
+				<Button size="sm" onclick={() => (createOpen = true)}>
 					<Plus class="size-4" />
 					Create template
 				</Button>
@@ -157,9 +121,7 @@
 				title="No matching templates"
 				description="No templates in this category anymore."
 			>
-				<Button variant="outline" size="sm" onclick={() => (selectedCategory = null)}>
-					Clear filter
-				</Button>
+				<Button variant="outline" size="sm" onclick={() => (category = null)}>Clear filter</Button>
 			</EmptyState>
 		</div>
 	{:else}
@@ -228,6 +190,14 @@
 				</div>
 			{/each}
 		</div>
+		<p class="tabular text-xs text-muted-foreground">
+			{#if category}
+				{filteredTemplates.length} of {templates.length} templates
+			{:else}
+				{templates.length}
+				{templates.length === 1 ? 'template' : 'templates'}
+			{/if}
+		</p>
 	{/if}
 </div>
 
@@ -241,7 +211,7 @@
 />
 
 <ModuleTemplateCreateDialog
-	bind:open={createDialogOpen}
+	bind:open={createOpen}
 	mode="create"
 	onSuccess={() => loadTemplates(true)}
 />

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { registerRefresh } from '$lib/stores/refresh';
 	import { resolve } from '$app/paths';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import type { ProxyListener } from '$lib/proto/discopanel/v1/common_pb';
@@ -68,6 +69,7 @@
 
 	onMount(() => {
 		loadAll();
+		return registerRefresh(loadAll);
 	});
 
 	async function loadAll() {

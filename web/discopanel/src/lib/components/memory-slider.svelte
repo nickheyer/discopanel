@@ -252,7 +252,7 @@
 			<p class="text-[10px] text-muted-foreground/80">
 				{fmtGb(occupiedMb)} reserved by other servers
 				{#if overCommitted}
-					· tight if everything runs at once
+					· sharing memory with other servers
 				{/if}
 			</p>
 		</div>

@@ -140,6 +140,9 @@ final class FatalErrors {
             if (mods.isEmpty()) {
                 fabricFailedMods(cause, mods);
             }
+            if (mods.isEmpty()) {
+                fabricEntrypointFailure(cause, mods);
+            }
             if (!mods.isEmpty()) {
                 return mods;
             }
@@ -205,6 +208,27 @@ final class FatalErrors {
             }
             mods.add(mod.build());
         }
+    }
+
+    /** Providing mod id quoted inside the entrypoint wrap */
+    private static final Pattern FABRIC_ENTRYPOINT_PROVIDER = Pattern.compile("provided by '([a-z][a-z0-9_-]*)'");
+
+    /** Entrypoint wrap messages blame the providing mod */
+    private static void fabricEntrypointFailure(Throwable error, List<AgentProto.FailedMod> mods) {
+        String message = error.getMessage();
+        if (message == null || !message.startsWith("Could not execute entrypoint stage")) {
+            return;
+        }
+        Matcher m = FABRIC_ENTRYPOINT_PROVIDER.matcher(message);
+        if (!m.find()) {
+            return;
+        }
+        mods.add(AgentProto.FailedMod.newBuilder()
+                .setModId(m.group(1))
+                .setReason("fabric.entrypoint")
+                .setErrorType(error.getClass().getName())
+                .setErrorMessage(message)
+                .build());
     }
 
     /** Dependency relation lines blame their first named mod */

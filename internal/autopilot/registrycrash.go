@@ -152,7 +152,7 @@ func (r *CrashResponder) planRegistry(server *storage.Server, m *metrics.ServerM
 // Finds the jar whose mod ids claim the namespace
 func nsProvider(metas []minecraft.ModJarMeta, ns string) string {
 	for i := range metas {
-		if metas[i].HasModID(ns) {
+		if metas[i].HasReportedModID(ns) {
 			return metas[i].FileName
 		}
 	}

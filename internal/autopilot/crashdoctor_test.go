@@ -1445,3 +1445,38 @@ func TestDoctorStallFrameDisablesOwner(t *testing.T) {
 		t.Fatal("uninvolved jars must stay enabled")
 	}
 }
+
+func TestDoctorResolvesConnectorFoldedVerdict(t *testing.T) {
+	dataPath := t.TempDir()
+	modsDir := filepath.Join(dataPath, "mods")
+	writeModJar(t, modsDir, "particle-effects-1.2.jar", map[string]string{
+		"fabric.mod.json": `{"id":"particle-effects","version":"1.2"}`,
+	})
+
+	store := &fakeStore{
+		server: &storage.Server{ID: "s1", DataPath: dataPath, ModLoader: storage.ModLoaderModrinth, MCVersion: "1.20.1", JavaVersion: "17"},
+		cfg:    &storage.ServerProperties{},
+	}
+	lc := newFakeLifecycle()
+	r, collector := testResponder(t, store, lc)
+
+	// Connector reports the fabric id folded, with no file name
+	collector.ApplyAgentExit("s1", &agentv1.Exited{
+		ExitCode: 0, Crashed: true, BootFailed: true, ExitedAtUnixMs: time.Now().UnixMilli(),
+		FatalError: &agentv1.FatalError{
+			Causes: []*agentv1.CrashCause{{Type: "net.minecraftforge.fml.loading.EarlyLoadingException"}},
+			FailedMods: []*agentv1.FailedMod{{
+				ModId:     "particle_effects",
+				ErrorType: "net.minecraftforge.fml.loading.EarlyLoadingException",
+			}},
+		},
+	})
+	r.OnCrashExit(context.Background(), "s1")
+
+	if got := lc.wait(t); got != "restart" {
+		t.Fatalf("expected restart, got %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "particle-effects-1.2.jar")); err != nil {
+		t.Fatal("the folded verdict should map to the hyphen jar and disable it")
+	}
+}

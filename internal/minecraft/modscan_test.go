@@ -226,3 +226,20 @@ func TestClientOnlySweep(t *testing.T) {
 		t.Fatalf("only the unneeded client jar should drop, got %+v", drop)
 	}
 }
+
+func TestHasReportedModID(t *testing.T) {
+	meta := ModJarMeta{Mods: []ModInfo{{ID: "particle-effects"}}}
+	if !meta.HasReportedModID("particle-effects") {
+		t.Fatal("exact id must match")
+	}
+	// Connector registers fabric hyphen ids with underscores
+	if !meta.HasReportedModID("particle_effects") {
+		t.Fatal("folded loader id must match the declared id")
+	}
+	if meta.HasReportedModID("particle") {
+		t.Fatal("prefixes must not match")
+	}
+	if meta.HasModID("particle_effects") {
+		t.Fatal("declared id comparisons must stay exact")
+	}
+}

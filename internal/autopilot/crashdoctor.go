@@ -90,7 +90,7 @@ func resolveFailedMod(fm *agentv1.FailedMod, metas []minecraft.ModJarMeta) crash
 	}
 	if ref.ModFile == "" && ref.ModID != "" {
 		for i := range metas {
-			if metas[i].HasModID(ref.ModID) {
+			if metas[i].HasReportedModID(ref.ModID) {
 				ref.ModFile = metas[i].FileName
 				break
 			}
@@ -145,7 +145,7 @@ func attributeFatal(fatal *agentv1.FatalError, metas []minecraft.ModJarMeta) (mo
 		for _, frame := range causes[i].GetFrames() {
 			if m := mixinFramePattern.FindStringSubmatch(frame.GetMethodName() + "$"); m != nil {
 				for j := range metas {
-					if metas[j].HasModID(m[1]) {
+					if metas[j].HasReportedModID(m[1]) {
 						return m[1], metas[j].FileName
 					}
 				}

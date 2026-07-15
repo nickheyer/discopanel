@@ -50,6 +50,25 @@ func (m *ModJarMeta) HasModID(id string) bool {
 	return false
 }
 
+// FML forbids hyphens, Connector registers fabric ids folded
+func foldModID(id string) string {
+	return strings.ReplaceAll(id, "-", "_")
+}
+
+// True when a loader-reported id names one of this jar's mods
+func (m *ModJarMeta) HasReportedModID(id string) bool {
+	if m.HasModID(id) {
+		return true
+	}
+	want := foldModID(id)
+	for i := range m.Mods {
+		if foldModID(m.Mods[i].ID) == want {
+			return true
+		}
+	}
+	return false
+}
+
 // True when any declared mod id is in the required set
 func (m *ModJarMeta) providesAny(required map[string]bool) bool {
 	for i := range m.Mods {

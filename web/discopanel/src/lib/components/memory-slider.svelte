@@ -241,23 +241,6 @@
 		{/if}
 	</div>
 
-	{#if occupiedMb > 0}
-		<div class="space-y-0.5">
-			<div class="relative h-1 overflow-hidden rounded-full bg-muted/60">
-				<div
-					class="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/30"
-					style="width: {occupiedPct}%"
-				></div>
-			</div>
-			<p class="text-[10px] text-muted-foreground/80">
-				{fmtGb(occupiedMb)} reserved by other servers
-				{#if overCommitted}
-					· sharing memory with other servers
-				{/if}
-			</p>
-		</div>
-	{/if}
-
 	<div class="touch-none select-none {disabled ? 'opacity-50' : ''}">
 		<div class="relative h-8" aria-hidden="true">
 			{#if trackWidth > 0}
@@ -275,6 +258,13 @@
 			onpointerdown={handleTrackPointer}
 		>
 			<div class="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-muted">
+				{#if totalMb > 0 && occupiedMb > 0}
+					<div
+						class="occupied-zone absolute inset-y-0 right-0 rounded-r-full"
+						class:over={overCommitted}
+						style="width: {occupiedPct}%"
+					></div>
+				{/if}
 				<div
 					class="absolute inset-y-0 left-0 rounded-full bg-primary/25"
 					style="width: {pct(memory)}%"
@@ -387,9 +377,39 @@
 		</div>
 	</div>
 
+	{#if totalMb > 0 && occupiedMb > 0}
+		{#if overCommitted}
+			<p class="text-[10px] text-status-busy">
+				Sharing {fmtGb(occupiedMb + memory - totalMb)} with other servers
+			</p>
+		{:else}
+			<p class="text-[10px] text-muted-foreground/80">
+				{fmtGb(occupiedMb)} reserved by other servers
+			</p>
+		{/if}
+	{/if}
+
 	{#if unlocked}
 		<p class="text-[11px] text-status-busy">
 			Manual sizing can destabilize the server. Relink to restore automatic sizing.
 		</p>
 	{/if}
 </div>
+
+<style>
+	/* Hatch marks memory reserved by other servers */
+	.occupied-zone {
+		background: repeating-linear-gradient(
+			-45deg,
+			color-mix(in oklch, var(--muted-foreground) 45%, transparent) 0 2px,
+			transparent 2px 5px
+		);
+	}
+	.occupied-zone.over {
+		background: repeating-linear-gradient(
+			-45deg,
+			color-mix(in oklch, var(--status-busy) 70%, transparent) 0 2px,
+			transparent 2px 5px
+		);
+	}
+</style>

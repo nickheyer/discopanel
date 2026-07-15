@@ -206,7 +206,7 @@ final class LogErrorWatcher {
                 }
                 // Loader failure lists bypass the cap, they drive repair
                 if (reports.incrementAndGet() > MAX_REPORTS
-                        && FatalErrors.failedMods((Throwable) thrown).isEmpty()) {
+                        && !FatalErrors.hasLoaderVerdicts((Throwable) thrown)) {
                     return;
                 }
                 Object thread = getThreadName.invoke(event);

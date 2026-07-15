@@ -2,14 +2,13 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -17,9 +16,6 @@ const (
 	stallIdleWindow = 4 * time.Minute
 	stallSampleTick = 10 * time.Second
 	dumpWaitTimeout = 10 * time.Second
-	maxDumpLines    = 20000
-	maxDumpThreads  = 4
-	maxDumpFrames   = 32
 )
 
 // Watches for a never-ready JVM burning no CPU
@@ -71,10 +67,8 @@ func (s *supervisor) runBootStallWatch() {
 
 // Collects forensics then ends the stalled boot
 func (s *supervisor) endStalledBoot(idleMinutes int) {
-	fmt.Printf("[discopanel-runtime] boot stalled, the JVM has been idle for %d minutes, collecting a thread dump\n", idleMinutes)
-	if fatal := stallFatal(s.captureThreadDump()); fatal != nil {
-		s.setFatalError(fatal)
-	}
+	fmt.Printf("[discopanel-runtime] boot stalled, the JVM has been idle for %d minutes, asking it for a thread dump\n", idleMinutes)
+	s.awaitStallDump()
 	s.mu.Lock()
 	if s.bootFailedAt.IsZero() {
 		s.bootFailedAt = time.Now()
@@ -93,151 +87,47 @@ func (s *supervisor) endStalledBoot(idleMinutes int) {
 	}
 }
 
-// Console lines of one in-flight thread dump
-type dumpCapture struct {
-	active bool // Saw the dump header
-	closed bool
-	lines  []string
-	done   chan struct{}
-}
-
-// Asks the JVM for a thread dump off its own stdout
-func (s *supervisor) captureThreadDump() string {
+// Asks the JVM agent for stall evidence, waits briefly
+func (s *supervisor) awaitStallDump() {
 	done := make(chan struct{})
 	s.mu.Lock()
-	s.dump = &dumpCapture{done: done}
-	proc := s.proc
+	s.dumpWait = done
 	s.mu.Unlock()
-	if proc == nil {
-		return ""
+	defer func() {
+		s.mu.Lock()
+		if s.dumpWait == done {
+			s.dumpWait = nil
+		}
+		s.mu.Unlock()
+	}()
+	req := &agentv1.PanelMessage{Payload: &agentv1.PanelMessage_ThreadDumpRequest{
+		ThreadDumpRequest: &agentv1.ThreadDumpRequest{},
+	}}
+	if !s.sendToJVM(req) {
+		return
 	}
-	_ = proc.Signal(syscall.SIGQUIT)
 	select {
 	case <-done:
 	case <-time.After(dumpWaitTimeout):
 	case <-s.done():
 	}
+}
+
+// Writes one framed message down the JVM agent link
+func (s *supervisor) sendToJVM(msg *agentv1.PanelMessage) bool {
 	s.mu.Lock()
-	d := s.dump
-	s.dump = nil
+	conn := s.jvmConn
 	s.mu.Unlock()
-	if d == nil {
-		return ""
+	if conn == nil {
+		return false
 	}
-	return strings.Join(d.lines, "\n")
-}
-
-// Routes console lines into an armed dump capture
-func (s *supervisor) collectDumpLine(line string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	d := s.dump
-	if d == nil || d.closed {
-		return
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return false
 	}
-	line = strings.TrimRight(line, "\r")
-	if !d.active {
-		if strings.HasPrefix(line, "Full thread dump") {
-			d.active = true
-		}
-		return
-	}
-	if strings.HasPrefix(line, "JNI global refs") || len(d.lines) >= maxDumpLines {
-		d.closed = true
-		close(d.done)
-		return
-	}
-	d.lines = append(d.lines, line)
-}
-
-// One parsed thread from a SIGQUIT dump
-type dumpThread struct {
-	name   string
-	state  string
-	frames []*agentv1.CrashFrame
-}
-
-var dumpThreadHeader = regexp.MustCompile(`^"([^"]+)"`)
-
-var dumpStatePattern = regexp.MustCompile(`java\.lang\.Thread\.State: ([A-Z_]+)`)
-
-var dumpFramePattern = regexp.MustCompile(`^\s*at ([\w.$]+)\.([\w$<>]+)\((.*)\)`)
-
-func parseDumpThreads(dump string) []dumpThread {
-	var threads []dumpThread
-	var cur *dumpThread
-	for _, line := range strings.Split(dump, "\n") {
-		if m := dumpThreadHeader.FindStringSubmatch(line); m != nil {
-			threads = append(threads, dumpThread{name: m[1]})
-			cur = &threads[len(threads)-1]
-			continue
-		}
-		if cur == nil {
-			continue
-		}
-		if m := dumpStatePattern.FindStringSubmatch(line); m != nil {
-			cur.state = m[1]
-			continue
-		}
-		m := dumpFramePattern.FindStringSubmatch(line)
-		if m == nil || len(cur.frames) >= maxDumpFrames {
-			continue
-		}
-		frame := &agentv1.CrashFrame{ClassName: m[1], MethodName: m[2], FileName: m[3]}
-		if idx := strings.LastIndexByte(m[3], ':'); idx > 0 {
-			if n, err := strconv.Atoi(m[3][idx+1:]); err == nil {
-				frame.FileName = m[3][:idx]
-				frame.Line = int32(n)
-			}
-		}
-		cur.frames = append(cur.frames, frame)
-	}
-	return threads
-}
-
-// The tick thread and stuck workers tell the stall story
-func pickStallThreads(threads []dumpThread) []dumpThread {
-	var picked []dumpThread
-	for _, t := range threads {
-		if t.name == tickThreadComm && len(t.frames) > 0 {
-			picked = append(picked, t)
-			break
-		}
-	}
-	for _, t := range threads {
-		if len(picked) >= maxDumpThreads {
-			break
-		}
-		if t.name == tickThreadComm || len(t.frames) == 0 {
-			continue
-		}
-		if t.state == "BLOCKED" || strings.HasPrefix(t.name, "Worker-Main") {
-			picked = append(picked, t)
-		}
-	}
-	return picked
-}
-
-// Builds structured stall evidence from the dump text
-func stallFatal(dump string) *agentv1.FatalError {
-	if dump == "" {
-		return nil
-	}
-	picked := pickStallThreads(parseDumpThreads(dump))
-	if len(picked) == 0 {
-		return nil
-	}
-	fatal := &agentv1.FatalError{Thread: picked[0].name}
-	for _, t := range picked {
-		state := strings.ToLower(t.state)
-		if state == "" {
-			state = "stuck"
-		}
-		fatal.Causes = append(fatal.Causes, &agentv1.CrashCause{
-			Type:    "BootStall",
-			Message: t.name + " is " + state,
-			Frames:  t.frames,
-		})
-	}
-	return fatal
+	frame := make([]byte, 4+len(data))
+	binary.BigEndian.PutUint32(frame, uint32(len(data)))
+	copy(frame[4:], data)
+	_, err = conn.Write(frame)
+	return err == nil
 }

@@ -40,12 +40,20 @@ public final class DiscoAgent {
         }
     }
 
-    private static void start(int port, Instrumentation inst) {
+    private static void start(final int port, final Instrumentation inst) {
         AgentProto.Hello hello = AgentProto.Hello.newBuilder()
                 .setSource(AgentProto.HelloSource.HELLO_SOURCE_JVM)
                 .setVersion(version())
                 .build();
-        final AgentConnection connection = new AgentConnection(port, hello);
+        final AgentConnection connection = new AgentConnection(port, hello,
+                new AgentConnection.PanelHandler() {
+                    @Override
+                    public AgentProto.AgentMessage onThreadDumpRequest() {
+                        return AgentProto.AgentMessage.newBuilder()
+                                .setFatalError(FatalErrors.stallDump(inst))
+                                .build();
+                    }
+                });
         final TickSampler ticks = new TickSampler();
         connection.start();
         ticks.start();

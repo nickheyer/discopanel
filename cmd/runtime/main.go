@@ -207,7 +207,8 @@ type supervisor struct {
 	fatal            *agentv1.FatalError // Best structured JVM fatal error
 	captureArmed     bool                // Log watcher confirmed at least one hook
 	bootFailedAt     time.Time           // First boot failure signal, zero while healthy
-	dump             *dumpCapture        // Armed thread dump capture, nil when idle
+	jvmConn          net.Conn            // Persistent JVM agent link, nil when away
+	dumpWait         chan struct{}       // Closed when a fatal arrives, nil when idle
 	survivedReportAt time.Time           // Newest crash report the JVM outlived
 	pendingExit      *exitReport         // Unacked exit report, replayed until acked
 	lagDebtMs        float64             // Debt from the newest lag line
@@ -223,6 +224,10 @@ func (s *supervisor) setFatalError(fatal *agentv1.FatalError) {
 		return
 	}
 	s.mu.Lock()
+	if s.dumpWait != nil {
+		close(s.dumpWait)
+		s.dumpWait = nil
+	}
 	if !fatal.GetUncaught() && s.ready {
 		s.mu.Unlock()
 		return
@@ -478,7 +483,6 @@ func (s *supervisor) mirrorConsole(r interface{ Read([]byte) (int, error) }, w *
 					}
 					break
 				}
-				s.collectDumpLine(string(line[:idx]))
 				s.events.handleLine(string(line[:idx]))
 				line = line[idx+1:]
 			}

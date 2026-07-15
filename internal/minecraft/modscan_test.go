@@ -207,20 +207,6 @@ func TestScanMcmodInfo(t *testing.T) {
 	}
 }
 
-func TestHasModIDConnectorNormalization(t *testing.T) {
-	meta := ModJarMeta{Mods: []ModInfo{{ID: "particle-effects"}}}
-	if !meta.HasModID("particle-effects") {
-		t.Fatal("exact id must match")
-	}
-	// Connector reports fabric hyphen ids with underscores
-	if !meta.HasModID("particle_effects") {
-		t.Fatal("underscore form must match the hyphen id")
-	}
-	if meta.HasModID("particle") {
-		t.Fatal("prefixes must not match")
-	}
-}
-
 func TestClientOnlySweep(t *testing.T) {
 	metas := []ModJarMeta{
 		{FileName: "suppsquared.jar", Mods: []ModInfo{{ID: "suppsquared"}},

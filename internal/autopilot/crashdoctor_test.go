@@ -17,6 +17,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/metrics"
+	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -1282,76 +1283,15 @@ func TestCollectorSnapshotIsolation(t *testing.T) {
 	}
 }
 
-const frameworkReport = `---- Minecraft Crash Report ----
-// Ooh. Shiny.
-
-Description: Mod loading error has occurred
-
--- Head --
-Thread: main
-Stacktrace:
-	at cpw.mods.cl.ModuleClassLoader.loadClass(ModuleClassLoader.java:141) ~[securejarhandler-2.1.10.jar:?] {}
--- MOD framework --
-Details:
-	Caused by 0: java.lang.NoClassDefFoundError: net/minecraft/client/gui/components/toasts/Toast
-		at com.mrcrayfish.controllable.client.settings.InputLibrary.<clinit>(InputLibrary.java:14) ~[controllable-forge-1.20.1-0.21.7.jar%23744!/:1.20.1-0.21.7] {re:classloading}
-		at java.lang.Class.forName0(Native Method) ~[?:?] {re:mixin}
-		at com.mrcrayfish.framework.platform.ForgeConfigHelper.getAllFrameworkConfigs(ForgeConfigHelper.java:31) ~[framework-forge-1.20.1-0.7.12.jar%23832!/:1.20.1-0.7.12] {re:classloading}
-
-	Mod File: /data/mods/framework-forge-1.20.1-0.7.12.jar
-	Failure message: Framework (framework) has failed to load correctly
-		java.lang.NoClassDefFoundError: net/minecraft/client/gui/components/toasts/Toast
-	Mod Version: 0.7.12
-	Mod Issue URL: NOT PROVIDED
-	Exception message: java.lang.ClassNotFoundException: net.minecraft.client.gui.components.toasts.Toast
-
--- System Details --
-Details:
-	Minecraft Version: 1.20.1
-`
-
-func TestParseReportModSections(t *testing.T) {
-	mods, details := parseReportModSections(frameworkReport)
-	if len(mods) != 1 || mods[0].GetModId() != "framework" {
-		t.Fatalf("expected framework verdict, got %+v", mods)
-	}
-	if mods[0].GetFileName() != "/data/mods/framework-forge-1.20.1-0.7.12.jar" {
-		t.Fatalf("mod file parsed wrong: %+v", mods[0])
-	}
-	if !strings.Contains(mods[0].GetErrorMessage(), "has failed to load correctly") {
-		t.Fatalf("failure message parsed wrong: %+v", mods[0])
-	}
-	det := details["framework"]
-	if det == nil || !det.DistError {
-		t.Fatalf("client class error must mark a dist error, got %+v", det)
-	}
-	want := []string{"controllable-forge-1.20.1-0.21.7.jar", "framework-forge-1.20.1-0.7.12.jar"}
-	if !reflect.DeepEqual(det.FrameJars, want) {
-		t.Fatalf("frame jars parsed wrong: got %v want %v", det.FrameJars, want)
-	}
-
-	// The section idiom also feeds the report verdict floor
-	if floor := parseReportMods(frameworkReport); len(floor) != 1 || floor[0].GetModId() != "framework" {
-		t.Fatalf("verdict floor should read MOD sections, got %+v", floor)
-	}
-}
-
-func TestDoctorDistErrorConvictsAccomplice(t *testing.T) {
+func TestDoctorLinkageConvictsAccomplice(t *testing.T) {
 	dataPath := t.TempDir()
 	modsDir := filepath.Join(dataPath, "mods")
-	writeModJar(t, modsDir, "controllable-forge-1.20.1-0.21.7.jar", map[string]string{
+	writeModJar(t, modsDir, "controllable.jar", map[string]string{
 		"META-INF/mods.toml": "[[mods]]\nmodId = \"controllable\"\n",
 	})
-	writeModJar(t, modsDir, "framework-forge-1.20.1-0.7.12.jar", map[string]string{
+	writeModJar(t, modsDir, "framework.jar", map[string]string{
 		"META-INF/mods.toml": "[[mods]]\nmodId = \"framework\"\n",
 	})
-	reportDir := filepath.Join(dataPath, "crash-reports")
-	if err := os.MkdirAll(reportDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(reportDir, "crash-fml.txt"), []byte(frameworkReport), 0644); err != nil {
-		t.Fatal(err)
-	}
 
 	store := &fakeStore{
 		server: &storage.Server{ID: "s1", DataPath: dataPath, ModLoader: storage.ModLoaderModrinth, MCVersion: "1.20.1", JavaVersion: "17"},
@@ -1360,23 +1300,30 @@ func TestDoctorDistErrorConvictsAccomplice(t *testing.T) {
 	lc := newFakeLifecycle()
 	r, collector := testResponder(t, store, lc)
 
-	verdict := &agentv1.FatalError{FailedMods: []*agentv1.FailedMod{
-		{ModId: "framework", FileName: "framework-forge-1.20.1-0.7.12.jar", ErrorMessage: "Framework (framework) has failed to load correctly"},
-	}}
+	// Loader blames framework, root frames run controllable's code
+	verdict := &agentv1.FatalError{FailedMods: []*agentv1.FailedMod{{
+		ModId:        "framework",
+		FileName:     "framework.jar",
+		ErrorType:    "java.lang.ClassNotFoundException",
+		ErrorMessage: "Framework (framework) has failed to load correctly",
+		Frames: []*agentv1.CrashFrame{
+			{ClassName: "com.mrcrayfish.controllable.client.InputLibrary", MethodName: "<clinit>", SourceLocation: "union:/data/mods/controllable.jar%23744!/"},
+			{ClassName: "com.mrcrayfish.framework.platform.ForgeConfigHelper", MethodName: "getAllFrameworkConfigs", SourceLocation: "union:/data/mods/framework.jar%23832!/"},
+		},
+	}}}
 	collector.ApplyAgentExit("s1", &agentv1.Exited{
 		ExitCode: 1, Crashed: true, ExitedAtUnixMs: time.Now().UnixMilli(),
-		CrashReportPath: "crash-reports/crash-fml.txt",
-		FatalError:      verdict,
+		FatalError: verdict,
 	})
 	r.OnCrashExit(context.Background(), "s1")
 
 	if got := lc.wait(t); got != "restart" {
 		t.Fatalf("expected restart, got %s", got)
 	}
-	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "controllable-forge-1.20.1-0.21.7.jar")); err != nil {
+	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "controllable.jar")); err != nil {
 		t.Fatal("the crashing frame owner should be disabled")
 	}
-	if _, err := os.Stat(filepath.Join(modsDir, "framework-forge-1.20.1-0.7.12.jar")); err != nil {
+	if _, err := os.Stat(filepath.Join(modsDir, "framework.jar")); err != nil {
 		t.Fatal("the blamed reporter must stay enabled")
 	}
 
@@ -1384,15 +1331,41 @@ func TestDoctorDistErrorConvictsAccomplice(t *testing.T) {
 	waitDoctorIdle(t, r, "s1")
 	collector.ApplyAgentExit("s1", &agentv1.Exited{
 		ExitCode: 1, Crashed: true, ExitedAtUnixMs: time.Now().UnixMilli() + 2000,
-		CrashReportPath: "crash-reports/crash-fml.txt",
-		FatalError:      verdict,
+		FatalError: verdict,
 	})
 	r.OnCrashExit(context.Background(), "s1")
 	if got := lc.wait(t); got != "restart" {
 		t.Fatalf("expected second restart, got %s", got)
 	}
-	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "framework-forge-1.20.1-0.7.12.jar")); err != nil {
+	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "framework.jar")); err != nil {
 		t.Fatal("the reporter should be disabled on the retry")
+	}
+}
+
+func TestAccompliceNeedsLinkageError(t *testing.T) {
+	metas := []minecraft.ModJarMeta{
+		{FileName: "other.jar", Mods: []minecraft.ModInfo{{ID: "other"}}},
+	}
+	fm := &agentv1.FailedMod{
+		ModId:     "broken",
+		FileName:  "broken.jar",
+		ErrorType: "java.lang.IllegalStateException",
+		Frames: []*agentv1.CrashFrame{
+			{ClassName: "dev.other.Api", MethodName: "dispatch", SourceLocation: "file:/data/mods/other.jar"},
+		},
+	}
+	if _, ok := accompliceAction(fm, "broken.jar", metas, nil); ok {
+		t.Fatal("plain exceptions must not convict the frame owner")
+	}
+	fm.ErrorType = "java.lang.NoSuchMethodError"
+	a, ok := accompliceAction(fm, "broken.jar", metas, nil)
+	if !ok || a.File != "other.jar" {
+		t.Fatalf("linkage failure should convict the frame owner, got %+v", a)
+	}
+	// The reporter crashing in its own code convicts itself
+	fm.Frames[0].SourceLocation = "file:/data/mods/broken.jar"
+	if _, ok := accompliceAction(fm, "broken.jar", metas, nil); ok {
+		t.Fatal("self-owned frames must fall back to the reporter")
 	}
 }
 
@@ -1426,106 +1399,11 @@ func TestIncidentHeldFiles(t *testing.T) {
 	}
 }
 
-const levelInitReport = `---- Minecraft Crash Report ----
-// I feel sad now :(
-
-Description: Exception initializing level
-
-java.lang.AbstractMethodError: Method net/minecraft/world/entity/monster/Evoker.getAnimationStack()Ldev/kosmx/playerAnim/api/layered/AnimationStack; is abstract
-	at net.minecraft.world.entity.monster.Evoker.getAnimationStack(Evoker.java) ~[server.jar!/:?] {re:mixin,pl:accesstransformer:B,pl:mixin:APP:supplementaries-common.mixins.json:EvokerMixin,pl:mixin:A}
-	at net.minecraft.world.entity.Mob.handler$ddm000$post_init(Mob.java:9224) ~[server.jar!/:?] {re:mixin,pl:mixin:APP:bettermobcombat.mixins.json:MobMixin_AttackAnimation,pl:mixin:APP:ars_nouveau.mixins.json:MobAccessor,pl:mixin:A}
-	at net.minecraft.world.entity.Mob.<init>(Mob.java:138) ~[server.jar!/:?] {re:mixin,pl:mixin:APP:bettermobcombat.mixins.json:MobMixin_AttackAnimation,pl:mixin:A}
-
--- Head --
-Thread: Server thread
-Suspected Mods: 
-	Structure Essentials mod (structureessentials), Version: 1.20.1-4.5
-`
-
-func TestParseLinkageRefsAndConfigs(t *testing.T) {
-	refs := parseLinkageRefs(levelInitReport)
-	if len(refs) == 0 || refs[0] != "dev/kosmx/playerAnim/api/layered/AnimationStack" {
-		t.Fatalf("expected playerAnim ref first, got %v", refs)
-	}
-	for _, ref := range refs {
-		if strings.HasPrefix(ref, "net/minecraft") {
-			t.Fatalf("platform classes must be filtered, got %v", refs)
-		}
-	}
-
-	configs := parseCrashFrameConfigs(levelInitReport)
-	want := []string{"supplementaries-common.mixins.json", "bettermobcombat.mixins.json", "ars_nouveau.mixins.json"}
-	if !reflect.DeepEqual(configs, want) {
-		t.Fatalf("configs parsed wrong: got %v want %v", configs, want)
-	}
-}
-
-func TestDoctorLinkageConvictsMixinOwner(t *testing.T) {
-	dataPath := t.TempDir()
-	modsDir := filepath.Join(dataPath, "mods")
-	needle := "dev/kosmx/playerAnim/api/layered/AnimationStack"
-	writeModJar(t, modsDir, "playeranim.jar", map[string]string{
-		"META-INF/mods.toml": "[[mods]]\nmodId = \"playeranimator\"\n",
-		needle + ".class":    "classbytes",
-	})
-	writeModJar(t, modsDir, "bettermobcombat.jar", map[string]string{
-		"META-INF/mods.toml":          "[[mods]]\nmodId = \"bettermobcombat\"\n",
-		"bettermobcombat.mixins.json": "{}",
-		"net/bmc/MobMixin.class":      "refs " + needle + " here",
-	})
-	// Applies a frame mixin but never touches the API
-	writeModJar(t, modsDir, "supplementaries.jar", map[string]string{
-		"META-INF/mods.toml":                 "[[mods]]\nmodId = \"supplementaries\"\n",
-		"supplementaries-common.mixins.json": "{}",
-		"net/supp/EvokerMixin.class":         "no api refs",
-	})
-	// References the API but has no mixin on the crashing frames
-	writeModJar(t, modsDir, "ironsspellbooks.jar", map[string]string{
-		"META-INF/mods.toml":   "[[mods]]\nmodId = \"irons_spellbooks\"\n",
-		"io/irons/Magic.class": "refs " + needle + " too",
-	})
-
-	reportDir := filepath.Join(dataPath, "crash-reports")
-	if err := os.MkdirAll(reportDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(reportDir, "crash-server.txt"), []byte(levelInitReport), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	store := &fakeStore{
-		server: &storage.Server{ID: "s1", DataPath: dataPath, ModLoader: storage.ModLoaderModrinth, MCVersion: "1.20.1", JavaVersion: "17"},
-		cfg:    &storage.ServerProperties{},
-	}
-	lc := newFakeLifecycle()
-	r, collector := testResponder(t, store, lc)
-
-	// A boot crash with no loader verdict and no typed capture
-	collector.ApplyAgentExit("s1", &agentv1.Exited{
-		ExitCode: 143, Crashed: true, BootFailed: true, ExitedAtUnixMs: time.Now().UnixMilli(),
-		CrashReportPath: "crash-reports/crash-server.txt",
-	})
-	r.OnCrashExit(context.Background(), "s1")
-
-	if got := lc.wait(t); got != "restart" {
-		t.Fatalf("expected restart, got %s", got)
-	}
-	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "bettermobcombat.jar")); err != nil {
-		t.Fatal("the linking mixin owner should be disabled")
-	}
-	for _, name := range []string{"playeranim.jar", "supplementaries.jar", "ironsspellbooks.jar"} {
-		if _, err := os.Stat(filepath.Join(modsDir, name)); err != nil {
-			t.Fatalf("%s must stay enabled", name)
-		}
-	}
-}
-
 func TestDoctorStallFrameDisablesOwner(t *testing.T) {
 	dataPath := t.TempDir()
 	modsDir := filepath.Join(dataPath, "mods")
 	writeModJar(t, modsDir, "slowmod.jar", map[string]string{
 		"META-INF/mods.toml": "[[mods]]\nmodId = \"slowmod\"\n",
-		"com/example/slowmod/worldgen/OreVeinComputer.class": "classbytes",
 	})
 	writeModJar(t, modsDir, "innocent.jar", map[string]string{
 		"META-INF/mods.toml": "[[mods]]\nmodId = \"innocent\"\n",
@@ -1538,19 +1416,19 @@ func TestDoctorStallFrameDisablesOwner(t *testing.T) {
 	lc := newFakeLifecycle()
 	r, collector := testResponder(t, store, lc)
 
-	// A stall exit carries dump threads, no report, no verdict
+	// A stall exit carries agent dump threads, root cause last
 	collector.ApplyAgentExit("s1", &agentv1.Exited{
 		ExitCode: 143, Crashed: true, BootFailed: true, ExitedAtUnixMs: time.Now().UnixMilli(),
 		FatalError: &agentv1.FatalError{
-			Thread: "Server thread",
+			Thread: "Worker-Main-9",
 			Causes: []*agentv1.CrashCause{
 				{Type: "BootStall", Message: "Server thread is waiting", Frames: []*agentv1.CrashFrame{
 					{ClassName: "jdk.internal.misc.Unsafe", MethodName: "park"},
-					{ClassName: "net.minecraft.util.thread.BlockableEventLoop", MethodName: "waitForTasks"},
+					{ClassName: "net.minecraft.util.thread.BlockableEventLoop", MethodName: "waitForTasks", SourceLocation: "file:/server/libraries/server-1.20.1.jar"},
 				}},
 				{Type: "BootStall", Message: "Worker-Main-9 is waiting", Frames: []*agentv1.CrashFrame{
 					{ClassName: "jdk.internal.misc.Unsafe", MethodName: "park"},
-					{ClassName: "com.example.slowmod.worldgen.OreVeinComputer", MethodName: "awaitSeed", Line: 88},
+					{ClassName: "com.example.slowmod.worldgen.OreVeinComputer", MethodName: "awaitSeed", Line: 88, SourceLocation: "union:/data/mods/slowmod.jar%2312!/"},
 				}},
 			},
 		},

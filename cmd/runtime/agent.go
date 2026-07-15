@@ -39,6 +39,7 @@ func (s *supervisor) runLocalListener(ln net.Listener) {
 
 func (s *supervisor) serveAgentConn(conn net.Conn) {
 	defer conn.Close()
+	defer s.dropJVMConn(conn)
 	for {
 		msg, err := readFrame(conn)
 		if err != nil {
@@ -47,17 +48,29 @@ func (s *supervisor) serveAgentConn(conn net.Conn) {
 			}
 			return
 		}
-		s.handleAgentMessage(msg)
+		s.handleAgentMessage(msg, conn)
 	}
 }
 
-func (s *supervisor) handleAgentMessage(msg *agentv1.AgentMessage) {
+// Forgets the JVM agent link once its session ends
+func (s *supervisor) dropJVMConn(conn net.Conn) {
+	s.mu.Lock()
+	if s.jvmConn == conn {
+		s.jvmConn = nil
+	}
+	s.mu.Unlock()
+}
+
+func (s *supervisor) handleAgentMessage(msg *agentv1.AgentMessage, conn net.Conn) {
 	switch p := msg.GetPayload().(type) {
 	case *agentv1.AgentMessage_Hello:
 		if p.Hello.GetSource() != agentv1.HelloSource_HELLO_SOURCE_JVM {
 			return
 		}
 		fmt.Printf("[discopanel-runtime] telemetry javaagent connected (%s)\n", p.Hello.GetVersion())
+		s.mu.Lock()
+		s.jvmConn = conn
+		s.mu.Unlock()
 		s.send(msg)
 	case *agentv1.AgentMessage_TickThreadSample:
 		s.emitTickSample(p.TickThreadSample)

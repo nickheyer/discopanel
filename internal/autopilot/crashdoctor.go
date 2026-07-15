@@ -49,11 +49,7 @@ func diagnoseFatal(fatal *agentv1.FatalError, modsDir string) *crashDiagnosis {
 	}
 
 	if len(metas) > 0 {
-		id, file := attributeFatal(fatal, metas)
-		if id == "" && file == "" {
-			id, file = stallFrameOwner(fatal, metas, modsDir)
-		}
-		if id != "" || file != "" {
+		if id, file := attributeFatal(fatal, metas); id != "" || file != "" {
 			d.Mods = []crashModRef{{ModID: id, ModFile: file}}
 		}
 	}
@@ -651,8 +647,7 @@ func (r *CrashResponder) plan(server *storage.Server, cfg *storage.ServerPropert
 
 	fatal := effectiveFatal(server, m)
 	if failed := fatal.GetFailedMods(); modsDir != "" && len(failed) > 0 {
-		details := reportModDetails(server.DataPath, m.LastCrashReportPath)
-		return r.planVerdicts(server, failed, details, metas, modsDir, force, excludes, inc)
+		return r.planVerdicts(server, failed, metas, modsDir, force, excludes, inc)
 	}
 	// Runtime crashes stay hands-off, world data is at stake
 	if m.LastExitWasReady {
@@ -665,15 +660,11 @@ func (r *CrashResponder) plan(server *storage.Server, cfg *storage.ServerPropert
 		return actions
 	}
 
-	if actions := r.planLinkage(server, m, metas, modsDir, force, inc); len(actions) > 0 {
-		return actions
-	}
-
-	return planFrameGuess(fatal, metas, modsDir, force, inc)
+	return planFrameGuess(fatal, metas, force, inc)
 }
 
 // Remedies loader verdicts by failure reason, not by reflex
-func (r *CrashResponder) planVerdicts(server *storage.Server, failed []*agentv1.FailedMod, details map[string]*reportModDetail, metas []minecraft.ModJarMeta, modsDir string, force, excludes []string, inc *doctorIncident) []doctorAction {
+func (r *CrashResponder) planVerdicts(server *storage.Server, failed []*agentv1.FailedMod, metas []minecraft.ModJarMeta, modsDir string, force, excludes []string, inc *doctorIncident) []doctorAction {
 	var actions []doctorAction
 	solved := minecraft.SolveDeps(metas, serverDialects(server))
 	disabledMetas := minecraft.ScanModsDir(modsDir + "_disabled")
@@ -734,8 +725,8 @@ func (r *CrashResponder) planVerdicts(server *storage.Server, failed []*agentv1.
 		case failJava:
 			// Jars cannot fix the JVM, findings say so
 		case failModError:
-			// A dist error convicts the crashing frame, not the reporter
-			if a, ok := accompliceAction(fm, file, details[fm.GetModId()], metas, force); ok && !inc.tried(a.key()) {
+			// A linkage failure convicts the crashing frame, not the reporter
+			if a, ok := accompliceAction(fm, file, metas, force); ok && !inc.tried(a.key()) {
 				add(a)
 				continue
 			}
@@ -747,14 +738,27 @@ func (r *CrashResponder) planVerdicts(server *storage.Server, failed []*agentv1.
 	return actions
 }
 
+// Root failure types meaning code or classes failed to link
+var linkageErrorTypes = map[string]bool{
+	"AbstractMethodError":          true,
+	"NoClassDefFoundError":         true,
+	"NoSuchFieldError":             true,
+	"NoSuchMethodError":            true,
+	"IncompatibleClassChangeError": true,
+	"UnsatisfiedLinkError":         true,
+	"BootstrapMethodError":         true,
+	"ClassNotFoundException":       true,
+}
+
 // First installed jar in the failure frames names the culprit
-func accompliceAction(fm *agentv1.FailedMod, blamedFile string, det *reportModDetail, metas []minecraft.ModJarMeta, force []string) (doctorAction, bool) {
-	if det == nil || !det.DistError {
+func accompliceAction(fm *agentv1.FailedMod, blamedFile string, metas []minecraft.ModJarMeta, force []string) (doctorAction, bool) {
+	if !linkageErrorTypes[simpleTypeName(fm.GetErrorType())] {
 		return doctorAction{}, false
 	}
-	for _, jar := range det.FrameJars {
+	for _, frame := range fm.GetFrames() {
+		jar := jarFromLocation(frame.GetSourceLocation())
 		meta := metaByFile(metas, jar)
-		if meta == nil {
+		if jar == "" || meta == nil {
 			continue
 		}
 		// The reporter crashing in its own code convicts itself
@@ -765,7 +769,7 @@ func accompliceAction(fm *agentv1.FailedMod, blamedFile string, det *reportModDe
 		if len(meta.Mods) > 0 {
 			id = meta.Mods[0].ID
 		}
-		return doctorAction{Kind: actionDisable, File: jar, ModID: id, Reason: "its client-only code crashed " + fm.GetModId(), Evidence: evidenceVerdict}, true
+		return doctorAction{Kind: actionDisable, File: jar, ModID: id, Reason: "its code crashed " + fm.GetModId() + " during load", Evidence: evidenceVerdict}, true
 	}
 	return doctorAction{}, false
 }
@@ -817,22 +821,30 @@ func (r *CrashResponder) revertGuesses(modsDir string, inc *doctorIncident) {
 }
 
 // Crash frame mods are guesses worth one try
-func planFrameGuess(fatal *agentv1.FatalError, metas []minecraft.ModJarMeta, modsDir string, force []string, inc *doctorIncident) []doctorAction {
-	reason := "the crash happened inside this mod's code"
+func planFrameGuess(fatal *agentv1.FatalError, metas []minecraft.ModJarMeta, force []string, inc *doctorIncident) []doctorAction {
 	_, file := attributeFatal(fatal, metas)
-	if file == "" {
-		if _, stalled := stallFrameOwner(fatal, metas, modsDir); stalled != "" {
-			file, reason = stalled, "the boot stalled inside this mod's code"
-		}
-	}
 	if file == "" || minecraft.MatchesPatterns(file, force) {
 		return nil
+	}
+	reason := "the crash happened inside this mod's code"
+	if isStallFatal(fatal) {
+		reason = "the boot stalled inside this mod's code"
 	}
 	a := doctorAction{Kind: actionDisable, File: file, Reason: reason, Evidence: evidenceFrame}
 	if inc.tried(a.key()) {
 		return nil
 	}
 	return []doctorAction{a}
+}
+
+// Stall dump fatals carry BootStall thread causes
+func isStallFatal(fatal *agentv1.FatalError) bool {
+	for _, c := range fatal.GetCauses() {
+		if c.GetType() == "BootStall" {
+			return true
+		}
+	}
+	return false
 }
 
 // Dialects the server's platform reads, declared else observed

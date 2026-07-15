@@ -16,17 +16,24 @@ final class AgentConnection {
     private static final long RECONNECT_DELAY_MS = 5000;
     private static final int QUEUE_CAPACITY = 256;
 
+    /** Answers panel messages addressed to the JVM agent */
+    interface PanelHandler {
+        AgentProto.AgentMessage onThreadDumpRequest();
+    }
+
     private final int port;
     private final AgentProto.Hello hello;
+    private final PanelHandler handler;
     private final LinkedBlockingQueue<AgentProto.AgentMessage> queue =
             new LinkedBlockingQueue<AgentProto.AgentMessage>(QUEUE_CAPACITY);
 
     private volatile boolean running = true;
     private Thread thread;
 
-    AgentConnection(int port, AgentProto.Hello hello) {
+    AgentConnection(int port, AgentProto.Hello hello, PanelHandler handler) {
         this.port = port;
         this.hello = hello;
+        this.handler = handler;
     }
 
     void start() {
@@ -123,7 +130,32 @@ final class AgentConnection {
             }
             byte[] data = new byte[length];
             in.readFully(data);
-            // Nothing addresses the JVM agent, frames are drained
+            handleFrame(data);
+        }
+    }
+
+    /** Dispatches one inbound supervisor frame */
+    private void handleFrame(byte[] data) {
+        if (handler == null) {
+            return;
+        }
+        AgentProto.PanelMessage message;
+        try {
+            message = AgentProto.PanelMessage.parseFrom(data);
+        } catch (Throwable ignored) {
+            return;
+        }
+        if (message.getPayloadCase() != AgentProto.PanelMessage.PayloadCase.THREAD_DUMP_REQUEST) {
+            return;
+        }
+        AgentProto.AgentMessage reply;
+        try {
+            reply = handler.onThreadDumpRequest();
+        } catch (Throwable ignored) {
+            return;
+        }
+        if (reply != null) {
+            enqueue(reply);
         }
     }
 

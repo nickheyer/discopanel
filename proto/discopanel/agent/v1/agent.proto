@@ -31,14 +31,20 @@ message AgentMessage {
   }
 }
 
-// Envelope for everything flowing from panel to container
+// Envelope for everything flowing toward the server process
 message PanelMessage {
+  // buf:lint:ignore COMMENT_ONEOF
   oneof payload {
     ConsoleCommand console_command = 1;
     ChatMessage chat_message = 2;
     ExitAck exit_ack = 3;
+    ThreadDumpRequest thread_dump_request = 4;
   }
 }
+
+// Asks the JVM agent to report stuck threads as a fatal error
+// Supervisor sends this on the loopback link when a boot stalls
+message ThreadDumpRequest {}
 
 // Mandatory first message identifying the connecting party
 message Hello {
@@ -131,6 +137,8 @@ message FailedMod {
   string reason = 5;
   // Failure key args rendered as strings, dep ids and ranges live here
   repeated string reason_args = 6;
+  // Root failure frames, mapped to the jars that own them
+  repeated CrashFrame frames = 7;
 }
 
 // One throwable in a fatal error's cause chain

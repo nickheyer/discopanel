@@ -41,15 +41,9 @@ type ModJarMeta struct {
 	ClientOnly bool
 }
 
-// Connector rewrites fabric hyphens to forge underscores
-func canonicalModID(id string) string {
-	return strings.ReplaceAll(id, "-", "_")
-}
-
 func (m *ModJarMeta) HasModID(id string) bool {
-	want := canonicalModID(id)
 	for i := range m.Mods {
-		if canonicalModID(m.Mods[i].ID) == want {
+		if m.Mods[i].ID == id {
 			return true
 		}
 	}
@@ -59,14 +53,14 @@ func (m *ModJarMeta) HasModID(id string) bool {
 // True when any declared mod id is in the required set
 func (m *ModJarMeta) providesAny(required map[string]bool) bool {
 	for i := range m.Mods {
-		if required[canonicalModID(m.Mods[i].ID)] {
+		if required[m.Mods[i].ID] {
 			return true
 		}
 	}
 	return false
 }
 
-// Server-relevant mandatory dep ids, canonical form
+// Server-relevant mandatory dep ids
 func requiredModIDs(metas []ModJarMeta) map[string]bool {
 	required := map[string]bool{}
 	for i := range metas {
@@ -74,7 +68,7 @@ func requiredModIDs(metas []ModJarMeta) map[string]bool {
 			if !dep.Mandatory || dep.Breaks || dep.Side == "client" {
 				continue
 			}
-			required[canonicalModID(dep.ID)] = true
+			required[dep.ID] = true
 		}
 	}
 	return required
@@ -574,77 +568,6 @@ func readJarJSON(f *zip.File, v any) error {
 		return err
 	}
 	return json.Unmarshal(data, v)
-}
-
-// Reports whether the jar ships an entry, nested jars included
-func JarHasEntry(absPath, name string) bool {
-	r, err := zip.OpenReader(absPath)
-	if err != nil {
-		return false
-	}
-	defer r.Close()
-	for _, f := range r.File {
-		if f.Name == name || strings.HasSuffix(f.Name, "/"+name) {
-			return true
-		}
-	}
-	for _, f := range r.File {
-		if !strings.HasSuffix(f.Name, ".jar") {
-			continue
-		}
-		data, err := readNestedJar(f)
-		if err != nil {
-			continue
-		}
-		inner, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-		if err != nil {
-			continue
-		}
-		for _, nf := range inner.File {
-			if nf.Name == name || strings.HasSuffix(nf.Name, "/"+name) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// Reports whether jar class code mentions the class path
-func JarRefsClass(absPath, classPath string) bool {
-	needle := []byte(classPath)
-	r, err := zip.OpenReader(absPath)
-	if err != nil {
-		return false
-	}
-	defer r.Close()
-	for _, f := range r.File {
-		if strings.HasSuffix(f.Name, ".class") {
-			if data, err := readJarFile(f); err == nil && bytes.Contains(data, needle) {
-				return true
-			}
-			continue
-		}
-		if !strings.HasSuffix(f.Name, ".jar") {
-			continue
-		}
-		data, err := readNestedJar(f)
-		if err != nil {
-			continue
-		}
-		inner, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-		if err != nil {
-			continue
-		}
-		for _, nf := range inner.File {
-			if !strings.HasSuffix(nf.Name, ".class") {
-				continue
-			}
-			if nd, err := readJarFile(nf); err == nil && bytes.Contains(nd, needle) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func DisableModJar(modsDir, fileName string) error {

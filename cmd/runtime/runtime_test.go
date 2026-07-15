@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -76,21 +75,21 @@ func TestLoopbackAllowlist(t *testing.T) {
 		{Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{Source: agentv1.HelloSource_HELLO_SOURCE_RUNTIME}}},
 	}
 	for _, msg := range blocked {
-		sup.handleAgentMessage(msg)
+		sup.handleAgentMessage(msg, nil)
 	}
 	if n := len(sess.sendCh); n != 0 {
 		t.Fatalf("%d spoofed loopback messages were relayed upstream", n)
 	}
 
-	sup.handleAgentMessage(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_JvmSample{JvmSample: &agentv1.JvmSample{HeapUsedMb: 1}}})
-	sup.handleAgentMessage(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{Source: agentv1.HelloSource_HELLO_SOURCE_JVM}}})
+	sup.handleAgentMessage(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_JvmSample{JvmSample: &agentv1.JvmSample{HeapUsedMb: 1}}}, nil)
+	sup.handleAgentMessage(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{Source: agentv1.HelloSource_HELLO_SOURCE_JVM}}}, nil)
 	if n := len(sess.sendCh); n != 2 {
 		t.Fatalf("expected 2 allowed messages relayed, got %d", n)
 	}
 
 	// Fatal errors held for exit report, relayed live
 	fatal := &agentv1.FatalError{Thread: "main"}
-	sup.handleAgentMessage(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_FatalError{FatalError: fatal}})
+	sup.handleAgentMessage(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_FatalError{FatalError: fatal}}, nil)
 	if n := len(sess.sendCh); n != 3 {
 		t.Fatalf("fatal error should relay for live visibility, got %d messages", n)
 	}
@@ -735,73 +734,5 @@ func TestPsiAvg10(t *testing.T) {
 	}
 	if _, ok := psiAvg10(filepath.Join(dir, "missing"), "some"); ok {
 		t.Error("missing pressure file should report unavailable")
-	}
-}
-
-const stallDump = `Full thread dump OpenJDK 64-Bit Server VM (17.0.12+7 mixed mode, sharing):
-
-"Server thread" #86 daemon prio=8 os_prio=0 cpu=12441.92ms elapsed=312.21s tid=0x00007f nid=0x62 waiting on condition  [0x00007f]
-   java.lang.Thread.State: WAITING (parking)
-	at jdk.internal.misc.Unsafe.park(java.base@17.0.12/Native Method)
-	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.12/LockSupport.java:341)
-	at net.minecraft.util.thread.BlockableEventLoop.waitForTasks(BlockableEventLoop.java:151)
-
-"Worker-Main-9" #120 daemon prio=5 os_prio=0 cpu=8231.11ms elapsed=310.02s tid=0x00007f nid=0x88 waiting on condition  [0x00007f]
-   java.lang.Thread.State: WAITING (parking)
-	at jdk.internal.misc.Unsafe.park(java.base@17.0.12/Native Method)
-	at com.example.slowmod.worldgen.OreVeinComputer.awaitSeed(OreVeinComputer.java:88)
-	at net.minecraft.world.level.levelgen.NoiseChunk.compute(NoiseChunk.java:112)
-
-"C2 CompilerThread0" #12 daemon prio=9 os_prio=0 cpu=99.2ms elapsed=311.0s tid=0x00007f nid=0x30 waiting on condition
-   java.lang.Thread.State: RUNNABLE
-	No compile task
-
-JNI global refs: 60, weak refs: 100`
-
-func TestStallFatalFromDump(t *testing.T) {
-	fatal := stallFatal(stallDump)
-	if fatal == nil || fatal.GetThread() != "Server thread" {
-		t.Fatalf("server thread must lead the stall fatal, got %+v", fatal)
-	}
-	causes := fatal.GetCauses()
-	if len(causes) != 2 || causes[0].GetType() != "BootStall" {
-		t.Fatalf("expected server thread and worker causes, got %+v", causes)
-	}
-	if !strings.Contains(causes[1].GetMessage(), "Worker-Main-9") {
-		t.Fatalf("worker cause mislabeled: %+v", causes[1])
-	}
-	frames := causes[1].GetFrames()
-	if len(frames) != 3 || frames[1].GetClassName() != "com.example.slowmod.worldgen.OreVeinComputer" {
-		t.Fatalf("worker frames parsed wrong: %+v", frames)
-	}
-	if frames[1].GetLine() != 88 || frames[1].GetFileName() != "OreVeinComputer.java" {
-		t.Fatalf("frame file and line parsed wrong: %+v", frames[1])
-	}
-}
-
-func TestCollectDumpLine(t *testing.T) {
-	s := &supervisor{}
-	done := make(chan struct{})
-	s.mu.Lock()
-	s.dump = &dumpCapture{done: done}
-	s.mu.Unlock()
-
-	s.collectDumpLine("[08:05:29] [Worker/INFO]: Preparing spawn area: 2%")
-	for _, line := range strings.Split(stallDump, "\n") {
-		s.collectDumpLine(line)
-	}
-	select {
-	case <-done:
-	default:
-		t.Fatal("JNI refs line must close the capture")
-	}
-	s.mu.Lock()
-	captured := strings.Join(s.dump.lines, "\n")
-	s.mu.Unlock()
-	if strings.Contains(captured, "Preparing spawn area") {
-		t.Fatal("lines before the dump header must not be captured")
-	}
-	if !strings.Contains(captured, "Worker-Main-9") {
-		t.Fatal("dump body must be captured")
 	}
 }

@@ -26,7 +26,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -45,6 +45,8 @@ final class FatalErrors {
     private static final Object indexLock = new Object();
     private static ClassIndex cachedIndex;
     private static long cachedIndexAt;
+    private static final AtomicReference<AgentProto.FatalError> lastSent =
+            new AtomicReference<AgentProto.FatalError>();
 
     private FatalErrors() {
     }
@@ -55,12 +57,9 @@ final class FatalErrors {
     }
 
     private static final class UncaughtReporter implements Thread.UncaughtExceptionHandler {
-        private static final int MAX_REPORTS = 4;
-
         private final Instrumentation inst;
         private final int port;
         private final Thread.UncaughtExceptionHandler previous;
-        private final AtomicInteger reports = new AtomicInteger();
 
         UncaughtReporter(Instrumentation inst, int port, Thread.UncaughtExceptionHandler previous) {
             this.inst = inst;
@@ -71,9 +70,7 @@ final class FatalErrors {
         @Override
         public void uncaughtException(Thread thread, Throwable error) {
             try {
-                if (reports.incrementAndGet() <= MAX_REPORTS) {
-                    send(port, build(inst, thread.getName(), error, true));
-                }
+                send(port, build(inst, thread.getName(), error, true));
             } catch (Throwable ignored) {
             }
             delegate(thread, error);
@@ -195,11 +192,6 @@ final class FatalErrors {
         } catch (Throwable ignored) {
         }
         return "";
-    }
-
-    /** True when the loader blamed specific mods for this error */
-    static boolean hasLoaderVerdicts(Throwable error) {
-        return !failedMods(error, new ClassIndex()).isEmpty();
     }
 
     /** Reads the loader's per-mod failure list off the exception object */
@@ -568,8 +560,14 @@ final class FatalErrors {
         return null;
     }
 
+    /** Newest error this JVM reported, answers stall dump requests */
+    static AgentProto.FatalError lastSent() {
+        return lastSent.get();
+    }
+
     /** Dedicated blocking socket, survives a dying telemetry thread */
     static void send(int port, AgentProto.FatalError fatal) throws Exception {
+        lastSent.set(fatal);
         sendMessage(port, AgentProto.AgentMessage.newBuilder().setFatalError(fatal).build());
     }
 

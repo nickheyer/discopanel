@@ -264,12 +264,6 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 
 	case *agentv1.AgentMessage_Roster:
 		h.collector.ApplyAgentRoster(serverID, p.Roster.GetOnlinePlayers())
-
-	case *agentv1.AgentMessage_FatalError:
-		// Live capture, the exit report lands moments later
-		if causes := p.FatalError.GetCauses(); len(causes) > 0 {
-			h.console(serverID, "fatal error in the JVM: %s", causes[0].GetType())
-		}
 	}
 }
 

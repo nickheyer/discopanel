@@ -87,11 +87,11 @@ func TestLoopbackAllowlist(t *testing.T) {
 		t.Fatalf("expected 2 allowed messages relayed, got %d", n)
 	}
 
-	// Fatal errors held for exit report, relayed live
+	// Fatal errors held for the exit report, never relayed live
 	fatal := &agentv1.FatalError{Thread: "main"}
 	sup.handleAgentMessage(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_FatalError{FatalError: fatal}}, nil)
-	if n := len(sess.sendCh); n != 3 {
-		t.Fatalf("fatal error should relay for live visibility, got %d messages", n)
+	if n := len(sess.sendCh); n != 2 {
+		t.Fatalf("fatal error must stay local, got %d messages", n)
 	}
 	if sup.fatalError().GetThread() != "main" {
 		t.Fatal("fatal error must be stored on the supervisor")

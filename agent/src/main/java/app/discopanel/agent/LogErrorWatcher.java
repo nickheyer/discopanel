@@ -11,18 +11,15 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 // Grabs live throwables off log4j error events via a proxy appender
 // Startup failures are caught and logged, never rethrown, so the
 // uncaught handler alone misses every mod loading crash
 final class LogErrorWatcher {
-    private static final int MAX_REPORTS = 8;
     private static final int ERROR_INT_LEVEL = 200;
 
     private final Instrumentation inst;
     private final int port;
-    private final AtomicInteger reports = new AtomicInteger();
     private final AtomicBoolean armed = new AtomicBoolean();
     private final Set<Object> hooked =
             Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
@@ -202,11 +199,6 @@ final class LogErrorWatcher {
                 }
                 Object level = getLevel.invoke(event);
                 if (level == null || (Integer) intLevel.invoke(level) > ERROR_INT_LEVEL) {
-                    return;
-                }
-                // Loader failure lists bypass the cap, they drive repair
-                if (reports.incrementAndGet() > MAX_REPORTS
-                        && !FatalErrors.hasLoaderVerdicts((Throwable) thrown)) {
                     return;
                 }
                 Object thread = getThreadName.invoke(event);

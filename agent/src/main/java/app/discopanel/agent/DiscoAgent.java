@@ -49,8 +49,13 @@ public final class DiscoAgent {
                 new AgentConnection.PanelHandler() {
                     @Override
                     public AgentProto.AgentMessage onThreadDumpRequest() {
+                        // Error that preceded the stall beats parked thread frames
+                        AgentProto.FatalError fatal = FatalErrors.lastSent();
+                        if (fatal == null) {
+                            fatal = FatalErrors.stallDump(inst);
+                        }
                         return AgentProto.AgentMessage.newBuilder()
-                                .setFatalError(FatalErrors.stallDump(inst))
+                                .setFatalError(fatal)
                                 .build();
                     }
                 });

@@ -78,8 +78,6 @@ func (s *supervisor) handleAgentMessage(msg *agentv1.AgentMessage, conn net.Conn
 		s.send(msg)
 	case *agentv1.AgentMessage_FatalError:
 		s.setFatalError(p.FatalError)
-		s.send(msg)
-		fmt.Printf("[discopanel-runtime] captured structured fatal error from the JVM\n")
 	case *agentv1.AgentMessage_CaptureArmed:
 		s.markCaptureArmed(p.CaptureArmed.GetContextsHooked())
 	}

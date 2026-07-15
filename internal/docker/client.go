@@ -794,7 +794,9 @@ func (c *Client) refreshImageAsync(imageName string) {
 	c.refreshMu.Unlock()
 
 	// A registry pull must never clobber a locally built image
-	if img, err := c.docker.ImageInspect(context.Background(), imageName); err == nil && len(img.RepoDigests) == 0 {
+	// Containerd stores give local builds digests, only labels prove origin
+	if img, err := c.docker.ImageInspect(context.Background(), imageName); err == nil &&
+		img.Config != nil && img.Config.Labels["app.discopanel.build"] == "local" {
 		c.log.Debug("Image %s is locally built, skipping background refresh", imageName)
 		return
 	}

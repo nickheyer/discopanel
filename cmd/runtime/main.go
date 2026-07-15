@@ -131,6 +131,7 @@ func main() {
 
 	go sup.runTickThreadBooster()
 	go sup.watchCrashReports()
+	go sup.runBootStallWatch()
 
 	// Forward termination signals to java for graceful shutdown
 	sigCh := make(chan os.Signal, 2)
@@ -206,7 +207,7 @@ type supervisor struct {
 	fatal            *agentv1.FatalError // Best structured JVM fatal error
 	captureArmed     bool                // Log watcher confirmed at least one hook
 	bootFailedAt     time.Time           // First boot failure signal, zero while healthy
-	bootFailed       bool                // Watchdog ended a hung boot-failed JVM
+	dump             *dumpCapture        // Armed thread dump capture, nil when idle
 	survivedReportAt time.Time           // Newest crash report the JVM outlived
 	pendingExit      *exitReport         // Unacked exit report, replayed until acked
 	lagDebtMs        float64             // Debt from the newest lag line
@@ -408,7 +409,6 @@ func (s *supervisor) endBootFailedAfterGrace() {
 	}
 
 	s.mu.Lock()
-	s.bootFailed = true
 	proc := s.proc
 	s.mu.Unlock()
 	if proc == nil {
@@ -426,12 +426,6 @@ func (s *supervisor) endBootFailedAfterGrace() {
 	case <-time.After(killEscalation):
 		_ = proc.Kill()
 	}
-}
-
-func (s *supervisor) wasBootFailed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.bootFailed
 }
 
 func (s *supervisor) done() chan struct{} {
@@ -484,6 +478,7 @@ func (s *supervisor) mirrorConsole(r interface{ Read([]byte) (int, error) }, w *
 					}
 					break
 				}
+				s.collectDumpLine(string(line[:idx]))
 				s.events.handleLine(string(line[:idx]))
 				line = line[idx+1:]
 			}
@@ -550,15 +545,16 @@ func (s *supervisor) reportExit(exitCode int) {
 	if blameSince.Before(s.startedAt) {
 		blameSince = s.startedAt
 	}
+	wasReady := s.isReady()
 	reportPath, excerpt, _ := findCrashReport(blameSince)
 	oomKilled := readOOMKills()-s.oomBaseline > 0 && exitCode != 0
-	crashed := isCrash(exitCode, requested, reportPath) || oomKilled
+	crashed := isCrash(exitCode, requested, wasReady, reportPath) || oomKilled
 	report := &exitReport{
 		ExitCode:       exitCode,
 		Crashed:        crashed,
 		OomKilled:      oomKilled,
-		BootFailed:     crashed && s.wasBootFailed(),
-		WasReady:       s.isReady(),
+		BootFailed:     crashed && !wasReady,
+		WasReady:       wasReady,
 		ReportPath:     reportPath,
 		Excerpt:        excerpt,
 		ExitedAtUnixMs: time.Now().UnixMilli(),
@@ -579,12 +575,15 @@ func (s *supervisor) reportExit(exitCode int) {
 	time.Sleep(500 * time.Millisecond)
 }
 
-// Decides crash, requested stops never count without a crash report
-func isCrash(exitCode int, stopRequested bool, reportPath string) bool {
+// Decides crash, unrequested deaths before ready always count
+func isCrash(exitCode int, stopRequested, wasReady bool, reportPath string) bool {
 	if reportPath != "" {
 		return true
 	}
-	return exitCode != 0 && !stopRequested
+	if stopRequested {
+		return false
+	}
+	return exitCode != 0 || !wasReady
 }
 
 // Persisted copy of the last process exit

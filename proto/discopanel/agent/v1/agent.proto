@@ -92,7 +92,7 @@ message Exited {
   bool oom_killed = 6;
   // Structured fatal error captured inside the JVM, when available
   FatalError fatal_error = 7;
-  // True when boot failed and the supervisor ended the hung JVM
+  // True when the crash ended boot before the server was ready
   bool boot_failed = 8;
   // True when the server reached ready before this exit
   bool was_ready = 9;

@@ -233,8 +233,10 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 			switch {
 			case p.Exited.GetOomKilled():
 				h.rec.Announce(rctx, serverID, "server.oom", attrs, "server was killed after running out of memory (exit code %d), raise the container memory or lower the heap", p.Exited.GetExitCode())
-			case p.Exited.GetBootFailed():
+			case p.Exited.GetBootFailed() && p.Exited.GetCrashReportPath() != "":
 				h.rec.Announce(rctx, serverID, "server.boot_failed", attrs, "server failed to start (crash report: %s)", p.Exited.GetCrashReportPath())
+			case p.Exited.GetBootFailed():
+				h.rec.Announce(rctx, serverID, "server.boot_failed", attrs, "server failed to start (exit code %d)", p.Exited.GetExitCode())
 			case p.Exited.GetCrashReportPath() != "":
 				h.rec.Announce(rctx, serverID, "server.crash", attrs, "server crashed (exit code %d, crash report: %s)", p.Exited.GetExitCode(), p.Exited.GetCrashReportPath())
 			default:

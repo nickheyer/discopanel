@@ -13,6 +13,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
 func writeClientJar(t *testing.T, dir, name, manifest string) {
@@ -43,6 +44,9 @@ func TestDisableClientOnlyMods(t *testing.T) {
 	writeClientJar(t, modsDir, "clientmod.jar", `{"id":"clientmod","environment":"client"}`)
 	writeClientJar(t, modsDir, "servermod.jar", `{"id":"servermod","environment":"*"}`)
 	writeClientJar(t, modsDir, "keepme.jar", `{"id":"keepme","environment":"client"}`)
+	// Mirrors supplementaries, flagged client-only yet a real dep
+	writeClientJar(t, modsDir, "supplementaries.jar", `{"id":"supplementaries","environment":"client"}`)
+	writeClientJar(t, modsDir, "needy.jar", `{"id":"needy","environment":"*","depends":{"supplementaries":"*"}}`)
 
 	p := &Provisioner{log: logger.New()}
 	server := &storage.Server{DataPath: dataPath, ModLoader: storage.ModLoaderModrinth}
@@ -56,6 +60,43 @@ func TestDisableClientOnlyMods(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(modsDir, "keepme.jar")); err != nil {
 		t.Fatal("force-included jar must stay")
+	}
+	if _, err := os.Stat(filepath.Join(modsDir, "supplementaries.jar")); err != nil {
+		t.Fatal("depended-on jar must survive the sweep")
+	}
+}
+
+func TestPreflightSkipsDoctorHeldJars(t *testing.T) {
+	dataPath := t.TempDir()
+	modsDir := filepath.Join(dataPath, "mods")
+	writeClientJar(t, modsDir, "alpha.jar", `{"id":"alpha","version":"1.0","depends":{"beta":"*"}}`)
+	writeClientJar(t, modsDir+"_disabled", "beta.jar", `{"id":"beta","version":"1.0"}`)
+
+	stateDir := filepath.Join(dataPath, runtimespec.StateDir)
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	journal := `{"version":1,"incident":{"opened_at":"2026-07-14T05:32:49Z","passes":1,"budget":8,` +
+		`"actions":[{"kind":"disable","file":"beta.jar","evidence":"verdict","applied_at":"2026-07-14T05:32:49Z"}]}}`
+	if err := os.WriteFile(filepath.Join(stateDir, "doctor.json"), []byte(journal), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &Provisioner{log: logger.New()}
+	server := &storage.Server{DataPath: dataPath, ModLoader: storage.ModLoaderModrinth, MCVersion: "1.20.1"}
+	p.preflightMods(context.Background(), server, &storage.ServerProperties{})
+
+	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "beta.jar")); err != nil {
+		t.Fatal("jar held by an open incident must stay disabled")
+	}
+
+	// A closed incident releases the hold
+	if err := os.WriteFile(filepath.Join(stateDir, "doctor.json"), []byte(`{"version":1}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p.preflightMods(context.Background(), server, &storage.ServerProperties{})
+	if _, err := os.Stat(filepath.Join(modsDir, "beta.jar")); err != nil {
+		t.Fatal("released dep should be re-enabled")
 	}
 }
 

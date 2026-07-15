@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
+	"github.com/nickheyer/discopanel/internal/autopilot"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -203,6 +205,7 @@ func (p *Provisioner) preflightMods(ctx context.Context, server *storage.Server,
 func (p *Provisioner) preflightFix(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, modsDir string, issues []minecraft.DepIssue) bool {
 	force := minecraft.ForceIncludePatterns(server.ModLoader, cfg)
 	excludes := minecraft.PackExcludePatterns(server.ModLoader, cfg)
+	held := autopilot.IncidentHeldFiles(server.DataPath)
 	fixed := false
 
 	for _, issue := range issues {
@@ -218,8 +221,10 @@ func (p *Provisioner) preflightFix(ctx context.Context, server *storage.Server, 
 			fixed = true
 		case minecraft.DepMissing:
 			// A disabled jar that provides the dep comes back
+			// Jars the crash doctor is testing stay out
 			for _, dm := range minecraft.ScanModsDir(modsDir + "_disabled") {
-				if !dm.HasModID(issue.DepID) || minecraft.MatchesPatterns(dm.FileName, excludes) {
+				if !dm.HasModID(issue.DepID) || minecraft.MatchesPatterns(dm.FileName, excludes) ||
+					slices.Contains(held, dm.FileName) {
 					continue
 				}
 				if err := minecraft.EnableModJar(modsDir, dm.FileName); err == nil {
@@ -469,10 +474,7 @@ func (p *Provisioner) disableClientOnlyMods(ctx context.Context, server *storage
 	if modsDir == "" {
 		return
 	}
-	for _, meta := range minecraft.ScanModsDir(modsDir) {
-		if !meta.ClientOnly || minecraft.MatchesPatterns(meta.FileName, forceIncludes) {
-			continue
-		}
+	for _, meta := range minecraft.ClientOnlySweep(minecraft.ScanModsDir(modsDir), forceIncludes) {
 		if err := minecraft.DisableModJar(modsDir, meta.FileName); err != nil {
 			p.progress(server, "could not disable client-only mod %s (%v)", meta.FileName, err)
 			continue

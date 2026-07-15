@@ -12,6 +12,7 @@
 	let { server }: { server: Server } = $props();
 
 	interface EventMarker {
+		id: bigint;
 		ts: Date;
 		label: string;
 		tone: string;
@@ -60,7 +61,7 @@
 			return null;
 		const ts = timestampDate(a.timestamp);
 		if (ts.getTime() < from.getTime()) return null;
-		return { ts, label: a.message, tone: markerTone(a.name) };
+		return { id: a.id, ts, label: a.message, tone: markerTone(a.name) };
 	}
 
 	async function loadEvents(from: Date) {
@@ -210,7 +211,7 @@
 					Events
 				</span>
 				<div class="relative h-3 flex-1 rounded bg-muted/40">
-					{#each events as m (m.ts.getTime() + m.label)}
+					{#each events as m (m.id)}
 						<span
 							class="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full {m.tone}"
 							style="left: {markerLeft(m)}%"

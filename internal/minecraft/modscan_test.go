@@ -206,3 +206,37 @@ func TestScanMcmodInfo(t *testing.T) {
 		t.Fatalf("dual.jar should declare dualmod once, got %+v", dual.Mods)
 	}
 }
+
+func TestHasModIDConnectorNormalization(t *testing.T) {
+	meta := ModJarMeta{Mods: []ModInfo{{ID: "particle-effects"}}}
+	if !meta.HasModID("particle-effects") {
+		t.Fatal("exact id must match")
+	}
+	// Connector reports fabric hyphen ids with underscores
+	if !meta.HasModID("particle_effects") {
+		t.Fatal("underscore form must match the hyphen id")
+	}
+	if meta.HasModID("particle") {
+		t.Fatal("prefixes must not match")
+	}
+}
+
+func TestClientOnlySweep(t *testing.T) {
+	metas := []ModJarMeta{
+		{FileName: "suppsquared.jar", Mods: []ModInfo{{ID: "suppsquared"}},
+			Deps: []ModDep{
+				{Owner: "suppsquared", ID: "supplementaries", Mandatory: true},
+				{Owner: "suppsquared", ID: "clientmod", Mandatory: true, Side: "client"},
+			}},
+		{FileName: "supplementaries.jar", ClientOnly: true, Mods: []ModInfo{{ID: "supplementaries"}},
+			Deps: []ModDep{{Owner: "supplementaries", ID: "chained", Mandatory: true}}},
+		{FileName: "chained.jar", ClientOnly: true, Mods: []ModInfo{{ID: "chained"}}},
+		{FileName: "clientmod.jar", ClientOnly: true, Mods: []ModInfo{{ID: "clientmod"}}},
+		{FileName: "forced.jar", ClientOnly: true, Mods: []ModInfo{{ID: "forced"}}},
+	}
+
+	drop := ClientOnlySweep(metas, []string{"forced"})
+	if len(drop) != 1 || drop[0].FileName != "clientmod.jar" {
+		t.Fatalf("only the unneeded client jar should drop, got %+v", drop)
+	}
+}

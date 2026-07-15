@@ -86,6 +86,22 @@ func (inc *doctorIncident) disabledCount() int {
 	return n
 }
 
+// Jars an open incident disabled, still on trial
+func IncidentHeldFiles(dataPath string) []string {
+	j := loadDoctor(dataPath)
+	if j.Incident == nil {
+		return nil
+	}
+	var files []string
+	for i := range j.Incident.Actions {
+		a := &j.Incident.Actions[i]
+		if a.Kind == actionDisable && !a.Reverted {
+			files = append(files, a.File)
+		}
+	}
+	return files
+}
+
 func doctorPath(dataPath string) string {
 	return filepath.Join(dataPath, runtimespec.StateDir, "doctor.json")
 }

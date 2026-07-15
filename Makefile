@@ -116,9 +116,10 @@ _STAMP_SYNC := $(shell mkdir -p $(STAMP_DIR); \
 endif
 
 # Rebuilds a local tag and deletes the image it displaced
+# Label marks dev builds the panel must never refresh over
 define build_image
 	@old=$$(docker image inspect -f '{{.Id}}' "$(1)" 2>/dev/null || true); \
-	docker build $(2) -t "$(1)" -f "$(3)" . || exit 1; \
+	docker build $(2) --label app.discopanel.build=local -t "$(1)" -f "$(3)" . || exit 1; \
 	new=$$(docker image inspect -f '{{.Id}}' "$(1)"); \
 	if [ -n "$$old" ] && [ "$$old" != "$$new" ]; then \
 		echo "Removing replaced image $${old#sha256:}..."; \

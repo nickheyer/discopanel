@@ -1,5 +1,4 @@
-// Package agent routes telemetry and console messages over disco-agent
-package agent
+package provisioner
 
 import (
 	"context"

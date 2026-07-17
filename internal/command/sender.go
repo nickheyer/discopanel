@@ -11,8 +11,9 @@ import (
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	rcon "github.com/nickheyer/discopanel/internal/rcon"
 	"github.com/nickheyer/discopanel/pkg/logger"
+
+	"github.com/jltobler/go-rcon"
 )
 
 var (
@@ -54,6 +55,34 @@ func (s *Sender) SetAgent(agent ConsoleAgent) {
 func (s *Sender) SetJournal(rec *activity.Recorder, streamer *logger.LogStreamer) {
 	s.rec = rec
 	s.streamer = streamer
+}
+
+type rconResult struct {
+	output string
+	err    error
+}
+
+func SendCommand(ctx context.Context, RCONHost string, RCONPort int, RCONPassword string, command string) (string, error) {
+	// initialize Client
+	rconClient := rcon.NewClient(fmt.Sprintf("rcon://%s:%d", RCONHost, RCONPort), RCONPassword)
+
+	// run Command in a goroutine to allow for timeout handling
+	resultCh := make(chan rconResult, 1)
+	go func() {
+		output, sendErr := rconClient.Send(command)
+		resultCh <- rconResult{output: output, err: sendErr}
+	}()
+
+	// wait for either the command result or a timeout
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		if result.err != nil {
+			return "", result.err
+		}
+		return result.output, nil
+	}
 }
 
 // Gates, echoes, sends, and records one console command
@@ -162,7 +191,7 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 	// Run command in dedicated context with timeout
 	rconCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	output, err := rcon.SendCommand(rconCtx, ip, rconPort, rconPassword, command)
+	output, err := SendCommand(rconCtx, ip, rconPort, rconPassword, command)
 	if err != nil {
 		// RCON preferred but a booting server falls back to stdin
 		if agentAvailable {

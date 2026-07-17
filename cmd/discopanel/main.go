@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
-	"github.com/nickheyer/discopanel/internal/agent"
 	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -193,7 +192,7 @@ func main() {
 	})
 
 	// Agent hub feeds telemetry and serves console commands
-	agentHub := agent.NewHub(store, metricsCollector, eventBus, rec, log)
+	agentHub := provisioner.NewHub(store, metricsCollector, eventBus, rec, log)
 	sender.SetAgent(agentHub)
 
 	// Initialize the provisioner and the lifecycle manager (the single owner

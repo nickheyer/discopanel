@@ -264,6 +264,10 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 
 	case *agentv1.AgentMessage_Roster:
 		h.collector.ApplyAgentRoster(serverID, p.Roster.GetOnlinePlayers())
+
+	case *agentv1.AgentMessage_FatalError:
+		// Runtime only, the runtime holds boot errors for the exit report
+		h.collector.RecordRuntimeFatal(serverID, p.FatalError)
 	}
 }
 

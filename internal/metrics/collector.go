@@ -84,8 +84,17 @@ type ServerMetrics struct {
 	CrashLoopStoppedAt time.Time   // When the panel broke a crash loop
 	LastAgentSessionAt time.Time   // Last time an agent session attached
 
+	// Errors thrown after ready, windowed for runtime findings
+	RuntimeFatals []RuntimeFatal
+
 	// Live proxied connection count from the routing layer
 	ProxyActiveConns int64
+}
+
+// One structured error the JVM threw while the server was up
+type RuntimeFatal struct {
+	At    time.Time
+	Fatal *agentv1.FatalError
 }
 
 // Copies the metrics with slices, safe outside the lock
@@ -97,6 +106,7 @@ func (m *ServerMetrics) snapshot() *ServerMetrics {
 	cp.PlayerSample = slices.Clone(m.PlayerSample)
 	cp.CrashExits = slices.Clone(m.CrashExits)
 	cp.UnexpectedExits = slices.Clone(m.UnexpectedExits)
+	cp.RuntimeFatals = slices.Clone(m.RuntimeFatals)
 	return &cp
 }
 

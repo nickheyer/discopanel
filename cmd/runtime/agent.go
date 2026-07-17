@@ -78,6 +78,10 @@ func (s *supervisor) handleAgentMessage(msg *agentv1.AgentMessage, conn net.Conn
 		s.send(msg)
 	case *agentv1.AgentMessage_FatalError:
 		s.setFatalError(p.FatalError)
+		// Errors after ready feed the panel's runtime findings
+		if s.isReady() {
+			s.send(msg)
+		}
 	case *agentv1.AgentMessage_CaptureArmed:
 		s.markCaptureArmed(p.CaptureArmed.GetContextsHooked())
 	}

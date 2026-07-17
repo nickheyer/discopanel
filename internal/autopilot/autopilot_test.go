@@ -1,11 +1,13 @@
 package autopilot
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/metrics"
+	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
@@ -88,6 +90,61 @@ func TestAnalyzeCrash(t *testing.T) {
 	findings := Analyze(server, &storage.ServerProperties{}, m)
 	if !hasFinding(findings, "recent_crash", v1.PerformanceSeverity_PERFORMANCE_SEVERITY_CRITICAL) {
 		t.Fatalf("expected recent_crash finding, got %+v", findings)
+	}
+}
+
+func TestCheckRuntimeErrors(t *testing.T) {
+	dataPath := t.TempDir()
+	modsDir := filepath.Join(dataPath, "mods")
+	writeModJar(t, modsDir, "packanalytics-forge-1.0.4-1.20.1.jar", map[string]string{
+		"META-INF/mods.toml": "[[mods]]\nmodId = \"packanalytics\"\n",
+	})
+
+	started := time.Now().Add(-10 * time.Minute)
+	server := &storage.Server{
+		DataPath:    dataPath,
+		ModLoader:   storage.ModLoaderForge,
+		LastStarted: &started,
+	}
+	fatal := &agentv1.FatalError{
+		Thread: "pool-6-thread-1",
+		Causes: []*agentv1.CrashCause{{
+			Type:    "java.net.ConnectException",
+			Message: "Connection refused",
+			Frames: []*agentv1.CrashFrame{{
+				ClassName:      "toni.packanalytics.PackAnalytics",
+				MethodName:     "sendKeepAliveRequest",
+				SourceLocation: "union:/data/mods/packanalytics-forge-1.0.4-1.20.1.jar%23561!/",
+			}},
+		}},
+	}
+
+	m := &metrics.ServerMetrics{}
+	for range runtimeErrorThreshold - 1 {
+		m.RuntimeFatals = append(m.RuntimeFatals, metrics.RuntimeFatal{At: time.Now(), Fatal: fatal})
+	}
+	if fs := checkRuntimeErrors(server, m); len(fs) != 0 {
+		t.Fatalf("below threshold should stay quiet, got %+v", fs)
+	}
+
+	m.RuntimeFatals = append(m.RuntimeFatals, metrics.RuntimeFatal{At: time.Now(), Fatal: fatal})
+	fs := checkRuntimeErrors(server, m)
+	if len(fs) != 1 {
+		t.Fatalf("expected one finding, got %+v", fs)
+	}
+	f := fs[0]
+	if f.FixID != FixDisableMod || len(f.FixArgs) != 1 || f.FixArgs[0] != "packanalytics-forge-1.0.4-1.20.1.jar" {
+		t.Fatalf("expected a disable fix for the jar, got %+v", f)
+	}
+	if f.Epoch != "ConnectException" {
+		t.Errorf("epoch should be the root cause type, got %q", f.Epoch)
+	}
+
+	// Errors from the previous boot never count
+	fresh := time.Now()
+	server.LastStarted = &fresh
+	if fs := checkRuntimeErrors(server, m); len(fs) != 0 {
+		t.Fatalf("errors before the last start should stay quiet, got %+v", fs)
 	}
 }
 

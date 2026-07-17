@@ -64,6 +64,7 @@ func Analyze(server *storage.Server, cfg *storage.ServerProperties, m *metrics.S
 		findings = append(findings, withSource(telemetry, checkIOStall(m))...)
 		findings = append(findings, withSource(telemetry, checkHostTHP(m))...)
 		findings = append(findings, withSource(v1.FindingSource_FINDING_SOURCE_CRASH_DOCTOR, checkCrash(server, m))...)
+		findings = append(findings, withSource(telemetry, checkRuntimeErrors(server, m))...)
 		findings = append(findings, withSource(telemetry, checkAgentLink(server, cfg, m))...)
 	}
 
@@ -607,6 +608,80 @@ func verdictFiles(mods []crashModRef) []string {
 		}
 	}
 	return files
+}
+
+// Errors this frequent mean the mod is broken, not unlucky
+const runtimeErrorThreshold = 10
+
+// Flags mods that keep throwing after the server is up
+func checkRuntimeErrors(server *storage.Server, m *metrics.ServerMetrics) []Finding {
+	if server.LastStarted == nil || len(m.RuntimeFatals) == 0 {
+		return nil
+	}
+	modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
+	if modsDir == "" {
+		return nil
+	}
+	metas := minecraft.ScanModsDir(modsDir)
+
+	type tally struct {
+		mod    crashModRef
+		count  int
+		newest *agentv1.FatalError
+	}
+	byFile := map[string]*tally{}
+	for i := range m.RuntimeFatals {
+		f := &m.RuntimeFatals[i]
+		// Errors from earlier boots never convict the current one
+		if !f.At.After(*server.LastStarted) {
+			continue
+		}
+		id, file := attributeFatal(f.Fatal, metas)
+		if file == "" {
+			continue
+		}
+		t := byFile[file]
+		if t == nil {
+			t = &tally{mod: crashModRef{ModID: id, ModFile: file}}
+			byFile[file] = t
+		}
+		t.count++
+		t.newest = f.Fatal
+	}
+
+	var files []string
+	for file, t := range byFile {
+		if t.count >= runtimeErrorThreshold {
+			files = append(files, file)
+		}
+	}
+	slices.SortFunc(files, func(a, b string) int {
+		if d := byFile[b].count - byFile[a].count; d != 0 {
+			return d
+		}
+		return strings.Compare(a, b)
+	})
+
+	var findings []Finding
+	for _, file := range files {
+		t := byFile[file]
+		epoch := ""
+		if causes := t.newest.GetCauses(); len(causes) > 0 {
+			epoch = simpleTypeName(causes[len(causes)-1].GetType())
+		}
+		findings = append(findings, Finding{
+			ID:       "runtime_errors_" + file,
+			Severity: v1.PerformanceSeverity_PERFORMANCE_SEVERITY_WARNING,
+			Title:    "A mod keeps throwing errors",
+			Detail:   fmt.Sprintf("%s threw %d errors in the last hour.", modLabel(t.mod), t.count),
+			Evidence: fatalEvidence(t.newest),
+			FixID:    FixDisableMod,
+			FixArgs:  []string{file},
+			FixLabel: "Disable this mod",
+			Epoch:    epoch,
+		})
+	}
+	return findings
 }
 
 const maxPreflightEvidence = 8

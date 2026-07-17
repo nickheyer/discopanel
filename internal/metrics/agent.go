@@ -97,6 +97,32 @@ func pruneCrashExits(times []time.Time) []time.Time {
 	return kept
 }
 
+// Runtime errors older than this stop counting toward findings
+const runtimeFatalRetention = time.Hour
+
+// Ring cap keeps a spamming mod from growing memory
+const maxRuntimeFatals = 128
+
+// Records one post-ready error for runtime findings
+func (c *Collector) RecordRuntimeFatal(serverID string, fatal *agentv1.FatalError) {
+	if fatal == nil {
+		return
+	}
+	now := time.Now()
+	c.updateMetrics(serverID, func(m *ServerMetrics) {
+		kept := m.RuntimeFatals[:0]
+		for _, f := range m.RuntimeFatals {
+			if now.Sub(f.At) < runtimeFatalRetention {
+				kept = append(kept, f)
+			}
+		}
+		if len(kept) >= maxRuntimeFatals {
+			kept = kept[len(kept)-maxRuntimeFatals+1:]
+		}
+		m.RuntimeFatals = append(kept, RuntimeFatal{At: now, Fatal: fatal})
+	})
+}
+
 // Records a clean exit nobody requested for loop breaking
 func (c *Collector) RecordUnexpectedExit(serverID string, exitedAt time.Time) {
 	if exitedAt.IsZero() {

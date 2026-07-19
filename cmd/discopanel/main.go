@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
+	"github.com/nickheyer/discopanel/internal/autopilot"
 	"github.com/nickheyer/discopanel/internal/command"
 	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -192,7 +193,7 @@ func main() {
 	})
 
 	// Agent hub feeds telemetry and serves console commands
-	agentHub := provisioner.NewHub(store, metricsCollector, eventBus, rec, log)
+	agentHub := metrics.NewHub(metricsCollector, eventBus, rec, log)
 	sender.SetAgent(agentHub)
 
 	// Initialize the provisioner and the lifecycle manager (the single owner
@@ -201,8 +202,15 @@ func main() {
 	lifecycleManager := lifecycle.NewManager(store, dockerClient, prov, sender, proxyManager, eventBus, cfg, rec, log)
 	lifecycleManager.SetPlayerCounter(metricsCollector)
 
-	// The hub repairs crashes through the lifecycle owner and provisioner
-	agentHub.SetCrashDoctor(lifecycleManager, prov)
+	// Doctor repairs crashes through the lifecycle owner and provisioner
+	agentHub.SetCrashDoctor(&autopilot.CrashResponder{
+		Store:     store,
+		Collector: metricsCollector,
+		Lifecycle: lifecycleManager,
+		Installer: prov,
+		Rec:       rec,
+		Log:       log,
+	})
 
 	// Proxy answers pings for paused servers, wakes logins
 	proxyManager.SetServerGate(lifecycleManager)

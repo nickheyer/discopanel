@@ -1,4 +1,4 @@
-package provisioner
+package metrics
 
 import (
 	"context"
@@ -8,10 +8,7 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
-	"github.com/nickheyer/discopanel/internal/autopilot"
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/events"
-	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -19,6 +16,12 @@ import (
 
 // Feeds human-readable agent lines into a server's console stream
 type ConsoleSink func(serverID string, message string)
+
+// Reacts to crash exits and verified boots
+type CrashDoctor interface {
+	OnCrashExit(ctx context.Context, serverID string)
+	OnServerReady(ctx context.Context, serverID string)
+}
 
 // One live agent stream, hub owns the registry
 type Session struct {
@@ -51,21 +54,19 @@ func (s *Session) close() {
 
 // Tracks live agent sessions and routes telemetry
 type Hub struct {
-	store     *storage.Store
-	collector *metrics.Collector
+	collector *Collector
 	bus       *events.Bus
 	rec       *activity.Recorder
 	log       *logger.Logger
 
-	mu        sync.Mutex
-	sessions  map[string]*Session
-	sink      ConsoleSink
-	responder *autopilot.CrashResponder
+	mu       sync.Mutex
+	sessions map[string]*Session
+	sink     ConsoleSink
+	doctor   CrashDoctor
 }
 
-func NewHub(store *storage.Store, collector *metrics.Collector, bus *events.Bus, rec *activity.Recorder, log *logger.Logger) *Hub {
+func NewHub(collector *Collector, bus *events.Bus, rec *activity.Recorder, log *logger.Logger) *Hub {
 	return &Hub{
-		store:     store,
 		collector: collector,
 		bus:       bus,
 		rec:       rec,
@@ -81,24 +82,17 @@ func (h *Hub) SetConsoleSink(sink ConsoleSink) {
 	h.mu.Unlock()
 }
 
-// Wires the lifecycle manager and dep installer for crash repair
-func (h *Hub) SetCrashDoctor(lifecycle autopilot.CrashLifecycle, installer autopilot.DepInstaller) {
+// Wires the crash doctor for repair on crash exits
+func (h *Hub) SetCrashDoctor(doctor CrashDoctor) {
 	h.mu.Lock()
-	h.responder = &autopilot.CrashResponder{
-		Store:     h.store,
-		Collector: h.collector,
-		Lifecycle: lifecycle,
-		Installer: installer,
-		Rec:       h.rec,
-		Log:       h.log,
-	}
+	h.doctor = doctor
 	h.mu.Unlock()
 }
 
-func (h *Hub) crashResponder() *autopilot.CrashResponder {
+func (h *Hub) crashDoctor() CrashDoctor {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.responder
+	return h.doctor
 }
 
 func (h *Hub) console(serverID, format string, args ...any) {
@@ -213,8 +207,8 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 			h.console(serverID, "server ready in %.1fs", secs)
 		}
 		// A verified boot closes any open repair incident
-		if r := h.crashResponder(); r != nil {
-			r.OnServerReady(ctx, serverID)
+		if d := h.crashDoctor(); d != nil {
+			d.OnServerReady(ctx, serverID)
 		}
 
 	case *agentv1.AgentMessage_Stopping:
@@ -243,8 +237,8 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 			}
 		}
 		if fresh {
-			if r := h.crashResponder(); r != nil {
-				r.OnCrashExit(ctx, serverID)
+			if d := h.crashDoctor(); d != nil {
+				d.OnCrashExit(ctx, serverID)
 			}
 		}
 		h.ackExit(ctx, serverID, p.Exited.GetExitedAtUnixMs())

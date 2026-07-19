@@ -11,7 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/provisioner"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	"gorm.io/gorm"
@@ -20,11 +20,11 @@ import (
 // Serves the telemetry stream from each runtime supervisor
 type AgentService struct {
 	store *storage.Store
-	hub   *provisioner.Hub
+	hub   *metrics.Hub
 	log   *logger.Logger
 }
 
-func NewAgentService(store *storage.Store, hub *provisioner.Hub, log *logger.Logger) *AgentService {
+func NewAgentService(store *storage.Store, hub *metrics.Hub, log *logger.Logger) *AgentService {
 	return &AgentService{store: store, hub: hub, log: log}
 }
 

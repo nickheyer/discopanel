@@ -19,7 +19,6 @@ import (
 	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/module"
-	"github.com/nickheyer/discopanel/internal/provisioner"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/internal/rpc/handlers"
@@ -57,14 +56,14 @@ type Server struct {
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	bus              *events.Bus
-	agentHub         *provisioner.Hub
+	agentHub         *metrics.Hub
 	uploadManager    *upload.Manager
 	downloadManager  *download.Manager
 	wsHub            *ws.Hub
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, agentHub *provisioner.Hub, rec *activity.Recorder, log *logger.Logger) (*Server, error) {
+func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, agentHub *metrics.Hub, rec *activity.Recorder, log *logger.Logger) (*Server, error) {
 	// RBAC init failure is fatal, authz must never silently vanish
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {

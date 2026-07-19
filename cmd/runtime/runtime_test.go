@@ -5,7 +5,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -97,12 +96,12 @@ func TestLoopbackAllowlist(t *testing.T) {
 		t.Fatal("fatal error must be stored on the supervisor")
 	}
 
-	// Post ready fatals relay for runtime findings
+	// Post ready fatals stay local too, exit reports carry them
 	sup.markReady(1)
 	runtime := &agentv1.FatalError{Thread: "pool-6-thread-1", Uncaught: true}
 	sup.handleAgentMessage(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_FatalError{FatalError: runtime}}, nil)
-	if n := len(sess.sendCh); n != 4 {
-		t.Fatalf("runtime fatal should relay, got %d messages", n)
+	if n := len(sess.sendCh); n != 3 {
+		t.Fatalf("runtime fatal must stay local, got %d messages", n)
 	}
 }
 
@@ -120,20 +119,19 @@ func TestExitReportFatalRoundTrip(t *testing.T) {
 		}},
 	}
 
-	report := &exitReport{ExitCode: 1, Crashed: true, ExitedAtUnixMs: time.Now().UnixMilli()}
-	report.setFatal(fatal)
+	report := &agentv1.Exited{ExitCode: 1, Crashed: true, ExitedAtUnixMs: time.Now().UnixMilli(), FatalError: fatal}
 
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, runtimespec.StateDir), 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeExitReport(dir, report)
-	loaded := readExitReport(dir)
+	runtimespec.WriteExitReport(dir, report)
+	loaded := runtimespec.ReadExitReport(dir)
 	if loaded == nil {
 		t.Fatal("exit report must round trip")
 	}
 
-	got := loaded.fatal()
+	got := loaded.GetFatalError()
 	if got.GetThread() != "main" || len(got.GetCauses()) != 1 {
 		t.Fatalf("fatal error must survive persistence, got %+v", got)
 	}
@@ -228,24 +226,24 @@ func TestExitReportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := readExitReport(dir); got != nil {
+	if got := runtimespec.ReadExitReport(dir); got != nil {
 		t.Fatalf("absent report must read nil, got %+v", got)
 	}
 
-	want := &exitReport{
-		ExitCode:       137,
-		Crashed:        true,
-		OomKilled:      true,
-		ReportPath:     "crash-reports/crash-2026-07-08.txt",
-		Excerpt:        "---- Minecraft Crash Report ----",
-		ExitedAtUnixMs: time.Now().UnixMilli(),
+	want := &agentv1.Exited{
+		ExitCode:           137,
+		Crashed:            true,
+		OomKilled:          true,
+		CrashReportPath:    "crash-reports/crash-2026-07-08.txt",
+		CrashReportExcerpt: "---- Minecraft Crash Report ----",
+		ExitedAtUnixMs:     time.Now().UnixMilli(),
 	}
-	writeExitReport(dir, want)
-	got := readExitReport(dir)
+	runtimespec.WriteExitReport(dir, want)
+	got := runtimespec.ReadExitReport(dir)
 	if got == nil {
 		t.Fatal("persisted report did not read back")
 	}
-	if !reflect.DeepEqual(got, want) {
+	if !proto.Equal(got, want) {
 		t.Fatalf("round trip mismatch: got %+v want %+v", got, want)
 	}
 
@@ -255,8 +253,8 @@ func TestExitReportRoundTrip(t *testing.T) {
 	}
 
 	// Reports without a timestamp are treated as absent
-	writeExitReport(dir, &exitReport{ExitCode: 1})
-	if got := readExitReport(dir); got != nil {
+	runtimespec.WriteExitReport(dir, &agentv1.Exited{ExitCode: 1})
+	if got := runtimespec.ReadExitReport(dir); got != nil {
 		t.Fatalf("timestampless report must read nil, got %+v", got)
 	}
 }

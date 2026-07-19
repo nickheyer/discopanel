@@ -9,12 +9,12 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/rbac"
-	"github.com/nickheyer/discopanel/pkg/download"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/transfer"
 )
 
 // Handles GET download streaming with auth and range resume
-func NewDownloadStreamHandler(downloadManager *download.Manager, authManager *auth.Manager, enforcer *rbac.Enforcer, log *logger.Logger) http.Handler {
+func NewDownloadStreamHandler(downloadManager *transfer.DownloadManager, authManager *auth.Manager, enforcer *rbac.Enforcer, log *logger.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

@@ -45,8 +45,6 @@ service ServerService {
   rpc GetServerPerformanceReport(GetServerPerformanceReportRequest) returns (GetServerPerformanceReportResponse);
   // Historical metrics samples for charts
   rpc GetServerMetricsHistory(GetServerMetricsHistoryRequest) returns (GetServerMetricsHistoryResponse);
-  // Apply a one-click fix suggested by a performance finding
-  rpc ApplyPerformanceFix(ApplyPerformanceFixRequest) returns (ApplyPerformanceFixResponse);
   // Hide a finding until its content changes, restore un-hides
   rpc DismissPerformanceFinding(DismissPerformanceFindingRequest) returns (DismissPerformanceFindingResponse);
   // Ledger of automation actions taken on a server
@@ -317,14 +315,12 @@ message PerformanceFinding {
   PerformanceSeverity severity = 2;
   string title = 3;
   string detail = 4;
-  string fix_id = 5; // empty when there is no one-click fix
-  string fix_label = 6;
-  repeated string fix_args = 7; // fix targets, e.g. the mod files to disable
-  FindingSource source = 8;
-  repeated string evidence = 9; // short factual lines backing the finding
-  string action = 10; // what automation already did about it, may be empty
-  bool dismissed = 11; // hidden by the user until the finding changes
-  int64 action_log_start_ms = 12; // ledger window start for View Logs, 0 when none
+  FindingSource source = 5;
+  repeated string evidence = 6; // short factual lines backing the finding
+  string action = 7; // what automation already did about it, may be empty
+  bool dismissed = 8; // hidden by the user until the finding changes
+  int64 action_log_start_ms = 9; // ledger window start for View Logs, 0 when none
+  string epoch = 10; // content version, dismissals expire when it changes
 }
 
 // The health check findings
@@ -366,17 +362,6 @@ message GetServerActionsResponse {
 }
 
 // A one-click fix to apply (fix_id from a finding)
-message ApplyPerformanceFixRequest {
-  string id = 1;
-  string fix_id = 2;
-  repeated string fix_args = 3; // fix_args from the finding, verbatim
-}
-
-// Result of applying a fix
-message ApplyPerformanceFixResponse {
-  string message = 1;
-  bool restarting = 2; // True when a live restart was kicked off
-}
 
 // One telemetry point for charts
 message MetricsSample {

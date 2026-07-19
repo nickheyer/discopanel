@@ -12,10 +12,8 @@ import (
 	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/command"
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/module"
@@ -25,11 +23,12 @@ import (
 	"github.com/nickheyer/discopanel/internal/rpc/services"
 	"github.com/nickheyer/discopanel/internal/scheduler"
 	"github.com/nickheyer/discopanel/internal/ws"
-	"github.com/nickheyer/discopanel/pkg/download"
+	"github.com/nickheyer/discopanel/pkg/config"
+	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1/agentv1connect"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"github.com/nickheyer/discopanel/pkg/upload"
+	"github.com/nickheyer/discopanel/pkg/transfer"
 	web "github.com/nickheyer/discopanel/web/discopanel"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -57,8 +56,8 @@ type Server struct {
 	moduleManager    *module.Manager
 	bus              *events.Bus
 	agentHub         *metrics.Hub
-	uploadManager    *upload.Manager
-	downloadManager  *download.Manager
+	uploadManager    *transfer.UploadManager
+	downloadManager  *transfer.DownloadManager
 	wsHub            *ws.Hub
 }
 
@@ -95,10 +94,10 @@ func NewServer(store *storage.Store, docker *docker.Client, sender *command.Send
 
 	// Initialize upload manager
 	uploadTTL := time.Duration(cfg.Upload.SessionTTL) * time.Minute
-	uploadManager := upload.NewManager(cfg.Storage.TempDir, uploadTTL, cfg.Upload.MaxUploadSize, log)
+	uploadManager := transfer.NewUploadManager(cfg.Storage.TempDir, uploadTTL, cfg.Upload.MaxUploadSize, log)
 
 	// Initialize download manager
-	downloadManager := download.NewManager(cfg.Storage.TempDir, uploadTTL, log)
+	downloadManager := transfer.NewDownloadManager(cfg.Storage.TempDir, uploadTTL, log)
 
 	// Initialize WebSocket hub
 	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, docker, sender, metricsCollector, rec, log)

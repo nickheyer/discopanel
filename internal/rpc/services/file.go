@@ -18,12 +18,11 @@ import (
 	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/pkg/download"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"github.com/nickheyer/discopanel/pkg/upload"
+	"github.com/nickheyer/discopanel/pkg/transfer"
 )
 
 // Compile-time check that FileService implements the interface
@@ -46,13 +45,13 @@ type FileService struct {
 	docker          *docker.Client
 	rec             *activity.Recorder
 	log             *logger.Logger
-	uploadManager   *upload.Manager
-	downloadManager *download.Manager
+	uploadManager   *transfer.UploadManager
+	downloadManager *transfer.DownloadManager
 	extractions     sync.Map
 }
 
 // Creates a new file service
-func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, downloadManager *download.Manager, rec *activity.Recorder, log *logger.Logger) *FileService {
+func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *transfer.UploadManager, downloadManager *transfer.DownloadManager, rec *activity.Recorder, log *logger.Logger) *FileService {
 	svc := &FileService{
 		store:           store,
 		docker:          docker,

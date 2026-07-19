@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 

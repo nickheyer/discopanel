@@ -16,8 +16,8 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/go-connections/nat"
 	"github.com/nickheyer/discopanel/internal/alias"
-	"github.com/nickheyer/discopanel/internal/config"
 	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/files"
 )
 
@@ -89,7 +89,9 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 
 	// Build mounts from module configuration only (frontend sends complete config)
 	vols := c.parseModuleVolumes(module.VolumeOverrides, aliasCtx)
-	resolveWorldSources(vols, server.DataPath)
+	if server != nil {
+		resolveWorldSources(vols, server.DataPath)
+	}
 
 	// Pre-create bind sources, read-only ones must exist before create
 	for _, vol := range vols {
@@ -203,12 +205,16 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 func (c *Client) buildModuleEnv(module *models.Module, server *models.Server, aliasCtx *alias.Context) []string {
 	env := make([]string, 0)
 
-	// Add DiscoPanel context variables
+	// Add DiscoPanel context variables, global modules have no server
+	if server != nil {
+		env = append(env,
+			fmt.Sprintf("DISCOPANEL_SERVER_ID=%s", server.ID),
+			fmt.Sprintf("DISCOPANEL_SERVER_NAME=%s", server.Name),
+			fmt.Sprintf("DISCOPANEL_SERVER_HOST=discopanel-server-%s", server.ID),
+			fmt.Sprintf("DISCOPANEL_SERVER_PORT=%d", server.InContainerPort()),
+		)
+	}
 	env = append(env,
-		fmt.Sprintf("DISCOPANEL_SERVER_ID=%s", server.ID),
-		fmt.Sprintf("DISCOPANEL_SERVER_NAME=%s", server.Name),
-		fmt.Sprintf("DISCOPANEL_SERVER_HOST=discopanel-server-%s", server.ID),
-		fmt.Sprintf("DISCOPANEL_SERVER_PORT=%d", server.InContainerPort()),
 		fmt.Sprintf("DISCOPANEL_MODULE_ID=%s", module.ID),
 		fmt.Sprintf("DISCOPANEL_MODULE_NAME=%s", module.Name),
 	)

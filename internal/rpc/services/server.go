@@ -21,21 +21,21 @@ import (
 	"github.com/google/uuid"
 	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/command"
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/internal/metrics"
-	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/provisioner"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/config"
+	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"github.com/nickheyer/discopanel/pkg/upload"
+	"github.com/nickheyer/discopanel/pkg/transfer"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -56,7 +56,7 @@ type ServerService struct {
 	metricsCollector *metrics.Collector
 	moduleManager    *module.Manager
 	bus              *events.Bus
-	uploadManager    *upload.Manager
+	uploadManager    *transfer.UploadManager
 
 	// Encoded server-icon.png keyed by server, checked by mtime
 	faviconMu sync.Mutex
@@ -70,7 +70,7 @@ type faviconEntry struct {
 }
 
 // NewServerService creates a new server service
-func NewServerService(store *storage.Store, docker *docker.Client, sender *command.Sender, config *config.Config, proxy *proxy.Manager, lifecycleManager *lifecycle.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, uploadManager *upload.Manager, rec *activity.Recorder, log *logger.Logger) *ServerService {
+func NewServerService(store *storage.Store, docker *docker.Client, sender *command.Sender, config *config.Config, proxy *proxy.Manager, lifecycleManager *lifecycle.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, uploadManager *transfer.UploadManager, rec *activity.Recorder, log *logger.Logger) *ServerService {
 	return &ServerService{
 		store:            store,
 		docker:           docker,

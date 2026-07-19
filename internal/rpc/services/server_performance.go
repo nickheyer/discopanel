@@ -7,40 +7,29 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/nickheyer/discopanel/internal/activity"
-	"github.com/nickheyer/discopanel/internal/autopilot"
-	"github.com/nickheyer/discopanel/internal/metrics"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Scopes a dismissal to the finding's current content
-func findingHash(f *autopilot.Finding) string {
-	sum := sha256.Sum256([]byte(f.ID + "\x00" + f.Epoch))
+func findingHash(f *v1.PerformanceFinding) string {
+	sum := sha256.Sum256([]byte(f.GetId() + "\x00" + f.GetEpoch()))
 	return hex.EncodeToString(sum[:])
 }
 
-// Runs autopilot checks and returns the health check findings
+// Serves findings the doctor module published, panel adds nothing
 func (s *ServerService) GetServerPerformanceReport(ctx context.Context, req *connect.Request[v1.GetServerPerformanceReportRequest]) (*connect.Response[v1.GetServerPerformanceReportResponse], error) {
 	server, err := s.store.GetServer(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
-	serverCfg, err := s.store.GetServerProperties(ctx, server.ID)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load server config: %w", err))
-	}
 
 	var agentConnected bool
-	var findings []autopilot.Finding
 	if s.metricsCollector != nil {
-		m := s.metricsCollector.GetMetrics(server.ID)
-		if m != nil {
+		if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
 			agentConnected = m.AgentConnected
 		}
-		findings = autopilot.Analyze(server, serverCfg, m)
-	} else {
-		findings = autopilot.Analyze(server, serverCfg, nil)
 	}
 
 	dismissals, err := s.store.GetFindingDismissals(ctx, server.ID)
@@ -48,28 +37,14 @@ func (s *ServerService) GetServerPerformanceReport(ctx context.Context, req *con
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load dismissals: %w", err))
 	}
 
-	protoFindings := make([]*v1.PerformanceFinding, 0, len(findings))
-	for i := range findings {
-		f := &findings[i]
-		d, ok := dismissals[f.ID]
-		protoFindings = append(protoFindings, &v1.PerformanceFinding{
-			Id:               f.ID,
-			Severity:         f.Severity,
-			Title:            f.Title,
-			Detail:           f.Detail,
-			FixId:            f.FixID,
-			FixLabel:         f.FixLabel,
-			FixArgs:          f.FixArgs,
-			Source:           f.Source,
-			Evidence:         f.Evidence,
-			Action:           f.Action,
-			Dismissed:        ok && d.ContentHash == findingHash(f),
-			ActionLogStartMs: f.LedgerMs,
-		})
+	findings := runtimespec.ReadFindings(server.DataPath)
+	for _, f := range findings {
+		d, ok := dismissals[f.GetId()]
+		f.Dismissed = ok && d.ContentHash == findingHash(f)
 	}
 
 	return connect.NewResponse(&v1.GetServerPerformanceReportResponse{
-		Findings:       protoFindings,
+		Findings:       findings,
 		AgentConnected: agentConnected,
 	}), nil
 }
@@ -87,20 +62,11 @@ func (s *ServerService) DismissPerformanceFinding(ctx context.Context, req *conn
 		return connect.NewResponse(&v1.DismissPerformanceFindingResponse{}), nil
 	}
 
-	serverCfg, err := s.store.GetServerProperties(ctx, server.ID)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load server config: %w", err))
-	}
-	var m *metrics.ServerMetrics
-	if s.metricsCollector != nil {
-		m = s.metricsCollector.GetMetrics(server.ID)
-	}
-	findings := autopilot.Analyze(server, serverCfg, m)
-	for i := range findings {
-		if findings[i].ID != req.Msg.FindingId {
+	for _, f := range runtimespec.ReadFindings(server.DataPath) {
+		if f.GetId() != req.Msg.FindingId {
 			continue
 		}
-		if err := s.store.UpsertFindingDismissal(ctx, server.ID, findings[i].ID, findingHash(&findings[i])); err != nil {
+		if err := s.store.UpsertFindingDismissal(ctx, server.ID, f.GetId(), findingHash(f)); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to dismiss finding: %w", err))
 		}
 		return connect.NewResponse(&v1.DismissPerformanceFindingResponse{}), nil
@@ -130,53 +96,4 @@ func (s *ServerService) GetServerActions(ctx context.Context, req *connect.Reque
 		})
 	}
 	return connect.NewResponse(&v1.GetServerActionsResponse{Actions: actions}), nil
-}
-
-// Applies a finding's one-click fix to server config
-func (s *ServerService) ApplyPerformanceFix(ctx context.Context, req *connect.Request[v1.ApplyPerformanceFixRequest]) (*connect.Response[v1.ApplyPerformanceFixResponse], error) {
-	server, err := s.store.GetServer(ctx, req.Msg.Id)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
-	}
-	serverCfg, err := s.store.GetServerProperties(ctx, server.ID)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load server config: %w", err))
-	}
-
-	var m *metrics.ServerMetrics
-	if s.metricsCollector != nil {
-		m = s.metricsCollector.GetMetrics(server.ID)
-	}
-	if autopilot.FindingForFix(autopilot.Analyze(server, serverCfg, m), req.Msg.FixId, req.Msg.FixArgs) == nil {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("fix does not match a current finding"))
-	}
-
-	prevMemoryMin, prevMemoryMax := server.MemoryMin, server.MemoryMax
-	message, err := autopilot.ApplyFix(server, serverCfg, req.Msg.FixId, req.Msg.FixArgs)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	if err := s.store.SaveServerProperties(ctx, serverCfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save server config: %w", err))
-	}
-	fields := map[string]any{}
-	if server.MemoryMin != prevMemoryMin {
-		fields["memory_min"] = server.MemoryMin
-	}
-	if server.MemoryMax != prevMemoryMax {
-		fields["memory_max"] = server.MemoryMax
-	}
-	if err := s.store.UpdateServerFields(ctx, server.ID, fields); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save server: %w", err))
-	}
-
-	// Restart required to propogate config to the container
-	restarting := s.recreateAfterConfigChange(ctx, server)
-
-	s.rec.Record(ctx, server.ID, "fix.apply", activity.Attrs{"fix": req.Msg.FixId}, "applied fix: %s", message)
-	s.log.Info("autopilot: applied fix %s to server %s (restarting=%v)", req.Msg.FixId, server.Name, restarting)
-	return connect.NewResponse(&v1.ApplyPerformanceFixResponse{
-		Message:    message,
-		Restarting: restarting,
-	}), nil
 }

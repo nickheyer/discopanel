@@ -4,8 +4,38 @@ import (
 	"context"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/config"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
+
+// Template id of the global crash doctor module
+const doctorTemplateID = "builtin-doctor"
+
+// Default web port for the seeded doctor instance
+func doctorPorts(cfg *config.Config) []*v1.ModulePort {
+	port := int32(8190)
+	if cfg != nil && cfg.Module.PortRangeMax > 0 {
+		port = int32(cfg.Module.PortRangeMax)
+	}
+	return []*v1.ModulePort{
+		{Name: "Web", ContainerPort: 8190, HostPort: port, Protocol: "http", ProxyEnabled: false},
+	}
+}
+
+func doctorEnv() string {
+	return `{
+		"DISCOPANEL_URL": "http://host.docker.internal:{{config.server.port}}",
+		"DISCOPANEL_DATA_DIR": "{{config.storage.data_dir}}",
+		"POLL_INTERVAL": "15s",
+		"DOCTOR_MODE": "repair",
+		"DOCTOR_INSTALL_DEPS": "on",
+		"PORT": "8190"
+	}`
+}
+
+func doctorVolumes() string {
+	return `[{"source": "{{config.storage.data_dir}}", "target": "/data", "read_only": false}]`
+}
 
 // Seeds missing built-in templates, never touches existing rows
 func InitBuiltinTemplates(store *storage.Store) error {
@@ -124,6 +154,28 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			HealthCheckPort: 8181,
 			Documentation:   "Displays a real-time status dashboard for the attached Minecraft server. Fetches status via the DiscoPanel API including player count, TPS, CPU/memory usage, and server configuration. Automatically refreshes every 10 seconds.",
 			DefaultMemory:   512,
+		},
+		{
+			ID:             doctorTemplateID,
+			Name:           "Doctor",
+			Description:    "Global crash doctor. Watches every DiscoPanel server, diagnoses crashes from structured exit reports, disables or sources mods with a full revert trail, and verifies repairs by restarting through the panel.",
+			Type:           storage.ModuleTemplateTypeBuiltin,
+			DockerImage:    "nickheyer/discopanel-doctor:latest",
+			Category:       "automation",
+			SupportsProxy:  false,
+			RequiresServer: false,
+			Icon:           "stethoscope",
+			Ports: []*v1.ModulePort{
+				{Name: "Web", ContainerPort: 8190, HostPort: 0, Protocol: "http", ProxyEnabled: false},
+			},
+			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
+			DefaultEnv:        doctorEnv(),
+			DefaultVolumes:    doctorVolumes(),
+			HealthCheckPath:   "/health",
+			HealthCheckPort:   8190,
+			Metadata:          map[string]string{"module_role": "doctor"},
+			Documentation:     "Runs as a single global module for the whole panel. Discovers servers through the DiscoPanel API, watches their exit history on the shared data volume, and repairs crash loops with reversible mod disables, re-enables, and dependency installs from CurseForge or Modrinth using the panel API keys. Set DOCTOR_MODE=observe to diagnose without acting, or DOCTOR_INSTALL_DEPS=off to disable dependency downloads. Stop the module or turn off auto start to disable it.",
+			DefaultMemory:     512,
 		},
 	}
 

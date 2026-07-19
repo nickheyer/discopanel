@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/nickheyer/discopanel/internal/alias"
-	"github.com/nickheyer/discopanel/internal/config"
 	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/config"
 	"google.golang.org/protobuf/proto"
 )
 

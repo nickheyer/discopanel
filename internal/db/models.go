@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 	"time"
 
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -21,56 +22,40 @@ const (
 	StatusPaused       ServerStatus = "paused"       // Container paused by autopause, wakes on connect
 )
 
-type ModLoader string
+// ModLoader lives in the minecraft domain package now
+type ModLoader = minecraft.ModLoader
 
 const (
-	// Vanilla
-	ModLoaderVanilla ModLoader = "vanilla"
-
-	// Forge-based
-	ModLoaderForge    ModLoader = "forge"
-	ModLoaderNeoForge ModLoader = "neoforge"
-
-	// Fabric-based
-	ModLoaderFabric ModLoader = "fabric"
-	ModLoaderQuilt  ModLoader = "quilt"
-
-	// Bukkit-based
-	ModLoaderBukkit ModLoader = "bukkit"
-	ModLoaderSpigot ModLoader = "spigot"
-
-	// Paper-based
-	ModLoaderPaper      ModLoader = "paper"
-	ModLoaderPurpur     ModLoader = "purpur"
-	ModLoaderPufferfish ModLoader = "pufferfish"
-	ModLoaderFolia      ModLoader = "folia"
-
-	// Hybrids (Forge + Bukkit)
-	ModLoaderMagma           ModLoader = "magma"
-	ModLoaderMagmaMaintained ModLoader = "magma_maintained"
-	ModLoaderKetting         ModLoader = "ketting"
-	ModLoaderMohist          ModLoader = "mohist"
-	ModLoaderYouer           ModLoader = "youer"
-	ModLoaderBanner          ModLoader = "banner"
-	ModLoaderCatserver       ModLoader = "catserver"
-	ModLoaderArclight        ModLoader = "arclight"
-
-	// Sponge
-	ModLoaderSpongeVanilla ModLoader = "spongevanilla"
-	ModLoaderSpongeForge   ModLoader = "spongeforge"
-
-	// Others
-	ModLoaderLimbo     ModLoader = "limbo"
-	ModLoaderNanoLimbo ModLoader = "nanolimbo"
-	ModLoaderCrucible  ModLoader = "crucible"
-	ModLoaderGlowstone ModLoader = "glowstone"
-	ModLoaderCustom    ModLoader = "custom"
-
-	// Modpack Platforms
-	ModLoaderAutoCurseForge ModLoader = "auto_curseforge"
-	ModLoaderCurseForge     ModLoader = "curseforge"
-	ModLoaderFTBA           ModLoader = "ftba"
-	ModLoaderModrinth       ModLoader = "modrinth"
+	ModLoaderVanilla         = minecraft.ModLoaderVanilla
+	ModLoaderForge           = minecraft.ModLoaderForge
+	ModLoaderNeoForge        = minecraft.ModLoaderNeoForge
+	ModLoaderFabric          = minecraft.ModLoaderFabric
+	ModLoaderQuilt           = minecraft.ModLoaderQuilt
+	ModLoaderBukkit          = minecraft.ModLoaderBukkit
+	ModLoaderSpigot          = minecraft.ModLoaderSpigot
+	ModLoaderPaper           = minecraft.ModLoaderPaper
+	ModLoaderPurpur          = minecraft.ModLoaderPurpur
+	ModLoaderPufferfish      = minecraft.ModLoaderPufferfish
+	ModLoaderFolia           = minecraft.ModLoaderFolia
+	ModLoaderMagma           = minecraft.ModLoaderMagma
+	ModLoaderMagmaMaintained = minecraft.ModLoaderMagmaMaintained
+	ModLoaderKetting         = minecraft.ModLoaderKetting
+	ModLoaderMohist          = minecraft.ModLoaderMohist
+	ModLoaderYouer           = minecraft.ModLoaderYouer
+	ModLoaderBanner          = minecraft.ModLoaderBanner
+	ModLoaderCatserver       = minecraft.ModLoaderCatserver
+	ModLoaderArclight        = minecraft.ModLoaderArclight
+	ModLoaderSpongeVanilla   = minecraft.ModLoaderSpongeVanilla
+	ModLoaderSpongeForge     = minecraft.ModLoaderSpongeForge
+	ModLoaderLimbo           = minecraft.ModLoaderLimbo
+	ModLoaderNanoLimbo       = minecraft.ModLoaderNanoLimbo
+	ModLoaderCrucible        = minecraft.ModLoaderCrucible
+	ModLoaderGlowstone       = minecraft.ModLoaderGlowstone
+	ModLoaderCustom          = minecraft.ModLoaderCustom
+	ModLoaderAutoCurseForge  = minecraft.ModLoaderAutoCurseForge
+	ModLoaderCurseForge      = minecraft.ModLoaderCurseForge
+	ModLoaderFTBA            = minecraft.ModLoaderFTBA
+	ModLoaderModrinth        = minecraft.ModLoaderModrinth
 )
 
 type Server struct {
@@ -529,6 +514,7 @@ type APIToken struct {
 	ExpiresAt     *time.Time `json:"expires_at" gorm:"column:expires_at"`
 	LastUsedAt    *time.Time `json:"last_used_at" gorm:"column:last_used_at"`
 	IsModuleToken bool       `json:"is_module_token" gorm:"default:false;column:is_module_token"`
+	ModuleRole    string     `json:"module_role" gorm:"default:'';column:module_role"`
 	CreatedAt     time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	User          *User      `json:"-" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
 }
@@ -784,4 +770,30 @@ type Module struct {
 	// Runtime stats (not persisted)
 	MemoryUsage float64 `json:"memory_usage" gorm:"-"`
 	CPUPercent  float64 `json:"cpu_percent" gorm:"-"`
+}
+
+// Pack list helpers live beside the fields they select
+
+// Splits the platform's force include list into patterns
+func ForceIncludePatterns(loader ModLoader, cfg *ServerProperties) []string {
+	pack := minecraft.PackPlatformFor(loader)
+	if cfg == nil || pack == nil {
+		return nil
+	}
+	field := platformField(pack.Source, cfg)
+	if field == nil || *field == nil {
+		return nil
+	}
+	return minecraft.SplitPatterns(**field)
+}
+
+// Selects the platform's force include column
+func platformField(source string, cfg *ServerProperties) **string {
+	switch source {
+	case "curseforge":
+		return &cfg.CFForceIncludeMods
+	case "modrinth":
+		return &cfg.ModrinthForceIncludeFiles
+	}
+	return nil
 }

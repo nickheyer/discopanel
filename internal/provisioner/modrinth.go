@@ -13,8 +13,9 @@ import (
 	"sync/atomic"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/indexers/modrinth"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
+	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -40,7 +41,7 @@ type mrpackFile struct {
 
 // Downloads a Modrinth modpack and installs its loader
 func (p *Provisioner) installModrinthPack(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
-	client := modrinth.NewClient(p.cfg)
+	client := modrinth.NewClient(p.cfg.Server.UserAgent)
 
 	version, err := p.resolveModrinthVersion(ctx, client, cfg, desired)
 	if err != nil {
@@ -49,29 +50,14 @@ func (p *Provisioner) installModrinthPack(ctx context.Context, server *storage.S
 	desired.versionID = version.ID
 
 	// Pick the primary file (packs may ship auxiliary non-primary files)
-	var packFile *modrinth.File
-	for i := range version.Files {
-		if version.Files[i].Primary {
-			packFile = &version.Files[i]
-			break
-		}
-	}
-	if packFile == nil && len(version.Files) > 0 {
-		packFile = &version.Files[0]
-	}
+	packFile := primaryFile(version)
 	if packFile == nil {
 		return nil, fmt.Errorf("Modrinth version %s has no files", version.ID)
 	}
 
 	p.progress(server, "downloading modpack %s (%s)...", desired.id, version.VersionNumber)
 	packPath := filepath.Join(installerDir(server.DataPath), "modpack.mrpack")
-	var sum *checksum
-	if packFile.Hashes.SHA512 != "" {
-		sum = &checksum{algo: "sha512", value: packFile.Hashes.SHA512}
-	} else if packFile.Hashes.SHA1 != "" {
-		sum = &checksum{algo: "sha1", value: packFile.Hashes.SHA1}
-	}
-	if err := p.download(ctx, packFile.URL, packPath, sum, nil, p.reporter(server, packFile.Filename)); err != nil {
+	if err := p.download(ctx, packFile.URL, packPath, mrChecksum(packFile.Hashes), nil, p.reporter(server, packFile.Filename)); err != nil {
 		return nil, err
 	}
 
@@ -194,7 +180,9 @@ func (p *Provisioner) installMrpack(ctx context.Context, server *storage.Server,
 		return nil, fmt.Errorf("mrpack has no modrinth.index.json")
 	}
 
-	excludes := minecraft.SplitPatterns(strVal(cfg.ModrinthExcludeFiles))
+	// Doctor holds stay out until it re-enables them
+	excludes := append(minecraft.SplitPatterns(strVal(cfg.ModrinthExcludeFiles)), runtimespec.DoctorExcludes(server.DataPath)...)
+	excludes = append(excludes, runtimespec.IncidentHeldFiles(server.DataPath)...)
 	forceIncludes := minecraft.SplitPatterns(strVal(cfg.ModrinthForceIncludeFiles))
 
 	// Resolves wanted files, then downloads concurrently, bounded
@@ -223,22 +211,14 @@ func (p *Provisioner) installMrpack(ctx context.Context, server *storage.Server,
 	for _, file := range pending {
 		g.Go(func() error {
 			dest := joinData(server.DataPath, file.Path)
-			var sum *checksum
-			if v := file.Hashes["sha512"]; v != "" {
-				sum = &checksum{algo: "sha512", value: v}
-			} else if v := file.Hashes["sha1"]; v != "" {
-				sum = &checksum{algo: "sha1", value: v}
-			}
+			sum := mrpackChecksum(file.Hashes)
 
-			err := retryTransient(gctx, func() error {
-				var lastErr error
-				for _, u := range file.Downloads {
-					if lastErr = p.download(gctx, u, dest, sum, nil, nil); lastErr == nil {
-						return nil
-					}
+			var err error
+			for _, u := range file.Downloads {
+				if err = p.download(gctx, u, dest, sum, nil, nil); err == nil {
+					break
 				}
-				return lastErr
-			})
+			}
 			if err != nil {
 				return fmt.Errorf("failed to download %q: %w", file.Path, err)
 			}
@@ -278,6 +258,11 @@ func (p *Provisioner) mrpackFileWanted(server *storage.Server, file mrpackFile, 
 			p.progress(server, "skipping excluded file %s", file.Path)
 			return false
 		}
+	}
+	// Known client jars skip even without env metadata
+	if defaultClientFile(name) {
+		p.progress(server, "skipping known client-only file %s", file.Path)
+		return false
 	}
 	if file.Env != nil && file.Env.Server == "unsupported" {
 		p.progress(server, "skipping client-only file %s", file.Path)
@@ -453,7 +438,7 @@ func (p *Provisioner) installModrinthProjects(ctx context.Context, server *stora
 		}
 
 		if client == nil {
-			client = modrinth.NewClient(p.cfg)
+			client = modrinth.NewClient(p.cfg.Server.UserAgent)
 		}
 		versions, err := client.GetProjectVersionsFiltered(ctx, project, facets, []string{mcVersion})
 		if err != nil {
@@ -471,16 +456,7 @@ func (p *Provisioner) installModrinthProjects(ctx context.Context, server *stora
 			break
 		}
 
-		var file *modrinth.File
-		for i := range pick.Files {
-			if pick.Files[i].Primary {
-				file = &pick.Files[i]
-				break
-			}
-		}
-		if file == nil && len(pick.Files) > 0 {
-			file = &pick.Files[0]
-		}
+		file := primaryFile(pick)
 		if file == nil {
 			continue
 		}
@@ -488,11 +464,7 @@ func (p *Provisioner) installModrinthProjects(ctx context.Context, server *stora
 		dest := filepath.Join(modsDir, file.Filename)
 		if force || !fileExists(dest) {
 			p.progress(server, "installing mod %s (%s)...", project, pick.VersionNumber)
-			var sum *checksum
-			if file.Hashes.SHA512 != "" {
-				sum = &checksum{algo: "sha512", value: file.Hashes.SHA512}
-			}
-			if err := p.download(ctx, file.URL, dest, sum, nil, nil); err != nil {
+			if err := p.download(ctx, file.URL, dest, mrChecksum(file.Hashes), nil, nil); err != nil {
 				installErr = fmt.Errorf("failed to download Modrinth project %q: %w", project, err)
 				break
 			}

@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/google/uuid"
-	"github.com/nickheyer/discopanel/internal/config"
+	"github.com/nickheyer/discopanel/pkg/config"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -1062,6 +1062,26 @@ func (s *Store) AssignRole(ctx context.Context, userID, roleName, source string)
 
 func (s *Store) UnassignRole(ctx context.Context, userID, roleName string) error {
 	return s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).Delete(&UserRole{}).Error
+}
+
+// Oldest active admin, owns tokens for seeded builtin modules
+func (s *Store) GetFirstAdminUserID(ctx context.Context) (string, error) {
+	var userID string
+	err := s.db.WithContext(ctx).
+		Model(&UserRole{}).
+		Select("user_roles.user_id").
+		Joins("JOIN users ON users.id = user_roles.user_id").
+		Where("user_roles.role_name = ? AND users.is_active = ?", "admin", true).
+		Order("users.created_at ASC").
+		Limit(1).
+		Pluck("user_roles.user_id", &userID).Error
+	if err != nil {
+		return "", err
+	}
+	if userID == "" {
+		return "", fmt.Errorf("no active admin user exists")
+	}
+	return userID, nil
 }
 
 func (s *Store) GetUserRoleNames(ctx context.Context, userID string) ([]string, error) {

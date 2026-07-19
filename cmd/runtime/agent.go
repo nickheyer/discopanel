@@ -71,17 +71,13 @@ func (s *supervisor) handleAgentMessage(msg *agentv1.AgentMessage, conn net.Conn
 		s.mu.Lock()
 		s.jvmConn = conn
 		s.mu.Unlock()
-		s.send(msg)
+		s.sendControl(msg)
 	case *agentv1.AgentMessage_TickThreadSample:
 		s.emitTickSample(p.TickThreadSample)
 	case *agentv1.AgentMessage_JvmSample:
 		s.send(msg)
 	case *agentv1.AgentMessage_FatalError:
 		s.setFatalError(p.FatalError)
-		// Errors after ready feed the panel's runtime findings
-		if s.isReady() {
-			s.send(msg)
-		}
 	case *agentv1.AgentMessage_CaptureArmed:
 		s.markCaptureArmed(p.CaptureArmed.GetContextsHooked())
 	}
@@ -126,6 +122,27 @@ func (s *supervisor) send(msg *agentv1.AgentMessage) {
 	select {
 	case sess.sendCh <- msg:
 	default:
+	}
+}
+
+// Queues a control message, waits instead of dropping
+// Reconnect resends state, so waiting only covers live streams
+func (s *supervisor) sendControl(msg *agentv1.AgentMessage) {
+	if msg == nil {
+		return
+	}
+	s.mu.Lock()
+	sess := s.session
+	s.mu.Unlock()
+	if sess == nil {
+		return
+	}
+	t := time.NewTimer(10 * time.Second)
+	defer t.Stop()
+	select {
+	case sess.sendCh <- msg:
+	case <-s.done():
+	case <-t.C:
 	}
 }
 
@@ -327,7 +344,7 @@ func (s *supervisor) clearExitReplay(exitedAtUnixMs int64) {
 	}
 	s.mu.Unlock()
 	if cleared {
-		_ = os.Remove(exitReportPath(dataDir))
+		_ = os.Remove(runtimespec.ExitReportPath(dataDir))
 	}
 }
 
@@ -411,16 +428,6 @@ func msgStopping() *agentv1.AgentMessage {
 	return &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Stopping{Stopping: &agentv1.Stopping{}}}
 }
 
-func msgExited(r *exitReport) *agentv1.AgentMessage {
-	return &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Exited{Exited: &agentv1.Exited{
-		ExitCode:           int32(r.ExitCode),
-		Crashed:            r.Crashed,
-		CrashReportPath:    r.ReportPath,
-		CrashReportExcerpt: r.Excerpt,
-		ExitedAtUnixMs:     r.ExitedAtUnixMs,
-		OomKilled:          r.OomKilled,
-		BootFailed:         r.BootFailed,
-		WasReady:           r.WasReady,
-		FatalError:         r.fatal(),
-	}}}
+func msgExited(r *agentv1.Exited) *agentv1.AgentMessage {
+	return &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Exited{Exited: r}}
 }

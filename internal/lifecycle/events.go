@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
-	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/events"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 

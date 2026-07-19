@@ -14,9 +14,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/nickheyer/discopanel/internal/config"
 	"github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/rbac"
+	"github.com/nickheyer/discopanel/pkg/config"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -408,7 +408,8 @@ func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, exp
 }
 
 // Creates a module API token under the creating user
-func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID string) (string, *db.APIToken, error) {
+// Role widens access for trusted builtins, e.g. the doctor
+func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID, role string) (string, *db.APIToken, error) {
 	tokenName := fmt.Sprintf("module:%s:%s", moduleName, moduleID)
 	plaintext, token, err := m.GenerateAPIToken(ctx, userID, tokenName, nil)
 	if err != nil {
@@ -417,6 +418,7 @@ func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, m
 
 	// Mark as module token
 	token.IsModuleToken = true
+	token.ModuleRole = role
 	if err := m.store.DB().WithContext(ctx).Save(token).Error; err != nil {
 		return "", nil, fmt.Errorf("failed to mark token as module token: %w", err)
 	}
@@ -455,10 +457,13 @@ func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*Authe
 		return nil, ErrUserNotActive
 	}
 
-	// Module tokens carry the narrow module role, never the creator's
+	// Module tokens carry their pinned role, never the creator's
 	var roleNames []string
 	if apiToken.IsModuleToken {
 		roleNames = []string{"module"}
+		if apiToken.ModuleRole != "" {
+			roleNames = []string{apiToken.ModuleRole}
+		}
 	} else {
 		roleNames, err = m.store.GetUserRoleNames(ctx, user.ID)
 		if err != nil {

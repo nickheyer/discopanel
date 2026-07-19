@@ -7,7 +7,7 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/alias"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/events"
+	"github.com/nickheyer/discopanel/pkg/events"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 

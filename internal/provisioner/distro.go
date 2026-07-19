@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 

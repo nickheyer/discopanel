@@ -17,7 +17,6 @@
 	import {
 		Loader2,
 		Gauge,
-		Sparkles,
 		Info,
 		AlertTriangle,
 		AlertCircle,
@@ -26,7 +25,6 @@
 		CircleDashed,
 		MoonStar,
 		Bot,
-		Wrench,
 		EyeOff,
 		RotateCcw,
 		ScrollText
@@ -43,7 +41,6 @@
 
 	let loading = $state(true);
 	let detailsOpen = $state(false);
-	let applyingFix = $state('');
 	let dismissing = $state('');
 	let findings = $state<PerformanceFinding[]>([]);
 	let agentConnected = $state(false);
@@ -128,27 +125,6 @@
 			if (!silent) toast.error('Failed to load performance report');
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function applyFix(finding: PerformanceFinding) {
-		applyingFix = finding.fixId;
-		try {
-			const res = await rpcClient.server.applyPerformanceFix({
-				id: server.id,
-				fixId: finding.fixId,
-				fixArgs: finding.fixArgs
-			});
-			toast.success(res.message, {
-				description: res.restarting
-					? 'The server is restarting to apply it.'
-					: 'It will apply the next time the server starts.'
-			});
-			await loadReport(true);
-		} catch {
-			toast.error('Failed to apply fix');
-		} finally {
-			applyingFix = '';
 		}
 	}
 
@@ -344,26 +320,8 @@
 							{/if}
 						</div>
 					{/if}
-					{#if finding.fixId || finding.severity >= PerformanceSeverity.INFO}
+					{#if finding.severity >= PerformanceSeverity.INFO}
 						<div class="flex items-center gap-2 border-t bg-muted/20 px-3 py-2">
-							{#if finding.fixId}
-								<Button
-									size="sm"
-									variant="outline"
-									class="shrink-0"
-									disabled={applyingFix !== ''}
-									onclick={() => applyFix(finding)}
-								>
-									{#if applyingFix === finding.fixId}
-										<Loader2 class="size-3.5 animate-spin" />
-									{:else if finding.fixId === 'enable_zgc'}
-										<Sparkles class="size-3.5" />
-									{:else}
-										<Wrench class="size-3.5" />
-									{/if}
-									{finding.fixLabel}
-								</Button>
-							{/if}
 							<Button
 								size="sm"
 								variant="ghost"
@@ -376,7 +334,7 @@
 								{:else}
 									<EyeOff class="size-3" />
 								{/if}
-								{finding.fixId ? 'Ignore' : 'Dismiss'}
+								Dismiss
 							</Button>
 						</div>
 					{/if}

@@ -57,6 +57,15 @@ func (c *Collector) ApplyAgentReady(ctx context.Context, serverID string, startu
 // Crash exits older than this stop counting toward loops
 const crashExitRetention = 30 * time.Minute
 
+// Seeds the exit dedup floor from the durable ack stamp
+func (c *Collector) SeedExitFloor(serverID string, floor time.Time) {
+	c.updateMetrics(serverID, func(m *ServerMetrics) {
+		if m.LastExitedAt.Before(floor) {
+			m.LastExitedAt = floor
+		}
+	})
+}
+
 // Records a process exit report, reports false for stale replays
 func (c *Collector) ApplyAgentExit(serverID string, exit *agentv1.Exited) bool {
 	exitedAt := time.Now()
@@ -74,9 +83,6 @@ func (c *Collector) ApplyAgentExit(serverID string, exit *agentv1.Exited) bool {
 		m.LastExitOomKilled = exit.GetOomKilled()
 		m.LastExitBootFailed = exit.GetBootFailed()
 		m.LastExitWasReady = exit.GetWasReady()
-		m.LastCrashReportPath = exit.GetCrashReportPath()
-		m.LastCrashExcerpt = exit.GetCrashReportExcerpt()
-		m.LastFatalError = exit.GetFatalError()
 		m.LastExitedAt = exitedAt
 		if exit.GetCrashed() {
 			m.CrashExits = pruneCrashExits(append(m.CrashExits, exitedAt))
@@ -95,32 +101,6 @@ func pruneCrashExits(times []time.Time) []time.Time {
 		}
 	}
 	return kept
-}
-
-// Runtime errors older than this stop counting toward findings
-const runtimeFatalRetention = time.Hour
-
-// Ring cap keeps a spamming mod from growing memory
-const maxRuntimeFatals = 128
-
-// Records one post-ready error for runtime findings
-func (c *Collector) RecordRuntimeFatal(serverID string, fatal *agentv1.FatalError) {
-	if fatal == nil {
-		return
-	}
-	now := time.Now()
-	c.updateMetrics(serverID, func(m *ServerMetrics) {
-		kept := m.RuntimeFatals[:0]
-		for _, f := range m.RuntimeFatals {
-			if now.Sub(f.At) < runtimeFatalRetention {
-				kept = append(kept, f)
-			}
-		}
-		if len(kept) >= maxRuntimeFatals {
-			kept = kept[len(kept)-maxRuntimeFatals+1:]
-		}
-		m.RuntimeFatals = append(kept, RuntimeFatal{At: now, Fatal: fatal})
-	})
 }
 
 // Records a clean exit nobody requested for loop breaking

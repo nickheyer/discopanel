@@ -13,12 +13,9 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
-	"github.com/nickheyer/discopanel/internal/autopilot"
 	"github.com/nickheyer/discopanel/internal/command"
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/lifecycle"
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/module"
@@ -26,6 +23,8 @@ import (
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/internal/rpc"
 	"github.com/nickheyer/discopanel/internal/scheduler"
+	"github.com/nickheyer/discopanel/pkg/config"
+	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -201,16 +200,6 @@ func main() {
 	prov := provisioner.New(store, dockerClient, cfg, rec, log)
 	lifecycleManager := lifecycle.NewManager(store, dockerClient, prov, sender, proxyManager, eventBus, cfg, rec, log)
 	lifecycleManager.SetPlayerCounter(metricsCollector)
-
-	// Doctor repairs crashes through the lifecycle owner and provisioner
-	agentHub.SetCrashDoctor(&autopilot.CrashResponder{
-		Store:     store,
-		Collector: metricsCollector,
-		Lifecycle: lifecycleManager,
-		Installer: prov,
-		Rec:       rec,
-		Log:       log,
-	})
 
 	// Proxy answers pings for paused servers, wakes logins
 	proxyManager.SetServerGate(lifecycleManager)

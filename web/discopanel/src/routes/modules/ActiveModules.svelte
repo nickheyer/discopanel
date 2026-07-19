@@ -223,7 +223,7 @@
 							<div class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
 								<span class="flex min-w-0 items-center gap-1">
 									<Server class="size-3 shrink-0" />
-									<span class="truncate">{module.serverName || module.serverId}</span>
+									<span class="truncate">{module.serverName || module.serverId || 'Global'}</span>
 								</span>
 								<span>·</span>
 								<span class="truncate">{module.templateName}</span>

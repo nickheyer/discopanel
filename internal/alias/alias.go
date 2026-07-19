@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nickheyer/discopanel/internal/config"
 	models "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/config"
 )
 
 // Groups aliases by source type

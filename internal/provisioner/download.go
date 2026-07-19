@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -18,7 +19,7 @@ import (
 	"time"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/indexers"
+	"github.com/nickheyer/discopanel/pkg/indexers"
 )
 
 type checksum struct {
@@ -75,7 +76,40 @@ func (p *Provisioner) reporter(server *storage.Server, label string) func(done, 
 	}
 }
 
-// Retries fn up to three times with backoff
+// Terminal HTTP failure, retrying cannot help
+type httpStatusError struct {
+	url    string
+	status int
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("download failed for %s: status %d", e.url, e.status)
+}
+
+// Deterministic content mismatch, upstream serves the wrong bytes
+type checksumError struct {
+	url, algo, want, got string
+}
+
+func (e *checksumError) Error() string {
+	return fmt.Sprintf("checksum mismatch for %s: expected %s %s, got %s", e.url, e.algo, e.want, e.got)
+}
+
+// Network hiccups and server-side failures retry, the rest never
+func isTransient(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var se *httpStatusError
+	if errors.As(err, &se) {
+		return se.status == http.StatusRequestTimeout ||
+			se.status == http.StatusTooManyRequests || se.status >= 500
+	}
+	var ce *checksumError
+	return !errors.As(err, &ce)
+}
+
+// Retries fn up to three times with backoff on transient errors
 func retryTransient(ctx context.Context, fn func() error) error {
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -89,12 +123,22 @@ func retryTransient(ctx context.Context, fn func() error) error {
 		if err = fn(); err == nil {
 			return nil
 		}
+		if !isTransient(err) {
+			return err
+		}
 	}
 	return err
 }
 
-// Fetches url into dest atomically, verifying checksum
+// Fetches url into dest with transient retry baked in
 func (p *Provisioner) download(ctx context.Context, rawURL, dest string, sum *checksum, headers map[string]string, report func(done, total int64)) error {
+	return retryTransient(ctx, func() error {
+		return p.downloadOnce(ctx, rawURL, dest, sum, headers, report)
+	})
+}
+
+// Fetches url into dest atomically, verifying checksum
+func (p *Provisioner) downloadOnce(ctx context.Context, rawURL, dest string, sum *checksum, headers map[string]string, report func(done, total int64)) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return err
 	}
@@ -119,7 +163,7 @@ func (p *Provisioner) download(ctx context.Context, rawURL, dest string, sum *ch
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("download failed for %s: status %d", rawURL, resp.StatusCode)
+		return &httpStatusError{url: rawURL, status: resp.StatusCode}
 	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(dest), ".download-*")
@@ -157,7 +201,7 @@ func (p *Provisioner) download(ctx context.Context, rawURL, dest string, sum *ch
 	if hasher != nil {
 		got := hex.EncodeToString(hasher.Sum(nil))
 		if !strings.EqualFold(got, sum.value) {
-			return fmt.Errorf("checksum mismatch for %s: expected %s %s, got %s", rawURL, sum.algo, sum.value, got)
+			return &checksumError{url: rawURL, algo: sum.algo, want: sum.value, got: got}
 		}
 		p.casPut(tmpPath, sum)
 	}

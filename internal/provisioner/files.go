@@ -14,16 +14,16 @@ import (
 
 	_ "golang.org/x/image/webp"
 	"io"
-	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
 
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/indexers"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 )
 
 // Writes panel-managed config files and installs configured Modrinth mods
@@ -37,7 +37,7 @@ func (p *Provisioner) applyConfigFiles(ctx context.Context, server *storage.Serv
 	if err := p.writeServerIcon(ctx, server, cfg); err != nil {
 		p.progress(server, "warning: failed to install server icon: %v", err)
 	}
-	if err := p.writePlayerList(ctx, server, cfg, "ops.json", strVal(cfg.Ops), true); err != nil {
+	if err := p.writePlayerListFile(ctx, server, cfg, "ops.json", strVal(cfg.Ops), true, false); err != nil {
 		p.progress(server, "warning: failed to write ops.json: %v", err)
 	}
 	overwriteWhitelist := boolVal(cfg.OverrideWhitelist)
@@ -93,7 +93,10 @@ func (p *Provisioner) writeServerProperties(server *storage.Server, cfg *storage
 	agentEnabled := cfg == nil || cfg.EnableAgent == nil || *cfg.EnableAgent
 	if minecraft.SupportsManagementProtocol(mcVersion) {
 		if agentEnabled {
-			secret := readServerProperty(server.DataPath, "management-server-secret")
+			secret := ""
+			if existing, err := minecraft.LoadServerProperties(server.DataPath); err == nil {
+				secret = existing["management-server-secret"]
+			}
 			if secret == "" {
 				secret = generateManagementSecret()
 			}
@@ -160,24 +163,6 @@ func generateManagementSecret() string {
 	return string(out)
 }
 
-// Reads one key from the existing server.properties file
-func readServerProperty(dataPath, key string) string {
-	data, err := os.ReadFile(filepath.Join(dataPath, "server.properties"))
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		if k, v, ok := strings.Cut(line, "="); ok && strings.TrimSpace(k) == key {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
 // Escapes non-ASCII runes as \uXXXX for legacy ISO-8859-1 readers
 func escapeUnicodeProperties(s string) string {
 	var b strings.Builder
@@ -216,22 +201,17 @@ func (p *Provisioner) writeServerIcon(ctx context.Context, server *storage.Serve
 }
 
 // Downloads any common image into 64x64 PNG bytes
+// Shared resilience client paces, retries, and reuses connections
 func FetchServerIcon(ctx context.Context, userAgent, iconURL string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, iconURL, nil)
+	host := "icon"
+	if u, err := url.Parse(iconURL); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	body, err := indexers.NewHTTPClient(host, userAgent, nil).DoBytes(ctx, iconURL)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", userAgent)
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("icon download failed: status %d", resp.StatusCode)
-	}
-	return ConvertServerIcon(resp.Body)
+	return ConvertServerIcon(bytes.NewReader(body))
 }
 
 // Decodes any common image into 64x64 PNG bytes
@@ -274,10 +254,6 @@ type playerEntry struct {
 	BypassesPlayerLimit bool   `json:"bypassesPlayerLimit,omitempty"`
 }
 
-func (p *Provisioner) writePlayerList(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, filename, list string, isOps bool) error {
-	return p.writePlayerListFile(ctx, server, cfg, filename, list, isOps, false)
-}
-
 // Resolves names to UUIDs and merges into list file
 // An explicit overwrite with an empty list truncates
 func (p *Provisioner) writePlayerListFile(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, filename, list string, isOps bool, overwrite bool) error {
@@ -290,7 +266,10 @@ func (p *Provisioner) writePlayerListFile(ctx context.Context, server *storage.S
 	entries := []playerEntry{}
 	if !overwrite {
 		if data, err := os.ReadFile(path); err == nil {
-			json.Unmarshal(data, &entries)
+			// Corrupt lists must not silently drop existing entries
+			if err := json.Unmarshal(data, &entries); err != nil {
+				return fmt.Errorf("existing %s is not valid JSON, fix or remove it: %w", filename, err)
+			}
 		}
 	}
 

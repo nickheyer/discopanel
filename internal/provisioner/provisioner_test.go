@@ -9,11 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/indexers/modrinth"
+	"github.com/nickheyer/discopanel/pkg/config"
+	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
+	"github.com/nickheyer/discopanel/pkg/indexers/modrinth"
 	"github.com/nickheyer/discopanel/pkg/logger"
-	"github.com/nickheyer/discopanel/pkg/runtimespec"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 )
 
 func writeClientJar(t *testing.T, dir, name, manifest string) {
@@ -66,37 +67,34 @@ func TestDisableClientOnlyMods(t *testing.T) {
 	}
 }
 
-func TestPreflightSkipsDoctorHeldJars(t *testing.T) {
-	dataPath := t.TempDir()
-	modsDir := filepath.Join(dataPath, "mods")
-	writeClientJar(t, modsDir, "alpha.jar", `{"id":"alpha","version":"1.0","depends":{"beta":"*"}}`)
-	writeClientJar(t, modsDir+"_disabled", "beta.jar", `{"id":"beta","version":"1.0"}`)
-
-	stateDir := filepath.Join(dataPath, runtimespec.StateDir)
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	journal := `{"version":1,"incident":{"opened_at":"2026-07-14T05:32:49Z","passes":1,"budget":8,` +
-		`"actions":[{"kind":"disable","file":"beta.jar","evidence":"verdict","applied_at":"2026-07-14T05:32:49Z"}]}}`
-	if err := os.WriteFile(filepath.Join(stateDir, "doctor.json"), []byte(journal), 0644); err != nil {
-		t.Fatal(err)
-	}
-
+func TestPackDownloadSkipsKnownClientMods(t *testing.T) {
 	p := &Provisioner{log: logger.New()}
-	server := &storage.Server{DataPath: dataPath, ModLoader: storage.ModLoaderModrinth, MCVersion: "1.20.1"}
-	p.preflightMods(context.Background(), server, &storage.ServerProperties{})
+	server := &storage.Server{}
 
-	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "beta.jar")); err != nil {
-		t.Fatal("jar held by an open incident must stay disabled")
+	slugged := &fuego.File{FileName: "some-shaders-1.0.jar", GameVersions: []string{"Client", "Server"}}
+	if p.cfFileWanted(server, slugged, &fuego.Modpack{Slug: "oculus"}, 42, nil, nil) {
+		t.Fatal("known client slug must be skipped")
+	}
+	if !p.cfFileWanted(server, slugged, &fuego.Modpack{Slug: "oculus"}, 42, nil, []string{"oculus"}) {
+		t.Fatal("force include must override the client list")
+	}
+	prefixed := &fuego.File{FileName: "rubidium-0.6.5.jar", GameVersions: []string{"Client", "Server"}}
+	if p.cfFileWanted(server, prefixed, &fuego.Modpack{}, 7, nil, nil) {
+		t.Fatal("known client file prefix must be skipped")
+	}
+	wanted := &fuego.File{FileName: "create-1.0.jar", GameVersions: []string{"Client", "Server"}}
+	if !p.cfFileWanted(server, wanted, &fuego.Modpack{Slug: "create"}, 9, nil, nil) {
+		t.Fatal("server mod must stay wanted")
 	}
 
-	// A closed incident releases the hold
-	if err := os.WriteFile(filepath.Join(stateDir, "doctor.json"), []byte(`{"version":1}`), 0644); err != nil {
-		t.Fatal(err)
+	if p.mrpackFileWanted(server, mrpackFile{Path: "mods/embeddium-0.3.jar"}, nil, nil) {
+		t.Fatal("known client jar must be skipped in mrpack")
 	}
-	p.preflightMods(context.Background(), server, &storage.ServerProperties{})
-	if _, err := os.Stat(filepath.Join(modsDir, "beta.jar")); err != nil {
-		t.Fatal("released dep should be re-enabled")
+	if !p.mrpackFileWanted(server, mrpackFile{Path: "mods/embeddium-0.3.jar"}, nil, []string{"embeddium"}) {
+		t.Fatal("force include must override in mrpack")
+	}
+	if !p.mrpackFileWanted(server, mrpackFile{Path: "mods/lithium-0.11.jar"}, nil, nil) {
+		t.Fatal("server jar must stay wanted in mrpack")
 	}
 }
 
@@ -148,14 +146,21 @@ func TestManagementSecretPersists(t *testing.T) {
 	if err := p.writeServerProperties(server, cfgRow, "1.21.9"); err != nil {
 		t.Fatal(err)
 	}
-	first := readServerProperty(server.DataPath, "management-server-secret")
+	readSecret := func() string {
+		props, err := minecraft.LoadServerProperties(server.DataPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return props["management-server-secret"]
+	}
+	first := readSecret()
 	if len(first) != 40 {
 		t.Fatalf("expected a 40 char secret, got %q", first)
 	}
 	if err := p.writeServerProperties(server, cfgRow, "1.21.9"); err != nil {
 		t.Fatal(err)
 	}
-	if again := readServerProperty(server.DataPath, "management-server-secret"); again != first {
+	if again := readSecret(); again != first {
 		t.Fatalf("secret must persist across Ensure, %q became %q", first, again)
 	}
 }

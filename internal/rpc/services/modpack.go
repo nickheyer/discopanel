@@ -15,18 +15,18 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/indexers"
-	_ "github.com/nickheyer/discopanel/internal/indexers/fuego"
-	_ "github.com/nickheyer/discopanel/internal/indexers/modrinth"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/files"
+	"github.com/nickheyer/discopanel/pkg/indexers"
+	_ "github.com/nickheyer/discopanel/pkg/indexers/fuego"
+	_ "github.com/nickheyer/discopanel/pkg/indexers/modrinth"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"github.com/nickheyer/discopanel/pkg/upload"
+	"github.com/nickheyer/discopanel/pkg/transfer"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -38,11 +38,11 @@ type ModpackService struct {
 	store         *storage.Store
 	config        *config.Config
 	log           *logger.Logger
-	uploadManager *upload.Manager
+	uploadManager *transfer.UploadManager
 }
 
 // Creates a new modpack service
-func NewModpackService(store *storage.Store, cfg *config.Config, uploadManager *upload.Manager, log *logger.Logger) *ModpackService {
+func NewModpackService(store *storage.Store, cfg *config.Config, uploadManager *transfer.UploadManager, log *logger.Logger) *ModpackService {
 	return &ModpackService{
 		store:         store,
 		config:        cfg,
@@ -66,7 +66,7 @@ func (s *ModpackService) getIndexer(ctx context.Context, name string) (indexers.
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("CurseForge API key not configured"))
 		}
 	}
-	idx, err := indexers.NewIndexer(name, apiKey, s.config)
+	idx, err := indexers.NewIndexer(name, apiKey, s.config.Server.UserAgent)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}

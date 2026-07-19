@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="15">
+<title>DiscoPanel Doctor</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font-family: ui-monospace, monospace; background: #0d1117; color: #e6edf3; }
+  header { padding: 16px 24px; border-bottom: 1px solid #21262d; display: flex; align-items: baseline; gap: 12px; }
+  h1 { font-size: 18px; margin: 0; }
+  .ver { color: #7d8590; font-size: 12px; }
+  main { padding: 24px; max-width: 960px; margin: 0 auto; }
+  .err { background: #3d1d1f; border: 1px solid #f85149; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  th { color: #7d8590; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  .up { color: #3fb950; }
+  .down { color: #f85149; }
+  .muted { color: #7d8590; }
+  .pill { display: inline-block; background: #21262d; border-radius: 10px; padding: 1px 8px; margin: 1px 2px; font-size: 12px; }
+  .log { background: #010409; border: 1px solid #21262d; border-radius: 6px; padding: 12px 14px; font-size: 12px; line-height: 1.6; max-height: 320px; overflow-y: auto; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DiscoPanel Doctor</h1>
+  <span class="ver">{{.Version}}</span>
+</header>
+<main>
+  {{if .Error}}<div class="err">panel unreachable: {{.Error}}</div>{{end}}
+  <table>
+    <tr><th>Server</th><th>State</th><th>Incident</th><th>Last outcome</th><th>Held out</th></tr>
+    {{range .Rows}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td>{{if .Running}}<span class="up">running</span>{{else}}<span class="down">down</span>{{end}}{{if .Exits}} <span class="muted">({{.Exits}} recent exits)</span>{{end}}</td>
+      <td>{{if .Incident}}{{.Incident}}{{else}}<span class="muted">none</span>{{end}}</td>
+      <td>{{if .Resolved}}{{.Resolved}}{{else}}<span class="muted">-</span>{{end}}</td>
+      <td>{{range .Excludes}}<span class="pill">{{.}}</span>{{else}}<span class="muted">-</span>{{end}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="5" class="muted">no servers discovered yet</td></tr>
+    {{end}}
+  </table>
+  <div class="log">{{range .Logs}}{{.}}
+{{else}}quiet so far{{end}}</div>
+</main>
+</body>
+</html>

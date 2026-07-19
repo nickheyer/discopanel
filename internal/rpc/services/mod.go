@@ -12,16 +12,16 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/nickheyer/discopanel/internal/activity"
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/indexers/fuego"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/files"
+	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"github.com/nickheyer/discopanel/pkg/upload"
+	"github.com/nickheyer/discopanel/pkg/transfer"
 	utils "github.com/nickheyer/discopanel/pkg/utils"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -36,7 +36,7 @@ type ModService struct {
 	config        *config.Config
 	rec           *activity.Recorder
 	log           *logger.Logger
-	uploadManager *upload.Manager
+	uploadManager *transfer.UploadManager
 
 	cfNamesMu sync.Mutex
 	cfNames   map[string]string
@@ -44,7 +44,7 @@ type ModService struct {
 }
 
 // NewModService creates a new mod service
-func NewModService(store *storage.Store, docker *docker.Client, cfg *config.Config, uploadManager *upload.Manager, rec *activity.Recorder, log *logger.Logger) *ModService {
+func NewModService(store *storage.Store, docker *docker.Client, cfg *config.Config, uploadManager *transfer.UploadManager, rec *activity.Recorder, log *logger.Logger) *ModService {
 	return &ModService{
 		store:         store,
 		docker:        docker,
@@ -217,7 +217,7 @@ func (s *ModService) sweepCFNames(serverID, apiKey string, files []struct {
 		return
 	}
 
-	client := fuego.NewClient(apiKey, s.config)
+	client := fuego.NewClient(apiKey, s.config.Server.UserAgent)
 	matches, err := client.GetFingerprintMatches(ctx, prints)
 	if err != nil {
 		s.log.Debug("CF fingerprint sweep failed: %v", err)

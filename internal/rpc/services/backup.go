@@ -12,8 +12,8 @@ import (
 	"connectrpc.com/connect"
 	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/minecraft"
 	"github.com/nickheyer/discopanel/pkg/files"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

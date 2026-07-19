@@ -16,8 +16,8 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
-	"github.com/nickheyer/discopanel/internal/config"
 	"github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/tidwall/gjson"
 	"golang.org/x/oauth2"

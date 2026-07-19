@@ -152,8 +152,8 @@ func (e *consoleEvents) playerChange(player string, joined bool) {
 	if joined {
 		eventType = agentv1.PlayerEventType_PLAYER_EVENT_TYPE_JOIN
 	}
+	// Panel applies the event, the roster ticker corrects drift
 	e.emit(eventType, player, "", count)
-	e.sup.sendRoster()
 }
 
 func (e *consoleEvents) isOnline(player string) bool {

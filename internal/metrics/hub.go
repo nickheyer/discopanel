@@ -2,30 +2,29 @@ package metrics
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
-	"github.com/nickheyer/discopanel/internal/events"
+	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
 // Feeds human-readable agent lines into a server's console stream
 type ConsoleSink func(serverID string, message string)
 
-// Reacts to crash exits and verified boots
-type CrashDoctor interface {
-	OnCrashExit(ctx context.Context, serverID string)
-	OnServerReady(ctx context.Context, serverID string)
-}
-
 // One live agent stream, hub owns the registry
 type Session struct {
 	ServerID string
+	DataPath string
 	sendCh   chan *agentv1.PanelMessage
 	closed   chan struct{}
 	cancel   context.CancelFunc
@@ -62,7 +61,6 @@ type Hub struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	sink     ConsoleSink
-	doctor   CrashDoctor
 }
 
 func NewHub(collector *Collector, bus *events.Bus, rec *activity.Recorder, log *logger.Logger) *Hub {
@@ -82,19 +80,6 @@ func (h *Hub) SetConsoleSink(sink ConsoleSink) {
 	h.mu.Unlock()
 }
 
-// Wires the crash doctor for repair on crash exits
-func (h *Hub) SetCrashDoctor(doctor CrashDoctor) {
-	h.mu.Lock()
-	h.doctor = doctor
-	h.mu.Unlock()
-}
-
-func (h *Hub) crashDoctor() CrashDoctor {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.doctor
-}
-
 func (h *Hub) console(serverID, format string, args ...any) {
 	h.mu.Lock()
 	sink := h.sink
@@ -105,9 +90,10 @@ func (h *Hub) console(serverID, format string, args ...any) {
 }
 
 // Registers a new live session, reconnect displaces the stale one
-func (h *Hub) Attach(serverID string, hello *agentv1.Hello, cancel context.CancelFunc) *Session {
+func (h *Hub) Attach(serverID, dataPath string, hello *agentv1.Hello, cancel context.CancelFunc) *Session {
 	sess := &Session{
 		ServerID: serverID,
+		DataPath: dataPath,
 		sendCh:   make(chan *agentv1.PanelMessage, 64),
 		closed:   make(chan struct{}),
 		cancel:   cancel,
@@ -118,6 +104,10 @@ func (h *Hub) Attach(serverID string, hello *agentv1.Hello, cancel context.Cance
 	h.mu.Unlock()
 	if old != nil {
 		old.close()
+	}
+	// Durable stamp keeps replayed exits stale across panel restarts
+	if stamp := readExitAck(dataPath); !stamp.IsZero() {
+		h.collector.SeedExitFloor(serverID, stamp)
 	}
 	h.collector.SetAgentConnected(serverID, true)
 	h.collector.ApplyAgentHello(serverID, hello)
@@ -155,6 +145,8 @@ func (h *Hub) sendToAgent(ctx context.Context, serverID string, msg *agentv1.Pan
 	if sess == nil {
 		return fmt.Errorf("no agent session for server %s", serverID)
 	}
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
 	select {
 	case sess.sendCh <- msg:
 		return nil
@@ -162,9 +154,19 @@ func (h *Hub) sendToAgent(ctx context.Context, serverID string, msg *agentv1.Pan
 		return fmt.Errorf("agent session for server %s is closing", serverID)
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		return fmt.Errorf("agent session for server %s is not draining", serverID)
 	}
+}
+
+// DataPath of the live session, empty when detached
+func (h *Hub) sessionDataPath(serverID string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if sess := h.sessions[serverID]; sess != nil {
+		return sess.DataPath
+	}
+	return ""
 }
 
 // Writes one command line to java stdin via supervisor
@@ -206,10 +208,6 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 		if secs := p.Ready.GetStartupSeconds(); secs > 0 {
 			h.console(serverID, "server ready in %.1fs", secs)
 		}
-		// A verified boot closes any open repair incident
-		if d := h.crashDoctor(); d != nil {
-			d.OnServerReady(ctx, serverID)
-		}
 
 	case *agentv1.AgentMessage_Stopping:
 		h.console(serverID, "server is shutting down")
@@ -237,11 +235,15 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 			}
 		}
 		if fresh {
-			if d := h.crashDoctor(); d != nil {
-				d.OnCrashExit(ctx, serverID)
+			// Stamp first so a lost ack never doubles the story
+			if ms := p.Exited.GetExitedAtUnixMs(); ms > 0 {
+				if err := writeExitAck(h.sessionDataPath(serverID), time.UnixMilli(ms)); err != nil {
+					h.log.Debug("agent: exit ack stamp for server %s not written: %v", serverID, err)
+				}
 			}
 		}
-		h.ackExit(ctx, serverID, p.Exited.GetExitedAtUnixMs())
+		// Ack runs off the recv loop, telemetry never stalls on it
+		go h.ackExit(ctx, serverID, p.Exited.GetExitedAtUnixMs())
 
 	case *agentv1.AgentMessage_ProcSample:
 		h.collector.ApplyAgentProc(serverID, p.ProcSample)
@@ -258,9 +260,6 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 	case *agentv1.AgentMessage_Roster:
 		h.collector.ApplyAgentRoster(serverID, p.Roster.GetOnlinePlayers())
 
-	case *agentv1.AgentMessage_FatalError:
-		// Runtime only, the runtime holds boot errors for the exit report
-		h.collector.RecordRuntimeFatal(serverID, p.FatalError)
 	}
 }
 
@@ -293,4 +292,44 @@ func (h *Hub) handlePlayerEvent(ctx context.Context, serverID string, ev *agentv
 	if h.bus != nil {
 		h.bus.Emit(ctx, events.Event{Type: eventType, ServerID: serverID, Data: data})
 	}
+}
+
+// Durable stamp of the newest exit the panel processed
+type exitAckStamp struct {
+	AckedUnixMs int64 `json:"acked_unix_ms"`
+}
+
+func exitAckPath(dataPath string) string {
+	return filepath.Join(dataPath, runtimespec.StateDir, "exit-ack.json")
+}
+
+// Reads the stamp, zero time when absent or unreadable
+func readExitAck(dataPath string) time.Time {
+	if dataPath == "" {
+		return time.Time{}
+	}
+	data, err := os.ReadFile(exitAckPath(dataPath))
+	if err != nil {
+		return time.Time{}
+	}
+	var s exitAckStamp
+	if json.Unmarshal(data, &s) != nil || s.AckedUnixMs <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(s.AckedUnixMs)
+}
+
+// Persists the stamp so replays stay stale across panel restarts
+func writeExitAck(dataPath string, exitedAt time.Time) error {
+	if dataPath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Join(dataPath, runtimespec.StateDir), 0755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(exitAckStamp{AckedUnixMs: exitedAt.UnixMilli()})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(exitAckPath(dataPath), data, 0644)
 }

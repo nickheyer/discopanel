@@ -14,12 +14,12 @@ import (
 
 	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/command"
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/events"
 	"github.com/nickheyer/discopanel/internal/provisioner"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/config"
+	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
@@ -542,17 +542,9 @@ func (m *Manager) Wake(ctx context.Context, serverID string) error {
 	return nil
 }
 
-// Matches the crash doctor's activity source
-const repairSource = "crash doctor"
-
 func (m *Manager) setStopIntent(serverID, source string) {
 	m.stopIntentMu.Lock()
 	defer m.stopIntentMu.Unlock()
-	cur := m.stopIntents[serverID]
-	// Doctor never overwrites another actor's stop
-	if source == repairSource && cur != "" && cur != repairSource {
-		return
-	}
 	m.stopIntents[serverID] = source
 }
 

@@ -51,7 +51,7 @@ func (s *AgentService) Session(ctx context.Context, stream *connect.BidiStream[a
 	sessCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	sess := s.hub.Attach(server.ID, hello, cancel)
+	sess := s.hub.Attach(server.ID, server.DataPath, hello, cancel)
 	defer s.hub.Detach(server.ID, sess)
 
 	// Pumps panel-to-agent messages while the main loop consumes telemetry

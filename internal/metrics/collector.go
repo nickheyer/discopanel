@@ -6,14 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/events"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/config"
+	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
-	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
@@ -68,15 +67,12 @@ type ServerMetrics struct {
 	PSIIoSome          float64
 
 	// Last process exit reported by the agent (crash forensics)
-	LastExitCode        int
-	LastExitCrashed     bool
-	LastExitOomKilled   bool
-	LastExitBootFailed  bool // Boot died and the runtime ended the hung JVM
-	LastExitWasReady    bool // Server reached ready before this exit
-	LastCrashReportPath string
-	LastCrashExcerpt    string
-	LastFatalError      *agentv1.FatalError // Structured in-JVM crash capture
-	LastExitedAt        time.Time
+	LastExitCode       int
+	LastExitCrashed    bool
+	LastExitOomKilled  bool
+	LastExitBootFailed bool // Boot died and the runtime ended the hung JVM
+	LastExitWasReady   bool // Server reached ready before this exit
+	LastExitedAt       time.Time
 
 	// Crash-loop bookkeeping fed by exit reports
 	CrashExits         []time.Time // Recent crash exit times, pruned
@@ -84,17 +80,8 @@ type ServerMetrics struct {
 	CrashLoopStoppedAt time.Time   // When the panel broke a crash loop
 	LastAgentSessionAt time.Time   // Last time an agent session attached
 
-	// Errors thrown after ready, windowed for runtime findings
-	RuntimeFatals []RuntimeFatal
-
 	// Live proxied connection count from the routing layer
 	ProxyActiveConns int64
-}
-
-// One structured error the JVM threw while the server was up
-type RuntimeFatal struct {
-	At    time.Time
-	Fatal *agentv1.FatalError
 }
 
 // Copies the metrics with slices, safe outside the lock
@@ -106,7 +93,6 @@ func (m *ServerMetrics) snapshot() *ServerMetrics {
 	cp.PlayerSample = slices.Clone(m.PlayerSample)
 	cp.CrashExits = slices.Clone(m.CrashExits)
 	cp.UnexpectedExits = slices.Clone(m.UnexpectedExits)
-	cp.RuntimeFatals = slices.Clone(m.RuntimeFatals)
 	return &cp
 }
 
@@ -136,6 +122,9 @@ func countWithin(times []time.Time, window time.Duration) int {
 	}
 	return n
 }
+
+// Agent process attribution younger than this beats docker stats
+const agentProcFreshFor = 45 * time.Second
 
 // Reports whether agent roster is recent enough to be authoritative
 func (m *ServerMetrics) agentRosterFresh() bool {
@@ -467,6 +456,15 @@ func (c *Collector) collectDockerStats() {
 			continue
 		}
 
+		// Fresh agent attribution skips the stats round trip
+		if m := c.GetMetrics(server.ID); m != nil && time.Since(m.AgentProcUpdated) <= agentProcFreshFor {
+			c.updateMetrics(server.ID, func(m *ServerMetrics) {
+				m.ProxyActiveConns = traffic[server.ID].ActiveConns
+				m.LastUpdated = time.Now()
+			})
+			continue
+		}
+
 		// Get container stats
 		stats, err := c.docker.GetContainerStats(ctx, server.ContainerID)
 		if err != nil {
@@ -475,7 +473,8 @@ func (c *Collector) collectDockerStats() {
 		}
 
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {
-			if time.Since(m.AgentProcUpdated) > 45*time.Second {
+			// Recheck inside the lock, an agent sample may have landed
+			if time.Since(m.AgentProcUpdated) > agentProcFreshFor {
 				m.CPUPercent = stats.CPUPercent
 				m.MemoryUsage = stats.MemoryUsage
 			}
@@ -592,12 +591,12 @@ func (c *Collector) recordHealth(containerID string, startedAt time.Time, ok boo
 		h = &containerHealth{startedAt: startedAt}
 		c.health[containerID] = h
 	}
-	if ok {
-		h.everHealthy = true
-		h.consecutiveFails = 0
-	} else {
+	if !ok {
 		h.consecutiveFails++
+		return
 	}
+	h.everHealthy = true
+	h.consecutiveFails = 0
 }
 
 func (c *Collector) clearHealth(containerID string) {
@@ -695,6 +694,12 @@ func (c *Collector) collectSLPData() {
 
 	for _, server := range servers {
 		if server.ContainerID == "" {
+			continue
+		}
+
+		// Agent-vouched servers only need a slow MOTD refresh
+		if m := c.GetMetrics(server.ID); m.agentHealthProof() && m.agentRosterFresh() &&
+			time.Since(m.SLPLastUpdated) < 4*c.collectorConfig.SLPInterval {
 			continue
 		}
 

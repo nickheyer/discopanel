@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	models "github.com/nickheyer/discopanel/internal/db"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 )
 
 // Default discopanel-runtime repo, overridable via docker.runtime_image

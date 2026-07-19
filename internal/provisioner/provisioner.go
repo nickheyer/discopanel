@@ -6,19 +6,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
-	"github.com/nickheyer/discopanel/internal/autopilot"
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -163,11 +161,8 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 
 	// Pack-managed mods get the client-only sweep every pass
 	if desired != nil {
-		p.disableClientOnlyMods(ctx, server, minecraft.ForceIncludePatterns(server.ModLoader, cfg))
+		p.disableClientOnlyMods(ctx, server, storage.ForceIncludePatterns(server.ModLoader, cfg))
 	}
-
-	// Dependency pre-flight fixes what it can prove, reports the rest
-	p.preflightMods(ctx, server, cfg)
 
 	// Config files are cheap and authoritative, always applied
 	if err := p.applyConfigFiles(ctx, server, cfg, result.MCVersion, force); err != nil {
@@ -177,68 +172,6 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 	return result, nil
 }
 
-// Validates the installed mod graph before every boot
-func (p *Provisioner) preflightMods(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties) {
-	modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
-	if modsDir == "" {
-		return
-	}
-	metas := minecraft.ScanModsDir(modsDir)
-	if len(metas) == 0 {
-		return
-	}
-	dialects := minecraft.ResolveDialects(server.ModLoader, server.DataPath, modsDir)
-
-	issues := minecraft.SolveDeps(metas, dialects)
-	if len(issues) == 0 {
-		return
-	}
-	if p.preflightFix(ctx, server, cfg, modsDir, issues) {
-		issues = minecraft.SolveDeps(minecraft.ScanModsDir(modsDir), dialects)
-	}
-	for _, issue := range issues {
-		p.progress(server, "mod check: %s", issue.Describe())
-	}
-}
-
-// Applies the provable local fixes, reports whether anything changed
-func (p *Provisioner) preflightFix(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, modsDir string, issues []minecraft.DepIssue) bool {
-	force := minecraft.ForceIncludePatterns(server.ModLoader, cfg)
-	excludes := minecraft.PackExcludePatterns(server.ModLoader, cfg)
-	held := autopilot.IncidentHeldFiles(server.DataPath)
-	fixed := false
-
-	for _, issue := range issues {
-		switch issue.Kind {
-		case minecraft.DepDuplicate:
-			if issue.OtherFile == "" || minecraft.MatchesPatterns(issue.OtherFile, force) {
-				continue
-			}
-			if err := minecraft.DisableModJar(modsDir, issue.OtherFile); err != nil {
-				continue
-			}
-			p.action(ctx, server, "mod check", "mod.disable", activity.Attrs{"file": issue.OtherFile, "duplicate_of": issue.File}, "disabled %s, an older duplicate of %s", issue.OtherFile, issue.File)
-			fixed = true
-		case minecraft.DepMissing:
-			// A disabled jar that provides the dep comes back
-			// Jars the crash doctor is testing stay out
-			for _, dm := range minecraft.ScanModsDir(modsDir + "_disabled") {
-				if !dm.HasModID(issue.DepID) || minecraft.MatchesPatterns(dm.FileName, excludes) ||
-					slices.Contains(held, dm.FileName) {
-					continue
-				}
-				if err := minecraft.EnableModJar(modsDir, dm.FileName); err == nil {
-					p.action(ctx, server, "mod check", "mod.enable", activity.Attrs{"file": dm.FileName, "needed_by": issue.ModID}, "re-enabled %s, %s needs it", dm.FileName, issue.ModID)
-					fixed = true
-				}
-				break
-			}
-		}
-	}
-	return fixed
-}
-
-// Decides whether server files must be (re)installed
 func (p *Provisioner) needsInstall(server *storage.Server, manifest *runtimespec.Manifest, desired *desiredModpack, force bool) bool {
 	if force || manifest == nil {
 		return true

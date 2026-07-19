@@ -10,7 +10,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/pkg/logger"
-	"github.com/nickheyer/discopanel/pkg/upload"
+	"github.com/nickheyer/discopanel/pkg/transfer"
 )
 
 type uploadStreamResponse struct {
@@ -20,7 +20,7 @@ type uploadStreamResponse struct {
 }
 
 // Handles PUT upload streaming with bearer auth and resume offset
-func NewUploadStreamHandler(uploadManager *upload.Manager, authManager *auth.Manager, enforcer *rbac.Enforcer, log *logger.Logger) http.Handler {
+func NewUploadStreamHandler(uploadManager *transfer.UploadManager, authManager *auth.Manager, enforcer *rbac.Enforcer, log *logger.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

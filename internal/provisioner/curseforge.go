@@ -16,8 +16,8 @@ import (
 	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
-	"github.com/nickheyer/discopanel/internal/indexers/fuego"
-	"github.com/nickheyer/discopanel/internal/minecraft"
+	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
+	"github.com/nickheyer/discopanel/pkg/minecraft"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"golang.org/x/sync/errgroup"
 )
@@ -127,20 +127,9 @@ func (p *Provisioner) installCurseForgePack(ctx context.Context, server *storage
 
 // Resolves the url for a pack file and downloads it
 func (p *Provisioner) downloadCurseForgeFile(ctx context.Context, client *fuego.Client, server *storage.Server, pack *fuego.Modpack, file *fuego.File) (string, error) {
-	dlURL := file.DownloadURL
-	if dlURL == "" {
-		var err error
-		dlURL, err = client.GetFileDownloadURL(ctx, pack.ID, file.ID)
-		if err != nil {
-			return "", err
-		}
-	}
-	// API withholds url when author disables distribution
-	if dlURL == "" {
-		dlURL = fuego.CDNDownloadURL(file.ID, file.FileName)
-	}
-	if dlURL == "" {
-		return "", fmt.Errorf("could not resolve a download url for modpack file %q", file.FileName)
+	dlURL, err := p.resolveModFileURL(ctx, client, pack.ID, file)
+	if err != nil {
+		return "", err
 	}
 
 	p.progress(server, "downloading %s (%s)...", pack.Name, file.FileName)
@@ -162,7 +151,7 @@ func (p *Provisioner) curseForgeClient(ctx context.Context, cfg *storage.ServerP
 	if apiKey == "" {
 		return nil, fmt.Errorf("a CurseForge API key is required for CurseForge modpacks (set it in the server or global settings)")
 	}
-	return fuego.NewClient(apiKey, p.cfg), nil
+	return fuego.NewClient(apiKey, p.cfg.Server.UserAgent), nil
 }
 
 // Picks pinned id, main file, or newest release file
@@ -289,7 +278,9 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 
 	p.progress(server, "installing %s %s (MC %s)...", manifest.Name, manifest.Version, manifest.Minecraft.Version)
 
-	excludes := minecraft.SplitPatterns(strVal(cfg.CFExcludeMods))
+	// Doctor holds stay out until it re-enables them
+	excludes := append(minecraft.SplitPatterns(strVal(cfg.CFExcludeMods)), runtimespec.DoctorExcludes(server.DataPath)...)
+	excludes = append(excludes, runtimespec.IncidentHeldFiles(server.DataPath)...)
 	forceIncludes := minecraft.SplitPatterns(strVal(cfg.CFForceIncludeMods))
 
 	// Apply overrides
@@ -377,26 +368,12 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 	g.SetLimit(packDownloadConcurrency)
 	for _, dl := range pending {
 		g.Go(func() error {
-			dlURL := dl.file.DownloadURL
-			if dlURL == "" {
-				// Indexer client paces and retries these internally
-				var uerr error
-				dlURL, uerr = client.GetFileDownloadURL(gctx, dl.projectID, dl.fileID)
-				if uerr != nil {
-					return uerr
-				}
-			}
-			// API withholds url when author disables distribution
-			if dlURL == "" {
-				dlURL = fuego.CDNDownloadURL(dl.fileID, dl.file.FileName)
-			}
-			if dlURL == "" {
-				return fmt.Errorf("could not resolve a download url for %s", dl.file.FileName)
+			dlURL, err := p.resolveModFileURL(gctx, client, dl.projectID, &dl.file)
+			if err != nil {
+				return err
 			}
 
-			err := retryTransient(gctx, func() error {
-				return p.download(gctx, dlURL, dl.dest, cfChecksum(&dl.file), nil, nil)
-			})
+			err = p.download(gctx, dlURL, dl.dest, cfChecksum(&dl.file), nil, nil)
 			if err != nil {
 				return fmt.Errorf("failed to download %s: %w", dl.file.FileName, err)
 			}
@@ -447,6 +424,12 @@ func (p *Provisioner) cfFileWanted(server *storage.Server, file *fuego.File, mod
 	if slices.Contains(excludes, idStr) || (slug != "" && slices.Contains(excludes, slug)) ||
 		(fileName != "" && slices.Contains(excludes, fileName)) {
 		p.progress(server, "skipping excluded mod %s", file.FileName)
+		return false
+	}
+
+	// Known client mods skip even without API environment flags
+	if defaultClientSlug(slug) || defaultClientFile(fileName) {
+		p.progress(server, "skipping known client-only mod %s", file.FileName)
 		return false
 	}
 

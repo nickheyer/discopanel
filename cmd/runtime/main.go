@@ -20,7 +20,6 @@ import (
 
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 const dataDir = "/data"
@@ -125,7 +124,7 @@ func main() {
 		pid:         cmd.Process.Pid,
 		proc:        cmd.Process,
 		oomBaseline: readOOMKills(),
-		pendingExit: readExitReport(dataDir),
+		pendingExit: runtimespec.ReadExitReport(dataDir),
 	}
 	sup.events = newConsoleEvents(sup)
 
@@ -210,7 +209,7 @@ type supervisor struct {
 	jvmConn          net.Conn            // Persistent JVM agent link, nil when away
 	dumpWait         chan struct{}       // Closed when a fatal arrives, nil when idle
 	survivedReportAt time.Time           // Newest crash report the JVM outlived
-	pendingExit      *exitReport         // Unacked exit report, replayed until acked
+	pendingExit      *agentv1.Exited     // Unacked exit report, replayed until acked
 	lagDebtMs        float64             // Debt from the newest lag line
 	lagAt            time.Time           // When the newest lag line printed
 	lagSpacing       time.Duration       // Gap between the last two lag lines
@@ -531,7 +530,7 @@ func (s *supervisor) markReady(startupSeconds float64) {
 	s.readyAt = time.Now()
 	s.readySeconds = startupSeconds
 	s.mu.Unlock()
-	s.send(msgReady(startupSeconds))
+	s.sendControl(msgReady(startupSeconds))
 }
 
 func (s *supervisor) readyTime() time.Time {
@@ -553,28 +552,29 @@ func (s *supervisor) reportExit(exitCode int) {
 	reportPath, excerpt, _ := findCrashReport(blameSince)
 	oomKilled := readOOMKills()-s.oomBaseline > 0 && exitCode != 0
 	crashed := isCrash(exitCode, requested, wasReady, reportPath) || oomKilled
-	report := &exitReport{
-		ExitCode:       exitCode,
-		Crashed:        crashed,
-		OomKilled:      oomKilled,
-		BootFailed:     crashed && !wasReady,
-		WasReady:       wasReady,
-		ReportPath:     reportPath,
-		Excerpt:        excerpt,
-		ExitedAtUnixMs: time.Now().UnixMilli(),
+	report := &agentv1.Exited{
+		ExitCode:           int32(exitCode),
+		Crashed:            crashed,
+		OomKilled:          oomKilled,
+		BootFailed:         crashed && !wasReady,
+		WasReady:           wasReady,
+		CrashReportPath:    reportPath,
+		CrashReportExcerpt: excerpt,
+		ExitedAtUnixMs:     time.Now().UnixMilli(),
 	}
 	// A stale background error means nothing on a clean exit
 	if crashed {
-		report.setFatal(s.fatalError())
+		report.FatalError = s.fatalError()
 	}
-	writeExitReport(dataDir, report)
+	runtimespec.WriteExitReport(dataDir, report)
+	runtimespec.AppendExitHistory(dataDir, report)
 	s.mu.Lock()
 	s.pendingExit = report
 	s.mu.Unlock()
 	if oomKilled {
 		fmt.Printf("[discopanel-runtime] server was killed by the kernel OOM killer (out of memory)\n")
 	}
-	s.send(msgExited(report))
+	s.sendControl(msgExited(report))
 	// Gives the sender goroutine a moment to flush
 	time.Sleep(500 * time.Millisecond)
 }
@@ -588,66 +588,6 @@ func isCrash(exitCode int, stopRequested, wasReady bool, reportPath string) bool
 		return false
 	}
 	return exitCode != 0 || !wasReady
-}
-
-// Persisted copy of the last process exit
-type exitReport struct {
-	ExitCode       int             `json:"exit_code"`
-	Crashed        bool            `json:"crashed"`
-	OomKilled      bool            `json:"oom_killed"`
-	BootFailed     bool            `json:"boot_failed,omitempty"`
-	WasReady       bool            `json:"was_ready,omitempty"`
-	ReportPath     string          `json:"crash_report_path,omitempty"`
-	Excerpt        string          `json:"crash_report_excerpt,omitempty"`
-	ExitedAtUnixMs int64           `json:"exited_at_unix_ms"`
-	FatalError     json.RawMessage `json:"fatal_error,omitempty"`
-}
-
-// Stores the structured fatal error as protojson
-func (r *exitReport) setFatal(fatal *agentv1.FatalError) {
-	if fatal == nil {
-		return
-	}
-	if data, err := protojson.Marshal(fatal); err == nil {
-		r.FatalError = data
-	}
-}
-
-// Decodes the persisted fatal error, nil when absent
-func (r *exitReport) fatal() *agentv1.FatalError {
-	if len(r.FatalError) == 0 {
-		return nil
-	}
-	var fatal agentv1.FatalError
-	if protojson.Unmarshal(r.FatalError, &fatal) != nil {
-		return nil
-	}
-	return &fatal
-}
-
-func exitReportPath(dir string) string {
-	return filepath.Join(dir, runtimespec.StateDir, "last-exit.json")
-}
-
-// Loads the previous run's exit report, nil if absent
-func readExitReport(dir string) *exitReport {
-	data, err := os.ReadFile(exitReportPath(dir))
-	if err != nil {
-		return nil
-	}
-	var r exitReport
-	if json.Unmarshal(data, &r) != nil || r.ExitedAtUnixMs == 0 {
-		return nil
-	}
-	return &r
-}
-
-func writeExitReport(dir string, r *exitReport) {
-	data, err := json.Marshal(r)
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(exitReportPath(dir), data, 0644)
 }
 
 // Locates the newest crash report and a capped excerpt

@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/command"
-	"github.com/nickheyer/discopanel/internal/config"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/proxy"
+	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
 )
 
@@ -31,7 +31,7 @@ type Manager struct {
 
 // Mints scoped API tokens for module containers
 type TokenMinter interface {
-	GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID string) (string, *storage.APIToken, error)
+	GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID, role string) (string, *storage.APIToken, error)
 }
 
 // Creates a new module manager
@@ -77,7 +77,65 @@ func (m *Manager) Start() error {
 
 	m.running = true
 	m.logger.Info("Module manager started")
+
+	// Doctor module lives for the panel's lifetime
+	if m.config.Module.DoctorEnabled {
+		go m.seedDoctorModule()
+	}
 	return nil
+}
+
+// Seeds and starts the global doctor module instance
+func (m *Manager) seedDoctorModule() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	modules, err := m.store.ListModules(ctx)
+	if err != nil {
+		m.logger.Error("Doctor seed: failed to list modules: %v", err)
+		return
+	}
+	var doctor *storage.Module
+	for _, mod := range modules {
+		if mod.TemplateID == doctorTemplateID {
+			doctor = mod
+			break
+		}
+	}
+
+	if doctor == nil {
+		owner, err := m.store.GetFirstAdminUserID(ctx)
+		if err != nil {
+			m.logger.Warn("Doctor seed: no admin user yet, doctor module waits for next start: %v", err)
+			return
+		}
+		doctor = &storage.Module{
+			ID:                    "builtin-doctor-instance",
+			Name:                  "Doctor",
+			TemplateID:            doctorTemplateID,
+			Status:                storage.ModuleStatusStopped,
+			AutoStart:             true,
+			FollowServerLifecycle: false,
+			CreatedBy:             owner,
+			Memory:                512,
+			Ports:                 doctorPorts(m.config),
+			EnvOverrides:          doctorEnv(),
+			VolumeOverrides:       doctorVolumes(),
+		}
+		if err := m.store.CreateModule(ctx, doctor); err != nil {
+			m.logger.Error("Doctor seed: failed to create module: %v", err)
+			return
+		}
+		m.logger.Info("Seeded the global doctor module")
+	}
+
+	// AutoStart off means the user disabled it, respect that
+	if !doctor.AutoStart {
+		return
+	}
+	if err := m.StartModule(ctx, doctor.ID); err != nil {
+		m.logger.Error("Doctor seed: failed to start doctor module: %v", err)
+	}
 }
 
 // Gracefully stops all managed modules
@@ -126,9 +184,13 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 		return fmt.Errorf("failed to get module template: %w", err)
 	}
 
-	server, err := m.store.GetServer(ctx, module.ServerID)
-	if err != nil {
-		return fmt.Errorf("failed to get server: %w", err)
+	// Global modules run without a server attachment
+	var server *storage.Server
+	if module.ServerID != "" {
+		server, err = m.store.GetServer(ctx, module.ServerID)
+		if err != nil {
+			return fmt.Errorf("failed to get server: %w", err)
+		}
 	}
 
 	// Fresh scoped token each create, plaintext lives only in env
@@ -138,7 +200,7 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 				m.logger.Warn("Failed to delete stale module token: %v", err)
 			}
 		}
-		plaintext, token, err := m.tokenMinter.GenerateModuleToken(ctx, module.CreatedBy, module.Name, module.ID)
+		plaintext, token, err := m.tokenMinter.GenerateModuleToken(ctx, module.CreatedBy, module.Name, module.ID, template.Metadata["module_role"])
 		if err != nil {
 			return fmt.Errorf("failed to mint module token: %w", err)
 		}
@@ -153,7 +215,10 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	}
 
 	// Fetch server config for alias resolution
-	serverConfig, _ := m.store.GetServerProperties(ctx, server.ID)
+	var serverConfig *storage.ServerProperties
+	if server != nil {
+		serverConfig, _ = m.store.GetServerProperties(ctx, server.ID)
+	}
 
 	// Create the container
 	containerID, err := m.docker.CreateModuleContainer(ctx, module, template, server, serverConfig, m.config, m.siblingModules(ctx, module))

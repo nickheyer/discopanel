@@ -65,7 +65,6 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/discopanel.v1.ServerService/UploadToMCLogs":             {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/GetServerPerformanceReport": {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/GetServerMetricsHistory":    {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
-	"/discopanel.v1.ServerService/ApplyPerformanceFix":        {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/DismissPerformanceFinding":  {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/GetServerActions":           {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},
 	"/discopanel.v1.ServerService/ListBackups":                {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "id"},

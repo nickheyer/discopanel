@@ -13,6 +13,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -33,27 +34,6 @@ func InContainerPort(s *v1.Server) int {
 		return MinecraftDefaultPort
 	}
 	return int(s.Port)
-}
-
-// Returns default JVM heap sizing for a container limit
-func DefaultHeapForMemory(memoryMB int) (initMB, maxMB int) {
-	return memoryMB / 2, memoryMB * 3 / 4
-}
-
-// Mirrors server heap sizing into read-only properties
-func SyncPropertiesMemory(c *v1.ServerProperties, server *v1.Server) {
-	initMB, maxMB := int(server.MemoryMin), int(server.MemoryMax)
-	defInit, defMax := DefaultHeapForMemory(int(server.Memory))
-	if initMB <= 0 {
-		initMB = defInit
-	}
-	if maxMB <= 0 {
-		maxMB = defMax
-	}
-	initStr := fmt.Sprintf("%dM", initMB)
-	maxStr := fmt.Sprintf("%dM", maxMB)
-	c.InitMemory = &initStr
-	c.MaxMemory = &maxStr
 }
 
 // Splits the platform's force include list into patterns
@@ -308,7 +288,7 @@ func (s *Store) SyncServerPropertiesWithServer(ctx context.Context, server *v1.S
 	int32Ptr := func(i int32) *int32 { return &i }
 	config.ServerPort = int32Ptr(server.Port)
 	config.MaxPlayers = int32Ptr(server.MaxPlayers)
-	SyncPropertiesMemory(config, server)
+	runtimespec.SyncPropertiesMemory(config, server)
 
 	return s.UpdateServerProperties(ctx, config)
 }
@@ -647,26 +627,6 @@ func (s *Store) AssignRole(ctx context.Context, userID, roleName, source string)
 		RoleName: roleName,
 		Source:   source,
 	})
-}
-
-// Oldest active admin, owns tokens for seeded builtin modules
-func (s *Store) GetFirstAdminUserID(ctx context.Context) (string, error) {
-	var userID string
-	err := s.db.WithContext(ctx).
-		Model(&v1.UserRole{}).
-		Select("user_roles.user_id").
-		Joins("JOIN users ON users.id = user_roles.user_id").
-		Where("user_roles.role_name = ? AND users.is_active = ?", "admin", true).
-		Order("users.created_at ASC").
-		Limit(1).
-		Pluck("user_roles.user_id", &userID).Error
-	if err != nil {
-		return "", err
-	}
-	if userID == "" {
-		return "", fmt.Errorf("no active admin user exists")
-	}
-	return userID, nil
 }
 
 // Role names for a user, system roles first

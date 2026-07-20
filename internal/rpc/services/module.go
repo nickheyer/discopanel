@@ -363,7 +363,6 @@ func (s *ModuleService) ListModules(ctx context.Context, req *connect.Request[v1
 		if _, ok := usernames[m.CreatedByUserId]; !ok {
 			usernames[m.CreatedByUserId] = s.resolveCreatedByUsername(ctx, m.CreatedByUserId)
 		}
-		m.Server = nil
 		m.Template = nil
 		m.ServerName = serverName
 		m.TemplateName = templateNames[m.TemplateId]
@@ -399,7 +398,6 @@ func (s *ModuleService) GetModule(ctx context.Context, req *connect.Request[v1.G
 
 	s.applyModuleStats(ctx, module)
 
-	module.Server = nil
 	module.Template = nil
 	if server, err := s.store.GetServer(ctx, module.ServerId); err == nil {
 		module.ServerName = server.Name
@@ -558,7 +556,6 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		}
 	}()
 
-	module.Server = nil
 	module.Template = nil
 	module.ServerName = server.Name
 	module.TemplateName = template.Name
@@ -689,7 +686,6 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		}()
 	}
 
-	module.Server = nil
 	module.Template = nil
 	if server, err := s.store.GetServer(ctx, module.ServerId); err == nil {
 		module.ServerName = server.Name

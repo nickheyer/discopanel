@@ -228,7 +228,7 @@ func migrations() []*gormigrate.Migration {
 						}
 					}
 					memory := int(srv.Memory)
-					defInit, defMax := DefaultHeapForMemory(memory)
+					defInit, defMax := runtimespec.DefaultHeapForMemory(memory)
 					if maxMB <= 0 {
 						maxMB = defMax
 					}
@@ -378,6 +378,72 @@ func migrations() []*gormigrate.Migration {
 						return err
 					}
 				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return nil
+			},
+		},
+		{
+			// Supermodule tokens have no user so the FK must go
+			ID: "20260719_001_api_tokens_drop_user_fk",
+			Migrate: func(tx *gorm.DB) error {
+				var ddl string
+				if err := tx.Raw("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'api_tokens'").Scan(&ddl).Error; err != nil {
+					return err
+				}
+				fkClause := regexp.MustCompile("(?i),\\s*CONSTRAINT\\s+`?\\w+`?\\s+FOREIGN\\s+KEY\\s*\\(`?user_id`?\\)\\s*REFERENCES\\s*`?users`?\\s*\\(`?id`?\\)(\\s+ON\\s+(DELETE|UPDATE)\\s+\\w+(\\s\\w+)?)*")
+				if ddl == "" || !fkClause.MatchString(ddl) {
+					return nil
+				}
+				newDDL := fkClause.ReplaceAllString(ddl, "")
+				newDDL = regexp.MustCompile("(?i)^CREATE TABLE\\s+`?api_tokens`?").ReplaceAllString(newDDL, "CREATE TABLE `api_tokens_fkfree`")
+				for _, stmt := range []string{
+					newDDL,
+					"INSERT INTO api_tokens_fkfree SELECT * FROM api_tokens",
+					"DROP TABLE api_tokens",
+					"ALTER TABLE api_tokens_fkfree RENAME TO api_tokens",
+					"CREATE UNIQUE INDEX IF NOT EXISTS idx_api_tokens_token_hash ON api_tokens(token_hash)",
+					"CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)",
+				} {
+					if err := tx.Exec(stmt).Error; err != nil {
+						return err
+					}
+				}
+				log.Println("[migrate] Rebuilt api_tokens without the users foreign key")
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return nil
+			},
+		},
+		{
+			// Global modules have no server so the FK must go
+			ID: "20260719_002_modules_drop_server_fk",
+			Migrate: func(tx *gorm.DB) error {
+				var ddl string
+				if err := tx.Raw("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'modules'").Scan(&ddl).Error; err != nil {
+					return err
+				}
+				fkClause := regexp.MustCompile("(?i),\\s*CONSTRAINT\\s+`?\\w+`?\\s+FOREIGN\\s+KEY\\s*\\(`?server_id`?\\)\\s*REFERENCES\\s*`?servers`?\\s*\\(`?id`?\\)(\\s+ON\\s+(DELETE|UPDATE)\\s+\\w+(\\s\\w+)?)*")
+				if ddl == "" || !fkClause.MatchString(ddl) {
+					return nil
+				}
+				newDDL := fkClause.ReplaceAllString(ddl, "")
+				newDDL = regexp.MustCompile("(?i)^CREATE TABLE\\s+`?modules`?").ReplaceAllString(newDDL, "CREATE TABLE `modules_fkfree`")
+				for _, stmt := range []string{
+					newDDL,
+					"INSERT INTO modules_fkfree SELECT * FROM modules",
+					"DROP TABLE modules",
+					"ALTER TABLE modules_fkfree RENAME TO modules",
+					"CREATE INDEX IF NOT EXISTS idx_modules_server_id ON modules(server_id)",
+					"CREATE INDEX IF NOT EXISTS idx_modules_template_id ON modules(template_id)",
+				} {
+					if err := tx.Exec(stmt).Error; err != nil {
+						return err
+					}
+				}
+				log.Println("[migrate] Rebuilt modules without the servers foreign key")
 				return nil
 			},
 			Rollback: func(tx *gorm.DB) error {

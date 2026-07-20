@@ -509,13 +509,8 @@ func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (v1
 		// Health comes from the panel-side SLP checker
 		if c.healthChecker != nil {
 			startedAt, _ := time.Parse(time.RFC3339Nano, inspect.State.StartedAt)
-			switch c.healthChecker.ContainerHealth(containerID, startedAt) {
-			case v1.ServerStatus_SERVER_STATUS_RUNNING:
-				return v1.ServerStatus_SERVER_STATUS_RUNNING, nil
-			case v1.ServerStatus_SERVER_STATUS_STARTING:
-				return v1.ServerStatus_SERVER_STATUS_STARTING, nil
-			case v1.ServerStatus_SERVER_STATUS_UNHEALTHY:
-				return v1.ServerStatus_SERVER_STATUS_UNHEALTHY, nil
+			if verdict := c.healthChecker.ContainerHealth(containerID, startedAt); verdict != v1.ServerStatus_SERVER_STATUS_UNSPECIFIED {
+				return verdict, nil
 			}
 		}
 		return v1.ServerStatus_SERVER_STATUS_RUNNING, nil
@@ -523,9 +518,7 @@ func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (v1
 		return v1.ServerStatus_SERVER_STATUS_PAUSED, nil
 	case "restarting":
 		return v1.ServerStatus_SERVER_STATUS_STARTING, nil
-	case "exited", "dead":
-		return v1.ServerStatus_SERVER_STATUS_STOPPED, nil
-	case "created", "removing":
+	case "exited", "dead", "created", "removing":
 		return v1.ServerStatus_SERVER_STATUS_STOPPED, nil
 	default:
 		return v1.ServerStatus_SERVER_STATUS_ERROR, nil

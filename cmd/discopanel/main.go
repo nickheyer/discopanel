@@ -202,12 +202,8 @@ func main() {
 	}
 	defer taskScheduler.Stop()
 
-	// Initialize module manager
+	// Initialize module manager, started after rpc wiring below
 	moduleManager := module.NewManager(store, dockerClient, sender, cfg, proxyManager, log)
-	if err := moduleManager.Start(); err != nil {
-		log.Error("Failed to start module manager: %v", err)
-	}
-	defer moduleManager.Stop()
 
 	// Event consumers register on the bus here
 	eventBus.Subscribe(moduleManager.HandleServerEvent)
@@ -229,6 +225,12 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to initialize RPC server: %v", err)
 	}
+
+	// Rpc wiring set the token minter, safe to seed now
+	if err := moduleManager.Start(); err != nil {
+		log.Error("Failed to start module manager: %v", err)
+	}
+	defer moduleManager.Stop()
 
 	// Provision progress lands in the server console
 	if streamer := rpcServer.LogStreamer(); streamer != nil {

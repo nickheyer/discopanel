@@ -33,7 +33,10 @@ import (
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"github.com/nickheyer/discopanel/pkg/transfer"
+	utils "github.com/nickheyer/discopanel/pkg/utils"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Compile-time check that ServerService implements the interface
@@ -238,28 +241,6 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 	return connect.NewResponse(&v1.GetServerResponse{
 		Server: server.Redact(),
 	}), nil
-}
-
-// CreateServer creates a new server
-// Fills heap defaults then validates the memory trio
-func normalizeServerMemory(server *v1.Server) error {
-	if server.Memory < 1024 {
-		return fmt.Errorf("server memory must be at least 1024 MB")
-	}
-	defInit, defMax := storage.DefaultHeapForMemory(int(server.Memory))
-	if server.MemoryMax <= 0 {
-		server.MemoryMax = int32(defMax)
-	}
-	if server.MemoryMin <= 0 {
-		server.MemoryMin = min(int32(defInit), server.MemoryMax)
-	}
-	if server.MemoryMin > server.MemoryMax {
-		return fmt.Errorf("initial heap %d MB exceeds max heap %d MB", server.MemoryMin, server.MemoryMax)
-	}
-	if server.Memory-server.MemoryMax < 256 {
-		return fmt.Errorf("max heap %d MB must leave at least 256 MB of the %d MB server memory for JVM overhead", server.MemoryMax, server.Memory)
-	}
-	return nil
 }
 
 func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v1.CreateServerRequest]) (*connect.Response[v1.CreateServerResponse], error) {
@@ -467,7 +448,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		server.ModLoader = v1.ModLoader_MOD_LOADER_VANILLA
 	}
 
-	if err := normalizeServerMemory(server); err != nil {
+	if err := runtimespec.NormalizeServerMemory(server); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
@@ -515,7 +496,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	}
 
 	// Reflects heap sizing into read-only properties
-	storage.SyncPropertiesMemory(serverConfig, server)
+	runtimespec.SyncPropertiesMemory(serverConfig, server)
 
 	if err := s.store.UpdateServerProperties(ctx, serverConfig); err != nil {
 		s.log.Error("Failed to update server config with memory settings: %v", err)
@@ -625,7 +606,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		// Zero heap values rescale to defaults in normalize
 		server.MemoryMin = msg.MemoryMin
 		server.MemoryMax = msg.MemoryMax
-		if err := normalizeServerMemory(server); err != nil {
+		if err := runtimespec.NormalizeServerMemory(server); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 
@@ -1305,4 +1286,132 @@ func (s *ServerService) GetHostMemory(ctx context.Context, req *connect.Request[
 		TotalMb:     totalMB,
 		Allocations: allocations,
 	}), nil
+}
+
+// Ranges longer than this are served bucketed
+const rawHistoryWindow = 6 * time.Hour
+
+// Returns stored metrics samples for one server's charts
+func (s *ServerService) GetServerMetricsHistory(ctx context.Context, req *connect.Request[v1.GetServerMetricsHistoryRequest]) (*connect.Response[v1.GetServerMetricsHistoryResponse], error) {
+	if _, err := s.store.GetServer(ctx, req.Msg.Id); err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+
+	to := time.Now()
+	if req.Msg.To != nil {
+		to = req.Msg.To.AsTime()
+	}
+	from := to.Add(-time.Hour)
+	if req.Msg.From != nil {
+		from = req.Msg.From.AsTime()
+	}
+	if !from.Before(to) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("from must be before to"))
+	}
+
+	resolution := int(req.Msg.Resolution)
+	if resolution == 0 && to.Sub(from) > rawHistoryWindow {
+		resolution = 300
+	}
+
+	samples, err := s.store.GetMetricsHistory(ctx, req.Msg.Id, from, to, resolution)
+	if err != nil {
+		s.log.Error("Failed to load metrics history for %s: %v", req.Msg.Id, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load metrics history"))
+	}
+
+	return connect.NewResponse(&v1.GetServerMetricsHistoryResponse{
+		Samples:    samples,
+		Resolution: int32(resolution),
+	}), nil
+}
+
+// Serves findings the doctor module published, panel adds nothing
+func (s *ServerService) GetServerPerformanceReport(ctx context.Context, req *connect.Request[v1.GetServerPerformanceReportRequest]) (*connect.Response[v1.GetServerPerformanceReportResponse], error) {
+	server, err := s.store.GetServer(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+
+	var agentConnected bool
+	if s.metricsCollector != nil {
+		if m := s.metricsCollector.GetMetrics(server.Id); m != nil {
+			agentConnected = m.AgentConnected
+		}
+	}
+
+	rows, err := s.store.GetFindingDismissals(ctx, server.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load dismissals: %w", err))
+	}
+	dismissals := make(map[string]*v1.FindingDismissal, len(rows))
+	for _, d := range rows {
+		dismissals[d.FindingId] = d
+	}
+
+	findings := runtimespec.ReadFindings(server.DataPath)
+	for _, f := range findings {
+		d, ok := dismissals[f.GetId()]
+		f.Dismissed = ok && d.ContentHash == utils.FindingHash(f)
+	}
+
+	return connect.NewResponse(&v1.GetServerPerformanceReportResponse{
+		Findings:       findings,
+		AgentConnected: agentConnected,
+	}), nil
+}
+
+// Hides or restores one finding, scoped to its current content
+func (s *ServerService) DismissPerformanceFinding(ctx context.Context, req *connect.Request[v1.DismissPerformanceFindingRequest]) (*connect.Response[v1.DismissPerformanceFindingResponse], error) {
+	server, err := s.store.GetServer(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+	if req.Msg.Restore {
+		if err := s.store.DeleteFindingDismissal(ctx, server.Id, req.Msg.FindingId); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restore finding: %w", err))
+		}
+		return connect.NewResponse(&v1.DismissPerformanceFindingResponse{}), nil
+	}
+
+	for _, f := range runtimespec.ReadFindings(server.DataPath) {
+		if f.GetId() != req.Msg.FindingId {
+			continue
+		}
+		dismissal := &v1.FindingDismissal{
+			ServerId:    server.Id,
+			FindingId:   f.GetId(),
+			ContentHash: utils.FindingHash(f),
+			DismissedAt: timestamppb.Now(),
+		}
+		if err := s.store.UpsertFindingDismissal(ctx, dismissal); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to dismiss finding: %w", err))
+		}
+		return connect.NewResponse(&v1.DismissPerformanceFindingResponse{}), nil
+	}
+	return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("finding not found"))
+}
+
+// Returns the activity ledger for one server
+func (s *ServerService) GetServerActions(ctx context.Context, req *connect.Request[v1.GetServerActionsRequest]) (*connect.Response[v1.GetServerActionsResponse], error) {
+	if _, err := s.store.GetServer(ctx, req.Msg.Id); err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+	rows, err := s.store.GetServerActions(ctx, req.Msg.Id, uint(req.Msg.AfterId))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load actions: %w", err))
+	}
+	actions := make([]*v1.ServerAction, 0, len(rows))
+	for i := range rows {
+		actions = append(actions, &v1.ServerAction{
+			Id:        int64(rows[i].Id),
+			Timestamp: rows[i].Timestamp,
+			Source:    rows[i].Source,
+			Name:      rows[i].Name,
+			Message:   rows[i].Message,
+			Attrs:     rows[i].Attrs,
+			TraceId:   rows[i].TraceId,
+		})
+	}
+	return connect.NewResponse(&v1.GetServerActionsResponse{Actions: actions}), nil
 }

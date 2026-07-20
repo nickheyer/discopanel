@@ -106,11 +106,7 @@ func (m *Manager) seedDoctorModule() {
 	}
 
 	if doctor == nil {
-		owner, err := m.store.GetFirstAdminUserID(ctx)
-		if err != nil {
-			m.logger.Warn("Doctor seed: no admin user yet, doctor module waits for next start: %v", err)
-			return
-		}
+		// Bootstrapped builtins have no owner, supermodule token instead
 		doctor = &v1.Module{
 			Id:                    "builtin-doctor-instance",
 			Name:                  "Doctor",
@@ -118,17 +114,24 @@ func (m *Manager) seedDoctorModule() {
 			Status:                v1.ModuleStatus_MODULE_STATUS_STOPPED,
 			AutoStart:             true,
 			FollowServerLifecycle: false,
-			CreatedByUserId:       owner,
 			Memory:                512,
 			Ports:                 doctorPorts(m.config),
 			EnvOverrides:          doctorEnv(),
 			VolumeOverrides:       doctorVolumes(),
+			Uid:                   doctorUID,
+			Gid:                   doctorGID,
 		}
 		if err := m.store.CreateModule(ctx, doctor); err != nil {
 			m.logger.Error("Doctor seed: failed to create module: %v", err)
 			return
 		}
 		m.logger.Info("Seeded the global doctor module")
+	} else if doctor.Uid == "" {
+		// Root era instances rebuild non root via hash drift
+		doctor.Uid, doctor.Gid = doctorUID, doctorGID
+		if err := m.store.UpdateModule(ctx, doctor); err != nil {
+			m.logger.Warn("Doctor seed: failed to backfill uid: %v", err)
+		}
 	}
 
 	// AutoStart off means the user disabled it, respect that
@@ -196,7 +199,10 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	}
 
 	// Fresh scoped token each create, plaintext lives only in env
-	if m.tokenMinter != nil && module.CreatedByUserId != "" {
+	if moduleRequiresToken(module, template) {
+		if m.tokenMinter == nil {
+			return fmt.Errorf("module %s requires an api token but minter is not ready", module.Name)
+		}
 		if module.TokenId != "" {
 			if err := m.store.DeleteApiToken(ctx, module.TokenId); err != nil {
 				m.logger.Warn("Failed to delete stale module token: %v", err)
@@ -246,6 +252,34 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	return nil
 }
 
+// True when module runs with a scoped or supermodule token
+func moduleRequiresToken(module *v1.Module, template *v1.ModuleTemplate) bool {
+	if module.CreatedByUserId != "" {
+		return true
+	}
+	return template.Type == v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN &&
+		template.Metadata["module_role"] != ""
+}
+
+// True when module should hold a token but none exists
+func (m *Manager) moduleTokenMissing(ctx context.Context, module *v1.Module) bool {
+	if m.tokenMinter == nil {
+		return false
+	}
+	template, err := m.store.GetModuleTemplate(ctx, module.TemplateId)
+	if err != nil {
+		return false
+	}
+	if !moduleRequiresToken(module, template) {
+		return false
+	}
+	if module.TokenId == "" {
+		return true
+	}
+	_, err = m.store.GetApiToken(ctx, module.TokenId)
+	return err != nil
+}
+
 // Sibling modules by name for inter-module alias references
 func (m *Manager) siblingModules(ctx context.Context, module *v1.Module) map[string]*v1.Module {
 	siblings := make(map[string]*v1.Module)
@@ -273,11 +307,16 @@ func (m *Manager) NeedsRecreate(ctx context.Context, moduleID string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	server, err := m.store.GetServer(ctx, module.ServerId)
-	if err != nil {
-		return false, err
+	// Global modules run without a server attachment
+	var server *v1.Server
+	var serverConfig *v1.ServerProperties
+	if module.ServerId != "" {
+		server, err = m.store.GetServer(ctx, module.ServerId)
+		if err != nil {
+			return false, err
+		}
+		serverConfig, _ = m.store.GetServerProperties(ctx, module.ServerId)
 	}
-	serverConfig, _ := m.store.GetServerProperties(ctx, server.Id)
 	current, err := m.docker.ModuleContainerConfigHash(ctx, module.ContainerId)
 	if err != nil {
 		return false, err
@@ -310,8 +349,20 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 	}
 
 	// Stale config hash rebuilds the container before start
-	if stale, err := m.NeedsRecreate(ctx, moduleID); err == nil && stale {
+	stale, err := m.NeedsRecreate(ctx, moduleID)
+	if err != nil {
+		m.logger.Warn("Failed to check config drift for module %s: %v", module.Name, err)
+	}
+	if stale {
 		m.logger.Info("Container for module %s has stale config, recreating", module.Name)
+	}
+
+	// Token excluded from hash, missing one still forces rebuild
+	if !stale && m.moduleTokenMissing(ctx, module) {
+		m.logger.Info("Container for module %s has no api token, recreating", module.Name)
+		stale = true
+	}
+	if stale {
 		if err := m.docker.RemoveContainer(ctx, module.ContainerId); err != nil {
 			m.logger.Error("Failed to remove stale module container: %v", err)
 		}

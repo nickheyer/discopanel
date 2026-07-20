@@ -11,6 +11,12 @@ import (
 // Template id of the global crash doctor module
 const doctorTemplateID = "builtin-doctor"
 
+// Panel user keeps doctor writes owned by the panel
+const (
+	doctorUID = "{{host.uid}}"
+	doctorGID = "{{host.gid}}"
+)
+
 // Default web port for the seeded doctor instance
 func doctorPorts(cfg *config.Config) []*v1.ModulePort {
 	port := int32(8190)
@@ -173,6 +179,8 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultVolumes:    doctorVolumes(),
 			HealthCheckPath:   "/health",
 			HealthCheckPort:   8190,
+			DefaultUid:        doctorUID,
+			DefaultGid:        doctorGID,
 			Metadata:          map[string]string{"module_role": "doctor"},
 			Documentation:     "Runs as a single global module for the whole panel. Discovers servers through the DiscoPanel API, watches their exit history on the shared data volume, and repairs crash loops with reversible mod disables, re-enables, and dependency installs from CurseForge or Modrinth using the panel API keys. Set DOCTOR_MODE=observe to diagnose without acting, or DOCTOR_INSTALL_DEPS=off to disable dependency downloads. Stop the module or turn off auto start to disable it.",
 			DefaultMemory:     512,

@@ -408,8 +408,12 @@ func (m *Manager) GenerateApiToken(ctx context.Context, userID, name string, exp
 }
 
 // Creates a module API token under the creating user
+// Empty user mints a userless supermodule token instead
 // Role widens access for trusted builtins, e.g. the doctor
 func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID, role string) (string, *v1.ApiToken, error) {
+	if userID == "" && role == "" {
+		return "", nil, fmt.Errorf("supermodule token requires a module role")
+	}
 	tokenName := fmt.Sprintf("module:%s:%s", moduleName, moduleID)
 	plaintext, token, err := m.GenerateApiToken(ctx, userID, tokenName, nil)
 	if err != nil {
@@ -445,6 +449,22 @@ func (m *Manager) ValidateApiToken(ctx context.Context, rawToken string) (*Authe
 	// Check expiry
 	if apiToken.ExpiresAt != nil && apiToken.ExpiresAt.AsTime().Before(time.Now()) {
 		return nil, ErrApiTokenExpired
+	}
+
+	// Supermodule tokens are userless, identity comes from token
+	if apiToken.IsModuleToken && apiToken.UserId == "" {
+		if apiToken.ModuleRole == "" {
+			return nil, ErrInvalidToken
+		}
+		go func() {
+			_ = m.store.UpdateApiTokenLastUsed(context.Background(), time.Now().UTC(), apiToken.Id)
+		}()
+		return &AuthenticatedUser{
+			Id:       apiToken.Id,
+			Username: apiToken.Name,
+			Roles:    []string{apiToken.ModuleRole},
+			Provider: "module",
+		}, nil
 	}
 
 	// Resolve user

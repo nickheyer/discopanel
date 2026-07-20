@@ -14,9 +14,13 @@ import (
 )
 
 func init() {
-	indexers.RegisterIndexer("modrinth", func(_ string, userAgent string) indexers.ModpackIndexer {
-		return NewIndexer(userAgent)
-	})
+	indexers.RegisterIndexer("modrinth",
+		func(_ string, userAgent string) indexers.ModpackIndexer {
+			return NewIndexer(userAgent)
+		},
+		indexers.WithPackSource("modrinth"),
+		indexers.WithForceIncludeProperty("modrinthForceIncludeFiles"),
+	)
 }
 
 // Implements ModpackIndexer

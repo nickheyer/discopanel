@@ -16,40 +16,45 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
-	"github.com/nickheyer/discopanel/pkg/indexers/modrinth"
+	"github.com/nickheyer/discopanel/pkg/indexers"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 )
 
-// Facet names mapped to CurseForge loader filter values
-var fuegoLoaderTypes = map[string]fuego.ModLoaderType{
-	"forge":    fuego.ModLoaderForge,
-	"fabric":   fuego.ModLoaderFabric,
-	"quilt":    fuego.ModLoaderQuilt,
-	"neoforge": fuego.ModLoaderNeoForge,
+// Panel surface the installer reads properties through
+type propertySource interface {
+	PropertyValue(ctx context.Context, serverID, key string) string
 }
 
-// Panel surface the installer needs for CurseForge access
-type keySource interface {
-	CFAPIKey(ctx context.Context, serverID string) string
-}
-
-// Sources missing dependencies, pack source orders indexers
+// Sources missing dependencies from every registered indexer
 // Downloaded jars must declare the id or get removed
 type depInstaller struct {
 	userAgent string
-	modrinth  *modrinth.Client
-	keys      keySource
+	props     propertySource
 	http      *http.Client
 }
 
-func newDepInstaller(userAgent string, keys keySource) *depInstaller {
+func newDepInstaller(userAgent string, props propertySource) *depInstaller {
 	return &depInstaller{
 		userAgent: userAgent,
-		modrinth:  modrinth.NewClient(userAgent),
-		keys:      keys,
+		props:     props,
 		http:      &http.Client{Timeout: 5 * time.Minute},
 	}
+}
+
+// Indexers serving the pack's source go first
+func orderSourcers(infos []indexers.IndexerInfo, packSource string) []indexers.IndexerInfo {
+	out := make([]indexers.IndexerInfo, 0, len(infos))
+	for _, info := range infos {
+		if packSource != "" && info.PackSource == packSource {
+			out = append(out, info)
+		}
+	}
+	for _, info := range infos {
+		if packSource == "" || info.PackSource != packSource {
+			out = append(out, info)
+		}
+	}
+	return out
 }
 
 // Installs a mod by id into the mods dir, returns file name
@@ -58,136 +63,71 @@ func (in *depInstaller) Install(ctx context.Context, srv *serverInfo, modsDir, m
 	if len(facets) == 0 {
 		return "", fmt.Errorf("no loader facet resolvable for %s", srv.Name)
 	}
+	q := indexers.ModQuery{ModID: modID, McVersion: srv.McVersion, Loaders: facets}
 
-	sources := []string{"modrinth"}
-	if pack := minecraft.PackPlatformFor(srv.ModLoader); pack != nil && pack.Source == "curseforge" {
-		sources = []string{"curseforge", "modrinth"}
+	packSource := ""
+	if pack := minecraft.PackPlatformFor(srv.ModLoader); pack != nil {
+		packSource = pack.Source
 	}
 
 	var errs []error
-	for _, src := range sources {
-		var file string
-		var err error
-		switch src {
-		case "curseforge":
-			file, err = in.fromCurseForge(ctx, srv, modsDir, modID, versionRange, facets, dialect)
-		case "modrinth":
-			file, err = in.fromModrinth(ctx, srv, modsDir, modID, versionRange, facets, dialect)
-		}
+	for _, info := range orderSourcers(indexers.Indexers(), packSource) {
+		file, err := in.fromIndexer(ctx, srv, info, modsDir, q, versionRange, dialect)
 		if err == nil {
 			return file, nil
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", src, err))
+		if errors.Is(err, errNotModSourcer) {
+			continue
+		}
+		errs = append(errs, fmt.Errorf("%s: %w", info.Name, err))
+	}
+	if len(errs) == 0 {
+		return "", fmt.Errorf("no registered indexer can source mods")
 	}
 	return "", errors.Join(errs...)
 }
 
-func (in *depInstaller) fromModrinth(ctx context.Context, srv *serverInfo, modsDir, modID, versionRange string, facets []string, dialect string) (string, error) {
-	versions, err := in.modrinth.GetProjectVersionsFiltered(ctx, modID, facets, []string{srv.McVersion})
+// Indexer registered without the mod sourcing capability
+var errNotModSourcer = errors.New("indexer does not source single mods")
+
+// Tries one indexer's candidates, first gated jar wins
+func (in *depInstaller) fromIndexer(ctx context.Context, srv *serverInfo, info indexers.IndexerInfo, modsDir string, q indexers.ModQuery, versionRange, dialect string) (string, error) {
+	apiKey := ""
+	if info.CredentialProperty != "" {
+		apiKey = in.props.PropertyValue(ctx, srv.ID, info.CredentialProperty)
+	}
+	ix, err := indexers.NewIndexer(info.Name, apiKey, in.userAgent)
 	if err != nil {
-		return "", fmt.Errorf("modrinth lookup for %q failed: %w", modID, err)
-	}
-	var pick *modrinth.Version
-	for i := range versions {
-		if versions[i].VersionType == "release" {
-			pick = &versions[i]
-			break
-		}
-	}
-	if pick == nil && len(versions) > 0 {
-		pick = &versions[0]
-	}
-	if pick == nil {
-		return "", fmt.Errorf("no %s build of %q exists for MC %s", facets[0], modID, srv.McVersion)
-	}
-
-	var file *modrinth.File
-	for i := range pick.Files {
-		if pick.Files[i].Primary {
-			file = &pick.Files[i]
-			break
-		}
-	}
-	if file == nil && len(pick.Files) > 0 {
-		file = &pick.Files[0]
-	}
-	if file == nil {
-		return "", fmt.Errorf("version %s of %q ships no files", pick.VersionNumber, modID)
-	}
-
-	dest := filepath.Join(modsDir, file.Filename)
-	if err := in.download(ctx, file.URL, dest, "sha512", file.Hashes.SHA512); err != nil {
 		return "", err
 	}
-	return in.gateJar(dest, "modrinth project "+modID, modID, versionRange, dialect)
-}
-
-func (in *depInstaller) fromCurseForge(ctx context.Context, srv *serverInfo, modsDir, modID, versionRange string, facets []string, dialect string) (string, error) {
-	apiKey := in.keys.CFAPIKey(ctx, srv.ID)
-	if apiKey == "" {
-		return "", fmt.Errorf("no CurseForge API key in server or global settings")
-	}
-	client := fuego.NewClient(apiKey, in.userAgent)
-
-	mod, err := client.GetModBySlug(ctx, modID, fuego.ModsClassID)
-	if err != nil {
-		return "", fmt.Errorf("no curseforge mod matches %q: %w", modID, err)
-	}
-	loaderType, ok := fuegoLoaderTypes[facets[0]]
+	src, ok := ix.(indexers.ModSourcer)
 	if !ok {
-		return "", fmt.Errorf("curseforge has no loader filter for %q", facets[0])
+		return "", errNotModSourcer
 	}
-	files, err := client.GetModpackFiles(ctx, mod.ID, srv.McVersion, loaderType)
+
+	candidates, err := src.SourceMod(ctx, q)
 	if err != nil {
-		return "", fmt.Errorf("file lookup for %q failed: %w", modID, err)
-	}
-	if len(files) == 0 {
-		return "", fmt.Errorf("no %s build of %q exists for MC %s", facets[0], modID, srv.McVersion)
-	}
-
-	// Newest file wins, the jar gate verifies the range
-	newest := &files[0]
-	for i := range files {
-		if files[i].FileDate.After(newest.FileDate) {
-			newest = &files[i]
-		}
-	}
-	dlURL := newest.DownloadURL
-	if dlURL == "" {
-		dlURL, err = client.GetFileDownloadURL(ctx, mod.ID, newest.ID)
-		if err != nil {
-			return "", err
-		}
-	}
-	// API withholds url when author disables distribution
-	if dlURL == "" {
-		dlURL = fuego.CDNDownloadURL(newest.ID, newest.FileName)
-	}
-	if dlURL == "" {
-		return "", fmt.Errorf("could not resolve a download url for %q", newest.FileName)
-	}
-
-	algo, sum := cfHash(newest)
-	dest := filepath.Join(modsDir, newest.FileName)
-	if err := in.download(ctx, dlURL, dest, algo, sum); err != nil {
 		return "", err
 	}
-	return in.gateJar(dest, "curseforge mod "+mod.Slug, modID, versionRange, dialect)
-}
-
-// Strongest hash CurseForge published for the file
-func cfHash(file *fuego.File) (string, string) {
-	for _, h := range file.Hashes {
-		if h.Algo == 1 {
-			return "sha1", h.Value
+	var errs []error
+	for i := range candidates {
+		c := &candidates[i]
+		dest := filepath.Join(modsDir, c.FileName)
+		if err := in.download(ctx, c.URL, dest, c.HashAlgo, c.HashSum); err != nil {
+			errs = append(errs, err)
+			continue
 		}
-	}
-	for _, h := range file.Hashes {
-		if h.Algo == 2 {
-			return "md5", h.Value
+		file, err := in.gateJar(dest, c.Origin, q.ModID, versionRange, dialect)
+		if err != nil {
+			errs = append(errs, err)
+			continue
 		}
+		return file, nil
 	}
-	return "", ""
+	if len(errs) == 0 {
+		return "", fmt.Errorf("no candidate files for %q", q.ModID)
+	}
+	return "", errors.Join(errs...)
 }
 
 // Keeps jars declaring the id inside the range

@@ -2,7 +2,6 @@ package provisioner
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
 	"github.com/nickheyer/discopanel/pkg/indexers/modrinth"
@@ -10,21 +9,7 @@ import (
 
 // Resolves a mod file url, CDN guess covers withheld urls
 func (p *Provisioner) resolveModFileURL(ctx context.Context, client *fuego.Client, modID int, file *fuego.File) (string, error) {
-	dlURL := file.DownloadURL
-	if dlURL == "" {
-		var err error
-		dlURL, err = client.GetFileDownloadURL(ctx, modID, file.ID)
-		if err != nil {
-			return "", err
-		}
-	}
-	if dlURL == "" {
-		dlURL = fuego.CDNDownloadURL(file.ID, file.FileName)
-	}
-	if dlURL == "" {
-		return "", fmt.Errorf("could not resolve a download url for %q", file.FileName)
-	}
-	return dlURL, nil
+	return client.ResolveDownloadURL(ctx, modID, file)
 }
 
 func primaryFile(version *modrinth.Version) *modrinth.File {

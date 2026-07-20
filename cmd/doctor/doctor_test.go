@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nickheyer/discopanel/pkg/indexers"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
@@ -149,6 +150,24 @@ func TestWantedStopStandsDown(t *testing.T) {
 
 	if panel.restarts != 0 || panel.stops != 0 {
 		t.Fatalf("wanted stop must not act, got %d restarts %d stops", panel.restarts, panel.stops)
+	}
+}
+
+func TestOrderSourcersPrefersPackSource(t *testing.T) {
+	infos := []indexers.IndexerInfo{
+		{Name: "aaa"},
+		{Name: "mmm", PackSource: "source-one"},
+		{Name: "zzz", PackSource: "source-two"},
+	}
+
+	got := orderSourcers(infos, "source-two")
+	if len(got) != 3 || got[0].Name != "zzz" || got[1].Name != "aaa" || got[2].Name != "mmm" {
+		t.Fatalf("pack source must lead, got %+v", got)
+	}
+
+	got = orderSourcers(infos, "")
+	if len(got) != 3 || got[0].Name != "aaa" || got[1].Name != "mmm" || got[2].Name != "zzz" {
+		t.Fatalf("no pack source keeps registry order, got %+v", got)
 	}
 }
 

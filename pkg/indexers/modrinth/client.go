@@ -152,17 +152,36 @@ type Dependency struct {
 
 // Searches for modpacks on Modrinth
 func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*SearchResponse, error) {
-	// Build facets for filtering
-	facets := [][]string{
-		{"project_type:modpack"},
-	}
-
-	if gameVersion != "" {
-		facets = append(facets, []string{fmt.Sprintf("versions:%s", gameVersion)})
-	}
-
+	var loaders, gameVersions []string
 	if modLoader != "" {
-		facets = append(facets, []string{fmt.Sprintf("categories:%s", strings.ToLower(modLoader))})
+		loaders = []string{modLoader}
+	}
+	if gameVersion != "" {
+		gameVersions = []string{gameVersion}
+	}
+	return c.SearchProjects(ctx, query, "modpack", loaders, gameVersions, offset, limit)
+}
+
+// Searches projects of one type with facet filters
+func (c *Client) SearchProjects(ctx context.Context, query, projectType string, loaders, gameVersions []string, offset, limit int) (*SearchResponse, error) {
+	facets := [][]string{
+		{fmt.Sprintf("project_type:%s", projectType)},
+	}
+
+	if len(gameVersions) > 0 {
+		group := make([]string, len(gameVersions))
+		for i, v := range gameVersions {
+			group[i] = fmt.Sprintf("versions:%s", v)
+		}
+		facets = append(facets, group)
+	}
+
+	if len(loaders) > 0 {
+		group := make([]string, len(loaders))
+		for i, l := range loaders {
+			group[i] = fmt.Sprintf("categories:%s", strings.ToLower(l))
+		}
+		facets = append(facets, group)
 	}
 
 	facetsJSON, err := json.Marshal(facets)

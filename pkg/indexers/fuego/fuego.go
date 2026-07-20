@@ -171,13 +171,18 @@ const (
 )
 
 func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader ModLoaderType, index, pageSize int) (*SearchModsResponse, error) {
+	return c.SearchProjects(ctx, query, ModpackClassID, gameVersion, modLoader, index, pageSize)
+}
+
+// Searches projects of one class sorted by popularity
+func (c *Client) SearchProjects(ctx context.Context, query string, classID int, gameVersion string, modLoader ModLoaderType, index, pageSize int) (*SearchModsResponse, error) {
 	if c.apiKey == "" {
 		return nil, indexers.NewAuthConfigError("fuego", "API key not configured")
 	}
 
 	params := url.Values{}
 	params.Set("gameId", strconv.Itoa(MinecraftGameID))
-	params.Set("classId", strconv.Itoa(ModpackClassID))
+	params.Set("classId", strconv.Itoa(classID))
 	params.Set("index", strconv.Itoa(index))
 	params.Set("pageSize", strconv.Itoa(pageSize))
 	params.Set("sortField", "2") // Sort by popularity
@@ -399,6 +404,40 @@ func (c *Client) verifyKey(ctx context.Context) error {
 	keyVerdicts[c.apiKey] = verdict
 	keyVerdictMu.Unlock()
 	return verdict
+}
+
+// Resolves a file download url, CDN guess covers withheld urls
+func (c *Client) ResolveDownloadURL(ctx context.Context, modID int, file *File) (string, error) {
+	dlURL := file.DownloadURL
+	if dlURL == "" {
+		var err error
+		dlURL, err = c.GetFileDownloadURL(ctx, modID, file.ID)
+		if err != nil {
+			return "", err
+		}
+	}
+	if dlURL == "" {
+		dlURL = CDNDownloadURL(file.ID, file.FileName)
+	}
+	if dlURL == "" {
+		return "", fmt.Errorf("could not resolve a download url for %q", file.FileName)
+	}
+	return dlURL, nil
+}
+
+// Strongest hash CurseForge published for the file
+func (f *File) BestHash() (string, string) {
+	for _, h := range f.Hashes {
+		if h.Algo == 1 {
+			return "sha1", h.Value
+		}
+	}
+	for _, h := range f.Hashes {
+		if h.Algo == 2 {
+			return "md5", h.Value
+		}
+	}
+	return "", ""
 }
 
 // Builds Forge CDN url for an API-withheld file

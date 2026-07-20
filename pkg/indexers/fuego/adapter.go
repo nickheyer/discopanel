@@ -15,9 +15,14 @@ import (
 )
 
 func init() {
-	indexers.RegisterIndexer("fuego", func(apiKey string, userAgent string) indexers.ModpackIndexer {
-		return NewIndexer(apiKey, userAgent)
-	})
+	indexers.RegisterIndexer("fuego",
+		func(apiKey string, userAgent string) indexers.ModpackIndexer {
+			return NewIndexer(apiKey, userAgent)
+		},
+		indexers.WithCredentialProperty("cfApiKey"),
+		indexers.WithPackSource("curseforge"),
+		indexers.WithForceIncludeProperty("cfForceIncludeMods"),
+	)
 }
 
 // Implements ModpackIndexer

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/nickheyer/discopanel/pkg/indexers"
+	_ "github.com/nickheyer/discopanel/pkg/indexers/all"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
@@ -210,31 +212,32 @@ func (p *panelClient) Stop(ctx context.Context, serverID string) error {
 	return err
 }
 
-// Pattern keys users may protect mods with, per indexer
-var forcePatternKeys = []string{"cfForceIncludeMods", "modrinthForceIncludeFiles"}
-
 // Files the user force-includes never get disabled
+// Indexer registrations declare where those patterns live
 func (p *panelClient) ForcePatterns(ctx context.Context, serverID string) []string {
 	props := p.serverProperties(ctx, serverID)
 	var patterns []string
-	for _, key := range forcePatternKeys {
-		if v := props[key]; v != "" {
+	for _, info := range indexers.Indexers() {
+		if info.ForceIncludeProperty == "" {
+			continue
+		}
+		if v := props[info.ForceIncludeProperty]; v != "" {
 			patterns = append(patterns, minecraft.SplitPatterns(v)...)
 		}
 	}
 	return patterns
 }
 
-// Server key wins, panel-wide global settings are the fallback
-func (p *panelClient) CFAPIKey(ctx context.Context, serverID string) string {
-	if key := p.serverProperties(ctx, serverID)["cfApiKey"]; key != "" {
-		return key
+// Server property wins, panel-wide global settings are the fallback
+func (p *panelClient) PropertyValue(ctx context.Context, serverID, key string) string {
+	if v := p.serverProperties(ctx, serverID)[key]; v != "" {
+		return v
 	}
 	resp, err := p.properties.GetGlobalSettings(ctx, connect.NewRequest(&v1.GetGlobalSettingsRequest{}))
 	if err != nil {
 		return ""
 	}
-	return categoriesValue(resp.Msg.GetCategories(), "cfApiKey")
+	return categoriesValue(resp.Msg.GetCategories(), key)
 }
 
 // Flattens one server's property categories into a map

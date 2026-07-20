@@ -8,7 +8,7 @@ const UserContextKey contextKey = "authenticated_user"
 
 // AuthenticatedUser represents a validated user in context
 type AuthenticatedUser struct {
-	ID       string
+	Id       string
 	Username string
 	Email    string
 	Roles    []string

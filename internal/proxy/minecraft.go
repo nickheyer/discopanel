@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // Routes Minecraft connections to backends by hostname
@@ -49,16 +50,18 @@ type RouteStats struct {
 	LastProtocol   atomic.Int32
 }
 
-// Point-in-time copy of RouteStats for the API
-type RouteStatsSnapshot struct {
-	ActiveConns    int64
-	TotalConns     int64
-	StatusPings    int64
-	Logins         int64
-	Wakes          int64
-	BytesToBackend int64
-	BytesToClient  int64
-	LastProtocol   int32
+// Copies the live counters onto a fresh route message
+func (st *RouteStats) Snapshot() *v1.ProxyRoute {
+	return &v1.ProxyRoute{
+		ActiveConnections:   st.ActiveConns.Load(),
+		TotalConnections:    st.TotalConns.Load(),
+		StatusPings:         st.StatusPings.Load(),
+		Logins:              st.Logins.Load(),
+		Wakes:               st.Wakes.Load(),
+		BytesToBackend:      st.BytesToBackend.Load(),
+		BytesToClient:       st.BytesToClient.Load(),
+		LastProtocolVersion: st.LastProtocol.Load(),
+	}
 }
 
 // Creates a new Minecraft proxy instance
@@ -88,21 +91,12 @@ func (p *MinecraftProxy) statsFor(serverID string) *RouteStats {
 }
 
 // Copies every route's counters for the API
-func (p *MinecraftProxy) StatsSnapshots() map[string]RouteStatsSnapshot {
+func (p *MinecraftProxy) StatsSnapshots() map[string]*v1.ProxyRoute {
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()
-	out := make(map[string]RouteStatsSnapshot, len(p.stats))
+	out := make(map[string]*v1.ProxyRoute, len(p.stats))
 	for id, st := range p.stats {
-		out[id] = RouteStatsSnapshot{
-			ActiveConns:    st.ActiveConns.Load(),
-			TotalConns:     st.TotalConns.Load(),
-			StatusPings:    st.StatusPings.Load(),
-			Logins:         st.Logins.Load(),
-			Wakes:          st.Wakes.Load(),
-			BytesToBackend: st.BytesToBackend.Load(),
-			BytesToClient:  st.BytesToClient.Load(),
-			LastProtocol:   st.LastProtocol.Load(),
-		}
+		out[id] = st.Snapshot()
 	}
 	return out
 }
@@ -136,6 +130,7 @@ func (p *MinecraftProxy) AddRoute(serverID, hostname, backendHost string, backen
 		Hostname:    hostname,
 		BackendHost: backendHost,
 		BackendPort: backendPort,
+		State:       v1.ProxyRouteState_PROXY_ROUTE_STATE_ONLINE,
 	})
 }
 
@@ -153,7 +148,7 @@ func (p *MinecraftProxy) UpsertServerRoute(route Route) {
 
 	if changed {
 		p.logger.Info("Route %s is %s (backend=%s:%d wakeable=%v)",
-			route.Hostname, route.State, route.BackendHost, route.BackendPort, route.Wakeable)
+			route.Hostname, route.State.Name(), route.BackendHost, route.BackendPort, route.Wakeable)
 	}
 }
 
@@ -317,7 +312,7 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 	if gate := p.getGate(); gate != nil {
 		if info, sleeping := gate.SleepingInfo(route.ServerID); sleeping {
 			if handshake.NextState == NextStateStatus {
-				p.serveSyntheticStatus(clientConn, br, handshake, info.MOTD, info.MaxPlayers, "Sleeping")
+				p.serveSyntheticStatus(clientConn, br, handshake, info.Motd, info.MaxPlayers, "Sleeping")
 				return
 			}
 			p.logger.Info("Waking sleeping server %s for incoming login", route.ServerID)
@@ -336,9 +331,9 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 
 	// Stopped and booting servers answer synthetically instead of dialing
 	switch route.State {
-	case RouteOffline:
+	case v1.ProxyRouteState_PROXY_ROUTE_STATE_OFFLINE:
 		if handshake.NextState == NextStateStatus {
-			p.serveSyntheticStatus(clientConn, br, handshake, route.MOTD, route.MaxPlayers, "Offline")
+			p.serveSyntheticStatus(clientConn, br, handshake, route.Motd, route.MaxPlayers, "Offline")
 			return
 		}
 		clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -361,9 +356,9 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 		WriteLoginDisconnect(clientConn, "The server is starting up, join again in a minute")
 		return
 
-	case RouteStarting:
+	case v1.ProxyRouteState_PROXY_ROUTE_STATE_STARTING:
 		if handshake.NextState == NextStateStatus {
-			p.serveSyntheticStatus(clientConn, br, handshake, route.MOTD, route.MaxPlayers, "Starting")
+			p.serveSyntheticStatus(clientConn, br, handshake, route.Motd, route.MaxPlayers, "Starting")
 			return
 		}
 		// No backend yet, container isn't up, tell client
@@ -526,19 +521,19 @@ func (p *MinecraftProxy) legacyStatus(raw []byte) (string, string, int) {
 
 	if gate := p.getGate(); gate != nil {
 		if info, sleeping := gate.SleepingInfo(route.ServerID); sleeping {
-			return info.MOTD, "Sleeping", info.MaxPlayers
+			return info.Motd, "Sleeping", info.MaxPlayers
 		}
 	}
 
-	motd := route.MOTD
+	motd := route.Motd
 	if motd == "" {
 		motd = route.Hostname
 	}
 	version := "Online"
 	switch route.State {
-	case RouteStarting:
+	case v1.ProxyRouteState_PROXY_ROUTE_STATE_STARTING:
 		version = "Starting"
-	case RouteOffline:
+	case v1.ProxyRouteState_PROXY_ROUTE_STATE_OFFLINE:
 		version = "Offline"
 	}
 	return motd, version, route.MaxPlayers

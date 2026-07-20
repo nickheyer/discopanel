@@ -12,6 +12,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"google.golang.org/protobuf/proto"
 )
 
 // Compile-time check that MinecraftService implements the interface
@@ -68,17 +69,9 @@ func (s *MinecraftService) GetModLoaders(ctx context.Context, req *connect.Reque
 	rows := minecraft.Loaders()
 	protoLoaders := make([]*v1.ModLoaderInfo, 0, len(rows))
 	for _, row := range rows {
-		protoLoaders = append(protoLoaders, &v1.ModLoaderInfo{
-			Name:            string(row.Loader),
-			DisplayName:     row.DisplayName,
-			Description:     row.Description,
-			SupportsMods:    row.ModsDirectory != "",
-			SupportsPlugins: row.ModsDirectory == "plugins",
-			Category:        row.Category,
-			Provisionable:   provisioner.HasNativeInstaller(row.Loader),
-			Loader:          row.Proto,
-			ModsDirectory:   row.ModsDirectory,
-		})
+		info, _ := proto.Clone(row.Info).(*v1.ModLoaderInfo)
+		info.Provisionable = provisioner.HasNativeInstaller(info.Loader)
+		protoLoaders = append(protoLoaders, info)
 	}
 
 	return connect.NewResponse(&v1.GetModLoadersResponse{

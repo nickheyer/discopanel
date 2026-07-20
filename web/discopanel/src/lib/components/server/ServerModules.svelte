@@ -6,9 +6,8 @@
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { registerRefresh } from '$lib/stores/refresh';
 	import { toast } from 'svelte-sonner';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import type { Module, ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
-	import { ModuleStatus } from '$lib/proto/discopanel/v1/module_pb';
+	import type { Server, Module, ModuleTemplate } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ModuleStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import { TONE_BADGE, TONE_BG } from '$lib/server-status';
 	import { moduleStatusMeta } from '$lib/module-status';
 	import { getEventTypeLabel } from '$lib/utils/events';

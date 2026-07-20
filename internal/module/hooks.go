@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/alias"
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/events"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
@@ -15,13 +14,13 @@ import (
 func (m *Manager) HandleServerEvent(ctx context.Context, event events.Event) {
 	switch event.Type {
 	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START:
-		m.autoStartModules(ctx, event.ServerID)
+		m.autoStartModules(ctx, event.ServerId)
 	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP:
-		m.stopLifecycleModules(ctx, event.ServerID)
+		m.stopLifecycleModules(ctx, event.ServerId)
 	}
 
 	// Execute configured event hooks for every event type
-	m.dispatchHooks(ctx, event.ServerID, event.Type)
+	m.dispatchHooks(ctx, event.ServerId, event.Type)
 }
 
 // Starts modules with AutoStart enabled when the parent server starts
@@ -34,10 +33,10 @@ func (m *Manager) autoStartModules(ctx context.Context, serverID string) {
 
 	for _, module := range modules {
 		if module.AutoStart && !module.Detached {
-			go func(mod *storage.Module) {
+			go func(mod *v1.Module) {
 				// Small delay to let the server settle before starting modules
 				time.Sleep(2 * time.Second)
-				if err := m.StartModule(context.Background(), mod.ID); err != nil {
+				if err := m.StartModule(context.Background(), mod.Id); err != nil {
 					m.logger.Error("Failed to start module %s on server start: %v", mod.Name, err)
 				} else {
 					m.logger.Info("Started module %s with server", mod.Name)
@@ -56,8 +55,8 @@ func (m *Manager) stopLifecycleModules(ctx context.Context, serverID string) {
 	}
 
 	for _, module := range modules {
-		if module.Status == storage.ModuleStatusRunning && !module.Detached {
-			if err := m.StopModule(ctx, module.ID); err != nil {
+		if module.Status == v1.ModuleStatus_MODULE_STATUS_RUNNING && !module.Detached {
+			if err := m.StopModule(ctx, module.Id); err != nil {
 				m.logger.Error("Failed to stop module %s on server stop: %v", module.Name, err)
 			} else {
 				m.logger.Info("Stopped module %s with server", module.Name)
@@ -89,7 +88,7 @@ func (m *Manager) dispatchHooks(ctx context.Context, serverID string, eventType 
 }
 
 // Executes a single module event hook
-func (m *Manager) executeHook(ctx context.Context, module *storage.Module, hook *v1.ModuleEventHook, serverID string) {
+func (m *Manager) executeHook(ctx context.Context, module *v1.Module, hook *v1.ModuleEventHook, serverID string) {
 	// Apply delay if configured
 	if hook.DelaySeconds > 0 {
 		m.logger.Debug("Delaying hook action for module %s by %d seconds", module.Name, hook.DelaySeconds)
@@ -119,12 +118,12 @@ func (m *Manager) executeHook(ctx context.Context, module *storage.Module, hook 
 		}
 
 	case v1.ModuleEventAction_MODULE_EVENT_ACTION_STOP:
-		if err := m.StopModule(ctx, module.ID); err != nil {
+		if err := m.StopModule(ctx, module.Id); err != nil {
 			m.logger.Error("Hook failed to stop module %s: %v", module.Name, err)
 		}
 
 	case v1.ModuleEventAction_MODULE_EVENT_ACTION_RESTART:
-		if err := m.RestartModule(ctx, module.ID); err != nil {
+		if err := m.RestartModule(ctx, module.Id); err != nil {
 			m.logger.Error("Hook failed to restart module %s: %v", module.Name, err)
 		}
 
@@ -144,20 +143,20 @@ func (m *Manager) executeHook(ctx context.Context, module *storage.Module, hook 
 }
 
 // Starts a module, creating its container if needed
-func (m *Manager) ensureModuleStarted(ctx context.Context, module *storage.Module) error {
-	if module.ContainerID == "" {
-		return m.CreateAndStartModule(ctx, module.ID, true)
+func (m *Manager) ensureModuleStarted(ctx context.Context, module *v1.Module) error {
+	if module.ContainerId == "" {
+		return m.CreateAndStartModule(ctx, module.Id, true)
 	}
-	return m.StartModule(ctx, module.ID)
+	return m.StartModule(ctx, module.Id)
 }
 
 // Executes a command inside a module container
-func (m *Manager) execInModule(ctx context.Context, module *storage.Module, command string) error {
-	if module.ContainerID == "" {
+func (m *Manager) execInModule(ctx context.Context, module *v1.Module, command string) error {
+	if module.ContainerId == "" {
 		return nil // Cannot exec in non-existent container
 	}
 
-	_, _, err := m.docker.Exec(ctx, module.ContainerID, []string{"sh", "-c", command})
+	_, _, err := m.docker.Exec(ctx, module.ContainerId, []string{"sh", "-c", command})
 	return err
 }
 
@@ -168,17 +167,17 @@ func (m *Manager) sendRCON(ctx context.Context, serverID string, command string)
 		return err
 	}
 
-	if server.ContainerID == "" {
+	if server.ContainerId == "" {
 		m.logger.Warn("Cannot send RCON: server %s has no container", server.Name)
 		return nil
 	}
 
-	_, err = m.sender.SendCommand(ctx, server.ID, command)
+	_, err = m.sender.SendCommand(ctx, server.Id, command)
 	return err
 }
 
 // Evaluates a hook condition like {{server.players_online}} > 5
-func (m *Manager) evaluateCondition(condition string, server *storage.Server, module *storage.Module) bool {
+func (m *Manager) evaluateCondition(condition string, server *v1.Server, module *v1.Module) bool {
 	condition = strings.TrimSpace(condition)
 	if condition == "" {
 		return true

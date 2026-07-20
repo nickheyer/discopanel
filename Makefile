@@ -237,6 +237,10 @@ proto:
 	$(BUF_RUN) generate
 	@echo "Generating disco-agent Java code (using Docker)..."
 	$(BUF_RUN) generate --template buf.gen.agent.yaml --path proto/discopanel/agent
+	@echo "Injecting gorm tags and generating db wrappers..."
+	$(BUF_RUN) build -o .buf-image.binpb
+	go run ./tools/gormgen -image .buf-image.binpb
+	rm -f .buf-image.binpb
 	@echo "Proto generation complete!"
 
 proto-clean:

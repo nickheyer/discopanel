@@ -11,6 +11,7 @@ import (
 
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -36,8 +37,8 @@ type serverInfo struct {
 	ID        string
 	Name      string
 	DataPath  string // Local path inside this container
-	ModLoader minecraft.ModLoader
-	MCVersion string
+	ModLoader v1.ModLoader
+	McVersion string
 	Running   bool
 	Stopped   bool // Panel intent, wanted stops stay stopped
 }

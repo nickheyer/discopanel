@@ -38,7 +38,7 @@ type SLPResult struct {
 	Favicon        string          `json:"favicon,omitempty"`
 	EnforcesSecure bool            `json:"enforcesSecureChat,omitempty"`
 	LatencyMs      int64
-	MOTD           string   // Parsed from Description
+	Motd           string   // Parsed from Description
 	PlayerNames    []string // Extracted player names
 }
 
@@ -107,7 +107,7 @@ func (c *SLPClient) Ping(ctx context.Context, host string, port int) (*SLPResult
 	}
 
 	result.LatencyMs = latency
-	result.MOTD = parseDescription(result.Description)
+	result.Motd = parseDescription(result.Description)
 
 	// Extract player names
 	for _, player := range result.Players.Sample {
@@ -249,7 +249,7 @@ func (c *SLPClient) sendPacket(conn net.Conn, data []byte) error {
 	return err
 }
 
-// Extract plain text MOTD from description field
+// Extract plain text Motd from description field
 func parseDescription(desc json.RawMessage) string {
 	if len(desc) == 0 {
 		return ""

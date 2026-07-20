@@ -4,8 +4,8 @@
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { rpcClient } from '$lib/api/rpc-client';
-	import type { Module } from '$lib/proto/discopanel/v1/module_pb';
-	import { ModuleStatus } from '$lib/proto/discopanel/v1/module_pb';
+	import type { Module } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ModuleStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
 	import { TONE_BG } from '$lib/server-status';
 	import { moduleStatusMeta } from '$lib/module-status';

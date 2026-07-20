@@ -6,9 +6,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	storage "github.com/nickheyer/discopanel/internal/db"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Ranges longer than this are served bucketed
@@ -43,30 +41,8 @@ func (s *ServerService) GetServerMetricsHistory(ctx context.Context, req *connec
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load metrics history"))
 	}
 
-	protoSamples := make([]*v1.MetricsSample, 0, len(samples))
-	for _, m := range samples {
-		protoSamples = append(protoSamples, dbMetricsSampleToProto(m))
-	}
-
 	return connect.NewResponse(&v1.GetServerMetricsHistoryResponse{
-		Samples:    protoSamples,
+		Samples:    samples,
 		Resolution: int32(resolution),
 	}), nil
-}
-
-func dbMetricsSampleToProto(m *storage.MetricsSample) *v1.MetricsSample {
-	return &v1.MetricsSample{
-		Timestamp:        timestamppb.New(m.Timestamp),
-		Tps:              m.TPS,
-		Mspt:             m.MSPT,
-		Players:          int32(m.Players),
-		CpuPercent:       m.CPUPercent,
-		MemoryMb:         m.MemoryMB,
-		HeapUsedMb:       m.HeapUsedMB,
-		DiskBytes:        m.DiskBytes,
-		ProxyActiveConns: m.ProxyActiveConns,
-		ProxyBytesIn:     m.ProxyBytesIn,
-		ProxyBytesOut:    m.ProxyBytesOut,
-		ProxyLogins:      m.ProxyLogins,
-	}
 }

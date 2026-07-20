@@ -12,8 +12,8 @@
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, RotateCcw, Lock, Camera } from '@lucide/svelte';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { UpdateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { UpdateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import type {

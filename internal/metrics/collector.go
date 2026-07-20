@@ -18,21 +18,21 @@ import (
 
 type ServerMetrics struct {
 	ServerID      string
-	CPUPercent    float64
-	CPUCount      int
+	CpuPercent    float64
+	CpuCount      int
 	MemoryUsage   float64 // MB
 	DiskUsage     int64   // Bytes (total server data)
 	DiskTotal     int64   // Bytes (volume total)
 	DiskUsed      int64   // Bytes (volume used, all data)
 	WorldSize     int64   // Bytes (world directory only)
 	PlayersOnline int
-	TPS           float64
+	Tps           float64
 	LastUpdated   time.Time
 
 	// SLP fields
-	SLPAvailable    bool
-	SLPLatencyMs    int64
-	MOTD            string
+	SlpAvailable    bool
+	SlpLatencyMs    int64
+	Motd            string
 	ServerVersion   string
 	ProtocolVersion int
 	PlayerSample    []string
@@ -43,17 +43,17 @@ type ServerMetrics struct {
 	AgentConnected     bool
 	AgentJvmActive     bool      // Javaagent is feeding JVM/tick telemetry
 	AgentReady         bool      // Agent reported server ready this run
-	AgentTickUpdated   time.Time // Freshness of TPS/MSPT below
+	AgentTickUpdated   time.Time // Freshness of TPS/Mspt below
 	AgentRosterUpdated time.Time // Freshness of PlayerSample/PlayersOnline
 	AgentProcUpdated   time.Time // Freshness of java process attribution below
-	MSPT               float64   // Mean ms per tick
-	MSPTMax            float64   // Worst tick in the sample window
-	HeapUsedMB         float64
-	HeapMaxMB          float64
+	Mspt               float64   // Mean ms per tick
+	MsptMax            float64   // Worst tick in the sample window
+	HeapUsedMb         float64
+	HeapMaxMb          float64
 	ThreadCount        int
 	ClassCount         int
-	CPUQuotaCores      float64 // Cgroup CPU quota (0 = unlimited)
-	CPUThrottlePercent float64 // Share of CFS periods throttled (0-100)
+	CpuQuotaCores      float64 // Cgroup CPU quota (0 = unlimited)
+	CpuThrottlePercent float64 // Share of CFS periods throttled (0-100)
 	GCPauseCount       int64   // Pauses in the last sample window
 	GCPauseTotalMs     float64
 	GCPauseMaxMs       float64
@@ -232,8 +232,8 @@ type Collector struct {
 	serverContainersMu sync.Mutex
 
 	// Proxy counter totals feeding per-window history deltas
-	proxyTraffic    func() map[string]ProxyTraffic
-	lastProxyTotals map[string]ProxyTraffic
+	proxyTraffic    func() map[string]*v1.ProxyRoute
+	lastProxyTotals map[string]*v1.ProxyRoute
 
 	running  bool
 	stopChan chan struct{}
@@ -242,17 +242,8 @@ type Collector struct {
 	collectorConfig CollectorConfig
 }
 
-// Monotonic per-server proxy counters plus the live conn gauge
-type ProxyTraffic struct {
-	ActiveConns    int64
-	TotalConns     int64
-	Logins         int64
-	BytesToBackend int64
-	BytesToClient  int64
-}
-
 // Wires the proxy counter source after construction
-func (c *Collector) SetProxyTrafficSource(fn func() map[string]ProxyTraffic) {
+func (c *Collector) SetProxyTrafficSource(fn func() map[string]*v1.ProxyRoute) {
 	c.proxyTraffic = fn
 }
 
@@ -395,11 +386,11 @@ func (c *Collector) refreshServerContainers(ctx context.Context) {
 	c.setServerContainers(servers)
 }
 
-func (c *Collector) setServerContainers(servers []*storage.Server) {
+func (c *Collector) setServerContainers(servers []*v1.Server) {
 	ids := make(map[string]bool, len(servers))
 	for _, server := range servers {
-		if server.ContainerID != "" {
-			ids[server.ContainerID] = true
+		if server.ContainerId != "" {
+			ids[server.ContainerId] = true
 		}
 	}
 	c.serverContainersMu.Lock()
@@ -425,31 +416,31 @@ func (c *Collector) collectDockerStats() {
 	}
 	c.setServerContainers(servers)
 
-	var traffic map[string]ProxyTraffic
+	var traffic map[string]*v1.ProxyRoute
 	if c.proxyTraffic != nil {
 		traffic = c.proxyTraffic()
 	}
 
 	for _, server := range servers {
-		if server.ContainerID == "" {
+		if server.ContainerId == "" {
 			continue
 		}
 
 		// Transient docker error keeps last sample
-		status, err := c.docker.GetContainerStatus(ctx, server.ContainerID)
+		status, err := c.docker.GetContainerStatus(ctx, server.ContainerId)
 		if err != nil {
 			continue
 		}
 		// Stopped container clears stale usage and tick stats
-		if status != storage.StatusRunning && status != storage.StatusUnhealthy && status != storage.StatusStarting {
-			c.updateMetrics(server.ID, func(m *ServerMetrics) {
-				m.CPUPercent = 0
+		if status != v1.ServerStatus_SERVER_STATUS_RUNNING && status != v1.ServerStatus_SERVER_STATUS_UNHEALTHY && status != v1.ServerStatus_SERVER_STATUS_STARTING {
+			c.updateMetrics(server.Id, func(m *ServerMetrics) {
+				m.CpuPercent = 0
 				m.MemoryUsage = 0
-				m.TPS = 0
-				m.MSPT = 0
-				m.MSPTMax = 0
-				m.HeapUsedMB = 0
-				m.HeapMaxMB = 0
+				m.Tps = 0
+				m.Mspt = 0
+				m.MsptMax = 0
+				m.HeapUsedMb = 0
+				m.HeapMaxMb = 0
 				m.PlayersOnline = 0
 				m.PlayerSample = nil
 			})
@@ -457,29 +448,29 @@ func (c *Collector) collectDockerStats() {
 		}
 
 		// Fresh agent attribution skips the stats round trip
-		if m := c.GetMetrics(server.ID); m != nil && time.Since(m.AgentProcUpdated) <= agentProcFreshFor {
-			c.updateMetrics(server.ID, func(m *ServerMetrics) {
-				m.ProxyActiveConns = traffic[server.ID].ActiveConns
+		if m := c.GetMetrics(server.Id); m != nil && time.Since(m.AgentProcUpdated) <= agentProcFreshFor {
+			c.updateMetrics(server.Id, func(m *ServerMetrics) {
+				m.ProxyActiveConns = traffic[server.Id].GetActiveConnections()
 				m.LastUpdated = time.Now()
 			})
 			continue
 		}
 
 		// Get container stats
-		stats, err := c.docker.GetContainerStats(ctx, server.ContainerID)
+		stats, err := c.docker.GetContainerStats(ctx, server.ContainerId)
 		if err != nil {
-			c.log.Debug("Metrics collector: failed to get stats for %s: %v", server.ID, err)
+			c.log.Debug("Metrics collector: failed to get stats for %s: %v", server.Id, err)
 			continue
 		}
 
-		c.updateMetrics(server.ID, func(m *ServerMetrics) {
+		c.updateMetrics(server.Id, func(m *ServerMetrics) {
 			// Recheck inside the lock, an agent sample may have landed
 			if time.Since(m.AgentProcUpdated) > agentProcFreshFor {
-				m.CPUPercent = stats.CPUPercent
+				m.CpuPercent = stats.CpuPercent
 				m.MemoryUsage = stats.MemoryUsage
 			}
-			m.CPUCount = stats.CPUCount
-			m.ProxyActiveConns = traffic[server.ID].ActiveConns
+			m.CpuCount = stats.CpuCount
+			m.ProxyActiveConns = traffic[server.Id].GetActiveConnections()
 			m.LastUpdated = time.Now()
 		})
 	}
@@ -497,7 +488,7 @@ func (c *Collector) collectDiskUsage() {
 	}
 
 	for _, server := range servers {
-		c.sampleDiskUsage(server.ID, server.DataPath)
+		c.sampleDiskUsage(server.Id, server.DataPath)
 	}
 }
 
@@ -551,11 +542,11 @@ func (c *Collector) onLifecycleEvent(ctx context.Context, e events.Event) {
 	go func() {
 		lookupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		server, err := c.store.GetServer(lookupCtx, e.ServerID)
+		server, err := c.store.GetServer(lookupCtx, e.ServerId)
 		if err != nil {
 			return
 		}
-		c.sampleDiskUsage(server.ID, server.DataPath)
+		c.sampleDiskUsage(server.Id, server.DataPath)
 	}()
 }
 
@@ -606,10 +597,10 @@ func (c *Collector) clearHealth(containerID string) {
 }
 
 // Implements docker.HealthChecker using the SLP ping record
-func (c *Collector) ContainerHealth(containerID string, startedAt time.Time) docker.HealthState {
+func (c *Collector) ContainerHealth(containerID string, startedAt time.Time) v1.ServerStatus {
 	// Module containers skip SLP health, docker state decides
 	if !c.isServerContainer(containerID) {
-		return docker.HealthUnknown
+		return v1.ServerStatus_SERVER_STATUS_UNSPECIFIED
 	}
 	c.healthMu.Lock()
 	h := c.health[containerID]
@@ -625,24 +616,24 @@ func (c *Collector) ContainerHealth(containerID string, startedAt time.Time) doc
 	// No record yet, collector hasn't pinged since (re)start
 	if h == nil || !record.startedAt.Equal(startedAt) {
 		if time.Since(startedAt) < grace {
-			return docker.HealthStarting
+			return v1.ServerStatus_SERVER_STATUS_STARTING
 		}
 		// Long-running container with no data assumes healthy until proven otherwise
-		return docker.HealthUnknown
+		return v1.ServerStatus_SERVER_STATUS_UNSPECIFIED
 	}
 
 	if record.everHealthy {
 		if record.consecutiveFails >= threshold {
-			return docker.HealthUnhealthy
+			return v1.ServerStatus_SERVER_STATUS_UNHEALTHY
 		}
-		return docker.HealthHealthy
+		return v1.ServerStatus_SERVER_STATUS_RUNNING
 	}
 
 	// Never answered a ping this run
 	if time.Since(startedAt) >= grace {
-		return docker.HealthUnhealthy
+		return v1.ServerStatus_SERVER_STATUS_UNHEALTHY
 	}
-	return docker.HealthStarting
+	return v1.ServerStatus_SERVER_STATUS_STARTING
 }
 
 // Implements lifecycle.PlayerCounter from agent roster or fresh SLP
@@ -654,7 +645,7 @@ func (c *Collector) PlayersOnline(serverID string) (int, bool) {
 	if m.agentRosterFresh() {
 		return m.PlayersOnline, true
 	}
-	if m.SLPAvailable && time.Since(m.SLPLastUpdated) < 2*c.collectorConfig.SLPInterval {
+	if m.SlpAvailable && time.Since(m.SLPLastUpdated) < 2*c.collectorConfig.SLPInterval {
 		return m.PlayersOnline, true
 	}
 	return 0, false
@@ -693,41 +684,41 @@ func (c *Collector) collectSLPData() {
 	slpClient := minecraft.NewSLPClient(c.collectorConfig.SLPTimeout)
 
 	for _, server := range servers {
-		if server.ContainerID == "" {
+		if server.ContainerId == "" {
 			continue
 		}
 
-		// Agent-vouched servers only need a slow MOTD refresh
-		if m := c.GetMetrics(server.ID); m.agentHealthProof() && m.agentRosterFresh() &&
+		// Agent-vouched servers only need a slow Motd refresh
+		if m := c.GetMetrics(server.Id); m.agentHealthProof() && m.agentRosterFresh() &&
 			time.Since(m.SLPLastUpdated) < 4*c.collectorConfig.SLPInterval {
 			continue
 		}
 
 		// Pings raw containers, must not consult GetContainerStatus here
-		info, err := c.docker.GetContainerRunInfo(ctx, server.ContainerID)
+		info, err := c.docker.GetContainerRunInfo(ctx, server.ContainerId)
 		if err != nil || !info.Running || info.Paused {
-			c.clearHealth(server.ContainerID)
-			c.updateMetrics(server.ID, func(m *ServerMetrics) {
-				m.SLPAvailable = false
+			c.clearHealth(server.ContainerId)
+			c.updateMetrics(server.Id, func(m *ServerMetrics) {
+				m.SlpAvailable = false
 			})
 			continue
 		}
 
 		// Get container IP
-		containerIP, err := c.docker.ContainerIP(ctx, server.ContainerID)
+		containerIP, err := c.docker.ContainerIP(ctx, server.ContainerId)
 		if err != nil {
-			c.log.Debug("Metrics collector SLP: failed to get container IP for %s: %v", server.ID, err)
+			c.log.Debug("Metrics collector SLP: failed to get container IP for %s: %v", server.Id, err)
 			// A live ready agent session vouches when SLP cannot
-			c.recordHealth(server.ContainerID, info.StartedAt, c.GetMetrics(server.ID).agentHealthProof())
-			c.updateMetrics(server.ID, func(m *ServerMetrics) {
-				m.SLPAvailable = false
+			c.recordHealth(server.ContainerId, info.StartedAt, c.GetMetrics(server.Id).agentHealthProof())
+			c.updateMetrics(server.Id, func(m *ServerMetrics) {
+				m.SlpAvailable = false
 			})
 			continue
 		}
 
 		// SLP ping w/ server version for protocol
 		slpCtx, slpCancel := context.WithTimeout(ctx, c.collectorConfig.SLPTimeout)
-		port := server.Port
+		port := int(server.Port)
 		if server.ProxyHostname != "" || port == 0 {
 			port = docker.DefaultMinecraftPort // Proxy listens on default port (inside container)
 		}
@@ -735,22 +726,22 @@ func (c *Collector) collectSLPData() {
 		slpCancel()
 
 		if err != nil {
-			c.log.Debug("Metrics collector SLP: failed to ping %s (%s:%d): %v", server.ID, containerIP, port, err)
+			c.log.Debug("Metrics collector SLP: failed to ping %s (%s:%d): %v", server.Id, containerIP, port, err)
 			// Blocked SLP should not read unhealthy if agent vouches
-			c.recordHealth(server.ContainerID, info.StartedAt, c.GetMetrics(server.ID).agentHealthProof())
-			c.updateMetrics(server.ID, func(m *ServerMetrics) {
-				m.SLPAvailable = false
+			c.recordHealth(server.ContainerId, info.StartedAt, c.GetMetrics(server.Id).agentHealthProof())
+			c.updateMetrics(server.Id, func(m *ServerMetrics) {
+				m.SlpAvailable = false
 			})
 			continue
 		}
 
-		c.recordHealth(server.ContainerID, info.StartedAt, true)
+		c.recordHealth(server.ContainerId, info.StartedAt, true)
 
 		// Fresh agent roster is authoritative, SLP must not clobber it
-		c.updateMetrics(server.ID, func(m *ServerMetrics) {
-			m.SLPAvailable = true
-			m.SLPLatencyMs = result.LatencyMs
-			m.MOTD = result.MOTD
+		c.updateMetrics(server.Id, func(m *ServerMetrics) {
+			m.SlpAvailable = true
+			m.SlpLatencyMs = result.LatencyMs
+			m.Motd = result.Motd
 			m.ServerVersion = result.Version.Name
 			m.ProtocolVersion = result.Version.Protocol
 			if !m.agentRosterFresh() {
@@ -804,32 +795,32 @@ func (c *Collector) detectLifecycleEvents() {
 	}
 
 	for _, server := range servers {
-		if server.ContainerID == "" {
-			c.clearLifecycle(server.ID)
+		if server.ContainerId == "" {
+			c.clearLifecycle(server.Id)
 			continue
 		}
 
-		status, err := c.docker.GetContainerStatus(ctx, server.ContainerID)
+		status, err := c.docker.GetContainerStatus(ctx, server.ContainerId)
 		if err != nil {
-			c.clearLifecycle(server.ID)
+			c.clearLifecycle(server.Id)
 			continue
 		}
 
 		// Fully down containers forget baseline so restart reseeds clean
-		alive := status == storage.StatusRunning || status == storage.StatusUnhealthy || status == storage.StatusStarting
+		alive := status == v1.ServerStatus_SERVER_STATUS_RUNNING || status == v1.ServerStatus_SERVER_STATUS_UNHEALTHY || status == v1.ServerStatus_SERVER_STATUS_STARTING
 		if !alive {
-			c.clearLifecycle(server.ID)
+			c.clearLifecycle(server.Id)
 			continue
 		}
 
 		// "Healthy" == docker health check passing (StatusRunning)
-		healthy := status == storage.StatusRunning
+		healthy := status == v1.ServerStatus_SERVER_STATUS_RUNNING
 
-		prev, seen := c.getLifecycle(server.ID)
+		prev, seen := c.getLifecycle(server.Id)
 		if seen && healthy && !prev.healthy {
-			c.emit(ctx, v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_HEALTHY, server.ID, nil)
+			c.emit(ctx, v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_HEALTHY, server.Id, nil)
 		}
-		c.setLifecycle(server.ID, lifecycleState{healthy: healthy})
+		c.setLifecycle(server.Id, lifecycleState{healthy: healthy})
 	}
 }
 
@@ -838,7 +829,7 @@ func (c *Collector) emit(ctx context.Context, t v1.TriggeredEventType, serverID 
 	if c.bus == nil {
 		return
 	}
-	c.bus.Emit(ctx, events.Event{Type: t, ServerID: serverID, Data: data})
+	c.bus.Emit(ctx, events.Event{Type: t, ServerId: serverID, Data: data})
 }
 
 func (c *Collector) getLifecycle(serverID string) (lifecycleState, bool) {

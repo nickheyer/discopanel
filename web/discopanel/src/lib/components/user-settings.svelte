@@ -39,8 +39,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { create } from '@bufbuild/protobuf';
 	import { rpcClient } from '$lib/api/rpc-client';
-	import type { User, Role } from '$lib/proto/discopanel/v1/common_pb';
-	import type { RegistrationInvite } from '$lib/proto/discopanel/v1/auth_pb';
+	import type { User, Role, RegistrationInvite } from '$lib/proto/discopanel/v1/storage_pb';
 	import {
 		CreateUserRequestSchema,
 		UpdateUserRequestSchema,

@@ -4,8 +4,8 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Plus, X, AlertCircle } from '@lucide/svelte';
-	import type { AdditionalPort } from '$lib/proto/discopanel/v1/common_pb';
-	import { AdditionalPortSchema } from '$lib/proto/discopanel/v1/common_pb';
+	import type { AdditionalPort } from '$lib/proto/discopanel/v1/storage_pb';
+	import { AdditionalPortSchema } from '$lib/proto/discopanel/v1/storage_pb';
 	import { create } from '@bufbuild/protobuf';
 
 	interface Props {

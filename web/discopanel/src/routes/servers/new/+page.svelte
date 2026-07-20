@@ -36,9 +36,9 @@
 	import { create } from '@bufbuild/protobuf';
 	import type { CreateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
-	import { ModLoader, type ProxyListener } from '$lib/proto/discopanel/v1/common_pb';
+	import { ModLoader, type ProxyListener, type IndexedModpack } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { ModLoaderInfo, DockerImage } from '$lib/proto/discopanel/v1/minecraft_pb';
-	import type { IndexedModpack, Version } from '$lib/proto/discopanel/v1/modpack_pb';
+	import type { Version } from '$lib/proto/discopanel/v1/modpack_pb';
 	import { loadModLoaders } from '$lib/stores/loaders';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';

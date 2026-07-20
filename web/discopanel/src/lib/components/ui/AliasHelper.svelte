@@ -3,6 +3,7 @@
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { AliasCategory, type AliasInfo } from '$lib/proto/discopanel/v1/module_pb';
+	import { AliasCategoryLabel } from '$lib/proto/enums.gen';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { Braces, Server, Box, Sparkles, Loader2, Check, Copy } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
@@ -72,16 +73,7 @@
 	}
 
 	function getCategoryLabel(category: AliasCategory): string {
-		switch (category) {
-			case AliasCategory.SERVER:
-				return 'Server';
-			case AliasCategory.MODULE:
-				return 'Module';
-			case AliasCategory.SPECIAL:
-				return 'Special';
-			default:
-				return 'Other';
-		}
+		return AliasCategoryLabel[category] ?? AliasCategoryLabel[AliasCategory.UNSPECIFIED];
 	}
 
 	function getCategoryColor(category: AliasCategory): string {

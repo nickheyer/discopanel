@@ -9,9 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nickheyer/discopanel/pkg/minecraft"
-
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -60,8 +59,8 @@ func testServer(t *testing.T) *serverInfo {
 		ID:        "s1",
 		Name:      "s1",
 		DataPath:  t.TempDir(),
-		ModLoader: minecraft.ModLoaderFabric,
-		MCVersion: "1.20.1",
+		ModLoader: v1.ModLoader_MOD_LOADER_FABRIC,
+		McVersion: "1.20.1",
 	}
 }
 

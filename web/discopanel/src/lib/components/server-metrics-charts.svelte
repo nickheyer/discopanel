@@ -6,8 +6,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import MetricsChart from '$lib/components/metrics-chart.svelte';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import type { MetricsSample, ServerAction } from '$lib/proto/discopanel/v1/server_pb';
+	import type { Server, MetricsSample, ServerAction } from '$lib/proto/discopanel/v1/storage_pb';
 
 	let { server }: { server: Server } = $props();
 

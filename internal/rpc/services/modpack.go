@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -59,8 +57,8 @@ func (s *ModpackService) getIndexer(ctx context.Context, name string) (indexers.
 		if err != nil || globalSettings == nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get global settings"))
 		}
-		if globalSettings.CFAPIKey != nil {
-			apiKey = *globalSettings.CFAPIKey
+		if globalSettings.CfApiKey != nil {
+			apiKey = *globalSettings.CfApiKey
 		}
 		if apiKey == "" {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("CurseForge API key not configured"))
@@ -91,35 +89,6 @@ func mapIndexerError(err error, msg string) *connect.Error {
 	return connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", msg, err))
 }
 
-// Converts a stored modpack row into its proto form
-func dbModpackToProto(modpack *storage.IndexedModpack, isFavorited bool) *v1.IndexedModpack {
-	javaVersionInt, _ := strconv.Atoi(modpack.JavaVersion)
-	return &v1.IndexedModpack{
-		Id:             modpack.ID,
-		IndexerId:      modpack.IndexerID,
-		Indexer:        modpack.Indexer,
-		Name:           modpack.Name,
-		Slug:           modpack.Slug,
-		Summary:        modpack.Summary,
-		Description:    modpack.Description,
-		LogoUrl:        modpack.LogoURL,
-		WebsiteUrl:     modpack.WebsiteURL,
-		DownloadCount:  int32(modpack.DownloadCount),
-		Categories:     modpack.Categories,
-		GameVersions:   modpack.GameVersions,
-		ModLoaders:     modpack.ModLoaders,
-		LatestFileId:   modpack.LatestFileID,
-		DateCreated:    timestamppb.New(modpack.DateCreated),
-		DateModified:   timestamppb.New(modpack.DateModified),
-		DateReleased:   timestamppb.New(modpack.DateReleased),
-		McVersion:      modpack.MCVersion,
-		JavaVersion:    int32(javaVersionInt),
-		DockerImage:    modpack.DockerImage,
-		RecommendedRam: int32(modpack.RecommendedRAM),
-		IsFavorited:    isFavorited,
-	}
-}
-
 // Searches for modpacks
 func (s *ModpackService) SearchModpacks(ctx context.Context, req *connect.Request[v1.SearchModpacksRequest]) (*connect.Response[v1.SearchModpacksResponse], error) {
 	msg := req.Msg
@@ -142,15 +111,14 @@ func (s *ModpackService) SearchModpacks(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to search modpacks: %w", err))
 	}
 
-	// Convert to proto format and check if modpacks are favorited
+	// Flag favorited rows
 	favorites, _ := s.store.FavoriteModpackIDs(ctx)
-	protoModpacks := make([]*v1.IndexedModpack, len(modpacks))
-	for i, modpack := range modpacks {
-		protoModpacks[i] = dbModpackToProto(modpack, favorites[modpack.ID])
+	for _, modpack := range modpacks {
+		modpack.IsFavorited = favorites[modpack.Id]
 	}
 
 	return connect.NewResponse(&v1.SearchModpacksResponse{
-		Modpacks: protoModpacks,
+		Modpacks: modpacks,
 		Total:    int32(total),
 		Page:     int32(page),
 		PageSize: int32(pageSize),
@@ -165,12 +133,10 @@ func (s *ModpackService) GetModpack(ctx context.Context, req *connect.Request[v1
 	}
 
 	// Check if favorited
-	isFavorited, _ := s.store.IsModpackFavorited(ctx, req.Msg.Id)
-
-	protoModpack := dbModpackToProto(modpack, isFavorited)
+	modpack.IsFavorited, _ = s.store.IsModpackFavorited(ctx, req.Msg.Id)
 
 	return connect.NewResponse(&v1.GetModpackResponse{
-		Modpack: protoModpack,
+		Modpack: modpack,
 	}), nil
 }
 
@@ -186,7 +152,7 @@ func (s *ModpackService) GetModpackByURL(ctx context.Context, req *connect.Reque
 	}
 
 	return connect.NewResponse(&v1.GetModpackByURLResponse{
-		Modpack: dbModpackToProto(modpack, false),
+		Modpack: modpack,
 	}), nil
 }
 
@@ -199,17 +165,17 @@ func (s *ModpackService) GetModpackConfig(ctx context.Context, req *connect.Requ
 
 	modLoader := ""
 	if loader, ok := minecraft.ServerLoaderForModpack(modpack.Indexer); ok {
-		modLoader = string(loader)
+		modLoader = loader.Name()
 	}
 
 	config := map[string]string{
 		"name":         modpack.Name,
 		"description":  modpack.Summary,
 		"mod_loader":   modLoader,
-		"mc_version":   modpack.MCVersion,
-		"memory":       strconv.Itoa(modpack.RecommendedRAM),
+		"mc_version":   modpack.McVersion,
+		"memory":       strconv.Itoa(int(modpack.RecommendedRam)),
 		"docker_image": modpack.DockerImage,
-		"modpack_file": modpack.LatestFileID, // For manual modpacks, this is the file ID
+		"modpack_file": modpack.LatestFileId, // For manual modpacks, this is the file ID
 	}
 
 	return connect.NewResponse(&v1.GetModpackConfigResponse{
@@ -238,29 +204,23 @@ func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Re
 	}
 
 	// Get files from the indexer, honoring the request filters
-	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerID, req.Msg.GameVersion, req.Msg.ModLoader)
+	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerId, req.Msg.GameVersion, req.Msg.ModLoader)
 	if err != nil {
 		s.log.Error("Failed to get modpack files from %s: %v", modpack.Indexer, err)
 		return nil, mapIndexerError(err, "failed to get modpack versions")
 	}
 
-	// Convert files to versions
+	// Convert files to versions, adapter order is newest first
 	versions := make([]*v1.Version, 0, len(files))
-	for _, file := range files {
+	for i, file := range files {
 		versions = append(versions, &v1.Version{
-			Id:            file.ID,
-			DisplayName:   file.DisplayName,
-			ReleaseType:   file.ReleaseType,
-			FileDate:      timestamppb.New(file.FileDate),
-			SortIndex:     int32(file.SortIndex),
-			VersionNumber: file.VersionNumber,
+			Id:          file.Id,
+			DisplayName: file.DisplayName,
+			ReleaseType: file.ReleaseType,
+			FileDate:    file.FileDate,
+			SortIndex:   int32(i),
 		})
 	}
-
-	// Sorts by SortIndex, lower index is newer
-	sort.Slice(versions, func(i, j int) bool {
-		return versions[i].SortIndex < versions[j].SortIndex
-	})
 
 	return connect.NewResponse(&v1.GetModpackVersionsResponse{
 		Versions: versions,
@@ -292,51 +252,19 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 	// Store modpacks in database
 	synced := 0
 	for _, modpack := range searchResp.Modpacks {
-		// Convert to JSON strings for storage
-		categoriesJSON, _ := json.Marshal(modpack.Categories)
-		gameVersionsJSON, _ := json.Marshal(modpack.GameVersions)
-		modLoadersJSON, _ := json.Marshal(modpack.ModLoaders)
-
 		// Finds most recent Minecraft version from game versions
-		mcVersion := minecraft.FindMostRecentMinecraftVersion(modpack.GameVersions)
+		var gameVersions []string
+		_ = json.Unmarshal([]byte(modpack.GameVersions), &gameVersions)
+		mcVersion := minecraft.FindMostRecentMinecraftVersion(gameVersions)
 
-		modLoader := storage.ModLoaderVanilla
-		if len(modpack.ModLoaders) > 0 {
-			if matched, ok := minecraft.MatchModLoader(modpack.ModLoaders[0]); ok {
-				modLoader = matched
-			}
-		}
+		// Computed fields
+		modpack.McVersion = mcVersion
+		modpack.JavaVersion = int32(docker.RequiredJavaMajor(mcVersion))
+		modpack.DockerImage = docker.OptimalRuntimeTag(mcVersion)
+		modpack.RecommendedRam = 6144 // 6GB for modpacks
 
-		javaVersion := docker.GetRequiredJavaVersion(mcVersion, modLoader)
-		dockerImage := docker.OptimalRuntimeTag(mcVersion)
-
-		dbModpack := &storage.IndexedModpack{
-			ID:            modpack.ID,
-			IndexerID:     modpack.IndexerID,
-			Indexer:       modpack.Indexer,
-			Name:          modpack.Name,
-			Slug:          modpack.Slug,
-			Summary:       modpack.Summary,
-			Description:   modpack.Description,
-			LogoURL:       modpack.LogoURL,
-			WebsiteURL:    modpack.WebsiteURL,
-			DownloadCount: modpack.DownloadCount,
-			Categories:    string(categoriesJSON),
-			GameVersions:  string(gameVersionsJSON),
-			ModLoaders:    string(modLoadersJSON),
-			LatestFileID:  modpack.LatestFileID,
-			DateCreated:   modpack.DateCreated,
-			DateModified:  modpack.DateModified,
-			DateReleased:  modpack.DateReleased,
-			// Computed fields
-			MCVersion:      mcVersion,
-			JavaVersion:    javaVersion,
-			DockerImage:    dockerImage,
-			RecommendedRAM: 6144, // 6GB for modpacks
-		}
-
-		if err := s.store.UpsertIndexedModpack(ctx, dbModpack); err != nil {
-			s.log.Error("Failed to store modpack %s: %v", modpack.ID, err)
+		if err := s.store.UpsertIndexedModpack(ctx, modpack); err != nil {
+			s.log.Error("Failed to store modpack %s: %v", modpack.Id, err)
 			continue
 		}
 		synced++
@@ -444,7 +372,7 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 	modpackID = uuid.New().String()
 
 	// Determine mod loader from manifest
-	var modLoader storage.ModLoader
+	var modLoader v1.ModLoader
 	loaderID := ""
 	for _, ml := range manifest.Minecraft.ModLoaders {
 		if loaderID == "" || ml.Primary {
@@ -455,39 +383,39 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 		modLoader = loader
 	}
 
-	if modLoader == "" {
-		modLoader = storage.ModLoaderCustom
+	if modLoader == v1.ModLoader_MOD_LOADER_UNSPECIFIED {
+		modLoader = v1.ModLoader_MOD_LOADER_CUSTOM
 	}
 
-	javaVersion := docker.GetRequiredJavaVersion(manifest.Minecraft.Version, modLoader)
+	javaVersion := docker.RequiredJavaMajor(manifest.Minecraft.Version)
 	dockerImage := docker.OptimalRuntimeTag(manifest.Minecraft.Version)
 
 	// Create database entry
 	gameVersionsJSON, _ := json.Marshal([]string{manifest.Minecraft.Version})
-	modLoadersJSON, _ := json.Marshal([]string{string(modLoader)})
+	modLoadersJSON, _ := json.Marshal([]string{modLoader.Name()})
 
-	dbModpack := &storage.IndexedModpack{
-		ID:             modpackID,
-		IndexerID:      modpackID,
+	dbModpack := &v1.IndexedModpack{
+		Id:             modpackID,
+		IndexerId:      modpackID,
 		Indexer:        "manual",
 		Name:           manifest.Name,
 		Slug:           strings.ToLower(strings.ReplaceAll(manifest.Name, " ", "-")),
 		Summary:        fmt.Sprintf("Version %s by %s", manifest.Version, manifest.Author),
 		Description:    manifest.Description,
-		LogoURL:        "", // No logo for manual uploads
-		WebsiteURL:     "",
+		LogoUrl:        "", // No logo for manual uploads
+		WebsiteUrl:     "",
 		DownloadCount:  0,
 		Categories:     "[]",
 		GameVersions:   string(gameVersionsJSON),
 		ModLoaders:     string(modLoadersJSON),
-		LatestFileID:   modpackID,
-		DateCreated:    time.Now(),
-		DateModified:   time.Now(),
-		DateReleased:   time.Now(),
-		MCVersion:      manifest.Minecraft.Version,
-		JavaVersion:    javaVersion,
+		LatestFileId:   modpackID,
+		DateCreated:    timestamppb.Now(),
+		DateModified:   timestamppb.Now(),
+		DateReleased:   timestamppb.Now(),
+		McVersion:      manifest.Minecraft.Version,
+		JavaVersion:    int32(javaVersion),
 		DockerImage:    dockerImage,
-		RecommendedRAM: 6144, // 6GB for modpacks
+		RecommendedRam: 6144, // 6GB for modpacks
 	}
 
 	if err := s.store.UpsertIndexedModpack(ctx, dbModpack); err != nil {
@@ -529,18 +457,18 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
 	// Create a file entry for the uploaded modpack
-	dbFile := &storage.IndexedModpackFile{
-		ID:               modpackID,
-		ModpackID:        modpackID,
+	dbFile := &v1.IndexedModpackFile{
+		Id:               modpackID,
+		ModpackId:        modpackID,
 		DisplayName:      originalFilename,
 		FileName:         originalFilename,
-		FileDate:         time.Now(),
+		FileDate:         timestamppb.Now(),
 		FileLength:       fileSize,
 		ReleaseType:      "1",      // Release
-		DownloadURL:      destPath, // Store local path
+		DownloadUrl:      destPath, // Store local path
 		GameVersions:     string(gameVersionsJSON),
-		ModLoader:        string(modLoader),
-		ServerPackFileID: nil,
+		ModLoader:        modLoader.Name(),
+		ServerPackFileId: nil,
 	}
 
 	if err := s.store.UpsertIndexedModpackFile(ctx, dbFile); err != nil {
@@ -550,11 +478,8 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 
 	s.log.Info("Successfully imported uploaded modpack '%s' (id: %s) from session %s", manifest.Name, modpackID, msg.UploadSessionId)
 
-	// Convert to proto format for response
-	protoModpack := dbModpackToProto(dbModpack, false)
-
 	return connect.NewResponse(&v1.ImportUploadedModpackResponse{
-		Modpack: protoModpack,
+		Modpack: dbModpack,
 		Message: fmt.Sprintf("Modpack '%s' v%s by %s uploaded successfully", manifest.Name, manifest.Version, manifest.Author),
 	}), nil
 }
@@ -598,8 +523,8 @@ func (s *ModpackService) DeleteModpack(ctx context.Context, req *connect.Request
 	}
 
 	// Delete the physical ZIP file
-	if len(files) > 0 && files[0].DownloadURL != "" {
-		filePath := files[0].DownloadURL
+	if len(files) > 0 && files[0].DownloadUrl != "" {
+		filePath := files[0].DownloadUrl
 		if err := os.Remove(filePath); err != nil {
 			s.log.Error("Failed to delete modpack file %s: %v", filePath, err)
 			// Continue with database deletion even if file deletion fails
@@ -637,7 +562,7 @@ func (s *ModpackService) ToggleFavorite(ctx context.Context, req *connect.Reques
 		}
 	} else {
 		// Add favorite
-		if err := s.store.AddModpackFavorite(ctx, modpackID); err != nil {
+		if err := s.store.CreateModpackFavorite(ctx, &v1.ModpackFavorite{ModpackId: modpackID}); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to add favorite"))
 		}
 	}
@@ -650,19 +575,23 @@ func (s *ModpackService) ToggleFavorite(ctx context.Context, req *connect.Reques
 
 // Lists favorite modpacks
 func (s *ModpackService) ListFavorites(ctx context.Context, req *connect.Request[v1.ListFavoritesRequest]) (*connect.Response[v1.ListFavoritesResponse], error) {
-	modpacks, err := s.store.ListFavoriteModpacks(ctx)
+	favorites, err := s.store.ListFavoriteModpacks(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list favorites"))
 	}
 
-	// Convert to proto format
-	protoModpacks := make([]*v1.IndexedModpack, len(modpacks))
-	for i, modpack := range modpacks {
-		protoModpacks[i] = dbModpackToProto(modpack, true)
+	// Unwrap preloaded modpack rows, skip dangling favorites
+	modpacks := make([]*v1.IndexedModpack, 0, len(favorites))
+	for _, fav := range favorites {
+		if fav.Modpack == nil {
+			continue
+		}
+		fav.Modpack.IsFavorited = true
+		modpacks = append(modpacks, fav.Modpack)
 	}
 
 	return connect.NewResponse(&v1.ListFavoritesResponse{
-		Modpacks: protoModpacks,
+		Modpacks: modpacks,
 	}), nil
 }
 
@@ -676,7 +605,7 @@ func (s *ModpackService) GetIndexerStatus(ctx context.Context, req *connect.Requ
 	}
 
 	apiKeyConfigured := false
-	if globalSettings.CFAPIKey != nil && *globalSettings.CFAPIKey != "" {
+	if globalSettings.CfApiKey != nil && *globalSettings.CfApiKey != "" {
 		apiKeyConfigured = true
 	}
 
@@ -719,7 +648,7 @@ func (s *ModpackService) SyncModpackFiles(ctx context.Context, req *connect.Requ
 	}
 
 	// Get all files from the indexer
-	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerID, "", "")
+	files, err := indexerClient.GetModpackFiles(ctx, modpack.IndexerId, "", "")
 	if err != nil {
 		s.log.Error("Failed to get modpack files: %v", err)
 		return nil, mapIndexerError(err, "failed to get modpack files")
@@ -728,25 +657,8 @@ func (s *ModpackService) SyncModpackFiles(ctx context.Context, req *connect.Requ
 	// Store files in database
 	synced := 0
 	for _, file := range files {
-		// Convert to JSON strings for storage
-		gameVersionsJSON, _ := json.Marshal(file.GameVersions)
-
-		dbFile := &storage.IndexedModpackFile{
-			ID:               file.ID,
-			ModpackID:        modpackID,
-			DisplayName:      file.DisplayName,
-			FileName:         file.FileName,
-			FileDate:         file.FileDate,
-			FileLength:       file.FileLength,
-			ReleaseType:      file.ReleaseType,
-			DownloadURL:      file.DownloadURL,
-			GameVersions:     string(gameVersionsJSON),
-			ModLoader:        file.ModLoader,
-			ServerPackFileID: file.ServerPackFileID,
-		}
-
-		if err := s.store.UpsertIndexedModpackFile(ctx, dbFile); err != nil {
-			s.log.Error("Failed to store modpack file %s: %v", file.ID, err)
+		if err := s.store.UpsertIndexedModpackFile(ctx, file); err != nil {
+			s.log.Error("Failed to store modpack file %s: %v", file.Id, err)
 			continue
 		}
 		synced++

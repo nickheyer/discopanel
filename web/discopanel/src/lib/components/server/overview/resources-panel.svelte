@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
 	import { tpsTone, TONE_TEXT, TONE_BG } from '$lib/server-status';
 	import { formatBytes } from '$lib/utils';
 	import { AlertTriangle } from '@lucide/svelte';

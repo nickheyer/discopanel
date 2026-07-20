@@ -17,16 +17,16 @@
 	import { cn } from '$lib/utils';
 	import { TONE_BADGE } from '$lib/server-status';
 	import { moduleStatusMeta } from '$lib/module-status';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
 	import type {
 		ModuleTemplate,
 		Module,
 		ModulePort,
 		ModuleDependency,
 		ModuleEventHook
-	} from '$lib/proto/discopanel/v1/module_pb';
-	import { ModuleEventAction } from '$lib/proto/discopanel/v1/module_pb';
-	import { TriggeredEventType } from '$lib/proto/discopanel/v1/event_pb';
+	} from '$lib/proto/discopanel/v1/storage_pb';
+	import { ModuleEventAction, TriggeredEventType } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ModuleEventActionLabel } from '$lib/proto/enums.gen';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import {
 		AlertTriangle,
@@ -301,15 +301,17 @@
 		metadata = metadata.filter((_, idx) => idx !== i);
 	}
 
+	// Display order for event action choices
+	const EVENT_ACTION_OPTIONS: ModuleEventAction[] = [
+		ModuleEventAction.START,
+		ModuleEventAction.STOP,
+		ModuleEventAction.RESTART,
+		ModuleEventAction.EXEC,
+		ModuleEventAction.RCON
+	];
+
 	function getEventActionLabel(a: ModuleEventAction): string {
-		const labels: Record<number, string> = {
-			[ModuleEventAction.START]: 'Start',
-			[ModuleEventAction.STOP]: 'Stop',
-			[ModuleEventAction.RESTART]: 'Restart',
-			[ModuleEventAction.EXEC]: 'Exec',
-			[ModuleEventAction.RCON]: 'RCON'
-		};
-		return labels[a] || 'Unknown';
+		return ModuleEventActionLabel[a] ?? ModuleEventActionLabel[ModuleEventAction.UNSPECIFIED];
 	}
 
 	async function loadServerModules() {
@@ -1329,21 +1331,11 @@
 																	<span class="truncate">{getEventActionLabel(hook.action)}</span>
 																</SelectTrigger>
 																<SelectContent>
-																	<SelectItem value={String(ModuleEventAction.START)}>
-																		Start
-																	</SelectItem>
-																	<SelectItem value={String(ModuleEventAction.STOP)}>
-																		Stop
-																	</SelectItem>
-																	<SelectItem value={String(ModuleEventAction.RESTART)}>
-																		Restart
-																	</SelectItem>
-																	<SelectItem value={String(ModuleEventAction.EXEC)}>
-																		Exec
-																	</SelectItem>
-																	<SelectItem value={String(ModuleEventAction.RCON)}>
-																		RCON
-																	</SelectItem>
+																	{#each EVENT_ACTION_OPTIONS as a (a)}
+																		<SelectItem value={String(a)}>
+																			{getEventActionLabel(a)}
+																		</SelectItem>
+																	{/each}
 																</SelectContent>
 															</Select>
 														</div>

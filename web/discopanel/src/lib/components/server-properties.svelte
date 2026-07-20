@@ -6,8 +6,8 @@
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, Save, RotateCcw, Search, AlertCircle, X, FileSliders } from '@lucide/svelte';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { ServerProperty } from '$lib/proto/discopanel/v1/properties_pb';
 	import PropertyField from '$lib/components/properties/property-field.svelte';
 	import { PropertiesForm, categorySlug } from '$lib/components/properties/properties-form.svelte';

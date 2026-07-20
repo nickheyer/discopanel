@@ -2,12 +2,15 @@ package modrinth
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/nickheyer/discopanel/pkg/indexers"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func init() {
@@ -44,10 +47,51 @@ func (m *ModrinthIndexer) SearchModpacks(ctx context.Context, query string, game
 		return nil, err
 	}
 
-	// Convert Modrinth projects to generic modpacks
-	modpacks := make([]indexers.Modpack, len(resp.Hits))
+	// Normalizes Modrinth projects into proto rows
+	modpacks := make([]*v1.IndexedModpack, len(resp.Hits))
 	for i, project := range resp.Hits {
-		modpacks[i] = m.convertSearchProject(project)
+		// Parse dates
+		dateCreated, _ := time.Parse(time.RFC3339, project.DateCreated)
+		dateModified, _ := time.Parse(time.RFC3339, project.DateModified)
+
+		// Extract mod loaders from categories (Modrinth puts loaders in categories)
+		modLoaders := []string{}
+		for _, cat := range project.Categories {
+			if loader, ok := minecraft.DetectModpackLoader(cat); ok {
+				modLoaders = append(modLoaders, loader.Name())
+			}
+		}
+
+		// Use display_categories if available, otherwise use categories
+		categories := project.DisplayCategories
+		if len(categories) == 0 {
+			categories = project.Categories
+		}
+
+		// Encodes slice columns as JSON strings
+		categoriesJSON, _ := json.Marshal(categories)
+		gameVersionsJSON, _ := json.Marshal(project.Versions)
+		modLoadersJSON, _ := json.Marshal(modLoaders)
+
+		modpacks[i] = &v1.IndexedModpack{
+			Id:            fmt.Sprintf("modrinth-%s", project.ProjectID),
+			IndexerId:     project.ProjectID,
+			Indexer:       "modrinth",
+			Name:          project.Title,
+			Slug:          project.Slug,
+			Summary:       project.Description,
+			Description:   project.Description,
+			LogoUrl:       project.IconURL,
+			WebsiteUrl:    fmt.Sprintf("https://modrinth.com/modpack/%s", project.Slug),
+			DownloadCount: int32(project.Downloads),
+			Categories:    string(categoriesJSON),
+			GameVersions:  string(gameVersionsJSON),
+			ModLoaders:    string(modLoadersJSON),
+			LatestFileId:  project.LatestVersion,
+			DateCreated:   timestamppb.New(dateCreated),
+			DateModified:  timestamppb.New(dateModified),
+			DateReleased:  timestamppb.New(dateCreated), // Modrinth doesn't have separate release date in search
+		}
 	}
 
 	return &indexers.SearchResult{
@@ -59,99 +103,13 @@ func (m *ModrinthIndexer) SearchModpacks(ctx context.Context, query string, game
 }
 
 // Get a specific modpack
-func (m *ModrinthIndexer) GetModpack(ctx context.Context, modpackID string) (*indexers.Modpack, error) {
+func (m *ModrinthIndexer) GetModpack(ctx context.Context, modpackID string) (*v1.IndexedModpack, error) {
 	// Get full project details
 	project, err := m.client.GetModpack(ctx, modpackID)
 	if err != nil {
 		return nil, err
 	}
 
-	result := m.convertProject(*project)
-	return &result, nil
-}
-
-// Get files for a modpack
-func (m *ModrinthIndexer) GetModpackFiles(ctx context.Context, modpackID string, gameVersion string, modLoader string) ([]indexers.ModpackFile, error) {
-	var loaders, gameVersions []string
-	if modLoader != "" {
-		loaders = []string{strings.ToLower(modLoader)}
-	}
-	if gameVersion != "" {
-		gameVersions = []string{gameVersion}
-	}
-	versions, err := m.client.GetProjectVersionsFiltered(ctx, modpackID, loaders, gameVersions)
-	if err != nil {
-		return nil, err
-	}
-
-	// Converts versions to files, keeps newest-first order
-	result := make([]indexers.ModpackFile, 0, len(versions))
-	for versionIndex, version := range versions {
-		if len(version.Files) > 0 {
-			// Find primary file or use first one
-			var primaryFile *File
-			for i := range version.Files {
-				if version.Files[i].Primary {
-					primaryFile = &version.Files[i]
-					break
-				}
-			}
-			if primaryFile == nil {
-				primaryFile = &version.Files[0]
-			}
-
-			file := m.convertVersionToFile(version, *primaryFile, modpackID)
-			file.SortIndex = versionIndex
-			result = append(result, file)
-		}
-	}
-
-	return result, nil
-}
-
-// Converts a Modrinth search project to a generic modpack
-func (m *ModrinthIndexer) convertSearchProject(project Project) indexers.Modpack {
-	// Parse dates
-	dateCreated, _ := time.Parse(time.RFC3339, project.DateCreated)
-	dateModified, _ := time.Parse(time.RFC3339, project.DateModified)
-
-	// Extract mod loaders from categories (Modrinth puts loaders in categories)
-	modLoaders := []string{}
-	for _, cat := range project.Categories {
-		if loader, ok := minecraft.DetectModpackLoader(cat); ok {
-			modLoaders = append(modLoaders, string(loader))
-		}
-	}
-
-	// Use display_categories if available, otherwise use categories
-	categories := project.DisplayCategories
-	if len(categories) == 0 {
-		categories = project.Categories
-	}
-
-	return indexers.Modpack{
-		ID:            fmt.Sprintf("modrinth-%s", project.ProjectID),
-		IndexerID:     project.ProjectID,
-		Indexer:       "modrinth",
-		Name:          project.Title,
-		Slug:          project.Slug,
-		Summary:       project.Description,
-		Description:   project.Description,
-		LogoURL:       project.IconURL,
-		WebsiteURL:    fmt.Sprintf("https://modrinth.com/modpack/%s", project.Slug),
-		DownloadCount: project.Downloads,
-		Categories:    categories,
-		GameVersions:  project.Versions,
-		ModLoaders:    modLoaders,
-		LatestFileID:  project.LatestVersion,
-		DateCreated:   dateCreated,
-		DateModified:  dateModified,
-		DateReleased:  dateCreated, // Modrinth doesn't have separate release date in search
-	}
-}
-
-// Converts a full Modrinth project to a generic modpack
-func (m *ModrinthIndexer) convertProject(project ProjectDetails) indexers.Modpack {
 	// Parse dates
 	dateCreated, _ := time.Parse(time.RFC3339, project.Published)
 	dateModified, _ := time.Parse(time.RFC3339, project.Updated)
@@ -180,62 +138,100 @@ func (m *ModrinthIndexer) convertProject(project ProjectDetails) indexers.Modpac
 		latestVersionID = project.Versions[0] // Modrinth returns versions in latest-first order
 	}
 
-	return indexers.Modpack{
-		ID:            fmt.Sprintf("modrinth-%s", project.ID),
-		IndexerID:     project.ID,
+	// Encodes slice columns as JSON strings
+	categoriesJSON, _ := json.Marshal(categories)
+	gameVersionsJSON, _ := json.Marshal(project.GameVersions)
+	modLoadersJSON, _ := json.Marshal(modLoaders)
+
+	return &v1.IndexedModpack{
+		Id:            fmt.Sprintf("modrinth-%s", project.ID),
+		IndexerId:     project.ID,
 		Indexer:       "modrinth",
 		Name:          project.Title,
 		Slug:          project.Slug,
 		Summary:       project.Description,
 		Description:   project.Body, // Full description from project body
-		LogoURL:       project.IconURL,
-		WebsiteURL:    fmt.Sprintf("https://modrinth.com/modpack/%s", project.Slug),
-		DownloadCount: project.Downloads,
-		Categories:    categories,
-		GameVersions:  project.GameVersions,
-		ModLoaders:    modLoaders,
-		LatestFileID:  latestVersionID,
-		DateCreated:   dateCreated,
-		DateModified:  dateModified,
-		DateReleased:  dateCreated,
-	}
+		LogoUrl:       project.IconURL,
+		WebsiteUrl:    fmt.Sprintf("https://modrinth.com/modpack/%s", project.Slug),
+		DownloadCount: int32(project.Downloads),
+		Categories:    string(categoriesJSON),
+		GameVersions:  string(gameVersionsJSON),
+		ModLoaders:    string(modLoadersJSON),
+		LatestFileId:  latestVersionID,
+		DateCreated:   timestamppb.New(dateCreated),
+		DateModified:  timestamppb.New(dateModified),
+		DateReleased:  timestamppb.New(dateCreated),
+	}, nil
 }
 
-// Converts a Modrinth version to a generic modpack file
-func (m *ModrinthIndexer) convertVersionToFile(version Version, file File, modpackID string) indexers.ModpackFile {
-	// Parse date
-	fileDate, _ := time.Parse(time.RFC3339, version.DatePublished)
-
-	// Convert version type to release type
-	releaseType := "release"
-	switch strings.ToLower(version.VersionType) {
-	case "beta":
-		releaseType = "beta"
-	case "alpha":
-		releaseType = "alpha"
+// Get files for a modpack
+func (m *ModrinthIndexer) GetModpackFiles(ctx context.Context, modpackID string, gameVersion string, modLoader string) ([]*v1.IndexedModpackFile, error) {
+	var loaders, gameVersions []string
+	if modLoader != "" {
+		loaders = []string{strings.ToLower(modLoader)}
+	}
+	if gameVersion != "" {
+		gameVersions = []string{gameVersion}
+	}
+	versions, err := m.client.GetProjectVersionsFiltered(ctx, modpackID, loaders, gameVersions)
+	if err != nil {
+		return nil, err
 	}
 
-	// Get primary mod loader
-	modLoader := ""
-	if len(version.Loaders) > 0 {
-		modLoader = strings.ToLower(version.Loaders[0])
+	// Normalizes versions to proto rows, keeps newest-first order
+	result := make([]*v1.IndexedModpackFile, 0, len(versions))
+	for _, version := range versions {
+		if len(version.Files) == 0 {
+			continue
+		}
+
+		// Find primary file or use first one
+		var primaryFile *File
+		for i := range version.Files {
+			if version.Files[i].Primary {
+				primaryFile = &version.Files[i]
+				break
+			}
+		}
+		if primaryFile == nil {
+			primaryFile = &version.Files[0]
+		}
+
+		// Parse date
+		fileDate, _ := time.Parse(time.RFC3339, version.DatePublished)
+
+		// Convert version type to release type
+		releaseType := "release"
+		switch strings.ToLower(version.VersionType) {
+		case "beta":
+			releaseType = "beta"
+		case "alpha":
+			releaseType = "alpha"
+		}
+
+		// Get primary mod loader
+		fileLoader := ""
+		if len(version.Loaders) > 0 {
+			fileLoader = strings.ToLower(version.Loaders[0])
+		}
+
+		gameVersionsJSON, _ := json.Marshal(version.GameVersions)
+
+		// No separate server pack files, uses the primary file
+		result = append(result, &v1.IndexedModpackFile{
+			Id:               version.ID,
+			ModpackId:        fmt.Sprintf("modrinth-%s", modpackID),
+			DisplayName:      version.Name,
+			FileName:         primaryFile.Filename,
+			FileDate:         timestamppb.New(fileDate),
+			FileLength:       primaryFile.Size,
+			ReleaseType:      releaseType,
+			DownloadUrl:      primaryFile.URL,
+			GameVersions:     string(gameVersionsJSON),
+			ModLoader:        fileLoader,
+			ServerPackFileId: nil,
+		})
 	}
 
-	// No separate server pack files, uses the primary file
-	var serverPackID *string
-
-	return indexers.ModpackFile{
-		ID:               version.ID,
-		ModpackID:        modpackID,
-		DisplayName:      version.Name,
-		FileName:         file.Filename,
-		FileDate:         fileDate,
-		FileLength:       file.Size,
-		ReleaseType:      releaseType,
-		DownloadURL:      file.URL,
-		GameVersions:     version.GameVersions,
-		ModLoader:        modLoader,
-		ServerPackFileID: serverPackID,
-		VersionNumber:    version.VersionNumber, // Use human-readable version number
-	}
+	return result, nil
 }

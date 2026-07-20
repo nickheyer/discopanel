@@ -83,7 +83,7 @@ func (in *depInstaller) Install(ctx context.Context, srv *serverInfo, modsDir, m
 }
 
 func (in *depInstaller) fromModrinth(ctx context.Context, srv *serverInfo, modsDir, modID, versionRange string, facets []string, dialect string) (string, error) {
-	versions, err := in.modrinth.GetProjectVersionsFiltered(ctx, modID, facets, []string{srv.MCVersion})
+	versions, err := in.modrinth.GetProjectVersionsFiltered(ctx, modID, facets, []string{srv.McVersion})
 	if err != nil {
 		return "", fmt.Errorf("modrinth lookup for %q failed: %w", modID, err)
 	}
@@ -98,7 +98,7 @@ func (in *depInstaller) fromModrinth(ctx context.Context, srv *serverInfo, modsD
 		pick = &versions[0]
 	}
 	if pick == nil {
-		return "", fmt.Errorf("no %s build of %q exists for MC %s", facets[0], modID, srv.MCVersion)
+		return "", fmt.Errorf("no %s build of %q exists for MC %s", facets[0], modID, srv.McVersion)
 	}
 
 	var file *modrinth.File
@@ -137,12 +137,12 @@ func (in *depInstaller) fromCurseForge(ctx context.Context, srv *serverInfo, mod
 	if !ok {
 		return "", fmt.Errorf("curseforge has no loader filter for %q", facets[0])
 	}
-	files, err := client.GetModpackFiles(ctx, mod.ID, srv.MCVersion, loaderType)
+	files, err := client.GetModpackFiles(ctx, mod.ID, srv.McVersion, loaderType)
 	if err != nil {
 		return "", fmt.Errorf("file lookup for %q failed: %w", modID, err)
 	}
 	if len(files) == 0 {
-		return "", fmt.Errorf("no %s build of %q exists for MC %s", facets[0], modID, srv.MCVersion)
+		return "", fmt.Errorf("no %s build of %q exists for MC %s", facets[0], modID, srv.McVersion)
 	}
 
 	// Newest file wins, the jar gate verifies the range

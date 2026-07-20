@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package discopanel.v1;
 
-import "google/protobuf/timestamp.proto";
+import "discopanel/v1/storage.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
@@ -18,22 +18,6 @@ service ModService {
   rpc UpdateMod(UpdateModRequest) returns (UpdateModResponse);
   // Delete mod file
   rpc DeleteMod(DeleteModRequest) returns (DeleteModResponse);
-}
-
-// Server mod metadata
-message Mod {
-  reserved 5, 8, 9;
-  reserved "description", "author", "website";
-  string id = 1;
-  string server_id = 2;
-  string file_name = 3;
-  string display_name = 4;
-  string version = 6; // From jar metadata when the jar declares it
-  string mod_id = 7; // Declared mod id from jar metadata
-  int64 file_size = 10;
-  google.protobuf.Timestamp uploaded_at = 11;
-  google.protobuf.Timestamp updated_at = 12;
-  bool enabled = 13;
 }
 
 // Server mods request

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -20,16 +20,16 @@ const (
 )
 
 // Downloads the Mojang server jar for the MC version
-func (p *Provisioner) installVanilla(ctx context.Context, server *storage.Server) (*Result, error) {
-	if err := p.downloadVanillaJar(ctx, server, server.MCVersion, "server.jar"); err != nil {
+func (p *Provisioner) installVanilla(ctx context.Context, server *v1.Server) (*Result, error) {
+	if err := p.downloadVanillaJar(ctx, server, server.McVersion, "server.jar"); err != nil {
 		return nil, err
 	}
 	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar"}
-	return p.finishLaunch(server, spec, storage.ModLoaderVanilla, "", server.MCVersion)
+	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_VANILLA, "", server.McVersion)
 }
 
 // Fetches SHA1 verified official server jar to relPath
-func (p *Provisioner) downloadVanillaJar(ctx context.Context, server *storage.Server, mcVersion, relPath string) error {
+func (p *Provisioner) downloadVanillaJar(ctx context.Context, server *v1.Server, mcVersion, relPath string) error {
 	meta, err := minecraft.GetVersionMetadata(mcVersion)
 	if err != nil {
 		return err
@@ -43,8 +43,8 @@ func (p *Provisioner) downloadVanillaJar(ctx context.Context, server *storage.Se
 }
 
 // Downloads Fabric launcher and pre-seeds the vanilla jar
-func (p *Provisioner) installFabric(ctx context.Context, server *storage.Server, loaderVersion string) (*Result, error) {
-	mc := server.MCVersion
+func (p *Provisioner) installFabric(ctx context.Context, server *v1.Server, loaderVersion string) (*Result, error) {
+	mc := server.McVersion
 
 	if loaderVersion == "" {
 		var loaders []struct {
@@ -107,12 +107,12 @@ func (p *Provisioner) installFabric(ctx context.Context, server *storage.Server,
 	}
 
 	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "fabric-server-launch.jar"}
-	return p.finishLaunch(server, spec, storage.ModLoaderFabric, loaderVersion, mc)
+	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_FABRIC, loaderVersion, mc)
 }
 
 // Runs the Quilt installer in a one-shot container
-func (p *Provisioner) installQuilt(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, loaderVersion string) (*Result, error) {
-	mc := server.MCVersion
+func (p *Provisioner) installQuilt(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, loaderVersion string) (*Result, error) {
+	mc := server.McVersion
 
 	if loaderVersion == "" {
 		var loaders []struct {
@@ -163,12 +163,12 @@ func (p *Provisioner) installQuilt(ctx context.Context, server *storage.Server, 
 	}
 
 	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "quilt-server-launch.jar"}
-	return p.finishLaunch(server, spec, storage.ModLoaderQuilt, loaderVersion, mc)
+	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_QUILT, loaderVersion, mc)
 }
 
 // Provisions paper or folia from the Fill v3 API
-func (p *Provisioner) installPaperMC(ctx context.Context, server *storage.Server, project string) (*Result, error) {
-	mc := server.MCVersion
+func (p *Provisioner) installPaperMC(ctx context.Context, server *v1.Server, project string) (*Result, error) {
+	mc := server.McVersion
 
 	var build struct {
 		ID        int    `json:"id"`
@@ -197,17 +197,17 @@ func (p *Provisioner) installPaperMC(ctx context.Context, server *storage.Server
 		return nil, err
 	}
 
-	loader := storage.ModLoaderPaper
+	loader := v1.ModLoader_MOD_LOADER_PAPER
 	if project == "folia" {
-		loader = storage.ModLoaderFolia
+		loader = v1.ModLoader_MOD_LOADER_FOLIA
 	}
 	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar"}
 	return p.finishLaunch(server, spec, loader, fmt.Sprintf("%d", build.ID), mc)
 }
 
 // Provisions Purpur from the purpurmc api
-func (p *Provisioner) installPurpur(ctx context.Context, server *storage.Server) (*Result, error) {
-	mc := server.MCVersion
+func (p *Provisioner) installPurpur(ctx context.Context, server *v1.Server) (*Result, error) {
+	mc := server.McVersion
 
 	var versionInfo struct {
 		Builds struct {
@@ -241,11 +241,11 @@ func (p *Provisioner) installPurpur(ctx context.Context, server *storage.Server)
 	}
 
 	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar"}
-	return p.finishLaunch(server, spec, storage.ModLoaderPurpur, buildNum, mc)
+	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_PURPUR, buildNum, mc)
 }
 
 // Provisions from a user supplied jar or exec string
-func (p *Provisioner) installCustom(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties) (*Result, error) {
+func (p *Provisioner) installCustom(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties) (*Result, error) {
 	customServer := strVal(cfg.CustomServer)
 	customExec := strVal(cfg.CustomJarExec)
 
@@ -280,5 +280,5 @@ func (p *Provisioner) installCustom(ctx context.Context, server *storage.Server,
 		return nil, fmt.Errorf("custom server requires a Custom Server JAR (URL or data-dir path) or a Custom JAR Execution command")
 	}
 
-	return p.finishLaunch(server, spec, server.ModLoader, "", server.MCVersion)
+	return p.finishLaunch(server, spec, server.ModLoader, "", server.McVersion)
 }

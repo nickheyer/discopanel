@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
-	storage "github.com/nickheyer/discopanel/internal/db"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 const idleCheckInterval = 30 * time.Second
@@ -72,44 +72,44 @@ func (m *Manager) checkIdleServers() {
 	}
 
 	for _, server := range servers {
-		if server.ContainerID == "" || server.Detached || m.IsStarting(server.ID) {
+		if server.ContainerId == "" || server.Detached || m.IsStarting(server.Id) {
 			continue
 		}
 
-		cfg, err := m.store.GetServerProperties(ctx, server.ID)
+		cfg, err := m.store.GetServerProperties(ctx, server.Id)
 		if err != nil {
 			continue
 		}
 		autopause := cfg.EnableAutopause != nil && *cfg.EnableAutopause && server.ProxyHostname != ""
 		autostop := cfg.EnableAutostop != nil && *cfg.EnableAutostop
 		if !autopause && !autostop {
-			m.resetIdle(server.ID)
+			m.resetIdle(server.Id)
 			continue
 		}
 
-		status, err := m.docker.GetContainerStatus(ctx, server.ContainerID)
+		status, err := m.docker.GetContainerStatus(ctx, server.ContainerId)
 		if err != nil {
-			m.resetIdle(server.ID)
+			m.resetIdle(server.Id)
 			continue
 		}
 
 		// Paused servers can still be autostopped after stop timeout
-		if status == storage.StatusPaused {
-			if autostop && m.idleFor(server) >= m.idleTimeout(cfg, server.ID) {
+		if status == v1.ServerStatus_SERVER_STATUS_PAUSED {
+			if autostop && m.idleFor(server) >= m.idleTimeout(cfg, server.Id) {
 				m.log.Info("lifecycle: autostopping paused idle server %s", server.Name)
-				go m.stopIdle(server.ID)
+				go m.stopIdle(server.Id)
 			}
 			continue
 		}
 
-		if status != storage.StatusRunning {
+		if status != v1.ServerStatus_SERVER_STATUS_RUNNING {
 			continue
 		}
 
 		players := 0
 		known := false
 		if m.players != nil {
-			players, known = m.players.PlayersOnline(server.ID)
+			players, known = m.players.PlayersOnline(server.Id)
 		}
 		if !known {
 			// Without player data, never take idle actions
@@ -118,13 +118,13 @@ func (m *Manager) checkIdleServers() {
 
 		now := time.Now()
 		m.idleMu.Lock()
-		st, ok := m.idle[server.ID]
+		st, ok := m.idle[server.Id]
 		if !ok {
 			st = &idleState{lastActive: now}
 			if server.LastStarted != nil {
-				st.lastActive = *server.LastStarted
+				st.lastActive = server.LastStarted.AsTime()
 			}
-			m.idle[server.ID] = st
+			m.idle[server.Id] = st
 		}
 		if players > 0 {
 			st.lastActive = now
@@ -139,7 +139,7 @@ func (m *Manager) checkIdleServers() {
 		}
 
 		if autopause && idleFor >= m.timeoutFor(intOrDefault(cfg.AutopauseTimeoutEst, 3600), intOrDefault(cfg.AutopauseTimeoutInit, 600), hadPlayers) {
-			if err := m.Pause(activity.WithTrace(activity.WithSource(ctx, "autopause")), server.ID); err != nil {
+			if err := m.Pause(activity.WithTrace(activity.WithSource(ctx, "autopause")), server.Id); err != nil {
 				m.log.Error("lifecycle: autopause failed for %s: %v", server.Name, err)
 			}
 			continue
@@ -147,26 +147,26 @@ func (m *Manager) checkIdleServers() {
 
 		if autostop && idleFor >= m.timeoutFor(intOrDefault(cfg.AutostopTimeoutEst, 3600), intOrDefault(cfg.AutostopTimeoutInit, 1800), hadPlayers) {
 			m.log.Info("lifecycle: autostopping idle server %s", server.Name)
-			go m.stopIdle(server.ID)
+			go m.stopIdle(server.Id)
 		}
 	}
 }
 
 // Returns how long server has been idle per tracked state
-func (m *Manager) idleFor(server *storage.Server) time.Duration {
+func (m *Manager) idleFor(server *v1.Server) time.Duration {
 	m.idleMu.Lock()
 	defer m.idleMu.Unlock()
-	if st, ok := m.idle[server.ID]; ok {
+	if st, ok := m.idle[server.Id]; ok {
 		return time.Since(st.lastActive)
 	}
 	if server.LastStarted != nil {
-		return time.Since(*server.LastStarted)
+		return time.Since(server.LastStarted.AsTime())
 	}
 	return 0
 }
 
 // Resolves the applicable autostop timeout for a server
-func (m *Manager) idleTimeout(cfg *storage.ServerProperties, serverID string) time.Duration {
+func (m *Manager) idleTimeout(cfg *v1.ServerProperties, serverID string) time.Duration {
 	m.idleMu.Lock()
 	hadPlayers := false
 	if st, ok := m.idle[serverID]; ok {
@@ -191,9 +191,9 @@ func (m *Manager) stopIdle(serverID string) {
 	}
 }
 
-func intOrDefault(v *int, def int) int {
+func intOrDefault(v *int32, def int) int {
 	if v == nil || *v <= 0 {
 		return def
 	}
-	return *v
+	return int(*v)
 }

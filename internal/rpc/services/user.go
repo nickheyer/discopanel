@@ -10,7 +10,6 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var _ discopanelv1connect.UserServiceHandler = (*UserService)(nil)
@@ -38,8 +37,8 @@ func (s *UserService) ListUsers(ctx context.Context, req *connect.Request[v1.Lis
 
 	protoUsers := make([]*v1.User, 0, len(users))
 	for _, user := range users {
-		roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
-		protoUsers = append(protoUsers, dbUserToProto(user, roles))
+		user.Roles, _ = s.store.GetUserRoleNames(ctx, user.Id)
+		protoUsers = append(protoUsers, user.Redact())
 	}
 
 	return connect.NewResponse(&v1.ListUsersResponse{
@@ -58,10 +57,10 @@ func (s *UserService) GetUser(ctx context.Context, req *connect.Request[v1.GetUs
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("user not found"))
 	}
 
-	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
+	user.Roles, _ = s.store.GetUserRoleNames(ctx, user.Id)
 
 	return connect.NewResponse(&v1.GetUserResponse{
-		User: dbUserToProto(user, roles),
+		User: user.Redact(),
 	}), nil
 }
 
@@ -80,8 +79,8 @@ func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.Cr
 
 	// Assign roles
 	for _, roleName := range msg.Roles {
-		if err := s.store.AssignRole(ctx, user.ID, roleName, "local"); err != nil {
-			s.log.Error("Failed to assign role %s to user %s: %v", roleName, user.ID, err)
+		if err := s.store.AssignRole(ctx, user.Id, roleName, "local"); err != nil {
+			s.log.Error("Failed to assign role %s to user %s: %v", roleName, user.Id, err)
 		}
 	}
 
@@ -89,14 +88,14 @@ func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.Cr
 	if len(msg.Roles) == 0 {
 		defaultRoles, _ := s.store.GetDefaultRoles(ctx)
 		for _, role := range defaultRoles {
-			_ = s.store.AssignRole(ctx, user.ID, role.Name, "local")
+			_ = s.store.AssignRole(ctx, user.Id, role.Name, "local")
 		}
 	}
 
-	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
+	user.Roles, _ = s.store.GetUserRoleNames(ctx, user.Id)
 
 	return connect.NewResponse(&v1.CreateUserResponse{
-		User: dbUserToProto(user, roles),
+		User: user.Redact(),
 	}), nil
 }
 
@@ -127,7 +126,7 @@ func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.Up
 	// Update roles if provided
 	if len(msg.Roles) > 0 {
 		// Get current roles
-		currentRoles, _ := s.store.GetUserRoleNames(ctx, user.ID)
+		currentRoles, _ := s.store.GetUserRoleNames(ctx, user.Id)
 
 		// Build sets for comparison
 		currentSet := make(map[string]bool)
@@ -142,22 +141,22 @@ func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.Up
 		// Remove roles not in desired set
 		for _, r := range currentRoles {
 			if !desiredSet[r] {
-				_ = s.store.UnassignRole(ctx, user.ID, r)
+				_ = s.store.UnassignRole(ctx, user.Id, r)
 			}
 		}
 
 		// Add roles not in current set
 		for _, r := range msg.Roles {
 			if !currentSet[r] {
-				_ = s.store.AssignRole(ctx, user.ID, r, "local")
+				_ = s.store.AssignRole(ctx, user.Id, r, "local")
 			}
 		}
 	}
 
-	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
+	user.Roles, _ = s.store.GetUserRoleNames(ctx, user.Id)
 
 	return connect.NewResponse(&v1.UpdateUserResponse{
-		User: dbUserToProto(user, roles),
+		User: user.Redact(),
 	}), nil
 }
 
@@ -176,21 +175,4 @@ func (s *UserService) DeleteUser(ctx context.Context, req *connect.Request[v1.De
 	return connect.NewResponse(&v1.DeleteUserResponse{
 		Message: "user deleted",
 	}), nil
-}
-
-func dbUserToProto(user *storage.User, roles []string) *v1.User {
-	protoUser := &v1.User{
-		Id:           user.ID,
-		Username:     user.Username,
-		Email:        user.Email,
-		AuthProvider: user.AuthProvider,
-		IsActive:     user.IsActive,
-		Roles:        roles,
-		CreatedAt:    timestamppb.New(user.CreatedAt),
-		UpdatedAt:    timestamppb.New(user.UpdatedAt),
-	}
-	if user.LastLogin != nil {
-		protoUser.LastLogin = timestamppb.New(*user.LastLogin)
-	}
-	return protoUser
 }

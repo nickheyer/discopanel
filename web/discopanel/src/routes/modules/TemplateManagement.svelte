@@ -6,8 +6,8 @@
 	import DynamicIcon from '$lib/components/ui/DynamicIcon.svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import type { ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
-	import { ModuleTemplateType } from '$lib/proto/discopanel/v1/module_pb';
+	import type { ModuleTemplate } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ModuleTemplateType } from '$lib/proto/discopanel/v1/storage_pb';
 	import { Plus, Trash2, Settings, Layers, Search } from '@lucide/svelte';
 	import ModuleTemplateCreateDialog from '$lib/components/server/ModuleTemplateCreateDialog.svelte';
 	import { onMount } from 'svelte';

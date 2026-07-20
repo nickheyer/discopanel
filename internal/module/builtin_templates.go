@@ -41,12 +41,12 @@ func doctorVolumes() string {
 func InitBuiltinTemplates(store *storage.Store) error {
 	ctx := context.Background()
 
-	templates := []storage.ModuleTemplate{
+	templates := []*v1.ModuleTemplate{
 		{
-			ID:             "builtin-geyser",
+			Id:             "builtin-geyser",
 			Name:           "Geyser",
 			Description:    "Allows Bedrock Edition players to join Java Edition servers. Requires Floodgate plugin on the server for seamless authentication.",
-			Type:           storage.ModuleTemplateTypeBuiltin,
+			Type:           v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN,
 			DockerImage:    "nickheyer/discopanel-geyser:latest",
 			Category:       "proxy",
 			SupportsProxy:  true,
@@ -75,10 +75,10 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultMemory:   1024,
 		},
 		{
-			ID:             "builtin-minecraft-exporter",
+			Id:             "builtin-minecraft-exporter",
 			Name:           "Prometheus Exporter",
 			Description:    "Exports Minecraft server metrics to Prometheus for monitoring dashboards",
-			Type:           storage.ModuleTemplateTypeBuiltin,
+			Type:           v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN,
 			DockerImage:    "nickheyer/discopanel-exporter:latest",
 			Category:       "monitoring",
 			SupportsProxy:  true,
@@ -99,10 +99,10 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultMemory:   512,
 		},
 		{
-			ID:             "builtin-bluemap",
+			Id:             "builtin-bluemap",
 			Name:           "BlueMap",
 			Description:    "Interactive 3D map renderer for Minecraft worlds with a web-based viewer. Renders overworld, nether, and end dimensions.",
-			Type:           storage.ModuleTemplateTypeBuiltin,
+			Type:           v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN,
 			DockerImage:    "ghcr.io/bluemap-minecraft/bluemap:latest",
 			Category:       "monitoring",
 			SupportsProxy:  true,
@@ -124,17 +124,17 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			HealthCheckPort:         8100,
 			Documentation:           "Renders 3D maps of your Minecraft worlds accessible via a web interface. Supports overworld, nether, and end dimensions. World volumes are mounted read-only from the server data path. Config, data, and web assets are stored in the bluemap module directory.",
 			DefaultMemory:           2048,
-			DefaultUID:              "{{host.uid}}",
-			DefaultGID:              "{{host.gid}}",
+			DefaultUid:              "{{host.uid}}",
+			DefaultGid:              "{{host.gid}}",
 			DefaultInitCommand:      `sed -i 's/accept-download: false/accept-download: true/' /app/config/core.conf`,
 			DefaultInitCommandDelay: 1,
 			DefaultRestartAfterInit: true,
 		},
 		{
-			ID:             "builtin-status-panel",
+			Id:             "builtin-status-panel",
 			Name:           "Status Panel",
 			Description:    "Real-time server status dashboard showing player count, TPS, memory usage, and server info via the DiscoPanel API.",
-			Type:           storage.ModuleTemplateTypeBuiltin,
+			Type:           v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN,
 			DockerImage:    "nickheyer/discopanel-status:latest",
 			Category:       "monitoring",
 			SupportsProxy:  true,
@@ -156,10 +156,10 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultMemory:   512,
 		},
 		{
-			ID:             doctorTemplateID,
+			Id:             doctorTemplateID,
 			Name:           "Doctor",
 			Description:    "Global crash doctor. Watches every DiscoPanel server, diagnoses crashes from structured exit reports, disables or sources mods with a full revert trail, and verifies repairs by restarting through the panel.",
-			Type:           storage.ModuleTemplateTypeBuiltin,
+			Type:           v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN,
 			DockerImage:    "nickheyer/discopanel-doctor:latest",
 			Category:       "automation",
 			SupportsProxy:  false,
@@ -181,10 +181,10 @@ func InitBuiltinTemplates(store *storage.Store) error {
 
 	// Insert only when missing so user edits survive restarts
 	for _, template := range templates {
-		if _, err := store.GetModuleTemplate(ctx, template.ID); err == nil {
+		if _, err := store.GetModuleTemplate(ctx, template.Id); err == nil {
 			continue
 		}
-		if err := store.CreateModuleTemplate(ctx, &template); err != nil {
+		if err := store.CreateModuleTemplate(ctx, template); err != nil {
 			return err
 		}
 	}

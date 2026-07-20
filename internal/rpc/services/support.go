@@ -597,7 +597,7 @@ func scrubTaskConfigs(db *gorm.DB) error {
 
 // Adds server configuration files to the bundle
 func (s *SupportService) addServerPropertiesToBundle(ctx context.Context, tarWriter *tar.Writer, serverIDs []string) error {
-	var servers []*storage.Server
+	var servers []*v1.Server
 	var err error
 
 	if len(serverIDs) > 0 {
@@ -619,7 +619,7 @@ func (s *SupportService) addServerPropertiesToBundle(ctx context.Context, tarWri
 	// Add each server's configuration
 	for _, server := range servers {
 		// Get server config from database
-		serverConfig, err := s.store.GetServerProperties(ctx, server.ID)
+		serverConfig, err := s.store.GetServerProperties(ctx, server.Id)
 		if err != nil {
 			s.log.Warn("Failed to get config for server %s: %v", server.Name, err)
 			continue
@@ -761,11 +761,11 @@ func (s *SupportService) addSystemInfoToBundle(ctx context.Context, tarWriter *t
 		if err == nil {
 			proxyConfigInfo = &v1.ProxyConfigInfo{
 				Enabled: proxyConfig.Enabled,
-				BaseUrl: proxyConfig.BaseURL,
+				BaseUrl: proxyConfig.BaseUrl,
 			}
 
 			// Get proxy listeners
-			listeners, err := s.store.GetProxyListeners(ctx)
+			listeners, err := s.store.ListProxyListeners(ctx)
 			if err == nil {
 				for _, listener := range listeners {
 					proxyConfigInfo.Listeners = append(proxyConfigInfo.Listeners, &v1.ProxyListenerInfo{
@@ -783,11 +783,11 @@ func (s *SupportService) addSystemInfoToBundle(ctx context.Context, tarWriter *t
 	serverSummaries := make([]*v1.ServerSummary, 0, len(servers))
 	for _, server := range servers {
 		serverSummaries = append(serverSummaries, &v1.ServerSummary{
-			Id:          server.ID,
+			Id:          server.Id,
 			Name:        server.Name,
-			ModLoader:   string(server.ModLoader),
-			McVersion:   server.MCVersion,
-			Status:      string(server.Status),
+			ModLoader:   server.ModLoader.Name(),
+			McVersion:   server.McVersion,
+			Status:      server.Status.Name(),
 			Port:        int32(server.Port),
 			Memory:      int32(server.Memory),
 			AutoStart:   server.AutoStart,

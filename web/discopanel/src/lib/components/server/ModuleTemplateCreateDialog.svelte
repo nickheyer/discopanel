@@ -12,8 +12,12 @@
 	import { EmptyState } from '$lib/components/app';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import { ModuleEventAction, type ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
-	import { TriggeredEventType } from '$lib/proto/discopanel/v1/event_pb';
+	import {
+		ModuleEventAction,
+		TriggeredEventType,
+		type ModuleTemplate
+	} from '$lib/proto/discopanel/v1/storage_pb';
+	import { ModuleEventActionLabel, ModuleEventActionDesc } from '$lib/proto/enums.gen';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import {
 		Loader2,
@@ -252,21 +256,17 @@
 		return map;
 	}
 
+	// Display order for event action choices
+	const EVENT_ACTION_OPTIONS: ModuleEventAction[] = [
+		ModuleEventAction.START,
+		ModuleEventAction.STOP,
+		ModuleEventAction.RESTART,
+		ModuleEventAction.EXEC,
+		ModuleEventAction.RCON
+	];
+
 	function getEventActionLabel(action: ModuleEventAction): string {
-		switch (action) {
-			case ModuleEventAction.START:
-				return 'Start Module';
-			case ModuleEventAction.STOP:
-				return 'Stop Module';
-			case ModuleEventAction.RESTART:
-				return 'Restart Module';
-			case ModuleEventAction.EXEC:
-				return 'Execute Command';
-			case ModuleEventAction.RCON:
-				return 'RCON Command';
-			default:
-				return 'Unknown';
-		}
+		return ModuleEventActionLabel[action] ?? ModuleEventActionLabel[ModuleEventAction.UNSPECIFIED];
 	}
 
 	// Snapshots template once so reloads keep edits
@@ -975,21 +975,16 @@
 																<span class="truncate">{getEventActionLabel(hook.action)}</span>
 															</SelectTrigger>
 															<SelectContent>
-																<SelectItem value={String(ModuleEventAction.START)}>
-																	Start Module
-																</SelectItem>
-																<SelectItem value={String(ModuleEventAction.STOP)}>
-																	Stop Module
-																</SelectItem>
-																<SelectItem value={String(ModuleEventAction.RESTART)}>
-																	Restart Module
-																</SelectItem>
-																<SelectItem value={String(ModuleEventAction.EXEC)}>
-																	Execute Command
-																</SelectItem>
-																<SelectItem value={String(ModuleEventAction.RCON)}>
-																	RCON Command
-																</SelectItem>
+																{#each EVENT_ACTION_OPTIONS as a (a)}
+																	<SelectItem value={String(a)}>
+																		<div class="flex flex-col">
+																			<span>{getEventActionLabel(a)}</span>
+																			{#if ModuleEventActionDesc[a]}
+																				<span class="text-xs text-muted-foreground">{ModuleEventActionDesc[a]}</span>
+																			{/if}
+																		</div>
+																	</SelectItem>
+																{/each}
 															</SelectContent>
 														</Select>
 													</div>

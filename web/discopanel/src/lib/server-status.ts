@@ -1,4 +1,5 @@
-import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
+import { ServerStatusLabel, ServerStatusDesc } from '$lib/proto/enums.gen';
 
 export type StatusTone = 'ok' | 'busy' | 'warn' | 'danger' | 'sleep' | 'idle';
 
@@ -9,71 +10,28 @@ export interface StatusMeta {
 	transitional: boolean;
 }
 
-const STATUS_META: Record<ServerStatus, StatusMeta> = {
-	[ServerStatus.UNSPECIFIED]: {
-		label: 'Unknown',
-		tone: 'idle',
-		desc: 'Status unknown',
-		transitional: false
-	},
-	[ServerStatus.CREATING]: {
-		label: 'Creating',
-		tone: 'busy',
-		desc: 'Setting up the server container',
-		transitional: true
-	},
-	[ServerStatus.STARTING]: {
-		label: 'Starting',
-		tone: 'busy',
-		desc: 'Booting up, hang tight',
-		transitional: true
-	},
-	[ServerStatus.RUNNING]: {
-		label: 'Running',
-		tone: 'ok',
-		desc: 'Online and accepting players',
-		transitional: false
-	},
-	[ServerStatus.STOPPING]: {
-		label: 'Stopping',
-		tone: 'busy',
-		desc: 'Saving the world and shutting down',
-		transitional: true
-	},
-	[ServerStatus.STOPPED]: {
-		label: 'Stopped',
-		tone: 'idle',
-		desc: 'Offline, start it to play',
-		transitional: false
-	},
-	[ServerStatus.ERROR]: {
-		label: 'Error',
-		tone: 'danger',
-		desc: 'Something went wrong, check the console',
-		transitional: false
-	},
-	[ServerStatus.UNHEALTHY]: {
-		label: 'Unhealthy',
-		tone: 'warn',
-		desc: 'Up but not responding normally',
-		transitional: false
-	},
-	[ServerStatus.PROVISIONING]: {
-		label: 'Provisioning',
-		tone: 'busy',
-		desc: 'Installing server files and mods',
-		transitional: true
-	},
-	[ServerStatus.PAUSED]: {
-		label: 'Sleeping',
-		tone: 'sleep',
-		desc: 'Paused while idle, joins wake it up',
-		transitional: false
-	}
+// Local UI tone and transition flag per status
+const STATUS_UI: Record<ServerStatus, { tone: StatusTone; transitional: boolean }> = {
+	[ServerStatus.UNSPECIFIED]: { tone: 'idle', transitional: false },
+	[ServerStatus.CREATING]: { tone: 'busy', transitional: true },
+	[ServerStatus.STARTING]: { tone: 'busy', transitional: true },
+	[ServerStatus.RUNNING]: { tone: 'ok', transitional: false },
+	[ServerStatus.STOPPING]: { tone: 'busy', transitional: true },
+	[ServerStatus.STOPPED]: { tone: 'idle', transitional: false },
+	[ServerStatus.ERROR]: { tone: 'danger', transitional: false },
+	[ServerStatus.UNHEALTHY]: { tone: 'warn', transitional: false },
+	[ServerStatus.PROVISIONING]: { tone: 'busy', transitional: true },
+	[ServerStatus.PAUSED]: { tone: 'sleep', transitional: false }
 };
 
 export function statusMeta(status: ServerStatus): StatusMeta {
-	return STATUS_META[status] ?? STATUS_META[ServerStatus.UNSPECIFIED];
+	const ui = STATUS_UI[status] ?? STATUS_UI[ServerStatus.UNSPECIFIED];
+	return {
+		label: ServerStatusLabel[status] ?? ServerStatusLabel[ServerStatus.UNSPECIFIED],
+		desc: ServerStatusDesc[status] ?? ServerStatusDesc[ServerStatus.UNSPECIFIED] ?? '',
+		tone: ui.tone,
+		transitional: ui.transitional
+	};
 }
 
 export const TONE_TEXT: Record<StatusTone, string> = {

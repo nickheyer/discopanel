@@ -16,31 +16,31 @@ func (m *Manager) HandleServerEvent(ctx context.Context, event events.Event) {
 	switch event.Type {
 	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START,
 		v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP:
-		m.resetRoster(event.ServerID)
+		m.resetRoster(event.ServerId)
 		return
 	}
 
-	cfg, err := m.store.GetServerProperties(ctx, event.ServerID)
+	cfg, err := m.store.GetServerProperties(ctx, event.ServerId)
 	if err != nil {
 		return
 	}
 
 	switch event.Type {
 	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_HEALTHY:
-		m.runRCONCommands(ctx, event.ServerID, cfg.RCONCmdsStartup)
+		m.runRCONCommands(ctx, event.ServerId, cfg.RconCmdsStartup)
 
 	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_JOIN:
-		first := m.trackJoin(event.ServerID, eventPlayer(event))
-		m.runRCONCommands(ctx, event.ServerID, cfg.RCONCmdsOnConnect)
+		first := m.trackJoin(event.ServerId, eventPlayer(event))
+		m.runRCONCommands(ctx, event.ServerId, cfg.RconCmdsOnConnect)
 		if first {
-			m.runRCONCommands(ctx, event.ServerID, cfg.RCONCmdsFirstConnect)
+			m.runRCONCommands(ctx, event.ServerId, cfg.RconCmdsFirstConnect)
 		}
 
 	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_LEAVE:
-		last := m.trackLeave(event.ServerID, eventPlayer(event))
-		m.runRCONCommands(ctx, event.ServerID, cfg.RCONCmdsOnDisconnect)
+		last := m.trackLeave(event.ServerId, eventPlayer(event))
+		m.runRCONCommands(ctx, event.ServerId, cfg.RconCmdsOnDisconnect)
 		if last {
-			m.runRCONCommands(ctx, event.ServerID, cfg.RCONCmdsLastDisconnect)
+			m.runRCONCommands(ctx, event.ServerId, cfg.RconCmdsLastDisconnect)
 		}
 	}
 }
@@ -124,13 +124,13 @@ func (m *Manager) SleepingInfo(serverID string) (*proxy.SleepingServer, bool) {
 	}
 
 	motd := server.Name + " is sleeping - join to wake it up"
-	if cfg, err := m.store.GetServerProperties(ctx, serverID); err == nil && cfg.MOTD != nil && *cfg.MOTD != "" {
-		motd = *cfg.MOTD + " (sleeping - join to wake)"
+	if cfg, err := m.store.GetServerProperties(ctx, serverID); err == nil && cfg.Motd != nil && *cfg.Motd != "" {
+		motd = *cfg.Motd + " (sleeping - join to wake)"
 	}
 
 	return &proxy.SleepingServer{
-		MOTD:       motd,
-		MaxPlayers: server.MaxPlayers,
+		Motd:       motd,
+		MaxPlayers: int(server.MaxPlayers),
 	}, true
 }
 

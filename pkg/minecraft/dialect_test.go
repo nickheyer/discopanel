@@ -1,6 +1,7 @@
 package minecraft
 
 import (
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"os"
 	"path/filepath"
 	"slices"
@@ -77,24 +78,24 @@ func TestResolveDialects(t *testing.T) {
 	mods := filepath.Join(dir, "mods")
 
 	// A declared loader never touches the disk
-	if got := ResolveDialects(ModLoaderQuilt, dir, mods); !slices.Equal(got, []string{"quilt", "fabric"}) {
+	if got := ResolveDialects(v1.ModLoader_MOD_LOADER_QUILT, dir, mods); !slices.Equal(got, []string{"quilt", "fabric"}) {
 		t.Fatalf("quilt resolved %v", got)
 	}
-	if got := ResolveDialects(ModLoaderMohist, dir, mods); !slices.Equal(got, []string{"forge"}) {
+	if got := ResolveDialects(v1.ModLoader_MOD_LOADER_MOHIST, dir, mods); !slices.Equal(got, []string{"forge"}) {
 		t.Fatalf("mohist resolved %v", got)
 	}
-	if got := ResolveDialects(ModLoaderPaper, dir, mods); got != nil {
+	if got := ResolveDialects(v1.ModLoader_MOD_LOADER_PAPER, dir, mods); got != nil {
 		t.Fatalf("paper resolved %v, want none", got)
 	}
 
 	// Pack platforms declare nothing, the install testifies
-	if got := ResolveDialects(ModLoaderModrinth, dir, mods); got != nil {
+	if got := ResolveDialects(v1.ModLoader_MOD_LOADER_MODRINTH, dir, mods); got != nil {
 		t.Fatalf("empty install resolved %v", got)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "libraries", "net", "neoforged"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if got := ResolveDialects(ModLoaderModrinth, dir, mods); !slices.Equal(got, []string{"neoforge", "forge"}) {
+	if got := ResolveDialects(v1.ModLoader_MOD_LOADER_MODRINTH, dir, mods); !slices.Equal(got, []string{"neoforge", "forge"}) {
 		t.Fatalf("neoforged libraries resolved %v", got)
 	}
 
@@ -102,7 +103,7 @@ func TestResolveDialects(t *testing.T) {
 	if err := runtimespec.WriteLaunchSpec(dir, &runtimespec.LaunchSpec{Loader: "fabric"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := ResolveDialects(ModLoaderModrinth, dir, mods); !slices.Equal(got, []string{"fabric"}) {
+	if got := ResolveDialects(v1.ModLoader_MOD_LOADER_MODRINTH, dir, mods); !slices.Equal(got, []string{"fabric"}) {
 		t.Fatalf("launch spec resolved %v", got)
 	}
 
@@ -110,7 +111,7 @@ func TestResolveDialects(t *testing.T) {
 	if err := runtimespec.WriteLaunchSpec(dir, &runtimespec.LaunchSpec{Loader: "mohist"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := ResolveDialects(ModLoaderCustom, dir, mods); !slices.Equal(got, []string{"forge"}) {
+	if got := ResolveDialects(v1.ModLoader_MOD_LOADER_CUSTOM, dir, mods); !slices.Equal(got, []string{"forge"}) {
 		t.Fatalf("hybrid spec resolved %v", got)
 	}
 }

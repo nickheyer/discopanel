@@ -19,8 +19,10 @@ import (
 	"github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/tidwall/gjson"
 	"golang.org/x/oauth2"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type OIDCHandler struct {
@@ -244,26 +246,26 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	claimRoles := make(map[string]bool, len(resolvedRoles))
 	for _, roleName := range resolvedRoles {
 		claimRoles[roleName] = true
-		_ = h.store.AssignRole(ctx, user.ID, roleName, "oidc")
+		_ = h.store.AssignRole(ctx, user.Id, roleName, "oidc")
 	}
-	var oidcAssigned []db.UserRole
-	if err := h.store.DB().WithContext(ctx).Where("user_id = ? AND source = ?", user.ID, "oidc").Find(&oidcAssigned).Error; err == nil {
+	var oidcAssigned []*v1.UserRole
+	if err := h.store.DB().WithContext(ctx).Where("user_id = ? AND source = ?", user.Id, "oidc").Find(&oidcAssigned).Error; err == nil {
 		for _, ur := range oidcAssigned {
 			if !claimRoles[ur.RoleName] {
-				_ = h.store.UnassignRole(ctx, user.ID, ur.RoleName)
+				_ = h.store.UnassignRole(ctx, user.Id, ur.RoleName)
 			}
 		}
 	}
 
 	// Get user roles
-	roleNames, err := h.store.GetUserRoleNames(ctx, user.ID)
+	roleNames, err := h.store.GetUserRoleNames(ctx, user.Id)
 	if err != nil {
 		roleNames = []string{}
 	}
 
 	// Generate session token
 	expiresAt := time.Now().Add(time.Duration(h.manager.config.SessionTimeout) * time.Second)
-	token, err := h.manager.generateJWT(user.ID, user.Username, roleNames, expiresAt)
+	token, err := h.manager.generateJWT(user.Id, user.Username, roleNames, expiresAt)
 	if err != nil {
 		h.log.Error("OIDC: failed to generate JWT: %v", err)
 		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
@@ -271,11 +273,11 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session
-	session := &db.Session{
-		ID:        uuid.New().String(),
-		UserID:    user.ID,
+	session := &v1.Session{
+		Id:        uuid.New().String(),
+		UserId:    user.Id,
 		Token:     token,
-		ExpiresAt: expiresAt,
+		ExpiresAt: timestamppb.New(expiresAt),
 	}
 	if err := h.store.CreateSession(ctx, session); err != nil {
 		h.log.Error("OIDC: failed to create session: %v", err)
@@ -290,7 +292,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // Finds or creates OIDC user, same username can coexist
-func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, email string) (*db.User, error) {
+func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, email string) (*v1.User, error) {
 	// Tries to find by OIDC subject, for returning users
 	if user, err := h.store.GetUserByOIDCSubject(ctx, sub); err == nil {
 		if !user.IsActive {
@@ -300,8 +302,7 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, e
 		if email != "" {
 			user.Email = &email
 		}
-		now := time.Now()
-		user.LastLogin = &now
+		user.LastLogin = timestamppb.Now()
 		_ = h.store.UpdateUser(ctx, user)
 		return user, nil
 	}
@@ -311,14 +312,14 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, e
 	if email != "" {
 		emailPtr = &email
 	}
-	user := &db.User{
-		ID:           uuid.New().String(),
+	user := &v1.User{
+		Id:           uuid.New().String(),
 		Username:     username,
 		Email:        emailPtr,
 		AuthProvider: "oidc",
-		OIDCSubject:  sub,
-		OIDCIssuer:   h.config.IssuerURI,
 		IsActive:     true,
+		OidcSubject:  sub,
+		OidcIssuer:   h.config.IssuerURI,
 	}
 	if err := h.store.CreateUser(ctx, user); err != nil {
 		return nil, fmt.Errorf("failed to create OIDC user: %w", err)
@@ -327,7 +328,7 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, e
 	// Default roles keep local source so claim sync spares them
 	defaultRoles, _ := h.store.GetDefaultRoles(ctx)
 	for _, role := range defaultRoles {
-		_ = h.store.AssignRole(ctx, user.ID, role.Name, "local")
+		_ = h.store.AssignRole(ctx, user.Id, role.Name, "local")
 	}
 
 	h.log.Info("OIDC: created new user %s", user.Username)

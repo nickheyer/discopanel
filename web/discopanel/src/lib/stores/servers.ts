@@ -1,6 +1,6 @@
 import { writable, derived } from 'svelte/store';
-import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
+import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
 import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 import { create } from '@bufbuild/protobuf';
 import { ListServersRequestSchema } from '$lib/proto/discopanel/v1/server_pb';

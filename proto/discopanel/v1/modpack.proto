@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package discopanel.v1;
 
+import "discopanel/v1/storage.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
@@ -32,32 +33,6 @@ service ModpackService {
   rpc GetModpackVersions(GetModpackVersionsRequest) returns (GetModpackVersionsResponse);
   // Sync version files from source
   rpc SyncModpackFiles(SyncModpackFilesRequest) returns (SyncModpackFilesResponse);
-}
-
-// Indexed modpack metadata
-message IndexedModpack {
-  string id = 1;
-  string indexer_id = 2;
-  string indexer = 3;
-  string name = 4;
-  string slug = 5;
-  string summary = 6;
-  string description = 7;
-  string logo_url = 8;
-  string website_url = 9;
-  int32 download_count = 10;
-  string categories = 11; // JSON array
-  string game_versions = 12; // JSON array
-  string mod_loaders = 13; // JSON array
-  string latest_file_id = 14;
-  google.protobuf.Timestamp date_created = 15;
-  google.protobuf.Timestamp date_modified = 16;
-  google.protobuf.Timestamp date_released = 17;
-  string mc_version = 18;
-  int32 java_version = 19;
-  string docker_image = 20;
-  int32 recommended_ram = 21;
-  bool is_favorited = 22;
 }
 
 // Modpack search filters

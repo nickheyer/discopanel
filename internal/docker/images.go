@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
-	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // Default discopanel-runtime repo, overridable via docker.runtime_image
@@ -39,10 +39,10 @@ func publishedJavaMajor(required int) int {
 	return SupportedJavaVersions[len(SupportedJavaVersions)-1]
 }
 
-// Returns the runtime Java major as a string for storage
-func GetRequiredJavaVersion(mcVersion string, modLoader models.ModLoader) string {
+// Returns the runtime Java major for storage
+func GetRequiredJavaVersion(mcVersion string, modLoader v1.ModLoader) int32 {
 	_ = modLoader // All loaders run on the Mojang-required Java version
-	return strconv.Itoa(RequiredJavaMajor(mcVersion))
+	return int32(RequiredJavaMajor(mcVersion))
 }
 
 // Returns the image tag for a Java major
@@ -79,14 +79,14 @@ func (c *Client) RuntimeImageForTag(tag string) string {
 }
 
 // Stored tag wins, then resolved Java, then network lookup
-func (c *Client) DesiredImage(server *models.Server) string {
+func (c *Client) DesiredImage(server *v1.Server) string {
 	if server.DockerImage != "" {
 		return c.RuntimeImageForTag(server.DockerImage)
 	}
-	if major, err := strconv.Atoi(server.JavaVersion); err == nil && major > 0 {
+	if major := int(server.JavaVersion); major > 0 {
 		return c.RuntimeImage(publishedJavaMajor(major))
 	}
-	return c.RuntimeImage(RequiredJavaMajor(server.MCVersion))
+	return c.RuntimeImage(RequiredJavaMajor(server.McVersion))
 }
 
 // Reports whether a tag matches a published runtime image

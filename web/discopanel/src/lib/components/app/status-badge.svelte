@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Loader2 } from '@lucide/svelte';
-	import type { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import { statusMeta, TONE_BADGE, TONE_BG } from '$lib/server-status';
 	import { cn } from '$lib/utils';
 

@@ -48,7 +48,7 @@
 		Loader2,
 		Moon
 	} from '@lucide/svelte';
-	import { type Server, ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import { type Server, ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
 
 	let servers = $derived($serversStore);
 	let user = $derived($currentUser);

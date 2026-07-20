@@ -13,7 +13,7 @@ func TestRegistryCoversProtoEnum(t *testing.T) {
 		if p == v1.ModLoader_MOD_LOADER_UNSPECIFIED {
 			continue
 		}
-		if _, ok := LoaderFromProto(p); !ok {
+		if _, ok := loaderIndex[p]; !ok {
 			t.Errorf("enum value %s has no registry row", name)
 		}
 	}
@@ -23,52 +23,46 @@ func TestRegistryCoversProtoEnum(t *testing.T) {
 }
 
 func TestRegistryRowsConsistent(t *testing.T) {
-	seenLoader := map[ModLoader]bool{}
 	seenProto := map[v1.ModLoader]bool{}
 	for _, row := range registry {
-		if row.Loader == "" {
-			t.Errorf("row %s has no loader name", row.DisplayName)
+		l := row.Loader()
+		if l == v1.ModLoader_MOD_LOADER_UNSPECIFIED {
+			t.Errorf("row %s declares no loader", row.Info.DisplayName)
 		}
-		if seenLoader[row.Loader] {
-			t.Errorf("loader %s declared twice", row.Loader)
+		if seenProto[l] {
+			t.Errorf("proto value %s mapped twice", l)
 		}
-		seenLoader[row.Loader] = true
-		if row.Proto == v1.ModLoader_MOD_LOADER_UNSPECIFIED {
-			t.Errorf("loader %s maps to unspecified proto", row.Loader)
-		}
-		if seenProto[row.Proto] {
-			t.Errorf("proto value %s mapped twice", row.Proto)
-		}
-		seenProto[row.Proto] = true
-		if row.DisplayName == "" || row.Description == "" || row.Category == "" {
-			t.Errorf("loader %s misses display facts", row.Loader)
+		seenProto[l] = true
+		if row.Info.Name == "" || row.Info.DisplayName == "" || row.Info.Description == "" || row.Info.Category == "" {
+			t.Errorf("loader %s misses display facts", l)
 		}
 		for _, d := range row.Dialects {
 			if definingLoader(d) == nil {
-				t.Errorf("loader %s reads unknown dialect %q", row.Loader, d)
+				t.Errorf("loader %s reads unknown dialect %q", l, d)
 			}
 		}
-		if len(row.Dialects) > 0 && row.ModsDirectory == "" {
-			t.Errorf("loader %s reads mods but stores none", row.Loader)
+		if len(row.Dialects) > 0 && row.Info.ModsDirectory == "" {
+			t.Errorf("loader %s reads mods but stores none", l)
 		}
-		defining := len(row.Dialects) > 0 && row.Dialects[0] == string(row.Loader)
+		defining := len(row.Dialects) > 0 && row.Dialects[0] == l.Name()
 		if !defining && (len(row.Builtins) > 0 || len(row.Facets) > 0 || len(row.Markers) > 0 || row.MavenRanges) {
-			t.Errorf("loader %s carries format facts without defining one", row.Loader)
+			t.Errorf("loader %s carries format facts without defining one", l)
 		}
 		if defining && (len(row.Facets) == 0 || len(row.Markers) == 0) {
-			t.Errorf("defining loader %s misses facets or markers", row.Loader)
+			t.Errorf("defining loader %s misses facets or markers", l)
 		}
 	}
 }
 
-func TestLoaderProtoRoundTrip(t *testing.T) {
+// Names must parse back to their own enum value
+func TestLoaderNameRoundTrip(t *testing.T) {
 	for _, row := range registry {
-		back, ok := LoaderFromProto(ProtoFor(row.Loader))
-		if !ok || back != row.Loader {
-			t.Errorf("round trip broke for %s", row.Loader)
+		back, ok := v1.ModLoaderFromName(row.Loader().Name())
+		if !ok || back != row.Loader() {
+			t.Errorf("round trip broke for %s", row.Loader())
 		}
 	}
-	if got := ProtoFor(ModLoader("nonsense")); got != v1.ModLoader_MOD_LOADER_UNSPECIFIED {
-		t.Errorf("unknown loader mapped to %v", got)
+	if _, ok := v1.ModLoaderFromName("nonsense"); ok {
+		t.Error("unknown name parsed to a loader")
 	}
 }

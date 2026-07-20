@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import { statusMeta, TONE_TEXT } from '$lib/server-status';
 	import { formatUptime } from '$lib/utils/time';
 	import { Equalizer } from '$lib/components/app';

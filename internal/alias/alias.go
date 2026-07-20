@@ -10,26 +10,8 @@ import (
 
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/config"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
-
-// Groups aliases by source type
-type Category string
-
-const (
-	CategoryServer  Category = "server"
-	CategoryModule  Category = "module"
-	CategorySpecial Category = "special"
-)
-
-// Metadata about an available alias
-type Info struct {
-	Alias        string // Example {{server.id}}
-	Path         string // Example server.id
-	Description  string // From struct tag or generated
-	Category     Category
-	ExampleValue string // Resolved value when context available
-	FieldType    string // Go type name
-}
 
 // Host system info for alias resolution
 type Host struct {
@@ -40,10 +22,10 @@ type Host struct {
 
 // Objects available for alias resolution
 type Context struct {
-	Server           *models.Server
-	ServerProperties *models.ServerProperties
-	Module           *models.Module
-	Modules          map[string]*models.Module // Sibling modules by name (for inter-module references)
+	Server           *v1.Server
+	ServerProperties *v1.ServerProperties
+	Module           *v1.Module
+	Modules          map[string]*v1.Module // Sibling modules by name (for inter-module references)
 	Host             *Host
 	Config           *config.Config
 }
@@ -61,7 +43,7 @@ func NewContext() *Context {
 // Derived from host fields
 func (ctx *Context) populateComputed() {
 	if ctx.Server != nil {
-		ctx.Server.ContainerPort = ctx.Server.InContainerPort()
+		ctx.Server.ContainerPort = int32(models.InContainerPort(ctx.Server))
 	}
 	if ctx.Host == nil {
 		ctx.Host = &Host{UID: os.Getuid(), GID: os.Getgid()}
@@ -79,7 +61,7 @@ func (ctx *Context) populateComputed() {
 }
 
 // Returns all available aliases with metadata
-func GetAvailableAliases(ctx *Context) []Info {
+func GetAvailableAliases(ctx *Context) []*v1.AliasInfo {
 	if ctx == nil {
 		ctx = NewContext()
 	}
@@ -88,36 +70,35 @@ func GetAvailableAliases(ctx *Context) []Info {
 	// Zero values first to capture all static aliases
 	staticSources := []struct {
 		prefix   string
-		category Category
+		category v1.AliasCategory
 		zeroVal  reflect.Value
 	}{
-		{"host", CategorySpecial, reflect.ValueOf(Host{})},
-		{"config", CategorySpecial, reflect.ValueOf(config.Config{})},
-		{"server", CategoryServer, reflect.ValueOf(models.Server{})},
-		{"server.config", CategoryServer, reflect.ValueOf(models.ServerProperties{})},
-		{"module", CategoryModule, reflect.ValueOf(models.Module{})},
+		{"host", v1.AliasCategory_ALIAS_CATEGORY_SPECIAL, reflect.ValueOf(Host{})},
+		{"config", v1.AliasCategory_ALIAS_CATEGORY_SPECIAL, reflect.ValueOf(config.Config{})},
+		{"server", v1.AliasCategory_ALIAS_CATEGORY_SERVER, reflect.ValueOf(v1.Server{})},
+		{"server.config", v1.AliasCategory_ALIAS_CATEGORY_SERVER, reflect.ValueOf(v1.ServerProperties{})},
+		{"module", v1.AliasCategory_ALIAS_CATEGORY_MODULE, reflect.ValueOf(v1.Module{})},
 	}
 
 	// Context sources for populating values and dynamic aliases (slices)
 	contextSources := []struct {
 		prefix   string
-		category Category
+		category v1.AliasCategory
 		value    any
 	}{
-		{"host", CategorySpecial, ctx.Host},
-		{"config", CategorySpecial, ctx.Config},
-		{"server", CategoryServer, ctx.Server},
-		{"server.config", CategoryServer, ctx.ServerProperties},
-		{"module", CategoryModule, ctx.Module},
+		{"host", v1.AliasCategory_ALIAS_CATEGORY_SPECIAL, ctx.Host},
+		{"config", v1.AliasCategory_ALIAS_CATEGORY_SPECIAL, ctx.Config},
+		{"server", v1.AliasCategory_ALIAS_CATEGORY_SERVER, ctx.Server},
+		{"server.config", v1.AliasCategory_ALIAS_CATEGORY_SERVER, ctx.ServerProperties},
+		{"module", v1.AliasCategory_ALIAS_CATEGORY_MODULE, ctx.Module},
 	}
 
-	aliasMap := make(map[string]*Info)
+	aliasMap := make(map[string]*v1.AliasInfo)
 
 	// Generate all static aliases with empty values
 	for _, src := range staticSources {
 		for _, a := range generateAliasesFromValue(src.zeroVal, src.prefix, src.category) {
-			info := a
-			aliasMap[a.Alias] = &info
+			aliasMap[a.Alias] = a
 		}
 	}
 
@@ -128,16 +109,15 @@ func GetAvailableAliases(ctx *Context) []Info {
 				if existing, ok := aliasMap[a.Alias]; ok {
 					existing.ExampleValue = a.ExampleValue
 				} else {
-					info := a
-					aliasMap[a.Alias] = &info
+					aliasMap[a.Alias] = a
 				}
 			}
 		}
 	}
 
-	aliases := make([]Info, 0, len(aliasMap))
+	aliases := make([]*v1.AliasInfo, 0, len(aliasMap))
 	for _, info := range aliasMap {
-		aliases = append(aliases, *info)
+		aliases = append(aliases, info)
 	}
 
 	// Sort by category then alias name for stable ordering
@@ -161,8 +141,8 @@ func GetResolvedAliases(ctx *Context) map[string]string {
 }
 
 // Walks value tree and generates aliases for leaf fields
-func generateAliasesFromValue(val reflect.Value, prefix string, category Category) []Info {
-	var aliases []Info
+func generateAliasesFromValue(val reflect.Value, prefix string, category v1.AliasCategory) []*v1.AliasInfo {
+	var aliases []*v1.AliasInfo
 
 	for val.Kind() == reflect.Pointer {
 		if val.IsNil() {
@@ -212,7 +192,7 @@ func generateAliasesFromValue(val reflect.Value, prefix string, category Categor
 			}
 		}
 	default:
-		aliases = append(aliases, Info{
+		aliases = append(aliases, &v1.AliasInfo{
 			Alias:        "{{" + prefix + "}}",
 			Path:         prefix,
 			Description:  generateDescription(prefix),
@@ -260,6 +240,11 @@ func getFieldValueByJSONName(val reflect.Value, jsonName string) string {
 
 // Converts reflect value to string representation
 func formatValue(v reflect.Value) string {
+	if v.IsValid() && v.CanInterface() {
+		if named, ok := v.Interface().(interface{ Name() string }); ok {
+			return named.Name()
+		}
+	}
 	switch v.Kind() {
 	case reflect.String:
 		return v.String()
@@ -478,7 +463,7 @@ func getFieldByJSONTag(val reflect.Value, jsonName string) reflect.Value {
 }
 
 // Handles {{modules.<name>.<field>}} patterns
-func substituteModuleReferences(input string, modules map[string]*models.Module) string {
+func substituteModuleReferences(input string, modules map[string]*v1.Module) string {
 	result := input
 
 	// Find all {{modules.*}} patterns
@@ -519,9 +504,9 @@ func substituteModuleReferences(input string, modules map[string]*models.Module)
 }
 
 // Gets one field value from a module
-func getModuleFieldValue(module *models.Module, field string) string {
+func getModuleFieldValue(module *v1.Module, field string) string {
 	// First try to resolve via reflection
-	moduleVal := reflect.ValueOf(*module)
+	moduleVal := reflect.ValueOf(module).Elem()
 	value := getFieldValueByJSONName(moduleVal, field)
 	if value != "" {
 		return value
@@ -531,7 +516,7 @@ func getModuleFieldValue(module *models.Module, field string) string {
 	switch field {
 	case "host":
 		// Docker container name for internal networking
-		return fmt.Sprintf("discopanel-module-%s", module.ID)
+		return fmt.Sprintf("discopanel-module-%s", module.Id)
 	case "port":
 		// Return the first port's container port
 		if len(module.Ports) > 0 && module.Ports[0] != nil && module.Ports[0].ContainerPort > 0 {

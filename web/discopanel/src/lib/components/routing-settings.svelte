@@ -3,7 +3,7 @@
 	import { registerRefresh } from '$lib/stores/refresh';
 	import { resolve } from '$app/paths';
 	import { rpcClient } from '$lib/api/rpc-client';
-	import type { ProxyListener } from '$lib/proto/discopanel/v1/common_pb';
+	import type { ProxyListener } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { ProxyListenerWithCount, ProxyRoute } from '$lib/proto/discopanel/v1/proxy_pb';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';

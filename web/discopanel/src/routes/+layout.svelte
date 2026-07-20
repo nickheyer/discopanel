@@ -53,7 +53,7 @@
 		ChevronRight,
 		RefreshCcw
 	} from '@lucide/svelte';
-	import type { User } from '$lib/proto/discopanel/v1/common_pb';
+	import type { User } from '$lib/proto/discopanel/v1/storage_pb';
 
 	let { children } = $props();
 

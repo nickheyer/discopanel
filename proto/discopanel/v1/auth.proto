@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package discopanel.v1;
 
-import "discopanel/v1/common.proto";
+import "discopanel/v1/storage.proto";
 import "gnostic/openapi/v3/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -191,20 +191,6 @@ message UpdateAuthSettingsResponse {
   GetAuthConfigResponse config = 1;
 }
 
-// Registration invite link
-message RegistrationInvite {
-  string id = 1;
-  string code = 2;
-  string description = 3;
-  repeated string roles = 4;
-  bool has_pin = 5;
-  int32 max_uses = 6;
-  int32 use_count = 7;
-  google.protobuf.Timestamp expires_at = 8;
-  string created_by = 9;
-  google.protobuf.Timestamp created_at = 10;
-}
-
 // New invite with roles, optional PIN, and expiry
 message CreateInviteRequest {
   string description = 1;
@@ -255,15 +241,6 @@ message ValidateInviteResponse {
   bool valid = 1;
   bool requires_pin = 2;
   string description = 3;
-}
-
-// API Token metadata (never includes the token value)
-message ApiToken {
-  string id = 1;
-  string name = 2;
-  google.protobuf.Timestamp expires_at = 3;
-  google.protobuf.Timestamp last_used_at = 4;
-  google.protobuf.Timestamp created_at = 5;
 }
 
 // New API token with name and optional expiry

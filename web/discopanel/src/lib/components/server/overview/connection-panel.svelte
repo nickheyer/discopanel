@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
 	import { isUp, TONE_BG, type StatusTone } from '$lib/server-status';
 	import { CopyButton, MotdText } from '$lib/components/app';
 	import { Users, Radio } from '@lucide/svelte';

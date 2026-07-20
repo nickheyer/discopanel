@@ -2,8 +2,9 @@ syntax = "proto3";
 
 package discopanel.v1;
 
-import "discopanel/v1/common.proto";
+import "discopanel/v1/storage.proto";
 import "google/protobuf/timestamp.proto";
+import "discopanel/options/v1/options.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
@@ -285,28 +286,30 @@ message GetServerPerformanceReportRequest {
 
 // Severity of one performance finding
 enum PerformanceSeverity {
-  PERFORMANCE_SEVERITY_UNSPECIFIED = 0;
+  option (discopanel.options.v1.enum_type) = {label: "Severity"};
+  PERFORMANCE_SEVERITY_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
   // Everything checked out
-  PERFORMANCE_SEVERITY_OK = 1;
+  PERFORMANCE_SEVERITY_OK = 1 [(discopanel.options.v1.value) = {label: "OK"}];
   // Informational, no action needed
-  PERFORMANCE_SEVERITY_INFO = 2;
+  PERFORMANCE_SEVERITY_INFO = 2 [(discopanel.options.v1.value) = {label: "Info"}];
   // Degrades performance, worth fixing
-  PERFORMANCE_SEVERITY_WARNING = 3;
+  PERFORMANCE_SEVERITY_WARNING = 3 [(discopanel.options.v1.value) = {label: "Warning"}];
   // Actively harming the server (stalls, OOM risk, crash)
-  PERFORMANCE_SEVERITY_CRITICAL = 4;
+  PERFORMANCE_SEVERITY_CRITICAL = 4 [(discopanel.options.v1.value) = {label: "Critical"}];
 }
 
 // What produced a finding
 enum FindingSource {
-  FINDING_SOURCE_UNSPECIFIED = 0;
+  option (discopanel.options.v1.enum_type) = {label: "Finding Source"};
+  FINDING_SOURCE_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "unknown"}];
   // Static config checks
-  FINDING_SOURCE_CONFIG = 1;
+  FINDING_SOURCE_CONFIG = 1 [(discopanel.options.v1.value) = {label: "config"}];
   // Live runtime and JVM telemetry
-  FINDING_SOURCE_TELEMETRY = 2;
+  FINDING_SOURCE_TELEMETRY = 2 [(discopanel.options.v1.value) = {label: "telemetry"}];
   // Crash forensics and automatic repair
-  FINDING_SOURCE_CRASH_DOCTOR = 3;
+  FINDING_SOURCE_CRASH_DOCTOR = 3 [(discopanel.options.v1.value) = {label: "crash doctor"}];
   // Mod dependency pre-flight validation
-  FINDING_SOURCE_PREFLIGHT = 4;
+  FINDING_SOURCE_PREFLIGHT = 4 [(discopanel.options.v1.value) = {label: "mod check"}];
 }
 
 // One autopilot check result in plain language
@@ -339,17 +342,6 @@ message DismissPerformanceFindingRequest {
 // Empty ack
 message DismissPerformanceFindingResponse {}
 
-// One recorded action DiscoPanel took on the server
-message ServerAction {
-  int64 id = 1;
-  google.protobuf.Timestamp timestamp = 2;
-  string source = 3; // Username or subsystem like crash doctor, scheduler, runtime
-  string message = 4;
-  string name = 5; // Dotted action key like server.start or mod.disable
-  map<string, string> attrs = 6; // Structured details for drill-down
-  string trace_id = 7; // Shared by every action of one operation
-}
-
 // Ledger query, after_id pages forward from a known row
 message GetServerActionsRequest {
   string id = 1;
@@ -362,22 +354,6 @@ message GetServerActionsResponse {
 }
 
 // A one-click fix to apply (fix_id from a finding)
-
-// One telemetry point for charts
-message MetricsSample {
-  google.protobuf.Timestamp timestamp = 1;
-  double tps = 2;
-  double mspt = 3;
-  int32 players = 4;
-  double cpu_percent = 5;
-  double memory_mb = 6;
-  int64 disk_bytes = 7;
-  double heap_used_mb = 8; // JVM heap in use, zero without agent
-  int64 proxy_active_conns = 9; // Live proxied connections at sample time
-  int64 proxy_bytes_in = 10; // Client to backend bytes this window
-  int64 proxy_bytes_out = 11; // Backend to client bytes this window
-  int64 proxy_logins = 12; // Login handshakes this window
-}
 
 // One archived world snapshot
 message Backup {

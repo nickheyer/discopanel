@@ -1,4 +1,5 @@
-import { ModuleStatus } from '$lib/proto/discopanel/v1/module_pb';
+import { ModuleStatus } from '$lib/proto/discopanel/v1/storage_pb';
+import { ModuleStatusLabel } from '$lib/proto/enums.gen';
 import type { StatusTone } from '$lib/server-status';
 
 export interface ModuleStatusMeta {
@@ -7,16 +8,22 @@ export interface ModuleStatusMeta {
 	transitional: boolean;
 }
 
-const STATUS_META: Record<ModuleStatus, ModuleStatusMeta> = {
-	[ModuleStatus.UNSPECIFIED]: { label: 'Unknown', tone: 'idle', transitional: false },
-	[ModuleStatus.STOPPED]: { label: 'Stopped', tone: 'idle', transitional: false },
-	[ModuleStatus.STARTING]: { label: 'Starting', tone: 'busy', transitional: true },
-	[ModuleStatus.RUNNING]: { label: 'Running', tone: 'ok', transitional: false },
-	[ModuleStatus.STOPPING]: { label: 'Stopping', tone: 'busy', transitional: true },
-	[ModuleStatus.ERROR]: { label: 'Error', tone: 'danger', transitional: false },
-	[ModuleStatus.CREATING]: { label: 'Creating', tone: 'busy', transitional: true }
+// Local UI tone and transition flag per status
+const STATUS_UI: Record<ModuleStatus, { tone: StatusTone; transitional: boolean }> = {
+	[ModuleStatus.UNSPECIFIED]: { tone: 'idle', transitional: false },
+	[ModuleStatus.STOPPED]: { tone: 'idle', transitional: false },
+	[ModuleStatus.STARTING]: { tone: 'busy', transitional: true },
+	[ModuleStatus.RUNNING]: { tone: 'ok', transitional: false },
+	[ModuleStatus.STOPPING]: { tone: 'busy', transitional: true },
+	[ModuleStatus.ERROR]: { tone: 'danger', transitional: false },
+	[ModuleStatus.CREATING]: { tone: 'busy', transitional: true }
 };
 
 export function moduleStatusMeta(status: ModuleStatus): ModuleStatusMeta {
-	return STATUS_META[status] ?? STATUS_META[ModuleStatus.UNSPECIFIED];
+	const ui = STATUS_UI[status] ?? STATUS_UI[ModuleStatus.UNSPECIFIED];
+	return {
+		label: ModuleStatusLabel[status] ?? ModuleStatusLabel[ModuleStatus.UNSPECIFIED],
+		tone: ui.tone,
+		transitional: ui.transitional
+	};
 }

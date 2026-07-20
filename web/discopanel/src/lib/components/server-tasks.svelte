@@ -34,17 +34,9 @@
 		Webhook as WebhookIcon,
 		Zap
 	} from '@lucide/svelte';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import type {
-		ScheduledTask,
-		TaskExecution,
-		GetSchedulerStatusResponse
-	} from '$lib/proto/discopanel/v1/task_pb';
+	import type { Server, ScheduledTask, TaskExecution } from '$lib/proto/discopanel/v1/storage_pb';
+	import type { GetSchedulerStatusResponse } from '$lib/proto/discopanel/v1/task_pb';
 	import {
-		TaskType,
-		TaskStatus,
-		ScheduleType,
-		ExecutionStatus,
 		CreateTaskRequestSchema,
 		UpdateTaskRequestSchema,
 		ToggleTaskRequestSchema,
@@ -53,7 +45,18 @@
 		ListTasksRequestSchema,
 		ListTaskExecutionsRequestSchema
 	} from '$lib/proto/discopanel/v1/task_pb';
-	import { TriggeredEventType } from '$lib/proto/discopanel/v1/event_pb';
+	import {
+		TaskType,
+		TaskStatus,
+		ScheduleType,
+		ExecutionStatus,
+		TriggeredEventType
+	} from '$lib/proto/discopanel/v1/storage_pb';
+	import {
+		TaskTypeLabel,
+		ScheduleTypeLabel,
+		ExecutionStatusLabel
+	} from '$lib/proto/enums.gen';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import { create } from '@bufbuild/protobuf';
 	import { timestampFromDate } from '@bufbuild/protobuf/wkt';
@@ -733,25 +736,27 @@
 		taskHistory = [];
 	}
 
+	// Display order for task type choices
+	const TASK_TYPE_OPTIONS: TaskType[] = [
+		TaskType.COMMAND,
+		TaskType.BACKUP,
+		TaskType.RESTART,
+		TaskType.START,
+		TaskType.STOP,
+		TaskType.SCRIPT,
+		TaskType.WEBHOOK
+	];
+
+	// Display order for schedule type choices
+	const SCHEDULE_TYPE_OPTIONS: ScheduleType[] = [
+		ScheduleType.EVENT,
+		ScheduleType.CRON,
+		ScheduleType.INTERVAL,
+		ScheduleType.ONCE
+	];
+
 	function getTaskTypeLabel(type: TaskType): string {
-		switch (type) {
-			case TaskType.COMMAND:
-				return 'Command';
-			case TaskType.BACKUP:
-				return 'Backup';
-			case TaskType.RESTART:
-				return 'Restart';
-			case TaskType.START:
-				return 'Start';
-			case TaskType.STOP:
-				return 'Stop';
-			case TaskType.SCRIPT:
-				return 'Script';
-			case TaskType.WEBHOOK:
-				return 'Webhook';
-			default:
-				return 'Unknown';
-		}
+		return TaskTypeLabel[type] ?? TaskTypeLabel[TaskType.UNSPECIFIED];
 	}
 
 	function getTaskTypeIcon(type: TaskType) {
@@ -776,18 +781,7 @@
 	}
 
 	function getScheduleTypeLabel(s: ScheduleType): string {
-		switch (s) {
-			case ScheduleType.CRON:
-				return 'Cron expression';
-			case ScheduleType.INTERVAL:
-				return 'Fixed interval';
-			case ScheduleType.ONCE:
-				return 'Run once';
-			case ScheduleType.EVENT:
-				return 'On event';
-			default:
-				return 'Unknown';
-		}
+		return ScheduleTypeLabel[s] ?? ScheduleTypeLabel[ScheduleType.UNSPECIFIED];
 	}
 
 	function getScheduleLabel(task: ScheduledTask): string {
@@ -844,24 +838,7 @@
 	}
 
 	function getExecutionStatusLabel(status: ExecutionStatus): string {
-		switch (status) {
-			case ExecutionStatus.PENDING:
-				return 'Pending';
-			case ExecutionStatus.RUNNING:
-				return 'Running';
-			case ExecutionStatus.COMPLETED:
-				return 'Completed';
-			case ExecutionStatus.FAILED:
-				return 'Failed';
-			case ExecutionStatus.SKIPPED:
-				return 'Skipped';
-			case ExecutionStatus.CANCELLED:
-				return 'Cancelled';
-			case ExecutionStatus.TIMEOUT:
-				return 'Timeout';
-			default:
-				return 'Unknown';
-		}
+		return ExecutionStatusLabel[status] ?? ExecutionStatusLabel[ExecutionStatus.UNSPECIFIED];
 	}
 
 	function formatDuration(ms: bigint): string {
@@ -1149,27 +1126,11 @@
 										{getTaskTypeLabel(taskType)}
 									</Select.Trigger>
 									<Select.Content>
-										<Select.Item value={TaskType.COMMAND.toString()} label="Command">
-											Command
-										</Select.Item>
-										<Select.Item value={TaskType.BACKUP.toString()} label="Backup">
-											Backup
-										</Select.Item>
-										<Select.Item value={TaskType.RESTART.toString()} label="Restart server">
-											Restart server
-										</Select.Item>
-										<Select.Item value={TaskType.START.toString()} label="Start server">
-											Start server
-										</Select.Item>
-										<Select.Item value={TaskType.STOP.toString()} label="Stop server">
-											Stop server
-										</Select.Item>
-										<Select.Item value={TaskType.SCRIPT.toString()} label="Script">
-											Script
-										</Select.Item>
-										<Select.Item value={TaskType.WEBHOOK.toString()} label="Webhook">
-											Webhook
-										</Select.Item>
+										{#each TASK_TYPE_OPTIONS as t (t)}
+											<Select.Item value={t.toString()} label={getTaskTypeLabel(t)}>
+												{getTaskTypeLabel(t)}
+											</Select.Item>
+										{/each}
 									</Select.Content>
 								</Select.Root>
 							</div>
@@ -1388,18 +1349,11 @@
 										{getScheduleTypeLabel(scheduleType)}
 									</Select.Trigger>
 									<Select.Content>
-										<Select.Item value={ScheduleType.EVENT.toString()} label="On event">
-											On event
-										</Select.Item>
-										<Select.Item value={ScheduleType.CRON.toString()} label="Cron expression">
-											Cron expression
-										</Select.Item>
-										<Select.Item value={ScheduleType.INTERVAL.toString()} label="Fixed interval">
-											Fixed interval
-										</Select.Item>
-										<Select.Item value={ScheduleType.ONCE.toString()} label="Run once">
-											Run once
-										</Select.Item>
+										{#each SCHEDULE_TYPE_OPTIONS as s (s)}
+											<Select.Item value={s.toString()} label={getScheduleTypeLabel(s)}>
+												{getScheduleTypeLabel(s)}
+											</Select.Item>
+										{/each}
 									</Select.Content>
 								</Select.Root>
 							</div>

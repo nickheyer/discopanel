@@ -1,7 +1,8 @@
 import { browser } from '$app/environment';
 import { get } from 'svelte/store';
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
-import type { LogEntry, MetricsSample } from '$lib/proto/discopanel/v1/server_pb';
+import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
+import type { MetricsSample } from '$lib/proto/discopanel/v1/storage_pb';
 import {
 	WSMessageType,
 	WebSocketClientMessageSchema,

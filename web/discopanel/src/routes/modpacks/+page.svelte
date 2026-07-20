@@ -27,8 +27,8 @@
 		X
 	} from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
+	import type { IndexedModpack } from '$lib/proto/discopanel/v1/storage_pb';
 	import type {
-		IndexedModpack,
 		SearchModpacksRequest,
 		SearchModpacksResponse,
 		GetIndexerStatusResponse

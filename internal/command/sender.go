@@ -14,6 +14,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 
 	"github.com/jltobler/go-rcon"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 var (
@@ -94,25 +95,25 @@ func (s *Sender) Run(ctx context.Context, serverID, cmd string, silent bool) (st
 	if err != nil {
 		return "", ErrServerNotFound
 	}
-	if server.ContainerID == "" {
+	if server.ContainerId == "" {
 		return "", ErrNoContainer
 	}
-	status, err := s.docker.GetContainerStatus(ctx, server.ContainerID)
-	if err != nil || (status != storage.StatusRunning && status != storage.StatusUnhealthy) {
+	status, err := s.docker.GetContainerStatus(ctx, server.ContainerId)
+	if err != nil || (status != v1.ServerStatus_SERVER_STATUS_RUNNING && status != v1.ServerStatus_SERVER_STATUS_UNHEALTHY) {
 		return "", ErrNotRunning
 	}
 
 	commandTime := time.Now()
 	if !silent && s.streamer != nil {
-		s.streamer.AddCommandEntry(server.ID, cmd, commandTime)
+		s.streamer.AddCommandEntry(server.Id, cmd, commandTime)
 	}
 
-	output, err := s.SendCommand(ctx, server.ID, cmd)
+	output, err := s.SendCommand(ctx, server.Id, cmd)
 	if err == nil {
-		s.rec.Record(ctx, server.ID, "command.run", activity.Attrs{"command": cmd}, "ran command %q", cmd)
+		s.rec.Record(ctx, server.Id, "command.run", activity.Attrs{"command": cmd}, "ran command %q", cmd)
 	}
 	if !silent && s.streamer != nil && (output != "" || err != nil) {
-		s.streamer.AddCommandOutput(server.ID, output, err == nil, commandTime)
+		s.streamer.AddCommandOutput(server.Id, output, err == nil, commandTime)
 	}
 	return output, err
 }
@@ -131,7 +132,7 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 	if err != nil {
 		return "", fmt.Errorf("server container not found")
 	}
-	if server.ContainerID == "" {
+	if server.ContainerId == "" {
 		return "", fmt.Errorf("server container not found")
 	}
 
@@ -142,7 +143,7 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 
 	agentAvailable := s.agent != nil && s.agent.Connected(serverID)
 
-	if serverCfg.EnableRCON != nil && !*serverCfg.EnableRCON {
+	if serverCfg.EnableRcon != nil && !*serverCfg.EnableRcon {
 		if agentAvailable {
 			return s.sendViaAgent(ctx, serverID, command)
 		}
@@ -164,8 +165,8 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 			}
 		}
 	}
-	if serverCfg.RCONPort != nil {
-		rconPort = *serverCfg.RCONPort
+	if serverCfg.RconPort != nil {
+		rconPort = int(*serverCfg.RconPort)
 	}
 
 	var rconPassword string
@@ -176,11 +177,11 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 			rconPassword = fmt.Sprint(v)
 		}
 	}
-	if serverCfg.RCONPassword != nil {
-		rconPassword = *serverCfg.RCONPassword
+	if serverCfg.RconPassword != nil {
+		rconPassword = *serverCfg.RconPassword
 	}
 
-	ip, err := s.docker.ContainerIP(ctx, server.ContainerID)
+	ip, err := s.docker.ContainerIP(ctx, server.ContainerId)
 	if err != nil {
 		if agentAvailable {
 			return s.sendViaAgent(ctx, serverID, command)

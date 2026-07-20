@@ -155,17 +155,13 @@ func (d *doctor) toInfo(s *v1.Server) *serverInfo {
 		return nil
 	}
 
-	loader, ok := minecraft.LoaderFromProto(s.GetModLoader())
-	if !ok {
-		return nil
-	}
 	status := s.GetStatus()
 	return &serverInfo{
 		ID:        s.GetId(),
 		Name:      s.GetName(),
 		DataPath:  local,
-		ModLoader: loader,
-		MCVersion: s.GetMcVersion(),
+		ModLoader: s.GetModLoader(),
+		McVersion: s.GetMcVersion(),
 		Running:   status == v1.ServerStatus_SERVER_STATUS_RUNNING,
 		Stopped:   status == v1.ServerStatus_SERVER_STATUS_STOPPED || status == v1.ServerStatus_SERVER_STATUS_STOPPING,
 	}

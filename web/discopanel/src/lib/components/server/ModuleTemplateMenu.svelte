@@ -4,7 +4,7 @@
 	import DynamicIcon from '$lib/components/ui/DynamicIcon.svelte';
 	import { EmptyState } from '$lib/components/app';
 	import { Package, ChevronRight, Trash2 } from '@lucide/svelte';
-	import { ModuleTemplateType, type ModuleTemplate } from '$lib/proto/discopanel/v1/module_pb';
+	import { ModuleTemplateType, type ModuleTemplate } from '$lib/proto/discopanel/v1/storage_pb';
 
 	interface Props {
 		templates?: ModuleTemplate[];

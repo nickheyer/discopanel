@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/indexers"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 type checksum struct {
@@ -65,7 +65,7 @@ func (w *progressWriter) Write(b []byte) (int, error) {
 }
 
 // Builds a progress callback emitting console lines
-func (p *Provisioner) reporter(server *storage.Server, label string) func(done, total int64) {
+func (p *Provisioner) reporter(server *v1.Server, label string) func(done, total int64) {
 	return func(done, total int64) {
 		if total > 0 {
 			p.progress(server, "downloading %s: %d%% (%.1f/%.1f MB)",

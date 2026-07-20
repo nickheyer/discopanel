@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 
 	"github.com/nickheyer/discopanel/internal/activity"
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"golang.org/x/sync/errgroup"
 )
@@ -73,7 +73,7 @@ type cfManifest struct {
 }
 
 // Installs a CurseForge modpack from API or local zip
-func (p *Provisioner) installCurseForgePack(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+func (p *Provisioner) installCurseForgePack(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 	// Locally uploaded pack zip
 	if desired.source == "zip" {
 		rel := strings.TrimPrefix(filepath.ToSlash(desired.id), "/data/")
@@ -126,7 +126,7 @@ func (p *Provisioner) installCurseForgePack(ctx context.Context, server *storage
 }
 
 // Resolves the url for a pack file and downloads it
-func (p *Provisioner) downloadCurseForgeFile(ctx context.Context, client *fuego.Client, server *storage.Server, pack *fuego.Modpack, file *fuego.File) (string, error) {
+func (p *Provisioner) downloadCurseForgeFile(ctx context.Context, client *fuego.Client, server *v1.Server, pack *fuego.Modpack, file *fuego.File) (string, error) {
 	dlURL, err := p.resolveModFileURL(ctx, client, pack.ID, file)
 	if err != nil {
 		return "", err
@@ -141,11 +141,11 @@ func (p *Provisioner) downloadCurseForgeFile(ctx context.Context, client *fuego.
 }
 
 // Builds a fuego client from server or global API key
-func (p *Provisioner) curseForgeClient(ctx context.Context, cfg *storage.ServerProperties) (*fuego.Client, error) {
-	apiKey := strVal(cfg.CFAPIKey)
+func (p *Provisioner) curseForgeClient(ctx context.Context, cfg *v1.ServerProperties) (*fuego.Client, error) {
+	apiKey := strVal(cfg.CfApiKey)
 	if apiKey == "" {
 		if global, _, err := p.store.GetGlobalSettings(ctx); err == nil && global != nil {
-			apiKey = strVal(global.CFAPIKey)
+			apiKey = strVal(global.CfApiKey)
 		}
 	}
 	if apiKey == "" {
@@ -192,7 +192,7 @@ func (p *Provisioner) resolveCurseForgeFile(ctx context.Context, client *fuego.C
 }
 
 // Prefers a ready-made server pack over the client file
-func (p *Provisioner) resolveServerPack(ctx context.Context, client *fuego.Client, pack *fuego.Modpack, server *storage.Server, file *fuego.File) *fuego.File {
+func (p *Provisioner) resolveServerPack(ctx context.Context, client *fuego.Client, pack *fuego.Modpack, server *v1.Server, file *fuego.File) *fuego.File {
 	// Official CurseForge server pack linkage
 	if file.ServerPackFileID != nil && *file.ServerPackFileID > 0 {
 		if sp, err := client.GetFile(ctx, pack.ID, *file.ServerPackFileID); err == nil {
@@ -220,7 +220,7 @@ func isServerPack(f *fuego.File) bool {
 }
 
 // Installs a pack zip, manifest driven or wholesale server pack
-func (p *Provisioner) installCurseForgeZip(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, zipPath string, client *fuego.Client, force bool) (*Result, error) {
+func (p *Provisioner) installCurseForgeZip(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, zipPath string, client *fuego.Client, force bool) (*Result, error) {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open modpack zip: %w", err)
@@ -234,7 +234,7 @@ func (p *Provisioner) installCurseForgeZip(ctx context.Context, server *storage.
 
 	// No manifest means ready-made server pack, unpack wholesale
 	p.progress(server, "extracting server pack...")
-	if err := p.extractServerPack(reader, server.DataPath, !force, minecraft.SplitPatterns(strVal(cfg.CFExcludeMods))); err != nil {
+	if err := p.extractServerPack(reader, server.DataPath, !force, minecraft.SplitPatterns(strVal(cfg.CfExcludeMods))); err != nil {
 		return nil, err
 	}
 	return p.completeServerPack(ctx, server, cfg, force)
@@ -267,7 +267,7 @@ func readCFManifest(reader *zip.Reader) (*cfManifest, string) {
 }
 
 // Performs manifest driven install of overrides, mods, and loader
-func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, reader *zip.ReadCloser, manifest *cfManifest, prefix string, client *fuego.Client, force bool) (*Result, error) {
+func (p *Provisioner) installFromCFManifest(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, reader *zip.ReadCloser, manifest *cfManifest, prefix string, client *fuego.Client, force bool) (*Result, error) {
 	if client == nil {
 		var err error
 		client, err = p.curseForgeClient(ctx, cfg)
@@ -279,9 +279,9 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 	p.progress(server, "installing %s %s (MC %s)...", manifest.Name, manifest.Version, manifest.Minecraft.Version)
 
 	// Doctor holds stay out until it re-enables them
-	excludes := append(minecraft.SplitPatterns(strVal(cfg.CFExcludeMods)), runtimespec.DoctorExcludes(server.DataPath)...)
+	excludes := append(minecraft.SplitPatterns(strVal(cfg.CfExcludeMods)), runtimespec.DoctorExcludes(server.DataPath)...)
 	excludes = append(excludes, runtimespec.IncidentHeldFiles(server.DataPath)...)
-	forceIncludes := minecraft.SplitPatterns(strVal(cfg.CFForceIncludeMods))
+	forceIncludes := minecraft.SplitPatterns(strVal(cfg.CfForceIncludeMods))
 
 	// Apply overrides
 	overrides := manifest.Overrides
@@ -412,7 +412,7 @@ func (p *Provisioner) installFromCFManifest(ctx context.Context, server *storage
 }
 
 // Applies exclude and include rules plus client-only heuristic
-func (p *Provisioner) cfFileWanted(server *storage.Server, file *fuego.File, mod *fuego.Modpack, projectID int, excludes, forceIncludes []string) bool {
+func (p *Provisioner) cfFileWanted(server *v1.Server, file *fuego.File, mod *fuego.Modpack, projectID int, excludes, forceIncludes []string) bool {
 	idStr := strconv.Itoa(projectID)
 	slug := strings.ToLower(mod.Slug)
 	fileName := strings.ToLower(file.FileName)
@@ -510,7 +510,7 @@ func commonZipRoot(reader *zip.Reader) string {
 }
 
 // Derives launch spec from an extracted server pack
-func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, force bool) (*Result, error) {
+func (p *Provisioner) completeServerPack(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, force bool) (*Result, error) {
 	dataPath := server.DataPath
 
 	detect := func() *runtimespec.LaunchSpec {
@@ -530,7 +530,7 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Se
 
 	if spec := detect(); spec != nil {
 		p.adoptServerPackVersion(ctx, server, spec)
-		return p.finishLaunch(server, spec, server.ModLoader, "", server.MCVersion)
+		return p.finishLaunch(server, spec, server.ModLoader, "", server.McVersion)
 	}
 
 	// Some packs ship the loader installer instead
@@ -544,14 +544,14 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Se
 		}
 		if spec := detect(); spec != nil {
 			p.adoptServerPackVersion(ctx, server, spec)
-			return p.finishLaunch(server, spec, server.ModLoader, "", server.MCVersion)
+			return p.finishLaunch(server, spec, server.ModLoader, "", server.McVersion)
 		}
 	}
 
 	// Some packs install the loader at first run
-	if loader, version := detectServerPackLoader(dataPath, server.MCVersion); loader != "" {
-		p.progress(server, "server pack ships no loader, installing %s %s", loader, version)
-		return p.installLoaderForPack(ctx, server, cfg, loader, version, server.MCVersion)
+	if loader, version := detectServerPackLoader(dataPath, server.McVersion); loader != v1.ModLoader_MOD_LOADER_UNSPECIFIED {
+		p.progress(server, "server pack ships no loader, installing %s %s", loader.Name(), version)
+		return p.installLoaderForPack(ctx, server, cfg, loader, version, server.McVersion)
 	}
 
 	return nil, errNoLaunchTarget
@@ -559,22 +559,22 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *storage.Se
 
 // Extracted tree outranks the user MC version guess
 // Absent evidence changes nothing, uncertainty never reports
-func (p *Provisioner) adoptServerPackVersion(ctx context.Context, server *storage.Server, spec *runtimespec.LaunchSpec) {
+func (p *Provisioner) adoptServerPackVersion(ctx context.Context, server *v1.Server, spec *runtimespec.LaunchSpec) {
 	evidence := serverPackMCVersion(server.DataPath, spec)
-	if evidence == "" || evidence == server.MCVersion {
+	if evidence == "" || evidence == server.McVersion {
 		return
 	}
-	javaVersion := strconv.Itoa(docker.RequiredJavaMajor(evidence))
+	javaVersion := int32(docker.RequiredJavaMajor(evidence))
 	p.action(ctx, server, "provisioner", "provision.mc_version",
-		activity.Attrs{"from": server.MCVersion, "to": evidence},
-		"server pack ships MC %s, replacing configured %s", evidence, server.MCVersion)
-	if err := p.store.UpdateServerFields(ctx, server.ID, map[string]any{
+		activity.Attrs{"from": server.McVersion, "to": evidence},
+		"server pack ships MC %s, replacing configured %s", evidence, server.McVersion)
+	if err := p.store.UpdateServerFields(ctx, server.Id, map[string]any{
 		"mc_version":   evidence,
 		"java_version": javaVersion,
 	}); err != nil {
 		p.progress(server, "warning: could not persist detected MC version: %v", err)
 	}
-	server.MCVersion = evidence
+	server.McVersion = evidence
 	server.JavaVersion = javaVersion
 }
 

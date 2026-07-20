@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // Common interface for all proxy types
@@ -21,30 +22,6 @@ type Proxier interface {
 	IsRunning() bool
 }
 
-// Classifies how the proxy serves a route
-type RouteState int
-
-const (
-	// Relays connections straight to the backend
-	RouteOnline RouteState = iota
-	// Answers pings synthetically while the server boots
-	RouteStarting
-	// Answers pings synthetically and wakes on login
-	RouteOffline
-)
-
-// Reads as a lowercase word for logs and the API
-func (s RouteState) String() string {
-	switch s {
-	case RouteStarting:
-		return "starting"
-	case RouteOffline:
-		return "offline"
-	default:
-		return "online"
-	}
-}
-
 // Maps a hostname to a backend server
 type Route struct {
 	ServerID    string
@@ -53,7 +30,7 @@ type Route struct {
 	BackendPort int
 
 	// Selects relay, synthetic status, or wake handling
-	State RouteState
+	State v1.ProxyRouteState
 	// Lets a login cold-start an offline server
 	Wakeable bool
 	// Sends a PROXY v2 header before the handshake
@@ -61,14 +38,14 @@ type Route struct {
 	// Keeps the client-sent hostname in the handshake
 	PreserveHost bool
 	// Synthesized status line for non-online states
-	MOTD string
+	Motd string
 	// Fills the synthesized status player cap
 	MaxPlayers int
 }
 
 // Carries status ping data for a paused server
 type SleepingServer struct {
-	MOTD       string
+	Motd       string
 	MaxPlayers int
 }
 

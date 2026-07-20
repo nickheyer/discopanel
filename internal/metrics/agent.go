@@ -44,14 +44,14 @@ func (c *Collector) ApplyAgentReady(ctx context.Context, serverID string, startu
 	})
 
 	server, err := c.store.GetServer(ctx, serverID)
-	if err != nil || server.ContainerID == "" {
+	if err != nil || server.ContainerId == "" {
 		return
 	}
-	info, err := c.docker.GetContainerRunInfo(ctx, server.ContainerID)
+	info, err := c.docker.GetContainerRunInfo(ctx, server.ContainerId)
 	if err != nil || !info.Running {
 		return
 	}
-	c.recordHealth(server.ContainerID, info.StartedAt, true)
+	c.recordHealth(server.ContainerId, info.StartedAt, true)
 }
 
 // Crash exits older than this stop counting toward loops
@@ -123,9 +123,9 @@ func (c *Collector) MarkCrashLoopStopped(serverID string) {
 // Stores javaagent tick timing, authoritative TPS and MSPT
 func (c *Collector) ApplyAgentTick(serverID string, sample *agentv1.TickSample) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
-		m.TPS = sample.GetTps()
-		m.MSPT = sample.GetMsptAvg()
-		m.MSPTMax = sample.GetMsptMax()
+		m.Tps = sample.GetTps()
+		m.Mspt = sample.GetMsptAvg()
+		m.MsptMax = sample.GetMsptMax()
 		m.AgentTickUpdated = time.Now()
 		m.LastUpdated = time.Now()
 	})
@@ -137,8 +137,8 @@ const gcLogWindowFresh = 45 * time.Second
 // Stores JVM telemetry from the javaagent
 func (c *Collector) ApplyAgentJvm(serverID string, sample *agentv1.JvmSample) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
-		m.HeapUsedMB = sample.GetHeapUsedMb()
-		m.HeapMaxMB = sample.GetHeapMaxMb()
+		m.HeapUsedMb = sample.GetHeapUsedMb()
+		m.HeapMaxMb = sample.GetHeapMaxMb()
 		m.ThreadCount = int(sample.GetThreadCount())
 		m.ClassCount = int(sample.GetClassCount())
 		// MX bean GC only speaks while no gc.log window flows
@@ -155,16 +155,16 @@ func (c *Collector) ApplyAgentJvm(serverID string, sample *agentv1.JvmSample) {
 func (c *Collector) ApplyAgentProc(serverID string, sample *agentv1.ProcSample) {
 	c.updateMetrics(serverID, func(m *ServerMetrics) {
 		// Java process attribution beats whole-container docker stats
-		m.CPUPercent = sample.GetCpuPercent()
+		m.CpuPercent = sample.GetCpuPercent()
 		if rss := sample.GetRssMb(); rss > 0 {
 			m.MemoryUsage = rss
 		}
 		m.AgentProcUpdated = time.Now()
-		m.CPUQuotaCores = sample.GetCpuQuotaCores()
+		m.CpuQuotaCores = sample.GetCpuQuotaCores()
 		if periods := sample.GetCfsPeriods(); periods > 0 {
-			m.CPUThrottlePercent = float64(sample.GetCfsThrottledPeriods()) / float64(periods) * 100
+			m.CpuThrottlePercent = float64(sample.GetCfsThrottledPeriods()) / float64(periods) * 100
 		} else {
-			m.CPUThrottlePercent = 0
+			m.CpuThrottlePercent = 0
 		}
 		if gc := sample.GetGc(); gc != nil {
 			m.GCPauseCount = gc.GetCount()

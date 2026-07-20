@@ -16,22 +16,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nickheyer/discopanel/internal/alias"
-	storage "github.com/nickheyer/discopanel/internal/db"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // Builds, signs, and delivers HTTP webhooks for server events
 // Concurrency is a scheduler concern, this stays sync
-
-// Controls one delivery, built from task config json
-type Config struct {
-	URL             string            `json:"url"`
-	Secret          string            `json:"secret"`
-	PayloadTemplate string            `json:"payload_template"`
-	Headers         map[string]string `json:"headers"`
-	MaxRetries      int               `json:"max_retries"`
-	RetryDelayMs    int               `json:"retry_delay_ms"`
-	TimeoutMs       int               `json:"timeout_ms"`
-}
 
 // A single delivery attempt outcome
 type Result struct {
@@ -47,34 +37,22 @@ type Result struct {
 type Payload struct {
 	Event     string         `json:"event"`
 	Timestamp time.Time      `json:"timestamp"`
-	Server    *ServerPayload `json:"server,omitempty"`
+	Server    *v1.Server     `json:"server,omitempty"`
 	Data      map[string]any `json:"data,omitempty"`
 
 	vars map[string]any
 }
 
-// Server snapshot embedded in a webhook payload
-type ServerPayload struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	MCVersion  string `json:"mc_version"`
-	ModLoader  string `json:"mod_loader"`
-	Players    int    `json:"players_online"`
-	MaxPlayers int    `json:"max_players"`
-	Port       int    `json:"port"`
-}
-
 // Renders, signs, POSTs, and retries one delivery
-func Deliver(ctx context.Context, cfg Config, payload *Payload) Result {
+func Deliver(ctx context.Context, cfg *v1.WebhookTaskConfig, payload *Payload) Result {
 	start := time.Now()
-	maxAttempts := cfg.MaxRetries
+	maxAttempts := int(cfg.MaxRetries)
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	} else {
 		maxAttempts++ // initial attempt + retries
 	}
-	retryBaseMs := cfg.RetryDelayMs
+	retryBaseMs := int(cfg.RetryDelayMs)
 	if retryBaseMs <= 0 {
 		retryBaseMs = 1000
 	}
@@ -103,7 +81,7 @@ func Deliver(ctx context.Context, cfg Config, payload *Payload) Result {
 	return last
 }
 
-func deliverOnce(ctx context.Context, cfg Config, payload *Payload) Result {
+func deliverOnce(ctx context.Context, cfg *v1.WebhookTaskConfig, payload *Payload) Result {
 	start := time.Now()
 	result := Result{}
 
@@ -121,7 +99,7 @@ func deliverOnce(ctx context.Context, cfg Config, payload *Payload) Result {
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, "POST", cfg.URL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(reqCtx, "POST", cfg.Url, bytes.NewReader(body))
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("request error: %v", err)
 		result.DurationMs = time.Since(start).Milliseconds()
@@ -159,7 +137,7 @@ func deliverOnce(ctx context.Context, cfg Config, payload *Payload) Result {
 	return result
 }
 
-func renderBody(cfg Config, payload *Payload) ([]byte, error) {
+func renderBody(cfg *v1.WebhookTaskConfig, payload *Payload) ([]byte, error) {
 	if cfg.PayloadTemplate != "" {
 		return renderTemplate(cfg.PayloadTemplate, payload)
 	}
@@ -173,7 +151,7 @@ func sign(body []byte, secret string) string {
 }
 
 // Flattens alias paths into template vars, one shared vocabulary
-func templateVars(event string, timestamp time.Time, server *storage.Server, data map[string]any) map[string]any {
+func templateVars(event string, timestamp time.Time, server *v1.Server, data map[string]any) map[string]any {
 	vars := map[string]any{
 		"event":       event,
 		"is_" + event: true,
@@ -230,9 +208,9 @@ func ValidateTemplate(tmplStr string) error {
 	if strings.TrimSpace(tmplStr) == "" {
 		return nil
 	}
-	sample := BuildPayload("test", &storage.Server{
-		ID: "test-id", Name: "Test Server", Status: storage.StatusRunning,
-		MCVersion: "1.21", ModLoader: "vanilla",
+	sample := BuildPayload("test", &v1.Server{
+		Id: "test-id", Name: "Test Server", Status: v1.ServerStatus_SERVER_STATUS_RUNNING,
+		McVersion: "1.21", ModLoader: v1.ModLoader_MOD_LOADER_VANILLA,
 		MaxPlayers: 20, Port: 25565,
 	}, nil)
 	_, err := renderTemplate(tmplStr, sample)
@@ -240,26 +218,17 @@ func ValidateTemplate(tmplStr string) error {
 }
 
 // Assembles a Payload for the given event and server
-func BuildPayload(event string, server *storage.Server, data map[string]any) *Payload {
-	var sp *ServerPayload
+func BuildPayload(event string, server *v1.Server, data map[string]any) *Payload {
+	var redacted *v1.Server
 	if server != nil {
-		sp = &ServerPayload{
-			ID:         server.ID,
-			Name:       server.Name,
-			Status:     string(server.Status),
-			MCVersion:  server.MCVersion,
-			ModLoader:  string(server.ModLoader),
-			Players:    server.PlayersOnline,
-			MaxPlayers: server.MaxPlayers,
-			Port:       server.Port,
-		}
+		redacted = proto.Clone(server).(*v1.Server).Redact()
 	}
 	p := &Payload{
 		Event:     event,
 		Timestamp: time.Now().UTC(),
-		Server:    sp,
+		Server:    redacted,
 		Data:      data,
 	}
-	p.vars = templateVars(event, p.Timestamp, server, data)
+	p.vars = templateVars(event, p.Timestamp, redacted, data)
 	return p
 }

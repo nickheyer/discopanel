@@ -6,8 +6,8 @@
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Plus, AlertCircle, Code, ChevronDown, ChevronRight, X } from '@lucide/svelte';
-	import type { DockerOverrides, VolumeMount } from '$lib/proto/discopanel/v1/common_pb';
-	import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/discopanel/v1/common_pb';
+	import type { DockerOverrides, VolumeMount } from '$lib/proto/discopanel/v1/storage_pb';
+	import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/discopanel/v1/storage_pb';
 	import { create } from '@bufbuild/protobuf';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';

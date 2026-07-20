@@ -43,7 +43,7 @@ type LaunchSpec struct {
 	ArgsFile  string `json:"args_file,omitempty"`
 	Exec      string `json:"exec,omitempty"` // Whitespace-tokenized for LaunchKindCustom
 	Loader    string `json:"loader"`
-	MCVersion string `json:"mc_version"`
+	McVersion string `json:"mc_version"`
 	JavaMajor int    `json:"java_major"`
 }
 
@@ -68,7 +68,7 @@ type Manifest struct {
 	Version       int         `json:"version"`
 	Loader        string      `json:"loader"`
 	LoaderVersion string      `json:"loader_version,omitempty"`
-	MCVersion     string      `json:"mc_version"`
+	McVersion     string      `json:"mc_version"`
 	JavaMajor     int         `json:"java_major"`
 	Modpack       *ModpackRef `json:"modpack,omitempty"`
 	ProvisionedAt string      `json:"provisioned_at"`

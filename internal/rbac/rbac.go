@@ -7,15 +7,9 @@ import (
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"gorm.io/gorm"
 )
-
-// Single resource/action/object permission tuple
-type Permission struct {
-	Resource string
-	Action   string
-	ObjectID string
-}
 
 // Wraps Casbin enforcer with convenience methods for RBAC
 type Enforcer struct {
@@ -144,18 +138,18 @@ func (e *Enforcer) Enforce(roles []string, resource, action, objectID string) (b
 }
 
 // Returns all permissions currently assigned to role
-func (e *Enforcer) GetPermissionsForRole(role string) []Permission {
+func (e *Enforcer) GetPermissionsForRole(role string) []*v1.Permission {
 	policies, err := e.enforcer.GetFilteredPolicy(0, role)
 	if err != nil {
 		return nil
 	}
-	perms := make([]Permission, 0, len(policies))
+	perms := make([]*v1.Permission, 0, len(policies))
 	for _, p := range policies {
 		if len(p) >= 4 {
-			perms = append(perms, Permission{
+			perms = append(perms, &v1.Permission{
 				Resource: p[1],
 				Action:   p[2],
-				ObjectID: p[3],
+				ObjectId: p[3],
 			})
 		}
 	}
@@ -163,7 +157,7 @@ func (e *Enforcer) GetPermissionsForRole(role string) []Permission {
 }
 
 // Replaces all permissions for a role, admin role blocked
-func (e *Enforcer) SetPermissionsForRole(role string, perms []Permission) error {
+func (e *Enforcer) SetPermissionsForRole(role string, perms []*v1.Permission) error {
 	// Don't modify admin role
 	if strings.ToLower(role) == "admin" {
 		return fmt.Errorf("cannot modify admin role permissions")
@@ -174,7 +168,7 @@ func (e *Enforcer) SetPermissionsForRole(role string, perms []Permission) error 
 
 	// Add new permissions
 	for _, p := range perms {
-		objectID := p.ObjectID
+		objectID := p.ObjectId
 		if objectID == "" {
 			objectID = "*"
 		}
@@ -188,19 +182,19 @@ func (e *Enforcer) SetPermissionsForRole(role string, perms []Permission) error 
 }
 
 // Maps each role to its permission slices
-func (e *Enforcer) GetPermissionMatrix() map[string][]Permission {
+func (e *Enforcer) GetPermissionMatrix() map[string][]*v1.Permission {
 	policies, err := e.enforcer.GetPolicy()
 	if err != nil {
 		return nil
 	}
-	matrix := make(map[string][]Permission)
+	matrix := make(map[string][]*v1.Permission)
 	for _, p := range policies {
 		if len(p) >= 4 {
 			role := p[0]
-			matrix[role] = append(matrix[role], Permission{
+			matrix[role] = append(matrix[role], &v1.Permission{
 				Resource: p[1],
 				Action:   p[2],
-				ObjectID: p[3],
+				ObjectId: p[3],
 			})
 		}
 	}

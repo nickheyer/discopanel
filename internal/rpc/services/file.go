@@ -220,7 +220,7 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
 	uploadedPath := filepath.Join(targetPath, targetFilename)
-	s.rec.Record(ctx, server.ID, "file.upload", activity.Attrs{"path": uploadedPath}, "uploaded file %s", uploadedPath)
+	s.rec.Record(ctx, server.Id, "file.upload", activity.Attrs{"path": uploadedPath}, "uploaded file %s", uploadedPath)
 
 	return connect.NewResponse(&v1.SaveUploadedFileResponse{
 		Message: "File uploaded successfully",
@@ -256,7 +256,7 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 		s.log.Error("Failed to write file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update file"))
 	}
-	s.rec.Record(ctx, server.ID, "file.edit", activity.Attrs{"path": msg.Path}, "edited file %s", msg.Path)
+	s.rec.Record(ctx, server.Id, "file.edit", activity.Attrs{"path": msg.Path}, "edited file %s", msg.Path)
 
 	return connect.NewResponse(&v1.UpdateFileResponse{
 		Message: "File updated successfully",
@@ -310,7 +310,7 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete %s", p))
 		}
 	}
-	s.rec.Record(ctx, server.ID, "file.delete", activity.Attrs{"paths": strings.Join(paths, ", ")}, "deleted %s", strings.Join(paths, ", "))
+	s.rec.Record(ctx, server.Id, "file.delete", activity.Attrs{"paths": strings.Join(paths, ", ")}, "deleted %s", strings.Join(paths, ", "))
 
 	return connect.NewResponse(&v1.DeleteFileResponse{}), nil
 }
@@ -369,7 +369,7 @@ func (s *FileService) RenameFile(ctx context.Context, req *connect.Request[v1.Re
 		s.log.Error("Failed to rename file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to rename file"))
 	}
-	s.rec.Record(ctx, server.ID, "file.rename", activity.Attrs{"from": msg.Path, "to": newPath}, "renamed %s to %s", msg.Path, msg.NewName)
+	s.rec.Record(ctx, server.Id, "file.rename", activity.Attrs{"from": msg.Path, "to": newPath}, "renamed %s to %s", msg.Path, msg.NewName)
 
 	return connect.NewResponse(&v1.RenameFileResponse{
 		Message: "File renamed successfully",
@@ -434,7 +434,7 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 			s.log.Error("Extraction %s failed: %v", opID, err)
 		} else {
 			op.State = "completed"
-			s.rec.Record(bgCtx, server.ID, "file.extract", activity.Attrs{"archive": msg.Path, "files": strconv.Itoa(int(op.FilesExtracted.Load()))}, "extracted %s (%d files)", msg.Path, op.FilesExtracted.Load())
+			s.rec.Record(bgCtx, server.Id, "file.extract", activity.Attrs{"archive": msg.Path, "files": strconv.Itoa(int(op.FilesExtracted.Load()))}, "extracted %s (%d files)", msg.Path, op.FilesExtracted.Load())
 			s.log.Info("Extraction %s completed: %d files", opID, op.FilesExtracted.Load())
 		}
 		op.CompletedAt = time.Now()
@@ -494,7 +494,7 @@ func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.
 		s.log.Error("Failed to create folder: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create folder"))
 	}
-	s.rec.Record(ctx, server.ID, "file.mkdir", activity.Attrs{"path": msg.Path}, "created folder %s", msg.Path)
+	s.rec.Record(ctx, server.Id, "file.mkdir", activity.Attrs{"path": msg.Path}, "created folder %s", msg.Path)
 
 	return connect.NewResponse(&v1.CreateFolderResponse{
 		Message: "Folder created successfully",
@@ -550,7 +550,7 @@ func (s *FileService) MoveFile(ctx context.Context, req *connect.Request[v1.Move
 		}
 		os.RemoveAll(srcFull)
 	}
-	s.rec.Record(ctx, server.ID, "file.move", activity.Attrs{"from": msg.SourcePath, "to": msg.DestinationPath}, "moved %s to %s", msg.SourcePath, msg.DestinationPath)
+	s.rec.Record(ctx, server.Id, "file.move", activity.Attrs{"from": msg.SourcePath, "to": msg.DestinationPath}, "moved %s to %s", msg.SourcePath, msg.DestinationPath)
 
 	return connect.NewResponse(&v1.MoveFileResponse{
 		Message: "File moved successfully",
@@ -654,7 +654,7 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 	}
 
 	archivePath, _ := filepath.Rel(server.DataPath, destFull)
-	s.rec.Record(ctx, server.ID, "file.archive", activity.Attrs{"path": archivePath}, "created archive %s", archivePath)
+	s.rec.Record(ctx, server.Id, "file.archive", activity.Attrs{"path": archivePath}, "created archive %s", archivePath)
 	return connect.NewResponse(&v1.CreateArchiveResponse{
 		Message:       "Archive created successfully",
 		ArchivePath:   archivePath,

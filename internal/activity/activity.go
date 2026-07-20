@@ -9,6 +9,7 @@ import (
 
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // Structured details attached to one ledger event
@@ -97,13 +98,13 @@ func (r *Recorder) Announce(ctx context.Context, serverID, name string, attrs At
 }
 
 func (r *Recorder) record(ctx context.Context, serverID, name string, attrs Attrs, msg string) {
-	action := &storage.ServerAction{
-		ServerID: serverID,
+	action := &v1.ServerAction{
+		ServerId: serverID,
 		Source:   SourceFrom(ctx),
 		Name:     name,
 		Message:  msg,
 		Attrs:    attrs,
-		TraceID:  TraceFrom(ctx),
+		TraceId:  TraceFrom(ctx),
 	}
 	if err := r.store.AppendServerAction(context.WithoutCancel(ctx), action); err != nil {
 		r.log.Error("activity: ledger append failed for server %s: %v", serverID, err)

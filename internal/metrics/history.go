@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	storage "github.com/nickheyer/discopanel/internal/db"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -47,7 +48,7 @@ func (c *Collector) sampleHistory() {
 	traffic := c.takeProxyDeltas()
 
 	now := time.Now().UTC()
-	var batch []*storage.MetricsSample
+	var batch []*v1.MetricsSample
 	for id, m := range c.GetAllMetrics() {
 		// Lifecycle baseline only exists while the container is alive
 		if !c.ServerAlive(id) {
@@ -56,39 +57,42 @@ func (c *Collector) sampleHistory() {
 		// Stale heap without a live agent must not record
 		var heapUsed float64
 		if m.AgentConnected {
-			heapUsed = m.HeapUsedMB
+			heapUsed = m.HeapUsedMb
 		}
 		t := traffic[id]
-		batch = append(batch, &storage.MetricsSample{
-			ServerID:         id,
-			Timestamp:        now,
-			TPS:              m.TPS,
-			MSPT:             m.MSPT,
-			Players:          m.PlayersOnline,
-			CPUPercent:       m.CPUPercent,
-			MemoryMB:         m.MemoryUsage,
-			HeapUsedMB:       heapUsed,
+		if t == nil {
+			t = &v1.ProxyRoute{}
+		}
+		batch = append(batch, &v1.MetricsSample{
+			ServerId:         id,
+			Timestamp:        timestamppb.New(now),
+			Tps:              m.Tps,
+			Mspt:             m.Mspt,
+			Players:          int32(m.PlayersOnline),
+			CpuPercent:       m.CpuPercent,
+			MemoryMb:         m.MemoryUsage,
+			HeapUsedMb:       heapUsed,
 			DiskBytes:        m.DiskUsage,
-			ProxyActiveConns: t.ActiveConns,
+			ProxyActiveConns: t.ActiveConnections,
 			ProxyBytesIn:     t.BytesToBackend,
 			ProxyBytesOut:    t.BytesToClient,
 			ProxyLogins:      t.Logins,
 		})
 	}
-	if err := c.store.AddMetricsSamples(ctx, batch); err != nil {
+	if err := c.store.CreateMetricsSample(ctx, batch...); err != nil {
 		c.log.Debug("Metrics history: failed to insert samples: %v", err)
 	}
 }
 
 // Window deltas from monotonic proxy totals, resets clamp to zero
-func (c *Collector) takeProxyDeltas() map[string]ProxyTraffic {
+func (c *Collector) takeProxyDeltas() map[string]*v1.ProxyRoute {
 	if c.proxyTraffic == nil {
 		return nil
 	}
 	totals := c.proxyTraffic()
-	deltas := make(map[string]ProxyTraffic, len(totals))
+	deltas := make(map[string]*v1.ProxyRoute, len(totals))
 	if c.lastProxyTotals == nil {
-		c.lastProxyTotals = make(map[string]ProxyTraffic, len(totals))
+		c.lastProxyTotals = make(map[string]*v1.ProxyRoute, len(totals))
 	}
 	clamp := func(cur, last int64) int64 {
 		if d := cur - last; d > 0 {
@@ -98,12 +102,15 @@ func (c *Collector) takeProxyDeltas() map[string]ProxyTraffic {
 	}
 	for id, cur := range totals {
 		last := c.lastProxyTotals[id]
-		deltas[id] = ProxyTraffic{
-			ActiveConns:    cur.ActiveConns,
-			TotalConns:     clamp(cur.TotalConns, last.TotalConns),
-			Logins:         clamp(cur.Logins, last.Logins),
-			BytesToBackend: clamp(cur.BytesToBackend, last.BytesToBackend),
-			BytesToClient:  clamp(cur.BytesToClient, last.BytesToClient),
+		if last == nil {
+			last = &v1.ProxyRoute{}
+		}
+		deltas[id] = &v1.ProxyRoute{
+			ActiveConnections: cur.ActiveConnections,
+			TotalConnections:  clamp(cur.TotalConnections, last.TotalConnections),
+			Logins:            clamp(cur.Logins, last.Logins),
+			BytesToBackend:    clamp(cur.BytesToBackend, last.BytesToBackend),
+			BytesToClient:     clamp(cur.BytesToClient, last.BytesToClient),
 		}
 		c.lastProxyTotals[id] = cur
 	}

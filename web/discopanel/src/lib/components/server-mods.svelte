@@ -9,8 +9,7 @@
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { modsDirectoryFor } from '$lib/stores/loaders';
 	import { toast } from 'svelte-sonner';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import type { Mod } from '$lib/proto/discopanel/v1/mod_pb';
+	import type { Server, Mod } from '$lib/proto/discopanel/v1/storage_pb';
 	import { formatBytes } from '$lib/utils';
 	import { formatDate } from '$lib/utils/time';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';

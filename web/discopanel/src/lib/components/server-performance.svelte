@@ -29,12 +29,13 @@
 		RotateCcw,
 		ScrollText
 	} from '@lucide/svelte';
-	import { ServerStatus, type Server } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus, type Server } from '$lib/proto/discopanel/v1/storage_pb';
 	import {
 		FindingSource,
 		PerformanceSeverity,
 		type PerformanceFinding
 	} from '$lib/proto/discopanel/v1/server_pb';
+	import { FindingSourceLabel } from '$lib/proto/enums.gen';
 	import { statusMeta } from '$lib/server-status';
 
 	let { server }: { server: Server } = $props();
@@ -99,13 +100,6 @@
 			icon: CircleDashed
 		};
 	});
-
-	const SOURCE_LABEL: Partial<Record<FindingSource, string>> = {
-		[FindingSource.CONFIG]: 'config',
-		[FindingSource.TELEMETRY]: 'telemetry',
-		[FindingSource.CRASH_DOCTOR]: 'crash doctor',
-		[FindingSource.PREFLIGHT]: 'mod check'
-	};
 
 	function chipClass(severity: PerformanceSeverity) {
 		return severity === PerformanceSeverity.CRITICAL
@@ -281,12 +275,12 @@
 						<div class="min-w-0 flex-1">
 							<div class="flex flex-wrap items-center gap-2">
 								<span class="font-medium">{finding.title}</span>
-								{#if SOURCE_LABEL[finding.source]}
+								{#if finding.source !== FindingSource.UNSPECIFIED}
 									<Badge
 										variant="outline"
 										class="px-1.5 py-0 text-[10px] tracking-wide text-muted-foreground uppercase"
 									>
-										{SOURCE_LABEL[finding.source]}
+										{FindingSourceLabel[finding.source]}
 									</Badge>
 								{/if}
 								{#if finding.severity === PerformanceSeverity.CRITICAL}

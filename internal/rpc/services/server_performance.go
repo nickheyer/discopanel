@@ -27,14 +27,18 @@ func (s *ServerService) GetServerPerformanceReport(ctx context.Context, req *con
 
 	var agentConnected bool
 	if s.metricsCollector != nil {
-		if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
+		if m := s.metricsCollector.GetMetrics(server.Id); m != nil {
 			agentConnected = m.AgentConnected
 		}
 	}
 
-	dismissals, err := s.store.GetFindingDismissals(ctx, server.ID)
+	rows, err := s.store.GetFindingDismissals(ctx, server.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load dismissals: %w", err))
+	}
+	dismissals := make(map[string]*v1.FindingDismissal, len(rows))
+	for _, d := range rows {
+		dismissals[d.FindingId] = d
 	}
 
 	findings := runtimespec.ReadFindings(server.DataPath)
@@ -56,7 +60,7 @@ func (s *ServerService) DismissPerformanceFinding(ctx context.Context, req *conn
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 	if req.Msg.Restore {
-		if err := s.store.DeleteFindingDismissal(ctx, server.ID, req.Msg.FindingId); err != nil {
+		if err := s.store.DeleteFindingDismissal(ctx, server.Id, req.Msg.FindingId); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restore finding: %w", err))
 		}
 		return connect.NewResponse(&v1.DismissPerformanceFindingResponse{}), nil
@@ -66,7 +70,13 @@ func (s *ServerService) DismissPerformanceFinding(ctx context.Context, req *conn
 		if f.GetId() != req.Msg.FindingId {
 			continue
 		}
-		if err := s.store.UpsertFindingDismissal(ctx, server.ID, f.GetId(), findingHash(f)); err != nil {
+		dismissal := &v1.FindingDismissal{
+			ServerId:    server.Id,
+			FindingId:   f.GetId(),
+			ContentHash: findingHash(f),
+			DismissedAt: timestamppb.Now(),
+		}
+		if err := s.store.UpsertFindingDismissal(ctx, dismissal); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to dismiss finding: %w", err))
 		}
 		return connect.NewResponse(&v1.DismissPerformanceFindingResponse{}), nil
@@ -86,13 +96,13 @@ func (s *ServerService) GetServerActions(ctx context.Context, req *connect.Reque
 	actions := make([]*v1.ServerAction, 0, len(rows))
 	for i := range rows {
 		actions = append(actions, &v1.ServerAction{
-			Id:        int64(rows[i].ID),
-			Timestamp: timestamppb.New(rows[i].Timestamp),
+			Id:        int64(rows[i].Id),
+			Timestamp: rows[i].Timestamp,
 			Source:    rows[i].Source,
 			Name:      rows[i].Name,
 			Message:   rows[i].Message,
 			Attrs:     rows[i].Attrs,
-			TraceId:   rows[i].TraceID,
+			TraceId:   rows[i].TraceId,
 		})
 	}
 	return connect.NewResponse(&v1.GetServerActionsResponse{Actions: actions}), nil

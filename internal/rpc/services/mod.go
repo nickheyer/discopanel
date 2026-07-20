@@ -71,7 +71,7 @@ func modDisplayName(fileName string) string {
 }
 
 // Builds mod entries for every jar in one directory
-func scanModDir(serverID, dir string, loader storage.ModLoader, enabled bool) []*v1.Mod {
+func scanModDir(serverID, dir string, loader v1.ModLoader, enabled bool) []*v1.Mod {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -140,8 +140,8 @@ func cfNameKey(path string, size int64) string {
 // Applies cached CurseForge names and sweeps unknown jars once
 func (s *ModService) applyCFNames(ctx context.Context, serverID, modsDir string, mods []*v1.Mod) {
 	apiKey := ""
-	if global, _, err := s.store.GetGlobalSettings(ctx); err == nil && global != nil && global.CFAPIKey != nil {
-		apiKey = *global.CFAPIKey
+	if global, _, err := s.store.GetGlobalSettings(ctx); err == nil && global != nil && global.CfApiKey != nil {
+		apiKey = *global.CfApiKey
 	}
 	if apiKey == "" {
 		return
@@ -380,7 +380,7 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	// Cleanup the upload session
 	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
-	s.rec.Record(ctx, server.ID, "mod.install", activity.Attrs{"file": originalFilename}, "installed mod %s", originalFilename)
+	s.rec.Record(ctx, server.Id, "mod.install", activity.Attrs{"file": originalFilename}, "installed mod %s", originalFilename)
 
 	// Get file info for the response
 	info, err := os.Stat(modPath)
@@ -477,7 +477,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to enable mod"))
 			}
 			finalEnabled = true
-			s.rec.Record(ctx, server.ID, "mod.enable", activity.Attrs{"file": modFileName}, "enabled mod %s", modFileName)
+			s.rec.Record(ctx, server.Id, "mod.enable", activity.Attrs{"file": modFileName}, "enabled mod %s", modFileName)
 		} else {
 			// Move from mods to disabled directory
 			os.MkdirAll(disabledDir, 0755)
@@ -488,7 +488,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to disable mod"))
 			}
 			finalEnabled = false
-			s.rec.Record(ctx, server.ID, "mod.disable", activity.Attrs{"file": modFileName}, "disabled mod %s", modFileName)
+			s.rec.Record(ctx, server.Id, "mod.disable", activity.Attrs{"file": modFileName}, "disabled mod %s", modFileName)
 		}
 	}
 
@@ -572,7 +572,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 	if deletedName == "" {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("mod not found"))
 	}
-	s.rec.Record(ctx, server.ID, "mod.delete", activity.Attrs{"file": deletedName}, "deleted mod %s", deletedName)
+	s.rec.Record(ctx, server.Id, "mod.delete", activity.Attrs{"file": deletedName}, "deleted mod %s", deletedName)
 
 	return connect.NewResponse(&v1.DeleteModResponse{
 		Message: "Mod deleted successfully",

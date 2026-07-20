@@ -14,6 +14,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"gorm.io/gorm"
 )
 
@@ -43,7 +44,7 @@ func (s *AgentService) Session(ctx context.Context, stream *connect.BidiStream[a
 	if hello == nil {
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("first message must be a hello"))
 	}
-	if hello.GetServerId() != server.ID {
+	if hello.GetServerId() != server.Id {
 		return connect.NewError(connect.CodePermissionDenied, errors.New("hello server id does not match token"))
 	}
 
@@ -51,8 +52,8 @@ func (s *AgentService) Session(ctx context.Context, stream *connect.BidiStream[a
 	sessCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	sess := s.hub.Attach(server.ID, server.DataPath, hello, cancel)
-	defer s.hub.Detach(server.ID, sess)
+	sess := s.hub.Attach(server.Id, server.DataPath, hello, cancel)
+	defer s.hub.Detach(server.Id, sess)
 
 	// Pumps panel-to-agent messages while the main loop consumes telemetry
 	sendErr := make(chan error, 1)
@@ -103,12 +104,12 @@ func (s *AgentService) Session(ctx context.Context, stream *connect.BidiStream[a
 			}
 			return err
 		case msg := <-recvMsg:
-			s.hub.HandleMessage(sessCtx, server.ID, msg)
+			s.hub.HandleMessage(sessCtx, server.Id, msg)
 		}
 	}
 }
 
-func (s *AgentService) authenticate(ctx context.Context, authHeader string) (*storage.Server, error) {
+func (s *AgentService) authenticate(ctx context.Context, authHeader string) (*v1.Server, error) {
 	token := strings.TrimPrefix(strings.TrimPrefix(authHeader, "Bearer "), "bearer ")
 	if token == "" || !strings.HasPrefix(token, "dpa_") {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("missing agent token"))

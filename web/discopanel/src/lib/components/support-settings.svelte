@@ -28,7 +28,7 @@
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { serversStore } from '$lib/stores/servers';
-	import type { Server as ServerType } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server as ServerType } from '$lib/proto/discopanel/v1/storage_pb';
 
 	let generating = $state(false);
 	let uploading = $state(false);

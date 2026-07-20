@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/command"
@@ -144,7 +146,7 @@ func (s *Scheduler) IsRunning() bool {
 }
 
 // Returns current scheduler status
-func (s *Scheduler) GetStatus() SchedulerStatus {
+func (s *Scheduler) GetStatus() *v1.GetSchedulerStatusResponse {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -154,30 +156,21 @@ func (s *Scheduler) GetStatus() SchedulerStatus {
 
 	// Count active tasks
 	ctx := context.Background()
-	tasks, _ := s.store.ListAllScheduledTasks(ctx)
+	tasks, _ := s.store.ListScheduledTasks(ctx)
 	activeCount := 0
 	for _, task := range tasks {
-		if task.Status == storage.TaskStatusEnabled {
+		if task.Status == v1.TaskStatus_TASK_STATUS_ENABLED {
 			activeCount++
 		}
 	}
 
-	return SchedulerStatus{
+	return &v1.GetSchedulerStatusResponse{
 		Running:           s.running,
-		ActiveTasks:       activeCount,
-		RunningExecutions: runningCount,
-		LastCheck:         s.lastCheck,
-		NextCheck:         s.nextCheck,
+		ActiveTasks:       int32(activeCount),
+		RunningExecutions: int32(runningCount),
+		LastCheck:         timestamppb.New(s.lastCheck),
+		NextCheck:         timestamppb.New(s.nextCheck),
 	}
-}
-
-// Represents the current state of the scheduler
-type SchedulerStatus struct {
-	Running           bool
-	ActiveTasks       int
-	RunningExecutions int
-	LastCheck         time.Time
-	NextCheck         time.Time
 }
 
 // Main scheduler loop
@@ -210,7 +203,7 @@ func (s *Scheduler) checkAndRunDueTasks() {
 	ctx := context.Background()
 
 	// Get all due tasks
-	tasks, err := s.store.ListDueScheduledTasks(ctx, time.Now())
+	tasks, err := s.store.ListDueScheduledTasks(ctx, v1.TaskStatus_TASK_STATUS_ENABLED, time.Now())
 	if err != nil {
 		s.log.Error("Failed to list due tasks: %v", err)
 		return
@@ -219,7 +212,7 @@ func (s *Scheduler) checkAndRunDueTasks() {
 	for _, task := range tasks {
 		// Execute task asynchronously
 		s.wg.Add(1)
-		go func(t *storage.ScheduledTask) {
+		go func(t *v1.ScheduledTask) {
 			defer s.wg.Done()
 			s.executeTask(t, "scheduled", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
 		}(task)
@@ -227,7 +220,7 @@ func (s *Scheduler) checkAndRunDueTasks() {
 }
 
 // Manually triggers a task execution
-func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*storage.TaskExecution, error) {
+func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*v1.TaskExecution, error) {
 	task, err := s.store.GetScheduledTask(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -239,14 +232,14 @@ func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*storage.Ta
 
 // Schedulers subscription to the central event bus
 func (s *Scheduler) HandleServerEvent(ctx context.Context, event events.Event) {
-	tasks, err := s.store.ListEventTriggeredTasks(ctx, event.ServerID, event.Type)
+	tasks, err := s.store.ListEventTriggeredTasks(ctx, event.ServerId, event.Type)
 	if err != nil {
 		s.log.Error("Failed to list event-triggered tasks for %s: %v", event.Type, err)
 		return
 	}
 	for _, task := range tasks {
 		s.wg.Add(1)
-		go func(t *storage.ScheduledTask) {
+		go func(t *v1.ScheduledTask) {
 			defer s.wg.Done()
 			s.executeTaskForEvent(t, event.Type, event.Data)
 		}(task)
@@ -254,7 +247,7 @@ func (s *Scheduler) HandleServerEvent(ctx context.Context, event events.Event) {
 }
 
 // Runs a task from an event, threads type to webhooks
-func (s *Scheduler) executeTaskForEvent(task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) {
+func (s *Scheduler) executeTaskForEvent(task *v1.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) {
 	s.executeTask(task, "event", eventType, eventData)
 }
 
@@ -277,52 +270,51 @@ func (s *Scheduler) endTask(taskID string) {
 }
 
 // Runs a single task, trigger names what drove it
-func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any) (*storage.TaskExecution, error) {
+func (s *Scheduler) executeTask(task *v1.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any) (*v1.TaskExecution, error) {
 	ctx := context.Background()
 
-	if !s.tryBeginTask(task.ID) {
+	if !s.tryBeginTask(task.Id) {
 		s.log.Debug("Task %s: skipped, previous run still in flight", task.Name)
 		return nil, fmt.Errorf("task %q is already running", task.Name)
 	}
-	defer s.endTask(task.ID)
+	defer s.endTask(task.Id)
 
 	// Advance schedule before running so re-listing never doubles
 	s.updateNextRun(task)
 
 	// Check if server exists
-	server, err := s.store.GetServer(ctx, task.ServerID)
+	server, err := s.store.GetServer(ctx, task.ServerId)
 	if err != nil {
 		s.log.Error("Task %s: server not found: %v", task.Name, err)
 		return nil, err
 	}
 
 	// Checks if server is online, webhook tasks always fire
-	if task.RequireOnline && task.TaskType != storage.TaskTypeWebhook && server.Status != storage.StatusRunning {
+	if task.RequireOnline && task.TaskType != v1.TaskType_TASK_TYPE_WEBHOOK && server.Status != v1.ServerStatus_SERVER_STATUS_RUNNING {
 		s.log.Debug("Task %s: skipped (server offline)", task.Name)
 
 		// Create skipped execution record
-		execution := &storage.TaskExecution{
-			ID:        uuid.New().String(),
-			TaskID:    task.ID,
-			ServerID:  task.ServerID,
-			Status:    storage.ExecutionStatusSkipped,
-			StartedAt: time.Now(),
+		execution := &v1.TaskExecution{
+			Id:        uuid.New().String(),
+			TaskId:    task.Id,
+			ServerId:  task.ServerId,
+			Status:    v1.ExecutionStatus_EXECUTION_STATUS_SKIPPED,
+			StartedAt: timestamppb.Now(),
 			Trigger:   trigger,
 			Error:     "server offline",
 		}
-		now := time.Now()
-		execution.EndedAt = &now
+		execution.EndedAt = timestamppb.Now()
 		s.store.CreateTaskExecution(ctx, execution)
 		return execution, nil
 	}
 
 	// Create execution record
-	execution := &storage.TaskExecution{
-		ID:        uuid.New().String(),
-		TaskID:    task.ID,
-		ServerID:  task.ServerID,
-		Status:    storage.ExecutionStatusRunning,
-		StartedAt: time.Now(),
+	execution := &v1.TaskExecution{
+		Id:        uuid.New().String(),
+		TaskId:    task.Id,
+		ServerId:  task.ServerId,
+		Status:    v1.ExecutionStatus_EXECUTION_STATUS_RUNNING,
+		StartedAt: timestamppb.Now(),
 		Trigger:   trigger,
 	}
 	if err := s.store.CreateTaskExecution(ctx, execution); err != nil {
@@ -339,13 +331,13 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 
 	// Track running execution
 	s.executionMu.Lock()
-	s.runningExecutions[execution.ID] = cancel
+	s.runningExecutions[execution.Id] = cancel
 	s.executionMu.Unlock()
 
 	defer func() {
 		cancel()
 		s.executionMu.Lock()
-		delete(s.runningExecutions, execution.ID)
+		delete(s.runningExecutions, execution.Id)
 		s.executionMu.Unlock()
 	}()
 
@@ -357,7 +349,7 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 
 	for attempt := 0; ; attempt++ {
 		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData)
-		if execErr == nil || attempt >= task.RetryCount || execCtx.Err() != nil {
+		if execErr == nil || attempt >= int(task.RetryCount) || execCtx.Err() != nil {
 			break
 		}
 
@@ -374,29 +366,29 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 		if execCtx.Err() != nil {
 			break
 		}
-		execution.RetryNum = attempt + 1
+		execution.RetryNum = int32(attempt + 1)
 	}
 
 	// Update execution record
 	endTime := time.Now()
-	execution.EndedAt = &endTime
-	execution.Duration = endTime.Sub(execution.StartedAt).Milliseconds()
+	execution.EndedAt = timestamppb.New(endTime)
+	execution.Duration = endTime.Sub(execution.StartedAt.AsTime()).Milliseconds()
 	execution.Output = output
 
 	if execErr != nil {
 		if execCtx.Err() == context.DeadlineExceeded {
-			execution.Status = storage.ExecutionStatusTimeout
+			execution.Status = v1.ExecutionStatus_EXECUTION_STATUS_TIMEOUT
 			execution.Error = "execution timed out"
 		} else if execCtx.Err() == context.Canceled {
-			execution.Status = storage.ExecutionStatusCancelled
+			execution.Status = v1.ExecutionStatus_EXECUTION_STATUS_CANCELLED
 			execution.Error = "execution cancelled"
 		} else {
-			execution.Status = storage.ExecutionStatusFailed
+			execution.Status = v1.ExecutionStatus_EXECUTION_STATUS_FAILED
 			execution.Error = execErr.Error()
 		}
 		s.log.Error("Task %s: failed: %v", task.Name, execErr)
 	} else {
-		execution.Status = storage.ExecutionStatusCompleted
+		execution.Status = v1.ExecutionStatus_EXECUTION_STATUS_COMPLETED
 		s.log.Info("Task %s: completed successfully", task.Name)
 	}
 
@@ -406,21 +398,21 @@ func (s *Scheduler) executeTask(task *storage.ScheduledTask, trigger string, eve
 }
 
 // Dispatches a single execution attempt to its executor
-func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
+func (s *Scheduler) runTaskType(ctx context.Context, server *v1.Server, task *v1.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
 	switch task.TaskType {
-	case storage.TaskTypeCommand:
+	case v1.TaskType_TASK_TYPE_COMMAND:
 		return s.executeCommandTask(ctx, server, task)
-	case storage.TaskTypeRestart:
+	case v1.TaskType_TASK_TYPE_RESTART:
 		return s.executeRestartTask(ctx, server, task)
-	case storage.TaskTypeStart:
+	case v1.TaskType_TASK_TYPE_START:
 		return s.executeStartTask(ctx, server, task)
-	case storage.TaskTypeStop:
+	case v1.TaskType_TASK_TYPE_STOP:
 		return s.executeStopTask(ctx, server, task)
-	case storage.TaskTypeBackup:
+	case v1.TaskType_TASK_TYPE_BACKUP:
 		return s.executeBackupTask(ctx, server, task)
-	case storage.TaskTypeScript:
+	case v1.TaskType_TASK_TYPE_SCRIPT:
 		return s.executeScriptTask(ctx, server, task)
-	case storage.TaskTypeWebhook:
+	case v1.TaskType_TASK_TYPE_WEBHOOK:
 		return s.executeWebhookTask(ctx, server, task, eventType, eventData)
 	default:
 		return "", fmt.Errorf("unknown task type: %s", task.TaskType)
@@ -442,14 +434,14 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 }
 
 // Calculates and persists the next run time
-func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
+func (s *Scheduler) updateNextRun(task *v1.ScheduledTask) {
 	ctx := context.Background()
 	now := time.Now()
 	var nextRun *time.Time
-	var status storage.TaskStatus
+	var status v1.TaskStatus
 
 	switch task.Schedule {
-	case storage.ScheduleTypeCron:
+	case v1.ScheduleType_SCHEDULE_TYPE_CRON:
 		if task.CronExpr != "" {
 			schedule, err := s.cronParser.Parse(task.CronExpr)
 			if err == nil {
@@ -457,90 +449,87 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
 				nextRun = &next
 			}
 		}
-	case storage.ScheduleTypeInterval:
+	case v1.ScheduleType_SCHEDULE_TYPE_INTERVAL:
 		if task.IntervalSecs > 0 {
 			next := now.Add(time.Duration(task.IntervalSecs) * time.Second)
 			nextRun = &next
 		}
-	case storage.ScheduleTypeOnce:
+	case v1.ScheduleType_SCHEDULE_TYPE_ONCE:
 		// Once tasks never repeat, disable on first fire
-		task.Status = storage.TaskStatusDisabled
-		status = storage.TaskStatusDisabled
+		task.Status = v1.TaskStatus_TASK_STATUS_DISABLED
+		status = v1.TaskStatus_TASK_STATUS_DISABLED
 		nextRun = nil
-	case storage.ScheduleTypeEvent:
+	case v1.ScheduleType_SCHEDULE_TYPE_EVENT:
 		// Event-triggered tasks have no time-based next run
 		nextRun = nil
 	}
 
-	if err := s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now, status); err != nil {
+	fields := map[string]any{"next_run": nextRun, "last_run": now}
+	if status != v1.TaskStatus_TASK_STATUS_UNSPECIFIED {
+		fields["status"] = status
+	}
+	if err := s.store.UpdateScheduledTaskFields(ctx, task.Id, fields); err != nil {
 		s.log.Error("Task %s: failed to persist next run: %v", task.Name, err)
 	}
 }
 
 // Task type executors
 
-// Configuration for command tasks
-type CommandTaskConfig struct {
-	Command string `json:"command"`
+// Parses a task's JSON config into its proto message
+func unmarshalTaskConfig(cfg string, msg proto.Message) error {
+	if cfg == "" {
+		return nil
+	}
+	return protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal([]byte(cfg), msg)
 }
 
-func (s *Scheduler) executeCommandTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
-	var config CommandTaskConfig
-	if task.Config != "" {
-		if err := json.Unmarshal([]byte(task.Config), &config); err != nil {
-			return "", fmt.Errorf("invalid command config: %w", err)
-		}
+func (s *Scheduler) executeCommandTask(ctx context.Context, server *v1.Server, task *v1.ScheduledTask) (string, error) {
+	config := &v1.CommandTaskConfig{}
+	if err := unmarshalTaskConfig(task.Config, config); err != nil {
+		return "", fmt.Errorf("invalid command config: %w", err)
 	}
 
 	if config.Command == "" {
 		return "", fmt.Errorf("no command specified")
 	}
 
-	if server.ContainerID == "" {
+	if server.ContainerId == "" {
 		return "", fmt.Errorf("server has no container")
 	}
 
-	output, err := s.sender.SendCommand(ctx, server.ID, config.Command)
+	output, err := s.sender.SendCommand(ctx, server.Id, config.Command)
 	if err == nil {
-		s.rec.Record(ctx, server.ID, "task.command", activity.Attrs{"command": config.Command, "task": task.Name}, "ran command %q (task %q)", config.Command, task.Name)
+		s.rec.Record(ctx, server.Id, "task.command", activity.Attrs{"command": config.Command, "task": task.Name}, "ran command %q (task %q)", config.Command, task.Name)
 	}
 	return output, err
 }
 
-func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
-	if err := s.lifecycle.Restart(ctx, server.ID); err != nil {
+func (s *Scheduler) executeRestartTask(ctx context.Context, server *v1.Server, _ *v1.ScheduledTask) (string, error) {
+	if err := s.lifecycle.Restart(ctx, server.Id); err != nil {
 		return "", err
 	}
 	return "server restarted successfully", nil
 }
 
-func (s *Scheduler) executeStartTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
-	if err := s.lifecycle.Start(ctx, server.ID); err != nil {
+func (s *Scheduler) executeStartTask(ctx context.Context, server *v1.Server, _ *v1.ScheduledTask) (string, error) {
+	if err := s.lifecycle.Start(ctx, server.Id); err != nil {
 		return "", err
 	}
 	return "server started successfully", nil
 }
 
-func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
-	if err := s.lifecycle.Stop(ctx, server.ID); err != nil {
+func (s *Scheduler) executeStopTask(ctx context.Context, server *v1.Server, _ *v1.ScheduledTask) (string, error) {
+	if err := s.lifecycle.Stop(ctx, server.Id); err != nil {
 		return "", err
 	}
 	return "server stopped successfully", nil
 }
 
-// Configuration for script tasks
-type ScriptTaskConfig struct {
-	ScriptPath string   `json:"script_path"`
-	Args       []string `json:"args"`
-}
-
-func (s *Scheduler) executeScriptTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+func (s *Scheduler) executeScriptTask(ctx context.Context, server *v1.Server, task *v1.ScheduledTask) (string, error) {
 	// Script tasks execute inside the container
-	var config ScriptTaskConfig
-	if task.Config != "" {
-		if err := json.Unmarshal([]byte(task.Config), &config); err != nil {
-			return "", fmt.Errorf("invalid config: %w", err)
-		}
+	config := &v1.ScriptTaskConfig{}
+	if err := unmarshalTaskConfig(task.Config, config); err != nil {
+		return "", fmt.Errorf("invalid config: %w", err)
 	}
 
 	if config.ScriptPath == "" {
@@ -548,11 +537,11 @@ func (s *Scheduler) executeScriptTask(ctx context.Context, server *storage.Serve
 	}
 
 	execCmd := []string{config.ScriptPath}
-	stdout, stderr, err := s.docker.Exec(ctx, server.ContainerID, append(execCmd, config.Args...))
+	stdout, stderr, err := s.docker.Exec(ctx, server.ContainerId, append(execCmd, config.Args...))
 	if err != nil {
 		return "", err
 	}
-	s.rec.Record(ctx, server.ID, "task.script", activity.Attrs{"script": config.ScriptPath, "task": task.Name}, "ran script %s (task %q)", config.ScriptPath, task.Name)
+	s.rec.Record(ctx, server.Id, "task.script", activity.Attrs{"script": config.ScriptPath, "task": task.Name}, "ran script %s (task %q)", config.ScriptPath, task.Name)
 	if strings.TrimSpace(stderr) != "" {
 		return stdout + "\n[stderr]\n" + stderr, nil
 	}
@@ -560,11 +549,11 @@ func (s *Scheduler) executeScriptTask(ctx context.Context, server *storage.Serve
 }
 
 // Calculates the next run time based on schedule
-func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, error) {
+func (s *Scheduler) CalculateNextRun(task *v1.ScheduledTask) (*time.Time, error) {
 	now := time.Now()
 
 	switch task.Schedule {
-	case storage.ScheduleTypeCron:
+	case v1.ScheduleType_SCHEDULE_TYPE_CRON:
 		if task.CronExpr == "" {
 			return nil, fmt.Errorf("cron expression required")
 		}
@@ -575,23 +564,24 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 		next := schedule.Next(now)
 		return &next, nil
 
-	case storage.ScheduleTypeInterval:
+	case v1.ScheduleType_SCHEDULE_TYPE_INTERVAL:
 		if task.IntervalSecs <= 0 {
 			return nil, fmt.Errorf("interval must be positive")
 		}
 		next := now.Add(time.Duration(task.IntervalSecs) * time.Second)
 		return &next, nil
 
-	case storage.ScheduleTypeOnce:
+	case v1.ScheduleType_SCHEDULE_TYPE_ONCE:
 		if task.RunAt == nil {
 			return nil, fmt.Errorf("run_at time required for once schedule")
 		}
-		if task.RunAt.Before(now) {
+		if task.RunAt.AsTime().Before(now) {
 			return nil, nil // Already passed
 		}
-		return task.RunAt, nil
+		runAt := task.RunAt.AsTime()
+		return &runAt, nil
 
-	case storage.ScheduleTypeEvent:
+	case v1.ScheduleType_SCHEDULE_TYPE_EVENT:
 		// No scheduled time, execution is triggered via OnEvent
 		return nil, nil
 
@@ -606,14 +596,12 @@ func (s *Scheduler) ValidateCronExpr(expr string) error {
 	return err
 }
 
-func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
-	var cfg webhook.Config
-	if task.Config != "" {
-		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
-			return "", fmt.Errorf("invalid webhook config: %w", err)
-		}
+func (s *Scheduler) executeWebhookTask(ctx context.Context, server *v1.Server, task *v1.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
+	cfg := &v1.WebhookTaskConfig{}
+	if err := unmarshalTaskConfig(task.Config, cfg); err != nil {
+		return "", fmt.Errorf("invalid webhook config: %w", err)
 	}
-	if cfg.URL == "" {
+	if cfg.Url == "" {
 		return "", fmt.Errorf("webhook URL is required")
 	}
 
@@ -630,8 +618,8 @@ func (s *Scheduler) executeWebhookTask(ctx context.Context, server *storage.Serv
 
 	// Pull live count from metrics so payloads report players accurately
 	if s.metrics != nil {
-		if m := s.metrics.GetMetrics(server.ID); m != nil {
-			server.PlayersOnline = m.PlayersOnline
+		if m := s.metrics.GetMetrics(server.Id); m != nil {
+			server.PlayersOnline = int32(m.PlayersOnline)
 		}
 	}
 

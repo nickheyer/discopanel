@@ -13,6 +13,8 @@ import (
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Handles the lifecycle of modules
@@ -31,7 +33,7 @@ type Manager struct {
 
 // Mints scoped API tokens for module containers
 type TokenMinter interface {
-	GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID, role string) (string, *storage.APIToken, error)
+	GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID, role string) (string, *v1.ApiToken, error)
 }
 
 // Creates a new module manager
@@ -95,9 +97,9 @@ func (m *Manager) seedDoctorModule() {
 		m.logger.Error("Doctor seed: failed to list modules: %v", err)
 		return
 	}
-	var doctor *storage.Module
+	var doctor *v1.Module
 	for _, mod := range modules {
-		if mod.TemplateID == doctorTemplateID {
+		if mod.TemplateId == doctorTemplateID {
 			doctor = mod
 			break
 		}
@@ -109,14 +111,14 @@ func (m *Manager) seedDoctorModule() {
 			m.logger.Warn("Doctor seed: no admin user yet, doctor module waits for next start: %v", err)
 			return
 		}
-		doctor = &storage.Module{
-			ID:                    "builtin-doctor-instance",
+		doctor = &v1.Module{
+			Id:                    "builtin-doctor-instance",
 			Name:                  "Doctor",
-			TemplateID:            doctorTemplateID,
-			Status:                storage.ModuleStatusStopped,
+			TemplateId:            doctorTemplateID,
+			Status:                v1.ModuleStatus_MODULE_STATUS_STOPPED,
 			AutoStart:             true,
 			FollowServerLifecycle: false,
-			CreatedBy:             owner,
+			CreatedByUserId:       owner,
 			Memory:                512,
 			Ports:                 doctorPorts(m.config),
 			EnvOverrides:          doctorEnv(),
@@ -133,7 +135,7 @@ func (m *Manager) seedDoctorModule() {
 	if !doctor.AutoStart {
 		return
 	}
-	if err := m.StartModule(ctx, doctor.ID); err != nil {
+	if err := m.StartModule(ctx, doctor.Id); err != nil {
 		m.logger.Error("Doctor seed: failed to start doctor module: %v", err)
 	}
 }
@@ -158,9 +160,9 @@ func (m *Manager) Stop() error {
 				continue
 			}
 
-			if module.Status == storage.ModuleStatusRunning {
+			if module.Status == v1.ModuleStatus_MODULE_STATUS_RUNNING {
 				m.logger.Info("Stopping module: %s", module.Name)
-				if err := m.StopModule(ctx, module.ID); err != nil {
+				if err := m.StopModule(ctx, module.Id); err != nil {
 					m.logger.Error("Failed to stop module %s: %v", module.Name, err)
 				}
 			}
@@ -179,58 +181,58 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 		return fmt.Errorf("failed to get module: %w", err)
 	}
 
-	template, err := m.store.GetModuleTemplate(ctx, module.TemplateID)
+	template, err := m.store.GetModuleTemplate(ctx, module.TemplateId)
 	if err != nil {
 		return fmt.Errorf("failed to get module template: %w", err)
 	}
 
 	// Global modules run without a server attachment
-	var server *storage.Server
-	if module.ServerID != "" {
-		server, err = m.store.GetServer(ctx, module.ServerID)
+	var server *v1.Server
+	if module.ServerId != "" {
+		server, err = m.store.GetServer(ctx, module.ServerId)
 		if err != nil {
 			return fmt.Errorf("failed to get server: %w", err)
 		}
 	}
 
 	// Fresh scoped token each create, plaintext lives only in env
-	if m.tokenMinter != nil && module.CreatedBy != "" {
-		if module.TokenID != "" {
-			if err := m.store.DeleteAPITokenByID(ctx, module.TokenID); err != nil {
+	if m.tokenMinter != nil && module.CreatedByUserId != "" {
+		if module.TokenId != "" {
+			if err := m.store.DeleteApiToken(ctx, module.TokenId); err != nil {
 				m.logger.Warn("Failed to delete stale module token: %v", err)
 			}
 		}
-		plaintext, token, err := m.tokenMinter.GenerateModuleToken(ctx, module.CreatedBy, module.Name, module.ID, template.Metadata["module_role"])
+		plaintext, token, err := m.tokenMinter.GenerateModuleToken(ctx, module.CreatedByUserId, module.Name, module.Id, template.Metadata["module_role"])
 		if err != nil {
 			return fmt.Errorf("failed to mint module token: %w", err)
 		}
-		module.TokenID = token.ID
+		module.TokenId = token.Id
 		module.TokenPlaintext = plaintext
 	}
 
 	// Update status to creating
-	module.Status = storage.ModuleStatusCreating
+	module.Status = v1.ModuleStatus_MODULE_STATUS_CREATING
 	if err := m.store.UpdateModule(ctx, module); err != nil {
 		return fmt.Errorf("failed to update module status: %w", err)
 	}
 
 	// Fetch server config for alias resolution
-	var serverConfig *storage.ServerProperties
+	var serverConfig *v1.ServerProperties
 	if server != nil {
-		serverConfig, _ = m.store.GetServerProperties(ctx, server.ID)
+		serverConfig, _ = m.store.GetServerProperties(ctx, server.Id)
 	}
 
 	// Create the container
 	containerID, err := m.docker.CreateModuleContainer(ctx, module, template, server, serverConfig, m.config, m.siblingModules(ctx, module))
 	if err != nil {
-		module.Status = storage.ModuleStatusError
+		module.Status = v1.ModuleStatus_MODULE_STATUS_ERROR
 		m.store.UpdateModule(ctx, module)
 		return fmt.Errorf("failed to create module container: %w", err)
 	}
 
 	// Update module with container ID
-	module.ContainerID = containerID
-	module.Status = storage.ModuleStatusStopped
+	module.ContainerId = containerID
+	module.Status = v1.ModuleStatus_MODULE_STATUS_STOPPED
 	if err := m.store.UpdateModule(ctx, module); err != nil {
 		return fmt.Errorf("failed to update module with container ID: %w", err)
 	}
@@ -245,12 +247,12 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 }
 
 // Sibling modules by name for inter-module alias references
-func (m *Manager) siblingModules(ctx context.Context, module *storage.Module) map[string]*storage.Module {
-	siblings := make(map[string]*storage.Module)
-	serverModules, err := m.store.ListServerModules(ctx, module.ServerID)
+func (m *Manager) siblingModules(ctx context.Context, module *v1.Module) map[string]*v1.Module {
+	siblings := make(map[string]*v1.Module)
+	serverModules, err := m.store.ListServerModules(ctx, module.ServerId)
 	if err == nil {
 		for _, sibling := range serverModules {
-			if sibling.ID != module.ID {
+			if sibling.Id != module.Id {
 				siblings[sibling.Name] = sibling
 			}
 		}
@@ -264,19 +266,19 @@ func (m *Manager) NeedsRecreate(ctx context.Context, moduleID string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	if module.ContainerID == "" {
+	if module.ContainerId == "" {
 		return false, nil
 	}
-	template, err := m.store.GetModuleTemplate(ctx, module.TemplateID)
+	template, err := m.store.GetModuleTemplate(ctx, module.TemplateId)
 	if err != nil {
 		return false, err
 	}
-	server, err := m.store.GetServer(ctx, module.ServerID)
+	server, err := m.store.GetServer(ctx, module.ServerId)
 	if err != nil {
 		return false, err
 	}
-	serverConfig, _ := m.store.GetServerProperties(ctx, server.ID)
-	current, err := m.docker.ModuleContainerConfigHash(ctx, module.ContainerID)
+	serverConfig, _ := m.store.GetServerProperties(ctx, server.Id)
+	current, err := m.docker.ModuleContainerConfigHash(ctx, module.ContainerId)
 	if err != nil {
 		return false, err
 	}
@@ -291,16 +293,16 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 		return fmt.Errorf("failed to get module: %w", err)
 	}
 
-	if module.ContainerID == "" {
+	if module.ContainerId == "" {
 		return m.CreateAndStartModule(ctx, moduleID, true)
 	}
 
 	// Check if container still exists in Docker
-	_, err = m.docker.GetContainerStatus(ctx, module.ContainerID)
+	_, err = m.docker.GetContainerStatus(ctx, module.ContainerId)
 	if err != nil {
 		// Container doesn't exist, recreate it
 		m.logger.Info("Container for module %s no longer exists, recreating", module.Name)
-		module.ContainerID = ""
+		module.ContainerId = ""
 		if err := m.store.UpdateModule(ctx, module); err != nil {
 			return fmt.Errorf("failed to clear module container ID: %w", err)
 		}
@@ -310,10 +312,10 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 	// Stale config hash rebuilds the container before start
 	if stale, err := m.NeedsRecreate(ctx, moduleID); err == nil && stale {
 		m.logger.Info("Container for module %s has stale config, recreating", module.Name)
-		if err := m.docker.RemoveContainer(ctx, module.ContainerID); err != nil {
+		if err := m.docker.RemoveContainer(ctx, module.ContainerId); err != nil {
 			m.logger.Error("Failed to remove stale module container: %v", err)
 		}
-		module.ContainerID = ""
+		module.ContainerId = ""
 		if err := m.store.UpdateModule(ctx, module); err != nil {
 			return fmt.Errorf("failed to clear module container ID: %w", err)
 		}
@@ -326,36 +328,35 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 	}
 
 	// Update status
-	module.Status = storage.ModuleStatusStarting
+	module.Status = v1.ModuleStatus_MODULE_STATUS_STARTING
 	if err := m.store.UpdateModule(ctx, module); err != nil {
 		return fmt.Errorf("failed to update module status: %w", err)
 	}
 
 	// Start the container
-	if err := m.docker.StartContainer(ctx, module.ContainerID); err != nil {
-		module.Status = storage.ModuleStatusError
+	if err := m.docker.StartContainer(ctx, module.ContainerId); err != nil {
+		module.Status = v1.ModuleStatus_MODULE_STATUS_ERROR
 		m.store.UpdateModule(ctx, module)
 		return fmt.Errorf("failed to start module container: %w", err)
 	}
 
 	// Start log streaming
 	if m.logStreamer != nil {
-		if err := m.logStreamer.StartStreaming(module.ID, module.ContainerID); err != nil {
+		if err := m.logStreamer.StartStreaming(module.Id, module.ContainerId); err != nil {
 			m.logger.Warn("Failed to start log streaming for module %s: %v", module.Name, err)
 		}
 	}
 
 	// Update status and timestamps
-	now := time.Now()
-	module.Status = storage.ModuleStatusRunning
-	module.LastStarted = &now
+	module.Status = v1.ModuleStatus_MODULE_STATUS_RUNNING
+	module.LastStarted = timestamppb.Now()
 	if err := m.store.UpdateModule(ctx, module); err != nil {
 		return fmt.Errorf("failed to update module status: %w", err)
 	}
 
 	// Update proxy route if enabled (handles primary and additional ports)
 	if m.proxyManager != nil {
-		server, err := m.store.GetServer(ctx, module.ServerID)
+		server, err := m.store.GetServer(ctx, module.ServerId)
 		if err == nil && server.ProxyHostname != "" {
 			if err := m.proxyManager.AddModuleRoute(module, server); err != nil {
 				m.logger.Error("Failed to add proxy route for module %s: %v", module.Name, err)
@@ -367,7 +368,7 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 
 	// Run init command in background if configured
 	if module.InitCommand != "" {
-		go m.runInitCommand(module.ID)
+		go m.runInitCommand(module.Id)
 	}
 
 	return nil
@@ -390,13 +391,13 @@ func (m *Manager) runInitCommand(moduleID string) {
 
 	// Verify container is still running
 	status, err := m.GetModuleStatus(ctx, moduleID)
-	if err != nil || status != storage.ModuleStatusRunning {
+	if err != nil || status != v1.ModuleStatus_MODULE_STATUS_RUNNING {
 		m.logger.Warn("Init command: module %s is no longer running, skipping", module.Name)
 		return
 	}
 
 	m.logger.Info("Init command: executing for module %s: %s", module.Name, module.InitCommand)
-	stdout, stderr, err := m.docker.Exec(ctx, module.ContainerID, []string{"sh", "-c", module.InitCommand})
+	stdout, stderr, err := m.docker.Exec(ctx, module.ContainerId, []string{"sh", "-c", module.InitCommand})
 	if err != nil {
 		m.logger.Error("Init command: failed for module %s: %v", module.Name, err)
 		return
@@ -410,14 +411,14 @@ func (m *Manager) runInitCommand(moduleID string) {
 
 	if module.RestartAfterInit {
 		m.logger.Info("Init command: restarting module %s after init", module.Name)
-		if err := m.docker.RestartContainer(ctx, module.ContainerID, 5*time.Second); err != nil {
+		if err := m.docker.RestartContainer(ctx, module.ContainerId, 5*time.Second); err != nil {
 			m.logger.Error("Init command: failed to restart module %s: %v", module.Name, err)
 		}
 	}
 }
 
 // Starts and waits for module dependencies
-func (m *Manager) startDependencies(ctx context.Context, module *storage.Module) error {
+func (m *Manager) startDependencies(ctx context.Context, module *v1.Module) error {
 	if len(module.Dependencies) == 0 {
 		return nil
 	}
@@ -433,11 +434,11 @@ func (m *Manager) startDependencies(ctx context.Context, module *storage.Module)
 		}
 
 		// Start dependency if not running
-		if depModule.Status != storage.ModuleStatusRunning {
+		if depModule.Status != v1.ModuleStatus_MODULE_STATUS_RUNNING {
 			m.logger.Info("Starting dependency %s for module %s", depModule.Name, module.Name)
 
 			// Create container if needed
-			if depModule.ContainerID == "" {
+			if depModule.ContainerId == "" {
 				if err := m.CreateAndStartModule(ctx, dep.ModuleId, true); err != nil {
 					return fmt.Errorf("failed to create and start dependency %s: %w", depModule.Name, err)
 				}
@@ -470,7 +471,7 @@ func (m *Manager) waitForHealthy(ctx context.Context, moduleID string, timeoutSe
 		return err
 	}
 
-	template, err := m.store.GetModuleTemplate(ctx, module.TemplateID)
+	template, err := m.store.GetModuleTemplate(ctx, module.TemplateId)
 	if err != nil {
 		return err
 	}
@@ -504,10 +505,10 @@ func (m *Manager) waitForHealthy(ctx context.Context, moduleID string, timeoutSe
 			return fmt.Errorf("health check timed out after %d seconds", timeoutSeconds)
 		case <-ticker.C:
 			// Get container IP
-			containerIP, err := m.docker.GetModuleContainerIP(ctx, module.ContainerID)
+			containerIP, err := m.docker.GetModuleContainerIP(ctx, module.ContainerId)
 			if err != nil {
 				failCount++
-				if failCount >= retries {
+				if failCount >= int(retries) {
 					return fmt.Errorf("failed to get container IP after %d retries", retries)
 				}
 				continue
@@ -515,7 +516,7 @@ func (m *Manager) waitForHealthy(ctx context.Context, moduleID string, timeoutSe
 
 			// Perform health check
 			healthURL := fmt.Sprintf("http://%s:%d%s", containerIP, template.HealthCheckPort, template.HealthCheckPath)
-			if m.checkHealth(healthURL, module.HealthCheckTimeout) {
+			if m.checkHealth(healthURL, int(module.HealthCheckTimeout)) {
 				m.logger.Info("Module %s is healthy", module.Name)
 				return nil
 			}
@@ -544,7 +545,7 @@ func (m *Manager) waitForRunning(ctx context.Context, moduleID string, timeoutSe
 			if err != nil {
 				continue
 			}
-			if status == storage.ModuleStatusRunning {
+			if status == v1.ModuleStatus_MODULE_STATUS_RUNNING {
 				return nil
 			}
 		}
@@ -577,12 +578,12 @@ func (m *Manager) StopModule(ctx context.Context, moduleID string) error {
 		return fmt.Errorf("failed to get module: %w", err)
 	}
 
-	if module.ContainerID == "" {
+	if module.ContainerId == "" {
 		return fmt.Errorf("module has no container")
 	}
 
 	// Update status
-	module.Status = storage.ModuleStatusStopping
+	module.Status = v1.ModuleStatus_MODULE_STATUS_STOPPING
 	if err := m.store.UpdateModule(ctx, module); err != nil {
 		return fmt.Errorf("failed to update module status: %w", err)
 	}
@@ -604,12 +605,12 @@ func (m *Manager) StopModule(ctx context.Context, moduleID string) error {
 	}
 
 	// Stop the container
-	if _, err := m.docker.StopContainer(ctx, module.ContainerID, 30); err != nil {
+	if _, err := m.docker.StopContainer(ctx, module.ContainerId, 30); err != nil {
 		m.logger.Error("Failed to stop module container: %v", err)
 	}
 
 	// Update status
-	module.Status = storage.ModuleStatusStopped
+	module.Status = v1.ModuleStatus_MODULE_STATUS_STOPPED
 	if err := m.store.UpdateModule(ctx, module); err != nil {
 		return fmt.Errorf("failed to update module status: %w", err)
 	}
@@ -636,7 +637,7 @@ func (m *Manager) RecreateModule(ctx context.Context, moduleID string) error {
 		return fmt.Errorf("failed to get module: %w", err)
 	}
 
-	wasRunning := module.Status == storage.ModuleStatusRunning
+	wasRunning := module.Status == v1.ModuleStatus_MODULE_STATUS_RUNNING
 
 	// Stop if running
 	if wasRunning {
@@ -646,11 +647,11 @@ func (m *Manager) RecreateModule(ctx context.Context, moduleID string) error {
 	}
 
 	// Remove old container
-	if module.ContainerID != "" {
-		if err := m.docker.RemoveContainer(ctx, module.ContainerID); err != nil {
+	if module.ContainerId != "" {
+		if err := m.docker.RemoveContainer(ctx, module.ContainerId); err != nil {
 			m.logger.Error("Failed to remove old module container: %v", err)
 		}
-		module.ContainerID = ""
+		module.ContainerId = ""
 		m.store.UpdateModule(ctx, module)
 	}
 
@@ -670,22 +671,22 @@ func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
 	}
 
 	// Stop if running
-	if module.Status == storage.ModuleStatusRunning {
+	if module.Status == v1.ModuleStatus_MODULE_STATUS_RUNNING {
 		if err := m.StopModule(ctx, moduleID); err != nil {
 			m.logger.Error("Failed to stop module for deletion: %v", err)
 		}
 	}
 
 	// Remove container
-	if module.ContainerID != "" {
-		if err := m.docker.RemoveContainer(ctx, module.ContainerID); err != nil {
+	if module.ContainerId != "" {
+		if err := m.docker.RemoveContainer(ctx, module.ContainerId); err != nil {
 			m.logger.Error("Failed to remove module container: %v", err)
 		}
 	}
 
 	// Clean up associated API token
-	if module.TokenID != "" {
-		if err := m.store.DeleteAPITokenByID(ctx, module.TokenID); err != nil {
+	if module.TokenId != "" {
+		if err := m.store.DeleteApiToken(ctx, module.TokenId); err != nil {
 			m.logger.Error("Failed to delete module API token: %v", err)
 		}
 	}
@@ -700,35 +701,35 @@ func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
 }
 
 // Returns current status from Docker
-func (m *Manager) GetModuleStatus(ctx context.Context, moduleID string) (storage.ModuleStatus, error) {
+func (m *Manager) GetModuleStatus(ctx context.Context, moduleID string) (v1.ModuleStatus, error) {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
-		return storage.ModuleStatusError, err
+		return v1.ModuleStatus_MODULE_STATUS_ERROR, err
 	}
 
-	if module.ContainerID == "" {
-		return storage.ModuleStatusStopped, nil
+	if module.ContainerId == "" {
+		return v1.ModuleStatus_MODULE_STATUS_STOPPED, nil
 	}
 
-	status, err := m.docker.GetContainerStatus(ctx, module.ContainerID)
+	status, err := m.docker.GetContainerStatus(ctx, module.ContainerId)
 	if err != nil {
-		return storage.ModuleStatusError, err
+		return v1.ModuleStatus_MODULE_STATUS_ERROR, err
 	}
 
 	// Map ServerStatus to ModuleStatus
 	switch status {
-	case storage.StatusRunning:
-		return storage.ModuleStatusRunning, nil
-	case storage.StatusStarting:
-		return storage.ModuleStatusStarting, nil
-	case storage.StatusStopping:
-		return storage.ModuleStatusStopping, nil
-	case storage.StatusStopped:
-		return storage.ModuleStatusStopped, nil
-	case storage.StatusCreating:
-		return storage.ModuleStatusCreating, nil
+	case v1.ServerStatus_SERVER_STATUS_RUNNING:
+		return v1.ModuleStatus_MODULE_STATUS_RUNNING, nil
+	case v1.ServerStatus_SERVER_STATUS_STARTING:
+		return v1.ModuleStatus_MODULE_STATUS_STARTING, nil
+	case v1.ServerStatus_SERVER_STATUS_STOPPING:
+		return v1.ModuleStatus_MODULE_STATUS_STOPPING, nil
+	case v1.ServerStatus_SERVER_STATUS_STOPPED:
+		return v1.ModuleStatus_MODULE_STATUS_STOPPED, nil
+	case v1.ServerStatus_SERVER_STATUS_CREATING:
+		return v1.ModuleStatus_MODULE_STATUS_CREATING, nil
 	default:
-		return storage.ModuleStatusError, nil
+		return v1.ModuleStatus_MODULE_STATUS_ERROR, nil
 	}
 }
 

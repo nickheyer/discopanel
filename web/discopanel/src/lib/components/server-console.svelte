@@ -4,9 +4,9 @@
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { create } from '@bufbuild/protobuf';
 	import { timestampDate } from '@bufbuild/protobuf/wkt';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
-	import type { LogEntry, ServerAction } from '$lib/proto/discopanel/v1/server_pb';
+	import type { Server, ServerAction } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
+	import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
 	import {
 		GetServerLogsRequestSchema,
 		ClearServerLogsRequestSchema,

@@ -25,8 +25,8 @@
 		ArrowRight,
 		RotateCcw
 	} from '@lucide/svelte';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { GetServerRoutingResponse, ProxyRoute } from '$lib/proto/discopanel/v1/proxy_pb';
 	import { routeStateLabel, routeStateClass, routeStatsSummary } from '$lib/proxy-route';
 

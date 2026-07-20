@@ -44,7 +44,7 @@ func main() {
 	}
 
 	// Print banner first so console never sits silent
-	fmt.Printf("[discopanel-runtime] %s %s (%s, MC %s)\n", spec.Kind, launchTarget(spec), spec.Loader, spec.MCVersion)
+	fmt.Printf("[discopanel-runtime] %s %s (%s, MC %s)\n", spec.Kind, launchTarget(spec), spec.Loader, spec.McVersion)
 
 	agentSpec, err := runtimespec.ReadAgentSpec(dataDir)
 	if err != nil {

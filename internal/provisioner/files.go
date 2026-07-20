@@ -12,7 +12,6 @@ import (
 	_ "image/jpeg"
 	"image/png"
 
-	_ "golang.org/x/image/webp"
 	"io"
 	"net/url"
 	"os"
@@ -21,13 +20,15 @@ import (
 	"strconv"
 	"strings"
 
-	storage "github.com/nickheyer/discopanel/internal/db"
+	_ "golang.org/x/image/webp"
+
 	"github.com/nickheyer/discopanel/pkg/indexers"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // Writes panel-managed config files and installs configured Modrinth mods
-func (p *Provisioner) applyConfigFiles(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, mcVersion string, force bool) error {
+func (p *Provisioner) applyConfigFiles(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, mcVersion string, force bool) error {
 	if err := p.writeServerProperties(server, cfg, mcVersion); err != nil {
 		return err
 	}
@@ -51,7 +52,7 @@ func (p *Provisioner) applyConfigFiles(ctx context.Context, server *storage.Serv
 }
 
 // Merges tagged fields and custom pairs into server.properties
-func (p *Provisioner) writeServerProperties(server *storage.Server, cfg *storage.ServerProperties, mcVersion string) error {
+func (p *Provisioner) writeServerProperties(server *v1.Server, cfg *v1.ServerProperties, mcVersion string) error {
 	props := minecraft.ServerProperties{}
 
 	value := reflect.ValueOf(cfg).Elem()
@@ -177,13 +178,13 @@ func escapeUnicodeProperties(s string) string {
 }
 
 // Writes eula.txt, Ensure gates acceptance before install
-func (p *Provisioner) writeEULA(server *storage.Server) error {
+func (p *Provisioner) writeEULA(server *v1.Server) error {
 	content := "# Accepted via DiscoPanel\neula=true\n"
 	return os.WriteFile(filepath.Join(server.DataPath, "eula.txt"), []byte(content), 0644)
 }
 
 // Downloads and converts the configured icon to 64x64 PNG
-func (p *Provisioner) writeServerIcon(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties) error {
+func (p *Provisioner) writeServerIcon(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties) error {
 	iconURL := strVal(cfg.Icon)
 	if iconURL == "" {
 		return nil
@@ -256,7 +257,7 @@ type playerEntry struct {
 
 // Resolves names to UUIDs and merges into list file
 // An explicit overwrite with an empty list truncates
-func (p *Provisioner) writePlayerListFile(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, filename, list string, isOps bool, overwrite bool) error {
+func (p *Provisioner) writePlayerListFile(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, filename, list string, isOps bool, overwrite bool) error {
 	names := splitList(list)
 	path := filepath.Join(server.DataPath, filename)
 	if len(names) == 0 && !overwrite {

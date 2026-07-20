@@ -43,7 +43,7 @@
 	} from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import { rpcClient } from '$lib/api/rpc-client';
-	import type { Role, Permission } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Role, Permission } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { ScopeableObject, ResourceActions } from '$lib/proto/discopanel/v1/role_pb';
 	import {
 		CreateRoleRequestSchema,

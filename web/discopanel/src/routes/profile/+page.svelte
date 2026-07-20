@@ -46,7 +46,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import type { ApiToken } from '$lib/proto/discopanel/v1/auth_pb';
+	import type { ApiToken } from '$lib/proto/discopanel/v1/storage_pb';
 
 	let user = $derived($currentUser);
 	let passwordForm = $state({

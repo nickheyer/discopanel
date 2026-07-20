@@ -27,8 +27,8 @@
 		Copy
 	} from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import {
 		GetServerRequestSchema,
 		DeleteServerRequestSchema

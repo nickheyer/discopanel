@@ -51,7 +51,7 @@
 		MemoryStick,
 		ArrowUpDown
 	} from '@lucide/svelte';
-	import { type Server, ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+	import { type Server, ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/storage_pb';
 
 	const DELETE_WARNING =
 		'This permanently removes the container, all server files, the world, and every mod and configuration.\nThis cannot be undone.';

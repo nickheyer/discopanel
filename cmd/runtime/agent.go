@@ -354,7 +354,7 @@ func (s *supervisor) msgHello() *agentv1.AgentMessage {
 		Source:      agentv1.HelloSource_HELLO_SOURCE_RUNTIME,
 		Version:     runtimeVersion,
 		Loader:      s.spec.Loader,
-		McVersion:   s.spec.MCVersion,
+		McVersion:   s.spec.McVersion,
 		JavaMajor:   int32(s.spec.JavaMajor),
 		HostThpMode: readHostTHPMode(),
 	}}}

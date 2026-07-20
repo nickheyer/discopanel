@@ -43,8 +43,8 @@ const (
 )
 
 type ContainerStats struct {
-	CPUPercent  float64 `json:"cpu_percent"`
-	CPUCount    int     `json:"cpu_count"`
+	CpuPercent  float64 `json:"cpu_percent"`
+	CpuCount    int     `json:"cpu_count"`
 	MemoryUsage float64 `json:"memory_usage"` // In MB
 	MemoryLimit float64 `json:"memory_limit"` // In MB
 }
@@ -67,19 +67,9 @@ func TranslateToHostPath(path string) string {
 	return filepath.Join(hostDataPath, relPath)
 }
 
-// Panel-side health verdict derived from Server List Ping
-type HealthState int
-
-const (
-	HealthUnknown HealthState = iota
-	HealthStarting
-	HealthHealthy
-	HealthUnhealthy
-)
-
 // Reports panel-side health for running containers
 type HealthChecker interface {
-	ContainerHealth(containerID string, startedAt time.Time) HealthState
+	ContainerHealth(containerID string, startedAt time.Time) v1.ServerStatus
 }
 
 type ClientConfig struct {
@@ -265,7 +255,7 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 }
 
 // Creates server container and reports setup progress via callback
-func (c *Client) CreateContainer(ctx context.Context, server *models.Server, serverConfig *models.ServerProperties, progress func(string)) (string, error) {
+func (c *Client) CreateContainer(ctx context.Context, server *v1.Server, serverConfig *v1.ServerProperties, progress func(string)) (string, error) {
 	imageName := c.DesiredImage(server)
 
 	if err := c.ensureImage(ctx, imageName, progress); err != nil {
@@ -277,9 +267,9 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 
 	// Proxy servers always use default port internally
 	useProxy := server.ProxyHostname != ""
-	containerPort := server.InContainerPort()
+	containerPort := models.InContainerPort(server)
 
-	c.log.Debug("Creating container for server %s with image %s", server.ID, imageName)
+	c.log.Debug("Creating container for server %s with image %s", server.Id, imageName)
 
 	// Build exposed ports
 	exposedPorts := nat.PortSet{
@@ -335,10 +325,10 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		AttachStderr: true,
 		ExposedPorts: exposedPorts,
 		Labels: map[string]string{
-			"discopanel.server.id":      server.ID,
+			"discopanel.server.id":      server.Id,
 			"discopanel.server.name":    server.Name,
 			"discopanel.server.loader":  string(server.ModLoader),
-			"discopanel.server.version": server.MCVersion,
+			"discopanel.server.version": server.McVersion,
 			"discopanel.managed":        "true",
 			LabelConfigHash:             c.DesiredConfigHash(server, serverConfig),
 		},
@@ -391,7 +381,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 
 	resp, err := c.docker.ContainerCreate(
 		ctx, config, hostConfig, networkConfig, nil,
-		fmt.Sprintf("discopanel-server-%s", server.ID),
+		fmt.Sprintf("discopanel-server-%s", server.Id),
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %w", err)
@@ -468,7 +458,7 @@ type RecreateContainerResult struct {
 }
 
 // Recreates container and restores prior run state
-func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, server *models.Server, serverConfig *models.ServerProperties, progress func(string)) (*RecreateContainerResult, error) {
+func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, server *v1.Server, serverConfig *v1.ServerProperties, progress func(string)) (*RecreateContainerResult, error) {
 	result := &RecreateContainerResult{}
 
 	// Check if container was running before we stop it
@@ -477,7 +467,7 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 		if err != nil {
 			// Container may not exist, that's ok - continue with creation
 			c.log.Debug("Container %s not found during recreation: %v", oldContainerID, err)
-		} else if status == models.StatusRunning || status == models.StatusUnhealthy {
+		} else if status == v1.ServerStatus_SERVER_STATUS_RUNNING || status == v1.ServerStatus_SERVER_STATUS_UNHEALTHY {
 			result.WasRunning = true
 			if _, err := c.StopContainer(ctx, oldContainerID, DefaultStopTimeoutSeconds); err != nil {
 				return nil, fmt.Errorf("failed to stop container: %w", err)
@@ -508,10 +498,10 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 	return result, nil
 }
 
-func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (models.ServerStatus, error) {
+func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (v1.ServerStatus, error) {
 	inspect, err := c.docker.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return models.StatusError, err
+		return v1.ServerStatus_SERVER_STATUS_ERROR, err
 	}
 
 	switch inspect.State.Status {
@@ -520,25 +510,25 @@ func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (mo
 		if c.healthChecker != nil {
 			startedAt, _ := time.Parse(time.RFC3339Nano, inspect.State.StartedAt)
 			switch c.healthChecker.ContainerHealth(containerID, startedAt) {
-			case HealthHealthy:
-				return models.StatusRunning, nil
-			case HealthStarting:
-				return models.StatusStarting, nil
-			case HealthUnhealthy:
-				return models.StatusUnhealthy, nil
+			case v1.ServerStatus_SERVER_STATUS_RUNNING:
+				return v1.ServerStatus_SERVER_STATUS_RUNNING, nil
+			case v1.ServerStatus_SERVER_STATUS_STARTING:
+				return v1.ServerStatus_SERVER_STATUS_STARTING, nil
+			case v1.ServerStatus_SERVER_STATUS_UNHEALTHY:
+				return v1.ServerStatus_SERVER_STATUS_UNHEALTHY, nil
 			}
 		}
-		return models.StatusRunning, nil
+		return v1.ServerStatus_SERVER_STATUS_RUNNING, nil
 	case "paused":
-		return models.StatusPaused, nil
+		return v1.ServerStatus_SERVER_STATUS_PAUSED, nil
 	case "restarting":
-		return models.StatusStarting, nil
+		return v1.ServerStatus_SERVER_STATUS_STARTING, nil
 	case "exited", "dead":
-		return models.StatusStopped, nil
+		return v1.ServerStatus_SERVER_STATUS_STOPPED, nil
 	case "created", "removing":
-		return models.StatusStopped, nil
+		return v1.ServerStatus_SERVER_STATUS_STOPPED, nil
 	default:
-		return models.StatusError, nil
+		return v1.ServerStatus_SERVER_STATUS_ERROR, nil
 	}
 }
 
@@ -653,8 +643,8 @@ func (c *Client) GetContainerStats(ctx context.Context, containerID string) (*Co
 	memoryLimit := float64(stats.MemoryStats.Limit) / 1024 / 1024
 
 	return &ContainerStats{
-		CPUPercent:  cpuPercent,
-		CPUCount:    int(cpuCount),
+		CpuPercent:  cpuPercent,
+		CpuCount:    int(cpuCount),
 		MemoryUsage: memoryUsage,
 		MemoryLimit: memoryLimit,
 	}, nil
@@ -946,7 +936,7 @@ func (c *Client) attachSelfToNetwork(ctx context.Context) {
 }
 
 // Builds Docker environment variables from ServerProperties struct
-func buildEnvFromConfig(config *models.ServerProperties) []string {
+func buildEnvFromConfig(config *v1.ServerProperties) []string {
 	var env []string
 
 	configValue := reflect.ValueOf(config).Elem()

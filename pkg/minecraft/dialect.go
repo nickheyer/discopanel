@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -14,7 +15,7 @@ import (
 // Detection exists only for loaders whose row declares nothing
 
 // Dialects the server's platform reads, declared else observed
-func ResolveDialects(loader ModLoader, dataPath, modsDir string) []string {
+func ResolveDialects(loader v1.ModLoader, dataPath, modsDir string) []string {
 	if row, ok := loaderIndex[loader]; ok && len(row.Dialects) > 0 {
 		return slices.Clone(row.Dialects)
 	}
@@ -26,8 +27,7 @@ func ResolveDialects(loader ModLoader, dataPath, modsDir string) []string {
 func DetectDialects(dataPath, modsDir string) []string {
 	if dataPath != "" {
 		if spec, err := runtimespec.ReadLaunchSpec(dataPath); err == nil && spec != nil {
-			name := ModLoader(strings.ToLower(spec.Loader))
-			if row, ok := loaderIndex[name]; ok && len(row.Dialects) > 0 {
+			if row, ok := nameIndex[strings.ToLower(spec.Loader)]; ok && len(row.Dialects) > 0 {
 				return slices.Clone(row.Dialects)
 			}
 		}

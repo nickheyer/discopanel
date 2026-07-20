@@ -179,7 +179,7 @@ func (h *Hub) encodeMetrics(serverID string) []byte {
 	// Stale heap without a live agent must not push
 	var heapUsed float64
 	if m.AgentConnected {
-		heapUsed = m.HeapUsedMB
+		heapUsed = m.HeapUsedMb
 	}
 	msg := &v1.WebSocketServerMessage{
 		Type: v1.WSMessageType_WS_MESSAGE_TYPE_METRICS,
@@ -187,10 +187,10 @@ func (h *Hub) encodeMetrics(serverID string) []byte {
 			ServerId: serverID,
 			Sample: &v1.MetricsSample{
 				Timestamp:        timestamppb.Now(),
-				Tps:              m.TPS,
-				Mspt:             m.MSPT,
+				Tps:              m.Tps,
+				Mspt:             m.Mspt,
 				Players:          int32(m.PlayersOnline),
-				CpuPercent:       m.CPUPercent,
+				CpuPercent:       m.CpuPercent,
 				MemoryMb:         m.MemoryUsage,
 				HeapUsedMb:       heapUsed,
 				DiskBytes:        m.DiskUsage,
@@ -322,7 +322,7 @@ func (c *Client) handleAuth(msg *v1.AuthMessage) {
 	// No auth providers enabled, grants full admin access
 	if !c.hub.authManager.IsAnyAuthEnabled() {
 		c.user = &auth.AuthenticatedUser{
-			ID:       "admin",
+			Id:       "admin",
 			Username: "admin",
 			Roles:    []string{"admin"},
 			Provider: "none",
@@ -338,7 +338,7 @@ func (c *Client) handleAuth(msg *v1.AuthMessage) {
 		var user *auth.AuthenticatedUser
 		var err error
 		if strings.HasPrefix(msg.Token, "dp_") {
-			user, err = c.hub.authManager.ValidateAPIToken(ctx, msg.Token)
+			user, err = c.hub.authManager.ValidateApiToken(ctx, msg.Token)
 		} else {
 			user, err = c.hub.authManager.ValidateSession(ctx, msg.Token)
 		}
@@ -413,8 +413,8 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 	c.subscriptionsMu.Unlock()
 
 	// Attach a follow if container exists but none is active
-	if server.ContainerID != "" {
-		if err := c.hub.logStreamer.StartStreaming(msg.ServerId, server.ContainerID); err != nil {
+	if server.ContainerId != "" {
+		if err := c.hub.logStreamer.StartStreaming(msg.ServerId, server.ContainerId); err != nil {
 			c.hub.log.Warn("Failed to start log streaming for server %s: %v", msg.ServerId, err)
 		}
 	}
@@ -540,7 +540,7 @@ func (c *Client) sendAuthOk() {
 	userId := ""
 	username := ""
 	if c.user != nil {
-		userId = c.user.ID
+		userId = c.user.Id
 		username = c.user.Username
 	}
 	c.sendMessage(&v1.WebSocketServerMessage{

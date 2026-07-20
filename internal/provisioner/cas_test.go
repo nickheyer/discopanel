@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 func testProvisioner(t *testing.T) *Provisioner {
@@ -105,7 +105,7 @@ func TestDownloadUsesCache(t *testing.T) {
 
 func TestLibTreeRoundTrip(t *testing.T) {
 	p := testProvisioner(t)
-	server := &storage.Server{ID: "s1", Name: "s1", DataPath: t.TempDir()}
+	server := &v1.Server{Id: "s1", Name: "s1", DataPath: t.TempDir()}
 
 	libDir := filepath.Join(server.DataPath, "libraries", "net", "minecraftforge")
 	if err := os.MkdirAll(libDir, 0755); err != nil {
@@ -121,7 +121,7 @@ func TestLibTreeRoundTrip(t *testing.T) {
 		t.Fatalf("archive missing after save: %v", err)
 	}
 
-	fresh := &storage.Server{ID: "s2", Name: "s2", DataPath: t.TempDir()}
+	fresh := &v1.Server{Id: "s2", Name: "s2", DataPath: t.TempDir()}
 	p.restoreLibTree(fresh, key)
 	restored := filepath.Join(fresh.DataPath, "libraries", "net", "minecraftforge", "forge.jar")
 	if data, err := os.ReadFile(restored); err != nil || string(data) != "lib" {

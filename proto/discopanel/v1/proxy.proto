@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package discopanel.v1;
 
-import "discopanel/v1/common.proto";
+import "discopanel/options/v1/options.proto";
+import "discopanel/v1/storage.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
@@ -30,13 +31,14 @@ service ProxyService {
 
 // Route serving state
 enum ProxyRouteState {
-  PROXY_ROUTE_STATE_UNSPECIFIED = 0;
+  option (discopanel.options.v1.enum_type) = {label: "Route State"};
+  PROXY_ROUTE_STATE_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
   // Backend is reachable, connections relay through
-  PROXY_ROUTE_STATE_ONLINE = 1;
+  PROXY_ROUTE_STATE_ONLINE = 1 [(discopanel.options.v1.value) = {label: "Online"}];
   // Server is booting, status pings get a synthesized response
-  PROXY_ROUTE_STATE_STARTING = 2;
+  PROXY_ROUTE_STATE_STARTING = 2 [(discopanel.options.v1.value) = {label: "Starting"}];
   // Server is stopped, logins may wake it when wakeable
-  PROXY_ROUTE_STATE_OFFLINE = 3;
+  PROXY_ROUTE_STATE_OFFLINE = 3 [(discopanel.options.v1.value) = {label: "Offline"}];
 }
 
 // Active proxy connection

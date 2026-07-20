@@ -42,7 +42,7 @@ func TestRecordCarriesContext(t *testing.T) {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
 	row := rows[0]
-	if row.Source != "nick" || row.Name != "server.start" || row.TraceID != "trace-1" {
+	if row.Source != "nick" || row.Name != "server.start" || row.TraceId != "trace-1" {
 		t.Fatalf("row = %+v", row)
 	}
 	if row.Attrs["key"] != "value" {

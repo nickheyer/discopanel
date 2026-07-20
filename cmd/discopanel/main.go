@@ -26,6 +26,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 func main() {
@@ -104,13 +105,13 @@ func main() {
 	// Build map of tracked container IDs
 	trackedIDs := make(map[string]bool)
 	for _, server := range servers {
-		if server.ContainerID != "" {
-			trackedIDs[server.ContainerID] = true
+		if server.ContainerId != "" {
+			trackedIDs[server.ContainerId] = true
 		}
 	}
 	for _, module := range modules {
-		if module.ContainerID != "" {
-			trackedIDs[module.ContainerID] = true
+		if module.ContainerId != "" {
+			trackedIDs[module.ContainerId] = true
 		}
 	}
 
@@ -126,23 +127,23 @@ func main() {
 	} else {
 		if isNew {
 			proxyConfig.Enabled = cfg.Proxy.Enabled
-			proxyConfig.BaseURL = cfg.Proxy.BaseURL
+			proxyConfig.BaseUrl = cfg.Proxy.BaseUrl
 			err = store.SaveProxyConfig(ctx, proxyConfig)
 			if err != nil {
 				log.Error("Failed to set proxy configs from startup configuration values: %v", err)
 			}
 		} else {
 			cfg.Proxy.Enabled = proxyConfig.Enabled
-			cfg.Proxy.BaseURL = proxyConfig.BaseURL
+			cfg.Proxy.BaseUrl = proxyConfig.BaseUrl
 		}
 
 		// Load listeners and build ports array
-		listeners, err := store.GetProxyListeners(ctx)
+		listeners, err := store.ListProxyListeners(ctx)
 		if err == nil && len(listeners) > 0 {
 			listenPorts := make([]int, 0, len(listeners))
 			for _, l := range listeners {
 				if l.Enabled {
-					listenPorts = append(listenPorts, l.Port)
+					listenPorts = append(listenPorts, int(l.Port))
 				}
 			}
 			if len(listenPorts) > 0 {
@@ -152,7 +153,7 @@ func main() {
 		}
 
 		log.Info("Loaded proxy configuration from database: enabled=%v, base_url=%v, listeners=%d",
-			cfg.Proxy.Enabled, cfg.Proxy.BaseURL, len(cfg.Proxy.ListenPorts))
+			cfg.Proxy.Enabled, cfg.Proxy.BaseUrl, len(cfg.Proxy.ListenPorts))
 	}
 
 	// Initialize proxy manager
@@ -176,20 +177,7 @@ func main() {
 	// Initialize metrics collector, the panel side health source
 	metricsCollector := metrics.NewCollector(store, dockerClient, cfg, eventBus, log, metrics.DefaultConfig())
 	dockerClient.SetHealthChecker(metricsCollector)
-	metricsCollector.SetProxyTrafficSource(func() map[string]metrics.ProxyTraffic {
-		stats := proxyManager.GetRouteStats()
-		out := make(map[string]metrics.ProxyTraffic, len(stats))
-		for id, s := range stats {
-			out[id] = metrics.ProxyTraffic{
-				ActiveConns:    s.ActiveConns,
-				TotalConns:     s.TotalConns,
-				Logins:         s.Logins,
-				BytesToBackend: s.BytesToBackend,
-				BytesToClient:  s.BytesToClient,
-			}
-		}
-		return out
-	})
+	metricsCollector.SetProxyTrafficSource(proxyManager.GetRouteStats)
 
 	// Agent hub feeds telemetry and serves console commands
 	agentHub := metrics.NewHub(metricsCollector, eventBus, rec, log)
@@ -278,10 +266,10 @@ func main() {
 				time.Sleep(2 * time.Second)
 
 				// Already-running containers just need their log stream reattached
-				if server.ContainerID != "" {
-					if status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID); err == nil &&
-						(status == storage.StatusRunning || status == storage.StatusStarting) {
-						if err := rpcServer.StartLogStreaming(server.ID, server.ContainerID); err != nil {
+				if server.ContainerId != "" {
+					if status, err := dockerClient.GetContainerStatus(ctx, server.ContainerId); err == nil &&
+						(status == v1.ServerStatus_SERVER_STATUS_RUNNING || status == v1.ServerStatus_SERVER_STATUS_STARTING) {
+						if err := rpcServer.StartLogStreaming(server.Id, server.ContainerId); err != nil {
 							log.Error("Failed to start log streaming for running server %s: %v", server.Name, err)
 						}
 						if server.ProxyHostname != "" {
@@ -295,7 +283,7 @@ func main() {
 
 				startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 				defer cancel()
-				if err := lifecycleManager.Start(activity.WithTrace(activity.WithSource(startCtx, "autostart")), server.ID); err != nil {
+				if err := lifecycleManager.Start(activity.WithTrace(activity.WithSource(startCtx, "autostart")), server.Id); err != nil {
 					log.Error("Failed to auto-start server %s: %v", server.Name, err)
 					return
 				}
@@ -305,7 +293,7 @@ func main() {
 	}
 
 	// Clean expired sessions on startup, then periodically
-	if err := store.CleanExpiredSessions(ctx); err != nil {
+	if err := store.CleanExpiredSessions(ctx, time.Now().UTC()); err != nil {
 		log.Error("Failed to clean expired sessions on startup: %v", err)
 	}
 	stopSessionCleanup := make(chan struct{})
@@ -315,7 +303,7 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				if err := store.CleanExpiredSessions(context.Background()); err != nil {
+				if err := store.CleanExpiredSessions(context.Background(), time.Now().UTC()); err != nil {
 					log.Error("Failed to clean expired sessions: %v", err)
 				}
 			case <-stopSessionCleanup:
@@ -341,15 +329,15 @@ func main() {
 				}
 
 				for _, server := range servers {
-					if server.ContainerID == "" {
+					if server.ContainerId == "" {
 						continue
 					}
-					status, err := dockerClient.GetContainerStatus(ctx, server.ContainerID)
+					status, err := dockerClient.GetContainerStatus(ctx, server.ContainerId)
 					if err != nil || server.Status == status {
 						continue
 					}
 					server.Status = status
-					if err := store.UpdateServerStatus(ctx, server.ID, status); err != nil {
+					if err := store.UpdateServerFields(ctx, server.Id, map[string]any{"status": status}); err != nil {
 						log.Error("Failed to update server status: %v", err)
 					}
 					// Updates proxy route on status change when proxied
@@ -407,7 +395,7 @@ func main() {
 			log.Info("Skipping shutdown of detached server: %s", server.Name)
 			continue
 		}
-		if server.Status != storage.StatusRunning {
+		if server.Status != v1.ServerStatus_SERVER_STATUS_RUNNING {
 			continue
 		}
 		stopWG.Add(1)
@@ -416,7 +404,7 @@ func main() {
 			log.Info("Stopping managed server: %s", server.Name)
 			stopCtx, stopCancel := context.WithTimeout(activity.WithTrace(activity.WithSource(ctx, "system")), 25*time.Second)
 			defer stopCancel()
-			if err := lifecycleManager.Stop(stopCtx, server.ID); err != nil {
+			if err := lifecycleManager.Stop(stopCtx, server.Id); err != nil {
 				log.Error("Failed to stop server %s: %v", server.Name, err)
 			}
 		}()

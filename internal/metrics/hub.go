@@ -290,7 +290,7 @@ func (h *Hub) handlePlayerEvent(ctx context.Context, serverID string, ev *agentv
 	}
 
 	if h.bus != nil {
-		h.bus.Emit(ctx, events.Event{Type: eventType, ServerID: serverID, Data: data})
+		h.bus.Emit(ctx, events.Event{Type: eventType, ServerId: serverID, Data: data})
 	}
 }
 

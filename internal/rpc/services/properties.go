@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -107,14 +108,14 @@ func (s *PropertiesService) UpdateServerProperties(ctx context.Context, req *con
 	}
 
 	// Save updated config
-	if err := s.store.SaveServerProperties(ctx, config); err != nil {
+	if err := s.store.UpdateServerProperties(ctx, config); err != nil {
 		s.log.Error("Failed to save server config: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save server properties"))
 	}
-	s.rec.Record(ctx, server.ID, "properties.update", activity.Attrs{"changed": strconv.Itoa(len(msg.Updates))}, "updated server properties (%d changed)", len(msg.Updates))
+	s.rec.Record(ctx, server.Id, "properties.update", activity.Attrs{"changed": strconv.Itoa(len(msg.Updates))}, "updated server properties (%d changed)", len(msg.Updates))
 
 	// Restarts running servers so new config applies
-	if server.ContainerID != "" && s.lifecycle != nil {
+	if server.ContainerId != "" && s.lifecycle != nil {
 		s.applyPropertiesToRunningServer(ctx, server)
 	}
 
@@ -185,13 +186,13 @@ func (s *PropertiesService) UpdateGlobalSettings(ctx context.Context, req *conne
 }
 
 // Restarts running server so saved properties take effect
-func (s *PropertiesService) applyPropertiesToRunningServer(reqCtx context.Context, server *storage.Server) {
+func (s *PropertiesService) applyPropertiesToRunningServer(reqCtx context.Context, server *v1.Server) {
 	switch server.Status {
-	case storage.StatusRunning, storage.StatusStarting, storage.StatusUnhealthy, storage.StatusPaused:
+	case v1.ServerStatus_SERVER_STATUS_RUNNING, v1.ServerStatus_SERVER_STATUS_STARTING, v1.ServerStatus_SERVER_STATUS_UNHEALTHY, v1.ServerStatus_SERVER_STATUS_PAUSED:
 		go func() {
 			ctx, cancel := context.WithTimeout(detach(reqCtx), 30*time.Minute)
 			defer cancel()
-			if err := s.lifecycle.Restart(ctx, server.ID); err != nil {
+			if err := s.lifecycle.Restart(ctx, server.Id); err != nil {
 				s.log.Error("Failed to restart server %s after config update: %v", server.Name, err)
 			}
 		}()
@@ -208,7 +209,7 @@ func applyPropertyUpdates(config any, updates map[string]string) error {
 		fieldIndex := -1
 		for i := 0; i < configType.NumField(); i++ {
 			field := configType.Field(i)
-			jsonTag := field.Tag.Get("json")
+			jsonTag := strings.Split(field.Tag.Get("json"), ",")[0]
 			if jsonTag == key {
 				fieldIndex = i
 				break
@@ -333,7 +334,7 @@ func buildPropertyCategories(config any) ([]*v1.PropertyCategory, error) {
 
 	for i := 0; i < configType.NumField(); i++ {
 		field := configType.Field(i)
-		jsonTag := field.Tag.Get("json")
+		jsonTag := strings.Split(field.Tag.Get("json"), ",")[0]
 		if jsonTag == "" || jsonTag == "-" || jsonTag == "id" || jsonTag == "server_id" || jsonTag == "updated_at" {
 			continue
 		}

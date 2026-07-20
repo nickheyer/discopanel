@@ -5,9 +5,9 @@
 	import { ConfirmDialog } from '$lib/components/app';
 	import { toast } from 'svelte-sonner';
 	import { Archive, RotateCcw } from '@lucide/svelte';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { Backup } from '$lib/proto/discopanel/v1/server_pb';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import { timestampDate } from '@bufbuild/protobuf/wkt';
 
 	let { server }: { server: Server } = $props();

@@ -19,6 +19,7 @@ import (
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/files"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // Represents a volume mount from module configuration
@@ -31,7 +32,7 @@ type ModuleVolumeMount struct {
 }
 
 // Creates a module container, optionally given sibling modules by name
-func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Module, template *models.ModuleTemplate, server *models.Server, serverConfig *models.ServerProperties, cfg *config.Config, siblingModules ...map[string]*models.Module) (string, error) {
+func (c *Client) CreateModuleContainer(ctx context.Context, module *v1.Module, template *v1.ModuleTemplate, server *v1.Server, serverConfig *v1.ServerProperties, cfg *config.Config, siblingModules ...map[string]*v1.Module) (string, error) {
 	// Determine the Docker image to use
 	imageName := template.DockerImage
 	if imageName == "" {
@@ -57,7 +58,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 	// Build environment variables
 	env := c.buildModuleEnv(module, server, aliasCtx)
 
-	c.log.Debug("Creating container for module %s with image %s", module.ID, imageName)
+	c.log.Debug("Creating container for module %s with image %s", module.Id, imageName)
 
 	// Build exposed ports and port bindings from module.Ports
 	exposedPorts := nat.PortSet{}
@@ -84,7 +85,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		}
 
 		c.log.Debug("Added port for module %s: %s (%d:%d/%s, proxy=%t)",
-			module.ID, port.Name, port.HostPort, port.ContainerPort, port.Protocol, port.ProxyEnabled)
+			module.Id, port.Name, port.HostPort, port.ContainerPort, port.Protocol, port.ProxyEnabled)
 	}
 
 	// Build mounts from module configuration only (frontend sends complete config)
@@ -110,7 +111,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 
 	mounts := c.moduleVolumesToMounts(vols)
 
-	siblings := map[string]*models.Module{}
+	siblings := map[string]*v1.Module{}
 	if len(siblingModules) > 0 && siblingModules[0] != nil {
 		siblings = siblingModules[0]
 	}
@@ -122,17 +123,17 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		AttachStderr: true,
 		ExposedPorts: exposedPorts,
 		Labels: map[string]string{
-			"discopanel.module.id":          module.ID,
+			"discopanel.module.id":          module.Id,
 			"discopanel.module.name":        module.Name,
-			"discopanel.module.server_id":   module.ServerID,
-			"discopanel.module.template_id": module.TemplateID,
+			"discopanel.module.server_id":   module.ServerId,
+			"discopanel.module.template_id": module.TemplateId,
 			"discopanel.managed":            "true",
 			LabelModuleConfigHash:           c.DesiredModuleConfigHash(module, template, server, serverConfig, cfg, siblings),
 		},
 	}
 
 	// Set uid + gid
-	uid, gid := alias.Substitute(module.UID, aliasCtx), alias.Substitute(module.GID, aliasCtx)
+	uid, gid := alias.Substitute(module.Uid, aliasCtx), alias.Substitute(module.Gid, aliasCtx)
 	if uid != "" || gid != "" {
 		config.User = fmt.Sprintf("%s:%s", uid, gid)
 	}
@@ -150,7 +151,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 			cmdArgs = []string{cmd}
 		}
 		config.Cmd = cmdArgs
-		c.log.Debug("Setting container command for module %s: %v", module.ID, config.Cmd)
+		c.log.Debug("Setting container command for module %s: %v", module.Id, config.Cmd)
 	}
 
 	// Configure resources
@@ -177,8 +178,8 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 	}
 
 	// Apply CPU limit if specified
-	if module.CPULimit > 0 {
-		hostConfig.Resources.NanoCPUs = int64(module.CPULimit * 1e9)
+	if module.CpuLimit > 0 {
+		hostConfig.Resources.NanoCPUs = int64(module.CpuLimit * 1e9)
 	}
 
 	// Network configuration - same network as server for communication
@@ -192,7 +193,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 	// Create the container
 	resp, err := c.docker.ContainerCreate(
 		ctx, config, hostConfig, networkConfig, nil,
-		fmt.Sprintf("discopanel-module-%s", module.ID),
+		fmt.Sprintf("discopanel-module-%s", module.Id),
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create module container: %w", err)
@@ -202,20 +203,20 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 }
 
 // Builds environment variables for a module container
-func (c *Client) buildModuleEnv(module *models.Module, server *models.Server, aliasCtx *alias.Context) []string {
+func (c *Client) buildModuleEnv(module *v1.Module, server *v1.Server, aliasCtx *alias.Context) []string {
 	env := make([]string, 0)
 
 	// Add DiscoPanel context variables, global modules have no server
 	if server != nil {
 		env = append(env,
-			fmt.Sprintf("DISCOPANEL_SERVER_ID=%s", server.ID),
+			fmt.Sprintf("DISCOPANEL_SERVER_ID=%s", server.Id),
 			fmt.Sprintf("DISCOPANEL_SERVER_NAME=%s", server.Name),
-			fmt.Sprintf("DISCOPANEL_SERVER_HOST=discopanel-server-%s", server.ID),
-			fmt.Sprintf("DISCOPANEL_SERVER_PORT=%d", server.InContainerPort()),
+			fmt.Sprintf("DISCOPANEL_SERVER_HOST=discopanel-server-%s", server.Id),
+			fmt.Sprintf("DISCOPANEL_SERVER_PORT=%d", models.InContainerPort(server)),
 		)
 	}
 	env = append(env,
-		fmt.Sprintf("DISCOPANEL_MODULE_ID=%s", module.ID),
+		fmt.Sprintf("DISCOPANEL_MODULE_ID=%s", module.Id),
 		fmt.Sprintf("DISCOPANEL_MODULE_NAME=%s", module.Name),
 	)
 

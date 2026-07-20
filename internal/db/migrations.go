@@ -7,36 +7,10 @@ import (
 	"regexp"
 
 	"github.com/go-gormigrate/gormigrate/v2"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"gorm.io/gorm"
 )
-
-func allModels() []any {
-	return []any{
-		&Server{},
-		&ServerProperties{},
-		&Mod{},
-		&IndexedModpack{},
-		&IndexedModpackFile{},
-		&ModpackFavorite{},
-		&ProxyConfig{},
-		&ProxyListener{},
-		&User{},
-		&Role{},
-		&UserRole{},
-		&Session{},
-		&APIToken{},
-		&RegistrationInvite{},
-		&ScheduledTask{},
-		&TaskExecution{},
-		&MetricsSample{},
-		&ModuleTemplate{},
-		&Module{},
-		&SystemSetting{},
-		&ServerAction{},
-		&FindingDismissal{},
-	}
-}
 
 func (s *Store) Migrate() error {
 	pending, err := s.pendingMigrations()
@@ -50,7 +24,7 @@ func (s *Store) Migrate() error {
 	}
 
 	// Create all tables/columns
-	if err := s.db.AutoMigrate(allModels()...); err != nil {
+	if err := s.db.AutoMigrate(v1.AllModels()...); err != nil {
 		return fmt.Errorf("schema migration failed: %w", err)
 	}
 
@@ -92,7 +66,7 @@ func migrations() []*gormigrate.Migration {
 			ID: "20260306_001_retry_backfill_user_roles",
 			Migrate: func(tx *gorm.DB) error {
 				// Find users that have no entry in user_roles
-				var usersWithoutRoles []User
+				var usersWithoutRoles []*v1.User
 				if err := tx.Where("id NOT IN (SELECT DISTINCT user_id FROM user_roles)").
 					Order("created_at ASC").
 					Find(&usersWithoutRoles).Error; err != nil {
@@ -104,20 +78,20 @@ func migrations() []*gormigrate.Migration {
 				}
 
 				var adminCount int64
-				tx.Model(&UserRole{}).Where("role_name = ?", "admin").Count(&adminCount)
+				tx.Model(&v1.UserRole{}).Where("role_name = ?", "admin").Count(&adminCount)
 
 				for i, user := range usersWithoutRoles {
 					roleName := "user"
 					if i == 0 && adminCount == 0 {
 						roleName = "admin"
 					}
-					ur := UserRole{
-						ID:       user.ID + "-" + roleName,
-						UserID:   user.ID,
+					ur := &v1.UserRole{
+						Id:       user.Id + "-" + roleName,
+						UserId:   user.Id,
 						RoleName: roleName,
 						Source:   "migration",
 					}
-					if err := tx.Create(&ur).Error; err != nil {
+					if err := tx.Create(ur).Error; err != nil {
 						return fmt.Errorf("failed to assign role %s to user %s: %w", roleName, user.Username, err)
 					}
 					log.Printf("[migrate] Assigned role '%s' to user '%s'", roleName, user.Username)
@@ -126,14 +100,14 @@ func migrations() []*gormigrate.Migration {
 				return nil
 			},
 			Rollback: func(tx *gorm.DB) error {
-				return tx.Where("source = ?", "migration").Delete(&UserRole{}).Error
+				return tx.Where("source = ?", "migration").Delete(&v1.UserRole{}).Error
 			},
 		},
 		{
 			// Clears stale itzg image tags for re-derivation on start
 			ID: "20260701_001_reset_itzg_image_tags",
 			Migrate: func(tx *gorm.DB) error {
-				result := tx.Model(&Server{}).Where("docker_image != ''").Update("docker_image", "")
+				result := tx.Model(&v1.Server{}).Where("docker_image != ''").Update("docker_image", "")
 				if result.Error != nil {
 					return result.Error
 				}
@@ -173,7 +147,7 @@ func migrations() []*gormigrate.Migration {
 					return err
 				}
 				log.Println("[migrate] Renamed server_configs to server_properties")
-				return tx.AutoMigrate(&ServerProperties{})
+				return tx.AutoMigrate(&v1.ServerProperties{})
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return tx.Migrator().RenameTable("server_properties", "server_configs")
@@ -235,13 +209,13 @@ func migrations() []*gormigrate.Migration {
 					return *s
 				}
 
-				var servers []Server
+				var servers []*v1.Server
 				if err := tx.Where("memory_min = 0 AND memory_max = 0").Find(&servers).Error; err != nil {
 					return err
 				}
 				for _, srv := range servers {
 					initMB, maxMB := 0, 0
-					p, ok := propsByServer[srv.ID]
+					p, ok := propsByServer[srv.Id]
 					autoMem := ok && p.AutoMemory != nil && *p.AutoMemory
 					if ok && !autoMem {
 						initMB = runtimespec.ParseMemoryMB(strVal(p.InitMemory))
@@ -253,20 +227,21 @@ func migrations() []*gormigrate.Migration {
 							}
 						}
 					}
-					defInit, defMax := DefaultHeapForMemory(srv.Memory)
+					memory := int(srv.Memory)
+					defInit, defMax := DefaultHeapForMemory(memory)
 					if maxMB <= 0 {
 						maxMB = defMax
 					}
 					if initMB <= 0 {
 						initMB = defInit
 					}
-					if srv.Memory > 0 && maxMB > srv.Memory {
-						maxMB = srv.Memory
+					if memory > 0 && maxMB > memory {
+						maxMB = memory
 					}
 					if initMB > maxMB {
 						initMB = maxMB
 					}
-					if err := tx.Model(&Server{}).Where("id = ?", srv.ID).
+					if err := tx.Model(&v1.Server{}).Where("id = ?", srv.Id).
 						Updates(map[string]any{"memory_min": initMB, "memory_max": maxMB}).Error; err != nil {
 						return err
 					}

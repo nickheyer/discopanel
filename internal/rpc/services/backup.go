@@ -11,7 +11,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/nickheyer/discopanel/internal/activity"
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -19,7 +18,7 @@ import (
 )
 
 // Backup directory for one server, empty when unconfigured
-func (s *ServerService) backupDirFor(server *storage.Server) string {
+func (s *ServerService) backupDirFor(server *v1.Server) string {
 	if s.config == nil || s.config.Storage.BackupDir == "" || server.DataPath == "" {
 		return ""
 	}
@@ -64,7 +63,7 @@ func (s *ServerService) ListBackups(ctx context.Context, req *connect.Request[v1
 
 // Stages an uploaded world zip into the data dir
 // Level.dat testimony sets the world name and MC version
-func (s *ServerService) importUploadedWorld(server *storage.Server, sessionID string) (string, error) {
+func (s *ServerService) importUploadedWorld(server *v1.Server, sessionID string) (string, error) {
 	archivePath, _, err := s.uploadManager.GetTempPath(sessionID)
 	if err != nil {
 		return "", fmt.Errorf("upload session not found or not completed")
@@ -94,7 +93,7 @@ func (s *ServerService) importUploadedWorld(server *storage.Server, sessionID st
 			levelName = files.SanitizePathName(info.LevelName)
 		}
 		if info.VersionName != "" {
-			server.MCVersion = info.VersionName
+			server.McVersion = info.VersionName
 		}
 	}
 
@@ -140,7 +139,7 @@ func (s *ServerService) RestoreBackup(ctx context.Context, req *connect.Request[
 	}
 
 	switch server.Status {
-	case storage.StatusStopped, storage.StatusError:
+	case v1.ServerStatus_SERVER_STATUS_STOPPED, v1.ServerStatus_SERVER_STATUS_ERROR:
 	default:
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("stop the server before restoring"))
 	}
@@ -171,7 +170,7 @@ func (s *ServerService) RestoreBackup(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restore backup: %w", err))
 	}
 
-	s.rec.Record(ctx, server.ID, "backup.restore", activity.Attrs{"file": req.Msg.FileName}, "restored backup %s", req.Msg.FileName)
+	s.rec.Record(ctx, server.Id, "backup.restore", activity.Attrs{"file": req.Msg.FileName}, "restored backup %s", req.Msg.FileName)
 	return connect.NewResponse(&v1.RestoreBackupResponse{
 		Message: fmt.Sprintf("Restored %s", req.Msg.FileName),
 	}), nil

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
 	"github.com/nickheyer/discopanel/pkg/indexers/modrinth"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 func writeClientJar(t *testing.T, dir, name, manifest string) {
@@ -50,7 +50,7 @@ func TestDisableClientOnlyMods(t *testing.T) {
 	writeClientJar(t, modsDir, "needy.jar", `{"id":"needy","environment":"*","depends":{"supplementaries":"*"}}`)
 
 	p := &Provisioner{log: logger.New()}
-	server := &storage.Server{DataPath: dataPath, ModLoader: storage.ModLoaderModrinth}
+	server := &v1.Server{DataPath: dataPath, ModLoader: v1.ModLoader_MOD_LOADER_MODRINTH}
 	p.disableClientOnlyMods(context.Background(), server, []string{"keepme"})
 
 	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "clientmod.jar")); err != nil {
@@ -69,7 +69,7 @@ func TestDisableClientOnlyMods(t *testing.T) {
 
 func TestPackDownloadSkipsKnownClientMods(t *testing.T) {
 	p := &Provisioner{log: logger.New()}
-	server := &storage.Server{}
+	server := &v1.Server{}
 
 	slugged := &fuego.File{FileName: "some-shaders-1.0.jar", GameVersions: []string{"Client", "Server"}}
 	if p.cfFileWanted(server, slugged, &fuego.Modpack{Slug: "oculus"}, 42, nil, nil) {
@@ -102,9 +102,9 @@ func TestEnsureGatesEULABeforeInstall(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Storage.DataDir = t.TempDir()
 	p := New(nil, nil, cfg, nil, logger.New())
-	server := &storage.Server{ID: "s1", Name: "s1", DataPath: t.TempDir(), ModLoader: storage.ModLoaderVanilla, MCVersion: "1.21.1"}
+	server := &v1.Server{Id: "s1", Name: "s1", DataPath: t.TempDir(), ModLoader: v1.ModLoader_MOD_LOADER_VANILLA, McVersion: "1.21.1"}
 
-	_, err := p.Ensure(context.Background(), server, &storage.ServerProperties{})
+	_, err := p.Ensure(context.Background(), server, &v1.ServerProperties{})
 	if err == nil || !strings.Contains(err.Error(), "EULA") {
 		t.Fatalf("expected EULA gate before install, got %v", err)
 	}
@@ -112,14 +112,14 @@ func TestEnsureGatesEULABeforeInstall(t *testing.T) {
 
 func TestOverrideWhitelistTruncates(t *testing.T) {
 	p := testProvisioner(t)
-	server := &storage.Server{ID: "s1", Name: "s1", DataPath: t.TempDir()}
+	server := &v1.Server{Id: "s1", Name: "s1", DataPath: t.TempDir()}
 	path := filepath.Join(server.DataPath, "whitelist.json")
 	seed := `[{"uuid":"0-0-0-0-0","name":"steve"}]`
 	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	cfgRow := &storage.ServerProperties{}
+	cfgRow := &v1.ServerProperties{}
 
 	// Empty list without override leaves the file alone
 	if err := p.writePlayerListFile(ctx, server, cfgRow, "whitelist.json", "", false, false); err != nil {
@@ -140,8 +140,8 @@ func TestOverrideWhitelistTruncates(t *testing.T) {
 
 func TestManagementSecretPersists(t *testing.T) {
 	p := testProvisioner(t)
-	server := &storage.Server{ID: "s1", Name: "s1", DataPath: t.TempDir(), Port: 25565}
-	cfgRow := &storage.ServerProperties{}
+	server := &v1.Server{Id: "s1", Name: "s1", DataPath: t.TempDir(), Port: 25565}
+	cfgRow := &v1.ServerProperties{}
 
 	if err := p.writeServerProperties(server, cfgRow, "1.21.9"); err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestModrinthStateRoundTrip(t *testing.T) {
 	state.Projects["sodium"] = modrinthProjectState{
 		VersionID:    "abc",
 		FileName:     "sodium-0.5.jar",
-		MCVersion:    "1.20.1",
+		McVersion:    "1.20.1",
 		Loader:       "fabric",
 		RequiredDeps: []string{"fabric-api"},
 	}
@@ -183,7 +183,7 @@ func TestModrinthStateRoundTrip(t *testing.T) {
 	}
 	again := readModrinthState(dir)
 	entry, ok := again.Projects["sodium"]
-	if !ok || entry.FileName != "sodium-0.5.jar" || entry.MCVersion != "1.20.1" ||
+	if !ok || entry.FileName != "sodium-0.5.jar" || entry.McVersion != "1.20.1" ||
 		entry.Loader != "fabric" || len(entry.RequiredDeps) != 1 {
 		t.Fatalf("state round trip mismatch, got %+v", again.Projects)
 	}

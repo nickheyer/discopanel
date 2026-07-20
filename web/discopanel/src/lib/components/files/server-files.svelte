@@ -19,7 +19,7 @@
 	import { registerRefresh } from '$lib/stores/refresh';
 	import { authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
-	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
+	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { FileInfo } from '$lib/proto/discopanel/v1/file_pb';
 	import { formatBytes } from '$lib/utils';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';

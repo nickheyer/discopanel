@@ -5,8 +5,8 @@
 	import { EmptyState, ConfirmDialog } from '$lib/components/app';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import type { Module } from '$lib/proto/discopanel/v1/module_pb';
-	import { ModuleStatus } from '$lib/proto/discopanel/v1/module_pb';
+	import type { Module } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ModuleStatus } from '$lib/proto/discopanel/v1/storage_pb';
 	import { TONE_BADGE, TONE_BG } from '$lib/server-status';
 	import { moduleStatusMeta } from '$lib/module-status';
 	import { cn } from '$lib/utils';

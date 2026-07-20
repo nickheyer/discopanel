@@ -11,7 +11,7 @@ import (
 // A single server lifecycle event
 type Event struct {
 	Type     v1.TriggeredEventType
-	ServerID string
+	ServerId string
 	Data     map[string]any
 }
 
@@ -81,7 +81,7 @@ func (b *Bus) Emit(ctx context.Context, event Event) {
 	b.mu.RUnlock()
 
 	if b.log != nil {
-		b.log.Debug("event bus: %s for server %s (%d handlers)", event.Type, event.ServerID, len(subs))
+		b.log.Debug("event bus: %s for server %s (%d handlers)", event.Type, event.ServerId, len(subs))
 	}
 
 	// Handlers outlive the emitting request, keep values drop cancellation

@@ -448,19 +448,19 @@ func (s *Server) resolveScopeObject(ctx context.Context, scope rbac.ObjectScope,
 		if err != nil {
 			return "", fmt.Errorf("task not found")
 		}
-		return task.ServerID, nil
+		return task.ServerId, nil
 	case rbac.ScopeTaskExecution:
 		execution, err := s.store.GetTaskExecution(ctx, objectID)
 		if err != nil {
 			return "", fmt.Errorf("task execution not found")
 		}
-		return execution.ServerID, nil
+		return execution.ServerId, nil
 	case rbac.ScopeModule:
 		mod, err := s.store.GetModule(ctx, objectID)
 		if err != nil {
 			return "", fmt.Errorf("module not found")
 		}
-		return mod.ServerID, nil
+		return mod.ServerId, nil
 	default:
 		return objectID, nil
 	}

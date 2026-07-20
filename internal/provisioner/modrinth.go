@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/indexers/modrinth"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"golang.org/x/sync/errgroup"
 )
@@ -40,7 +40,7 @@ type mrpackFile struct {
 }
 
 // Downloads a Modrinth modpack and installs its loader
-func (p *Provisioner) installModrinthPack(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+func (p *Provisioner) installModrinthPack(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 	client := modrinth.NewClient(p.cfg.Server.UserAgent)
 
 	version, err := p.resolveModrinthVersion(ctx, client, cfg, desired)
@@ -70,7 +70,7 @@ func (p *Provisioner) installModrinthPack(ctx context.Context, server *storage.S
 }
 
 // Picks the pack version to install
-func (p *Provisioner) resolveModrinthVersion(ctx context.Context, client *modrinth.Client, cfg *storage.ServerProperties, desired *desiredModpack) (*modrinth.Version, error) {
+func (p *Provisioner) resolveModrinthVersion(ctx context.Context, client *modrinth.Client, cfg *v1.ServerProperties, desired *desiredModpack) (*modrinth.Version, error) {
 	if desired.id == "" {
 		return nil, fmt.Errorf("no Modrinth modpack configured")
 	}
@@ -154,7 +154,7 @@ func versionTypesOf(versions []modrinth.Version) []string {
 }
 
 // Extracts mrpack, downloads files then applies overrides
-func (p *Provisioner) installMrpack(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, packPath string, force bool) (*mrpackIndex, error) {
+func (p *Provisioner) installMrpack(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, packPath string, force bool) (*mrpackIndex, error) {
 	reader, err := zip.OpenReader(packPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open mrpack: %w", err)
@@ -246,7 +246,7 @@ func (p *Provisioner) installMrpack(ctx context.Context, server *storage.Server,
 }
 
 // Applies env.server and user include/exclude rules
-func (p *Provisioner) mrpackFileWanted(server *storage.Server, file mrpackFile, excludes, forceIncludes []string) bool {
+func (p *Provisioner) mrpackFileWanted(server *v1.Server, file mrpackFile, excludes, forceIncludes []string) bool {
 	name := strings.ToLower(filepath.Base(file.Path))
 	for _, pattern := range forceIncludes {
 		if strings.Contains(name, pattern) {
@@ -317,16 +317,16 @@ func (p *Provisioner) extractZipPrefix(reader *zip.ReadCloser, prefix, destDir s
 // Mrpack dependency keys and the loaders they pin
 var mrpackLoaderKeys = []struct {
 	key    string
-	loader storage.ModLoader
+	loader v1.ModLoader
 }{
-	{"fabric-loader", storage.ModLoaderFabric},
-	{"quilt-loader", storage.ModLoaderQuilt},
-	{"forge", storage.ModLoaderForge},
-	{"neoforge", storage.ModLoaderNeoForge},
+	{"fabric-loader", v1.ModLoader_MOD_LOADER_FABRIC},
+	{"quilt-loader", v1.ModLoader_MOD_LOADER_QUILT},
+	{"forge", v1.ModLoader_MOD_LOADER_FORGE},
+	{"neoforge", v1.ModLoader_MOD_LOADER_NEOFORGE},
 }
 
 // Installs the mod loader a pack's index depends on
-func (p *Provisioner) installPackLoader(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, index *mrpackIndex, force bool) (*Result, error) {
+func (p *Provisioner) installPackLoader(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, index *mrpackIndex, force bool) (*Result, error) {
 	for _, entry := range mrpackLoaderKeys {
 		if version := index.Dependencies[entry.key]; version != "" {
 			return p.installLoaderForPack(ctx, server, cfg, entry.loader, version, index.Dependencies["minecraft"])
@@ -339,7 +339,7 @@ func (p *Provisioner) installPackLoader(ctx context.Context, server *storage.Ser
 type modrinthProjectState struct {
 	VersionID    string   `json:"version_id"`
 	FileName     string   `json:"file_name"`
-	MCVersion    string   `json:"mc_version"`
+	McVersion    string   `json:"mc_version"`
 	Loader       string   `json:"loader"`
 	RequiredDeps []string `json:"required_deps,omitempty"`
 	OptionalDeps []string `json:"optional_deps,omitempty"`
@@ -381,7 +381,7 @@ func writeModrinthState(dataPath string, state *modrinthInstallState) error {
 
 // Installs individual Modrinth mods, optionally resolving dependencies
 // Presence decides first, the network only fills what is missing
-func (p *Provisioner) installModrinthProjects(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, mcVersion string, force bool) error {
+func (p *Provisioner) installModrinthProjects(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, mcVersion string, force bool) error {
 	projects := minecraft.SplitPatterns(strVal(cfg.ModrinthProjects))
 	if len(projects) == 0 {
 		return nil
@@ -425,7 +425,7 @@ func (p *Provisioner) installModrinthProjects(ctx context.Context, server *stora
 		// Recorded installs with jars on disk need no network
 		if !force {
 			if entry, ok := state.Projects[project]; ok &&
-				entry.MCVersion == mcVersion && entry.Loader == loaderName &&
+				entry.McVersion == mcVersion && entry.Loader == loaderName &&
 				fileExists(filepath.Join(modsDir, entry.FileName)) {
 				if depMode == "required" || depMode == "optional" {
 					queue = append(queue, entry.RequiredDeps...)
@@ -485,7 +485,7 @@ func (p *Provisioner) installModrinthProjects(ctx context.Context, server *stora
 		state.Projects[project] = modrinthProjectState{
 			VersionID:    pick.ID,
 			FileName:     file.Filename,
-			MCVersion:    mcVersion,
+			McVersion:    mcVersion,
 			Loader:       loaderName,
 			RequiredDeps: requiredDeps,
 			OptionalDeps: optionalDeps,

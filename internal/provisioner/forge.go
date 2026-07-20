@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	storage "github.com/nickheyer/discopanel/internal/db"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -22,8 +22,8 @@ const (
 )
 
 // Runs Forge installer then detects launch layout
-func (p *Provisioner) installForge(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, forgeVersion string) (*Result, error) {
-	mc := server.MCVersion
+func (p *Provisioner) installForge(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, forgeVersion string) (*Result, error) {
+	mc := server.McVersion
 
 	installerRel, resolvedVersion, err := p.fetchForgeInstaller(ctx, server, cfg, mc, forgeVersion)
 	if err != nil {
@@ -44,11 +44,11 @@ func (p *Provisioner) installForge(ctx context.Context, server *storage.Server, 
 		return nil, err
 	}
 	p.saveLibTree(server, treeKey)
-	return p.finishLaunch(server, spec, storage.ModLoaderForge, resolvedVersion, mc)
+	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_FORGE, resolvedVersion, mc)
 }
 
 // Resolves Forge version and downloads the installer jar
-func (p *Provisioner) fetchForgeInstaller(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, mc, forgeVersion string) (string, string, error) {
+func (p *Provisioner) fetchForgeInstaller(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, mc, forgeVersion string) (string, string, error) {
 	installerRel := filepath.Join(".discopanel", "installers", "forge-installer.jar")
 
 	// User-provided installer path (relative to the data dir)
@@ -61,7 +61,7 @@ func (p *Provisioner) fetchForgeInstaller(ctx context.Context, server *storage.S
 	}
 
 	// User-provided installer URL
-	if u := strVal(cfg.ForgeInstallerURL); u != "" {
+	if u := strVal(cfg.ForgeInstallerUrl); u != "" {
 		p.progress(server, "downloading Forge installer from %s...", u)
 		if err := p.download(ctx, u, joinData(server.DataPath, installerRel), nil, nil, p.reporter(server, "forge installer")); err != nil {
 			return "", "", err
@@ -136,8 +136,8 @@ func (p *Provisioner) resolveForgeMavenVersion(ctx context.Context, mc, forgeVer
 }
 
 // Resolves and runs the NeoForge installer
-func (p *Provisioner) installNeoForge(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, neoVersion string) (*Result, error) {
-	mc := server.MCVersion
+func (p *Provisioner) installNeoForge(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, neoVersion string) (*Result, error) {
+	mc := server.McVersion
 
 	mavenBase := neoforgeMavenURL
 	artifact := "neoforge"
@@ -176,7 +176,7 @@ func (p *Provisioner) installNeoForge(ctx context.Context, server *storage.Serve
 		}
 	}
 	p.saveLibTree(server, treeKey)
-	return p.finishLaunch(server, spec, storage.ModLoaderNeoForge, neoVersion, mc)
+	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_NEOFORGE, neoVersion, mc)
 }
 
 // Picks the newest NeoForge version for an MC version
@@ -251,7 +251,7 @@ func (p *Provisioner) fetchChecksumSidecar(ctx context.Context, artifactURL, alg
 }
 
 // Reads a pack start script for its loader version
-func detectServerPackLoader(dataPath, mc string) (storage.ModLoader, string) {
+func detectServerPackLoader(dataPath, mc string) (v1.ModLoader, string) {
 	for _, name := range []string{"startserver.sh", "startserver.bat", "start.sh", "run.sh"} {
 		data, err := os.ReadFile(filepath.Join(dataPath, name))
 		if err != nil {
@@ -259,13 +259,13 @@ func detectServerPackLoader(dataPath, mc string) (storage.ModLoader, string) {
 		}
 		s := string(data)
 		if v := scriptVar(s, "NEOFORGE_VERSION"); v != "" {
-			return storage.ModLoaderNeoForge, v
+			return v1.ModLoader_MOD_LOADER_NEOFORGE, v
 		}
 		if v := scriptVar(s, "FORGE_VERSION"); v != "" {
-			return storage.ModLoaderForge, strings.TrimPrefix(v, mc+"-")
+			return v1.ModLoader_MOD_LOADER_FORGE, strings.TrimPrefix(v, mc+"-")
 		}
 	}
-	return "", ""
+	return v1.ModLoader_MOD_LOADER_UNSPECIFIED, ""
 }
 
 // Returns the value assigned to a shell variable

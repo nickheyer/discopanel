@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	storage "github.com/nickheyer/discopanel/internal/db"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // Caches maven library tree, deterministic per loader version
@@ -34,7 +34,7 @@ func (p *Provisioner) libTreePath(key string) string {
 }
 
 // Unpacks cached libraries so installer skips downloads
-func (p *Provisioner) restoreLibTree(server *storage.Server, key string) {
+func (p *Provisioner) restoreLibTree(server *v1.Server, key string) {
 	archive := p.libTreePath(key)
 	f, err := os.Open(archive)
 	if err != nil {
@@ -51,7 +51,7 @@ func (p *Provisioner) restoreLibTree(server *storage.Server, key string) {
 }
 
 // Archives the installed libraries tree for future installs
-func (p *Provisioner) saveLibTree(server *storage.Server, key string) {
+func (p *Provisioner) saveLibTree(server *v1.Server, key string) {
 	archive := p.libTreePath(key)
 	if _, err := os.Stat(archive); err == nil {
 		return

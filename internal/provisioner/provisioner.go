@@ -17,7 +17,9 @@ import (
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
+	"google.golang.org/protobuf/proto"
 )
 
 // Receives human-readable provisioning progress lines for a server
@@ -37,9 +39,9 @@ type Provisioner struct {
 
 // Reports what a successful provision resolved
 type Result struct {
-	Loader        storage.ModLoader
+	Loader        v1.ModLoader
 	LoaderVersion string
-	MCVersion     string
+	McVersion     string
 	JavaMajor     int
 }
 
@@ -59,19 +61,19 @@ func (p *Provisioner) SetProgressSink(sink ProgressSink) {
 	p.sink = sink
 }
 
-func (p *Provisioner) progress(server *storage.Server, format string, args ...any) {
+func (p *Provisioner) progress(server *v1.Server, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	p.log.Info("provisioner [%s]: %s", server.Name, msg)
 	if p.sink != nil {
-		p.sink(server.ID, msg)
+		p.sink(server.Id, msg)
 	}
 }
 
 // Progress line that also lands in the activity ledger
-func (p *Provisioner) action(ctx context.Context, server *storage.Server, source, name string, attrs activity.Attrs, format string, args ...any) {
+func (p *Provisioner) action(ctx context.Context, server *v1.Server, source, name string, attrs activity.Attrs, format string, args ...any) {
 	p.progress(server, format, args...)
 	if p.rec != nil {
-		p.rec.Record(activity.WithSource(ctx, source), server.ID, name, attrs, format, args...)
+		p.rec.Record(activity.WithSource(ctx, source), server.Id, name, attrs, format, args...)
 	}
 }
 
@@ -94,8 +96,8 @@ type desiredModpack struct {
 }
 
 // Idempotently provisions server files and applies config
-func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties) (*Result, error) {
-	lock := p.serverLock(server.ID)
+func (p *Provisioner) Ensure(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties) (*Result, error) {
+	lock := p.serverLock(server.Id)
 	lock.Lock()
 	defer lock.Unlock()
 
@@ -104,7 +106,7 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 	}
 
 	// Free gate belongs before any multi gigabyte install
-	if !strings.EqualFold(strVal(cfg.EULA), "true") {
+	if !strings.EqualFold(strVal(cfg.Eula), "true") {
 		return nil, fmt.Errorf("the Minecraft EULA must be accepted before the server can start")
 	}
 
@@ -135,9 +137,9 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 		}
 		if err := runtimespec.WriteManifest(server.DataPath, &runtimespec.Manifest{
 			Version:       1,
-			Loader:        string(server.ModLoader),
+			Loader:        server.ModLoader.Name(),
 			LoaderVersion: result.LoaderVersion,
-			MCVersion:     result.MCVersion,
+			McVersion:     result.McVersion,
 			JavaMajor:     result.JavaMajor,
 			Modpack:       mref,
 			ProvisionedAt: time.Now().UTC().Format(time.RFC3339),
@@ -145,18 +147,19 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 			return nil, fmt.Errorf("failed to write provision manifest: %w", err)
 		}
 		p.action(ctx, server, "provisioner", "provision.install",
-			activity.Attrs{"loader": string(result.Loader), "loader_version": result.LoaderVersion, "mc_version": result.MCVersion},
+			activity.Attrs{"loader": result.Loader.Name(), "loader_version": result.LoaderVersion, "mc_version": result.McVersion},
 			"installed server files (%s %s, MC %s, Java %d)",
-			result.Loader, result.LoaderVersion, result.MCVersion, result.JavaMajor)
+			result.Loader.Name(), result.LoaderVersion, result.McVersion, result.JavaMajor)
 	} else {
+		manifestLoader, _ := v1.ModLoaderFromName(manifest.Loader)
 		result = &Result{
-			Loader:        storage.ModLoader(manifest.Loader),
+			Loader:        manifestLoader,
 			LoaderVersion: manifest.LoaderVersion,
-			MCVersion:     manifest.MCVersion,
+			McVersion:     manifest.McVersion,
 			JavaMajor:     manifest.JavaMajor,
 		}
 		p.progress(server, "server files verified (%s %s, MC %s, Java %d)",
-			result.Loader, result.LoaderVersion, result.MCVersion, result.JavaMajor)
+			result.Loader.Name(), result.LoaderVersion, result.McVersion, result.JavaMajor)
 	}
 
 	// Pack-managed mods get the client-only sweep every pass
@@ -165,22 +168,22 @@ func (p *Provisioner) Ensure(ctx context.Context, server *storage.Server, cfg *s
 	}
 
 	// Config files are cheap and authoritative, always applied
-	if err := p.applyConfigFiles(ctx, server, cfg, result.MCVersion, force); err != nil {
+	if err := p.applyConfigFiles(ctx, server, cfg, result.McVersion, force); err != nil {
 		return nil, fmt.Errorf("failed to apply configuration files: %w", err)
 	}
 
 	return result, nil
 }
 
-func (p *Provisioner) needsInstall(server *storage.Server, manifest *runtimespec.Manifest, desired *desiredModpack, force bool) bool {
+func (p *Provisioner) needsInstall(server *v1.Server, manifest *runtimespec.Manifest, desired *desiredModpack, force bool) bool {
 	if force || manifest == nil {
 		return true
 	}
-	if manifest.Loader != string(server.ModLoader) {
+	if manifest.Loader != server.ModLoader.Name() {
 		return true
 	}
 	// Modpack servers derive MC version from the pack
-	if desired == nil && manifest.MCVersion != server.MCVersion {
+	if desired == nil && manifest.McVersion != server.McVersion {
 		return true
 	}
 
@@ -207,7 +210,7 @@ func (p *Provisioner) needsInstall(server *storage.Server, manifest *runtimespec
 }
 
 // Archives world dirs before a reinstall rewrites the tree
-func (p *Provisioner) snapshotWorld(server *storage.Server) {
+func (p *Provisioner) snapshotWorld(server *v1.Server) {
 	if p.cfg == nil || p.cfg.Storage.BackupDir == "" {
 		return
 	}
@@ -235,17 +238,17 @@ func (p *Provisioner) snapshotWorld(server *storage.Server) {
 }
 
 // Derives the modpack identity from server and config
-func (p *Provisioner) desiredModpackFor(server *storage.Server, cfg *storage.ServerProperties) *desiredModpack {
+func (p *Provisioner) desiredModpackFor(server *v1.Server, cfg *v1.ServerProperties) *desiredModpack {
 	pack := minecraft.PackPlatformFor(server.ModLoader)
 	if pack == nil {
 		return nil
 	}
 	switch pack.Source {
 	case "curseforge":
-		if v := strVal(cfg.CFModpackZip); v != "" {
+		if v := strVal(cfg.CfModpackZip); v != "" {
 			return &desiredModpack{source: "zip", id: v}
 		}
-		slug, fileID := parseCurseForgeRef(strVal(cfg.CFPageURL), strVal(cfg.CFSlug), strVal(cfg.CFFileID))
+		slug, fileID := parseCurseForgeRef(strVal(cfg.CfPageUrl), strVal(cfg.CfSlug), strVal(cfg.CfFileId))
 		return &desiredModpack{source: "curseforge", id: slug, versionID: fileID}
 	case "modrinth":
 		project, version := parseModrinthRef(strVal(cfg.ModrinthModpack), strVal(cfg.ModrinthVersion))
@@ -255,81 +258,81 @@ func (p *Provisioner) desiredModpackFor(server *storage.Server, cfg *storage.Ser
 	}
 }
 
-type installFunc func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error)
+type installFunc func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error)
 
 // One native install path per loader, absence means user files
-var loaderInstallers = map[storage.ModLoader]installFunc{
-	storage.ModLoaderVanilla: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+var loaderInstallers = map[v1.ModLoader]installFunc{
+	v1.ModLoader_MOD_LOADER_VANILLA: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installVanilla(ctx, server)
 	},
-	storage.ModLoaderFabric: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_FABRIC: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installFabric(ctx, server, "")
 	},
-	storage.ModLoaderQuilt: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_QUILT: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installQuilt(ctx, server, cfg, "")
 	},
-	storage.ModLoaderForge: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_FORGE: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installForge(ctx, server, cfg, strVal(cfg.ForgeVersion))
 	},
-	storage.ModLoaderNeoForge: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_NEOFORGE: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installNeoForge(ctx, server, cfg, strVal(cfg.ForgeVersion))
 	},
-	storage.ModLoaderPaper: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_PAPER: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installPaperMC(ctx, server, "paper")
 	},
-	storage.ModLoaderFolia: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_FOLIA: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installPaperMC(ctx, server, "folia")
 	},
-	storage.ModLoaderPurpur: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_PURPUR: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installPurpur(ctx, server)
 	},
-	storage.ModLoaderAutoCurseForge: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_AUTO_CURSEFORGE: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installCurseForgePack(ctx, server, cfg, desired, force)
 	},
-	storage.ModLoaderCurseForge: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_CURSEFORGE: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installCurseForgePack(ctx, server, cfg, desired, force)
 	},
-	storage.ModLoaderModrinth: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_MODRINTH: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installModrinthPack(ctx, server, cfg, desired, force)
 	},
-	storage.ModLoaderCustom: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_CUSTOM: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 		return p.installCustom(ctx, server, cfg)
 	},
 }
 
 // Reports whether the loader installs without user files
-func HasNativeInstaller(loader storage.ModLoader) bool {
+func HasNativeInstaller(loader v1.ModLoader) bool {
 	_, ok := loaderInstallers[loader]
 	return ok
 }
 
 // Loader installs that take a pinned version, packs use these
-var packLoaderInstallers = map[storage.ModLoader]func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, version string) (*Result, error){
-	storage.ModLoaderFabric: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, version string) (*Result, error) {
+var packLoaderInstallers = map[v1.ModLoader]func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, version string) (*Result, error){
+	v1.ModLoader_MOD_LOADER_FABRIC: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, version string) (*Result, error) {
 		return p.installFabric(ctx, server, version)
 	},
-	storage.ModLoaderQuilt: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, version string) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_QUILT: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, version string) (*Result, error) {
 		return p.installQuilt(ctx, server, cfg, version)
 	},
-	storage.ModLoaderForge: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, version string) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_FORGE: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, version string) (*Result, error) {
 		return p.installForge(ctx, server, cfg, version)
 	},
-	storage.ModLoaderNeoForge: func(p *Provisioner, ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, version string) (*Result, error) {
+	v1.ModLoader_MOD_LOADER_NEOFORGE: func(p *Provisioner, ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, version string) (*Result, error) {
 		return p.installNeoForge(ctx, server, cfg, version)
 	},
 }
 
 // Installs a pack's pinned loader, the pack MC version wins
-func (p *Provisioner) installLoaderForPack(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, loader storage.ModLoader, version, mcVersion string) (*Result, error) {
+func (p *Provisioner) installLoaderForPack(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, loader v1.ModLoader, version, mcVersion string) (*Result, error) {
 	fn, ok := packLoaderInstallers[loader]
 	if !ok {
-		return nil, fmt.Errorf("packs cannot install loader %q", loader)
+		return nil, fmt.Errorf("packs cannot install loader %q", loader.Name())
 	}
-	packServer := *server
+	packServer, _ := proto.Clone(server).(*v1.Server)
 	if mcVersion != "" {
-		packServer.MCVersion = mcVersion
+		packServer.McVersion = mcVersion
 	}
-	result, err := fn(p, ctx, &packServer, cfg, version)
+	result, err := fn(p, ctx, packServer, cfg, version)
 	if err != nil {
 		return nil, err
 	}
@@ -339,8 +342,8 @@ func (p *Provisioner) installLoaderForPack(ctx context.Context, server *storage.
 }
 
 // Performs the actual installation for the server's loader
-func (p *Provisioner) install(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
-	p.progress(server, "provisioning %s server (MC %s)...", server.ModLoader, server.MCVersion)
+func (p *Provisioner) install(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
+	p.progress(server, "provisioning %s server (MC %s)...", server.ModLoader.Name(), server.McVersion)
 	p.pruneCaches()
 
 	if fn, ok := loaderInstallers[server.ModLoader]; ok {
@@ -352,15 +355,15 @@ func (p *Provisioner) install(ctx context.Context, server *storage.Server, cfg *
 	}
 	return nil, fmt.Errorf(
 		"mod loader %q has no native DiscoPanel installer: upload your server files to the data directory and set the Custom Server JAR or Custom JAR Execution fields",
-		server.ModLoader)
+		server.ModLoader.Name())
 }
 
 // Computes java requirement, writes launch spec, builds Result
-func (p *Provisioner) finishLaunch(server *storage.Server, spec *runtimespec.LaunchSpec, loader storage.ModLoader, loaderVersion, mcVersion string) (*Result, error) {
+func (p *Provisioner) finishLaunch(server *v1.Server, spec *runtimespec.LaunchSpec, loader v1.ModLoader, loaderVersion, mcVersion string) (*Result, error) {
 	javaMajor := docker.RequiredJavaMajor(mcVersion)
 	spec.Version = 1
-	spec.Loader = string(loader)
-	spec.MCVersion = mcVersion
+	spec.Loader = loader.Name()
+	spec.McVersion = mcVersion
 	spec.JavaMajor = javaMajor
 
 	if !launchTargetExists(server.DataPath, spec) {
@@ -373,7 +376,7 @@ func (p *Provisioner) finishLaunch(server *storage.Server, spec *runtimespec.Lau
 	return &Result{
 		Loader:        loader,
 		LoaderVersion: loaderVersion,
-		MCVersion:     mcVersion,
+		McVersion:     mcVersion,
 		JavaMajor:     javaMajor,
 	}, nil
 }
@@ -402,7 +405,7 @@ func launchTargetExists(dataPath string, spec *runtimespec.LaunchSpec) bool {
 	}
 }
 
-func (p *Provisioner) disableClientOnlyMods(ctx context.Context, server *storage.Server, forceIncludes []string) {
+func (p *Provisioner) disableClientOnlyMods(ctx context.Context, server *v1.Server, forceIncludes []string) {
 	modsDir := minecraft.GetModsPath(server.DataPath, server.ModLoader)
 	if modsDir == "" {
 		return
@@ -416,17 +419,17 @@ func (p *Provisioner) disableClientOnlyMods(ctx context.Context, server *storage
 	}
 }
 
-func (p *Provisioner) runInstallerContainer(ctx context.Context, server *storage.Server, cfg *storage.ServerProperties, cmd []string) error {
-	javaMajor := docker.RequiredJavaMajor(server.MCVersion)
+func (p *Provisioner) runInstallerContainer(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, cmd []string) error {
+	javaMajor := docker.RequiredJavaMajor(server.McVersion)
 	image := p.docker.RuntimeImage(javaMajor)
 
 	uid := 1000
 	gid := 1000
-	if cfg.UID != nil {
-		uid = *cfg.UID
+	if cfg.Uid != nil {
+		uid = int(*cfg.Uid)
 	}
-	if cfg.GID != nil {
-		gid = *cfg.GID
+	if cfg.Gid != nil {
+		gid = int(*cfg.Gid)
 	}
 
 	opts := docker.OneShotOptions{
@@ -435,9 +438,9 @@ func (p *Provisioner) runInstallerContainer(ctx context.Context, server *storage
 		DataPath:   server.DataPath,
 		WorkingDir: "/data",
 		User:       fmt.Sprintf("%d:%d", uid, gid),
-		Name:       fmt.Sprintf("discopanel-install-%s", server.ID),
+		Name:       fmt.Sprintf("discopanel-install-%s", server.Id),
 		Labels: map[string]string{
-			"discopanel.server.id": server.ID,
+			"discopanel.server.id": server.Id,
 			"discopanel.managed":   "true",
 			"discopanel.oneshot":   "true",
 		},

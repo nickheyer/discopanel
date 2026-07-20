@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,27 +10,15 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/internal/activity"
-	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/files"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
-// BackupTaskConfig represents configuration for backup tasks
-type BackupTaskConfig struct {
-	BackupName    string   `json:"backup_name"`
-	Paths         []string `json:"paths"`
-	Compress      bool     `json:"compress"`
-	RetentionDays int      `json:"retention_days"`
-	MaxBackups    int      `json:"max_backups"`
-	MinBackups    int      `json:"min_backups"`
-}
-
 // Archives server data, pausing world saves for consistency
-func (s *Scheduler) executeBackupTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
-	var config BackupTaskConfig
-	if task.Config != "" {
-		if err := json.Unmarshal([]byte(task.Config), &config); err != nil {
-			return "", fmt.Errorf("invalid backup config: %w", err)
-		}
+func (s *Scheduler) executeBackupTask(ctx context.Context, server *v1.Server, task *v1.ScheduledTask) (string, error) {
+	config := &v1.BackupTaskConfig{}
+	if err := unmarshalTaskConfig(task.Config, config); err != nil {
+		return "", fmt.Errorf("invalid backup config: %w", err)
 	}
 
 	if s.appConfig == nil || s.appConfig.Storage.BackupDir == "" {
@@ -73,11 +60,11 @@ func (s *Scheduler) executeBackupTask(ctx context.Context, server *storage.Serve
 		size = info.Size()
 	}
 
-	pruned, pruneErr := pruneBackups(destDir, prefix+"_", config.RetentionDays, config.MinBackups, config.MaxBackups)
+	pruned, pruneErr := pruneBackups(destDir, prefix+"_", int(config.RetentionDays), int(config.MinBackups), int(config.MaxBackups))
 
 	output := fmt.Sprintf("backup created: %s (%d files, %s, took %s)",
 		filepath.Base(destPath), count, formatBytes(size), time.Since(start).Round(time.Millisecond))
-	s.rec.Record(ctx, server.ID, "backup.create",
+	s.rec.Record(ctx, server.Id, "backup.create",
 		activity.Attrs{"file": filepath.Base(destPath), "size": formatBytes(size), "task": task.Name},
 		"backed up %s (%d files, %s, task %q)",
 		filepath.Base(destPath), count, formatBytes(size), task.Name)
@@ -137,17 +124,17 @@ func resolveBackupPaths(dataPath string, requested []string) (paths []string, mi
 }
 
 // Pauses and flushes world saves, returns the resume function
-func (s *Scheduler) pauseWorldSaves(ctx context.Context, server *storage.Server) func() {
-	if server.Status != storage.StatusRunning || server.ContainerID == "" {
+func (s *Scheduler) pauseWorldSaves(ctx context.Context, server *v1.Server) func() {
+	if server.Status != v1.ServerStatus_SERVER_STATUS_RUNNING || server.ContainerId == "" {
 		return func() {}
 	}
 
-	if _, err := s.sender.SendCommand(ctx, server.ID, "save-off"); err != nil {
+	if _, err := s.sender.SendCommand(ctx, server.Id, "save-off"); err != nil {
 		s.log.Warn("Backup: failed to disable world saves on server %s (continuing anyway): %v", server.Name, err)
 		return func() {}
 	}
 
-	if _, err := s.sender.SendCommand(ctx, server.ID, "save-all flush"); err != nil {
+	if _, err := s.sender.SendCommand(ctx, server.Id, "save-all flush"); err != nil {
 		s.log.Warn("Backup: failed to flush world saves on server %s: %v", server.Name, err)
 	} else {
 		// Gives the server a moment to flush chunks
@@ -161,7 +148,7 @@ func (s *Scheduler) pauseWorldSaves(ctx context.Context, server *storage.Server)
 		// Fresh context re-enables saves even after cancellation
 		resumeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if _, err := s.sender.SendCommand(resumeCtx, server.ID, "save-on"); err != nil {
+		if _, err := s.sender.SendCommand(resumeCtx, server.Id, "save-on"); err != nil {
 			s.log.Error("Backup: failed to re-enable world saves on server %s: %v", server.Name, err)
 		}
 	}

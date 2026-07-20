@@ -83,7 +83,7 @@ type StorageConfig struct {
 
 type ProxyConfig struct {
 	Enabled      bool   `mapstructure:"enabled" json:"enabled"`
-	BaseURL      string `mapstructure:"base_url" json:"base_url"`
+	BaseUrl      string `mapstructure:"base_url" json:"base_url"`
 	ListenPort   int    `mapstructure:"listen_port" json:"listen_port"`   // Primary listen port
 	ListenPorts  []int  `mapstructure:"listen_ports" json:"listen_ports"` // Multiple listen ports
 	PortRangeMin int    `mapstructure:"port_range_min" json:"port_range_min"`

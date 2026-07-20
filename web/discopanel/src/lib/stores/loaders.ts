@@ -1,7 +1,7 @@
 import { derived, readable } from 'svelte/store';
 import { rpcClient } from '$lib/api/rpc-client';
 import type { ModLoaderInfo } from '$lib/proto/discopanel/v1/minecraft_pb';
-import type { ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+import type { ModLoader } from '$lib/proto/discopanel/v1/storage_pb';
 
 let cache: Promise<ModLoaderInfo[]> | null = null;
 

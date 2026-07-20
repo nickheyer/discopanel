@@ -17,7 +17,9 @@ import (
 	"github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/pkg/config"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
@@ -28,8 +30,8 @@ var (
 	ErrLocalAuthDisabled    = errors.New("local authentication is disabled")
 	ErrRegistrationDisabled = errors.New("registration is disabled")
 	ErrSessionTimeoutMin    = errors.New("session timeout must be at least 300 seconds (5 minutes)")
-	ErrAPITokenExpired      = errors.New("api token has expired")
-	ErrAPITokenNotFound     = errors.New("api token not found")
+	ErrApiTokenExpired      = errors.New("api token has expired")
+	ErrApiTokenNotFound     = errors.New("api token not found")
 	ErrInvalidRecoveryKey   = errors.New("invalid recovery key")
 )
 
@@ -60,8 +62,8 @@ func NewManager(store *db.Store, enforcer *rbac.Enforcer, cfg *config.AuthConfig
 		secret = []byte(cfg.JWTSecret)
 	} else {
 		stored, err := store.GetSystemSetting(ctx, jwtSecretSettingKey)
-		if err == nil && stored != "" {
-			secret, err = hex.DecodeString(stored)
+		if err == nil && stored.Value != "" {
+			secret, err = hex.DecodeString(stored.Value)
 			if err != nil {
 				return nil, fmt.Errorf("failed to decode stored JWT secret: %w", err)
 			}
@@ -71,7 +73,7 @@ func NewManager(store *db.Store, enforcer *rbac.Enforcer, cfg *config.AuthConfig
 			if _, err := rand.Read(secret); err != nil {
 				return nil, fmt.Errorf("failed to generate JWT secret: %w", err)
 			}
-			if err := store.SetSystemSetting(ctx, jwtSecretSettingKey, hex.EncodeToString(secret)); err != nil {
+			if err := store.UpdateSystemSetting(ctx, &v1.SystemSetting{Key: jwtSecretSettingKey, Value: hex.EncodeToString(secret)}); err != nil {
 				return nil, fmt.Errorf("failed to persist JWT secret: %w", err)
 			}
 			// Clean all sessions since old tokens are now invalid
@@ -98,7 +100,7 @@ func NewManager(store *db.Store, enforcer *rbac.Enforcer, cfg *config.AuthConfig
 	return m, nil
 }
 
-func (m *Manager) Login(ctx context.Context, username, password string) (*db.User, []string, string, time.Time, error) {
+func (m *Manager) Login(ctx context.Context, username, password string) (*v1.User, []string, string, time.Time, error) {
 	if !m.config.Local.Enabled {
 		return nil, nil, "", time.Time{}, ErrLocalAuthDisabled
 	}
@@ -117,32 +119,31 @@ func (m *Manager) Login(ctx context.Context, username, password string) (*db.Use
 	}
 
 	// Get user roles
-	roleNames, err := m.store.GetUserRoleNames(ctx, user.ID)
+	roleNames, err := m.store.GetUserRoleNames(ctx, user.Id)
 	if err != nil {
 		return nil, nil, "", time.Time{}, fmt.Errorf("failed to get user roles: %w", err)
 	}
 
 	// Generate token
 	expiresAt := time.Now().Add(time.Duration(m.config.SessionTimeout) * time.Second)
-	token, err := m.generateJWT(user.ID, user.Username, roleNames, expiresAt)
+	token, err := m.generateJWT(user.Id, user.Username, roleNames, expiresAt)
 	if err != nil {
 		return nil, nil, "", time.Time{}, err
 	}
 
 	// Create session
-	session := &db.Session{
-		ID:        uuid.New().String(),
-		UserID:    user.ID,
+	session := &v1.Session{
+		Id:        uuid.New().String(),
+		UserId:    user.Id,
 		Token:     token,
-		ExpiresAt: expiresAt,
+		ExpiresAt: timestamppb.New(expiresAt),
 	}
 	if err := m.store.CreateSession(ctx, session); err != nil {
 		return nil, nil, "", time.Time{}, err
 	}
 
 	// Update last login
-	now := time.Now()
-	user.LastLogin = &now
+	user.LastLogin = timestamppb.Now()
 	_ = m.store.UpdateUser(ctx, user)
 
 	return user, roleNames, token, expiresAt, nil
@@ -160,13 +161,13 @@ func (m *Manager) ValidateSession(ctx context.Context, token string) (*Authentic
 	}
 
 	// Get session from database
-	session, err := m.store.GetSession(ctx, token)
+	session, err := m.store.GetSession(ctx, token, time.Now().UTC())
 	if err != nil {
 		return nil, ErrSessionExpired
 	}
 
 	userID, _ := claims["user_id"].(string)
-	if session.UserID != userID {
+	if session.UserId != userID {
 		return nil, ErrInvalidToken
 	}
 
@@ -181,13 +182,13 @@ func (m *Manager) ValidateSession(ctx context.Context, token string) (*Authentic
 	}
 
 	// Get roles
-	roleNames, err := m.store.GetUserRoleNames(ctx, user.ID)
+	roleNames, err := m.store.GetUserRoleNames(ctx, user.Id)
 	if err != nil {
 		return nil, err
 	}
 
 	authUser := &AuthenticatedUser{
-		ID:       user.ID,
+		Id:       user.Id,
 		Username: user.Username,
 		Roles:    roleNames,
 		Provider: user.AuthProvider,
@@ -203,7 +204,7 @@ func (m *Manager) Logout(ctx context.Context, token string) error {
 	return m.store.DeleteSession(ctx, token)
 }
 
-func (m *Manager) CreateLocalUser(ctx context.Context, username, email, password string) (*db.User, error) {
+func (m *Manager) CreateLocalUser(ctx context.Context, username, email, password string) (*v1.User, error) {
 	hashedPassword, err := hashPassword(password)
 	if err != nil {
 		return nil, err
@@ -214,13 +215,13 @@ func (m *Manager) CreateLocalUser(ctx context.Context, username, email, password
 		emailPtr = &email
 	}
 
-	user := &db.User{
-		ID:           uuid.New().String(),
+	user := &v1.User{
+		Id:           uuid.New().String(),
 		Username:     username,
 		Email:        emailPtr,
-		PasswordHash: hashedPassword,
 		AuthProvider: "local",
 		IsActive:     true,
+		PasswordHash: hashedPassword,
 	}
 
 	if err := m.store.CreateUser(ctx, user); err != nil {
@@ -255,7 +256,7 @@ func (m *Manager) ChangePassword(ctx context.Context, userID, oldPassword, newPa
 
 func (m *Manager) AnonymousUser() *AuthenticatedUser {
 	return &AuthenticatedUser{
-		ID:       "anonymous",
+		Id:       "anonymous",
 		Username: "anonymous",
 		Roles:    []string{"anonymous"},
 		Provider: "anonymous",
@@ -274,7 +275,7 @@ func (m *Manager) IsAnyAuthEnabled() bool {
 func (m *Manager) AuthenticateFromHeader(ctx context.Context, authHeader string) (*AuthenticatedUser, error) {
 	if !m.IsAnyAuthEnabled() {
 		return &AuthenticatedUser{
-			ID: "admin", Username: "admin", Roles: []string{"admin"}, Provider: "none",
+			Id: "admin", Username: "admin", Roles: []string{"admin"}, Provider: "none",
 		}, nil
 	}
 
@@ -285,7 +286,7 @@ func (m *Manager) AuthenticateFromHeader(ctx context.Context, authHeader string)
 
 	if token != "" {
 		if strings.HasPrefix(token, "dp_") {
-			return m.ValidateAPIToken(ctx, token)
+			return m.ValidateApiToken(ctx, token)
 		}
 		return m.ValidateSession(ctx, token)
 	}
@@ -312,22 +313,22 @@ func (m *Manager) GetConfig() *config.AuthConfig {
 // Applies db setting overrides so db wins over config.yaml
 func (m *Manager) loadSettingOverrides(ctx context.Context) {
 	if v, err := m.store.GetSystemSetting(ctx, settingLocalEnabled); err == nil {
-		if b, err := strconv.ParseBool(v); err == nil {
+		if b, err := strconv.ParseBool(v.Value); err == nil {
 			m.config.Local.Enabled = b
 		}
 	}
 	if v, err := m.store.GetSystemSetting(ctx, settingAllowRegistration); err == nil {
-		if b, err := strconv.ParseBool(v); err == nil {
+		if b, err := strconv.ParseBool(v.Value); err == nil {
 			m.config.Local.AllowRegistration = b
 		}
 	}
 	if v, err := m.store.GetSystemSetting(ctx, settingAnonymousAccess); err == nil {
-		if b, err := strconv.ParseBool(v); err == nil {
+		if b, err := strconv.ParseBool(v.Value); err == nil {
 			m.config.AnonymousAccess = b
 		}
 	}
 	if v, err := m.store.GetSystemSetting(ctx, settingSessionTimeout); err == nil {
-		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+		if i, err := strconv.Atoi(v.Value); err == nil && i > 0 {
 			m.config.SessionTimeout = i
 		}
 	}
@@ -342,28 +343,28 @@ func (m *Manager) UpdateSettings(ctx context.Context, localEnabled, allowReg, an
 
 	// Persist and apply each provided field
 	if localEnabled != nil {
-		if err := m.store.SetSystemSetting(ctx, settingLocalEnabled, strconv.FormatBool(*localEnabled)); err != nil {
+		if err := m.store.UpdateSystemSetting(ctx, &v1.SystemSetting{Key: settingLocalEnabled, Value: strconv.FormatBool(*localEnabled)}); err != nil {
 			return fmt.Errorf("failed to save local auth setting: %w", err)
 		}
 		m.config.Local.Enabled = *localEnabled
 	}
 
 	if allowReg != nil {
-		if err := m.store.SetSystemSetting(ctx, settingAllowRegistration, strconv.FormatBool(*allowReg)); err != nil {
+		if err := m.store.UpdateSystemSetting(ctx, &v1.SystemSetting{Key: settingAllowRegistration, Value: strconv.FormatBool(*allowReg)}); err != nil {
 			return fmt.Errorf("failed to save registration setting: %w", err)
 		}
 		m.config.Local.AllowRegistration = *allowReg
 	}
 
 	if anonAccess != nil {
-		if err := m.store.SetSystemSetting(ctx, settingAnonymousAccess, strconv.FormatBool(*anonAccess)); err != nil {
+		if err := m.store.UpdateSystemSetting(ctx, &v1.SystemSetting{Key: settingAnonymousAccess, Value: strconv.FormatBool(*anonAccess)}); err != nil {
 			return fmt.Errorf("failed to save anonymous access setting: %w", err)
 		}
 		m.config.AnonymousAccess = *anonAccess
 	}
 
 	if sessionTimeout != nil {
-		if err := m.store.SetSystemSetting(ctx, settingSessionTimeout, strconv.Itoa(int(*sessionTimeout))); err != nil {
+		if err := m.store.UpdateSystemSetting(ctx, &v1.SystemSetting{Key: settingSessionTimeout, Value: strconv.Itoa(int(*sessionTimeout))}); err != nil {
 			return fmt.Errorf("failed to save session timeout setting: %w", err)
 		}
 		m.config.SessionTimeout = int(*sessionTimeout)
@@ -373,7 +374,7 @@ func (m *Manager) UpdateSettings(ctx context.Context, localEnabled, allowReg, an
 }
 
 // Creates an API token, plaintext returned and hash stored
-func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, expiresInDays *int32) (string, *db.APIToken, error) {
+func (m *Manager) GenerateApiToken(ctx context.Context, userID, name string, expiresInDays *int32) (string, *v1.ApiToken, error) {
 	// Generate 32 random bytes
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -386,21 +387,20 @@ func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, exp
 	hash := sha256.Sum256([]byte(plaintext))
 	hashHex := hex.EncodeToString(hash[:])
 
-	var expiresAt *time.Time
+	var expiresAt *timestamppb.Timestamp
 	if expiresInDays != nil && *expiresInDays > 0 {
-		t := time.Now().Add(time.Duration(*expiresInDays) * 24 * time.Hour)
-		expiresAt = &t
+		expiresAt = timestamppb.New(time.Now().Add(time.Duration(*expiresInDays) * 24 * time.Hour))
 	}
 
-	token := &db.APIToken{
-		ID:        uuid.New().String(),
-		UserID:    userID,
+	token := &v1.ApiToken{
+		Id:        uuid.New().String(),
 		Name:      name,
-		TokenHash: hashHex,
 		ExpiresAt: expiresAt,
+		UserId:    userID,
+		TokenHash: hashHex,
 	}
 
-	if err := m.store.CreateAPIToken(ctx, token); err != nil {
+	if err := m.store.CreateApiToken(ctx, token); err != nil {
 		return "", nil, fmt.Errorf("failed to store api token: %w", err)
 	}
 
@@ -409,9 +409,9 @@ func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, exp
 
 // Creates a module API token under the creating user
 // Role widens access for trusted builtins, e.g. the doctor
-func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID, role string) (string, *db.APIToken, error) {
+func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, moduleID, role string) (string, *v1.ApiToken, error) {
 	tokenName := fmt.Sprintf("module:%s:%s", moduleName, moduleID)
-	plaintext, token, err := m.GenerateAPIToken(ctx, userID, tokenName, nil)
+	plaintext, token, err := m.GenerateApiToken(ctx, userID, tokenName, nil)
 	if err != nil {
 		return "", nil, err
 	}
@@ -427,7 +427,7 @@ func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, m
 }
 
 // Validates a raw dp token and returns the user
-func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*AuthenticatedUser, error) {
+func (m *Manager) ValidateApiToken(ctx context.Context, rawToken string) (*AuthenticatedUser, error) {
 	if !strings.HasPrefix(rawToken, "dp_") {
 		return nil, ErrInvalidToken
 	}
@@ -437,18 +437,18 @@ func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*Authe
 	hashHex := hex.EncodeToString(hash[:])
 
 	// Look up by hash
-	apiToken, err := m.store.GetAPITokenByHash(ctx, hashHex)
+	apiToken, err := m.store.GetApiTokenByHash(ctx, hashHex)
 	if err != nil {
-		return nil, ErrAPITokenNotFound
+		return nil, ErrApiTokenNotFound
 	}
 
 	// Check expiry
-	if apiToken.ExpiresAt != nil && apiToken.ExpiresAt.Before(time.Now()) {
-		return nil, ErrAPITokenExpired
+	if apiToken.ExpiresAt != nil && apiToken.ExpiresAt.AsTime().Before(time.Now()) {
+		return nil, ErrApiTokenExpired
 	}
 
 	// Resolve user
-	user, err := m.store.GetUser(ctx, apiToken.UserID)
+	user, err := m.store.GetUser(ctx, apiToken.UserId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get token user: %w", err)
 	}
@@ -465,7 +465,7 @@ func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*Authe
 			roleNames = []string{apiToken.ModuleRole}
 		}
 	} else {
-		roleNames, err = m.store.GetUserRoleNames(ctx, user.ID)
+		roleNames, err = m.store.GetUserRoleNames(ctx, user.Id)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user roles: %w", err)
 		}
@@ -473,11 +473,11 @@ func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*Authe
 
 	// Background-update last_used_at
 	go func() {
-		_ = m.store.UpdateAPITokenLastUsed(context.Background(), apiToken.ID)
+		_ = m.store.UpdateApiTokenLastUsed(context.Background(), time.Now().UTC(), apiToken.Id)
 	}()
 
 	authUser := &AuthenticatedUser{
-		ID:       user.ID,
+		Id:       user.Id,
 		Username: user.Username,
 		Roles:    roleNames,
 		Provider: user.AuthProvider,

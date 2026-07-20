@@ -11,6 +11,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/alias"
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/config"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -18,7 +19,7 @@ import (
 const LabelConfigHash = "discopanel.config.hash"
 
 // Fingerprints create-time server inputs, excludes image which drifts separately
-func (c *Client) DesiredConfigHash(server *models.Server, serverConfig *models.ServerProperties) string {
+func (c *Client) DesiredConfigHash(server *v1.Server, serverConfig *v1.ServerProperties) string {
 	h := sha256.New()
 	w := func(parts ...string) {
 		for _, p := range parts {
@@ -34,13 +35,13 @@ func (c *Client) DesiredConfigHash(server *models.Server, serverConfig *models.S
 	}
 
 	useProxy := server.ProxyHostname != ""
-	w("port", strconv.Itoa(server.Port), strconv.Itoa(server.InContainerPort()), strconv.FormatBool(useProxy))
+	w("port", strconv.Itoa(int(server.Port)), strconv.Itoa(models.InContainerPort(server)), strconv.FormatBool(useProxy))
 	for _, p := range server.AdditionalPorts {
 		w("extra-port", strconv.Itoa(int(p.GetHostPort())), strconv.Itoa(int(p.GetContainerPort())), p.GetProtocol())
 	}
 
 	w("data", TranslateToHostPath(server.DataPath))
-	w("memory", strconv.Itoa(server.Memory))
+	w("memory", strconv.Itoa(int(server.Memory)))
 	w("dns", c.config.DNS)
 
 	if server.DockerOverrides != nil {
@@ -62,7 +63,7 @@ func (c *Client) ContainerConfigHash(ctx context.Context, containerID string) (s
 const LabelModuleConfigHash = "discopanel.module.confighash"
 
 // V1 fingerprints module create inputs, rotating token env excluded
-func (c *Client) DesiredModuleConfigHash(module *models.Module, template *models.ModuleTemplate, server *models.Server, serverConfig *models.ServerProperties, cfg *config.Config, siblings map[string]*models.Module) string {
+func (c *Client) DesiredModuleConfigHash(module *v1.Module, template *v1.ModuleTemplate, server *v1.Server, serverConfig *v1.ServerProperties, cfg *config.Config, siblings map[string]*v1.Module) string {
 	h := sha256.New()
 	w := func(parts ...string) {
 		for _, p := range parts {
@@ -97,14 +98,14 @@ func (c *Client) DesiredModuleConfigHash(module *models.Module, template *models
 	for _, v := range vols {
 		w("vol", v.Type, v.Source, v.Target, strconv.FormatBool(v.ReadOnly))
 	}
-	w("user", alias.Substitute(module.UID, aliasCtx), alias.Substitute(module.GID, aliasCtx))
+	w("user", alias.Substitute(module.Uid, aliasCtx), alias.Substitute(module.Gid, aliasCtx))
 	cmd := module.CmdOverride
 	if cmd == "" {
 		cmd = template.DefaultCmd
 	}
 	w("cmd", cmd)
-	w("memory", strconv.Itoa(module.Memory))
-	w("cpu", strconv.FormatFloat(module.CPULimit, 'f', -1, 64))
+	w("memory", strconv.Itoa(int(module.Memory)))
+	w("cpu", strconv.FormatFloat(module.CpuLimit, 'f', -1, 64))
 	w("network", c.config.NetworkName)
 
 	return hex.EncodeToString(h.Sum(nil))[:32]

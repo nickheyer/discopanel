@@ -13,7 +13,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -34,7 +33,7 @@ type Scheduler struct {
 	lifecycle     *lifecycle.Manager
 	appConfig     *appconfig.Config
 	metrics       *metrics.Collector
-	rec           *activity.Recorder
+	rec           *metrics.Recorder
 	log           *logger.Logger
 	checkInterval time.Duration
 
@@ -70,7 +69,7 @@ func DefaultConfig() Config {
 }
 
 // Creates a new task scheduler
-func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, lifecycleManager *lifecycle.Manager, appCfg *appconfig.Config, metricsCollector *metrics.Collector, rec *activity.Recorder, log *logger.Logger, config ...Config) *Scheduler {
+func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.Sender, lifecycleManager *lifecycle.Manager, appCfg *appconfig.Config, metricsCollector *metrics.Collector, rec *metrics.Recorder, log *logger.Logger, config ...Config) *Scheduler {
 	cfg := DefaultConfig()
 	if len(config) > 0 {
 		cfg = config[0]
@@ -327,7 +326,7 @@ func (s *Scheduler) executeTask(task *v1.ScheduledTask, trigger string, eventTyp
 	if timeout == 0 {
 		timeout = 5 * time.Minute // Default timeout
 	}
-	execCtx, cancel := context.WithTimeout(activity.WithTrace(activity.WithSource(ctx, "scheduler")), timeout)
+	execCtx, cancel := context.WithTimeout(metrics.WithTrace(metrics.WithSource(ctx, "scheduler")), timeout)
 
 	// Track running execution
 	s.executionMu.Lock()
@@ -499,7 +498,7 @@ func (s *Scheduler) executeCommandTask(ctx context.Context, server *v1.Server, t
 
 	output, err := s.sender.SendCommand(ctx, server.Id, config.Command)
 	if err == nil {
-		s.rec.Record(ctx, server.Id, "task.command", activity.Attrs{"command": config.Command, "task": task.Name}, "ran command %q (task %q)", config.Command, task.Name)
+		s.rec.Record(ctx, server.Id, "task.command", metrics.Attrs{"command": config.Command, "task": task.Name}, "ran command %q (task %q)", config.Command, task.Name)
 	}
 	return output, err
 }
@@ -541,7 +540,7 @@ func (s *Scheduler) executeScriptTask(ctx context.Context, server *v1.Server, ta
 	if err != nil {
 		return "", err
 	}
-	s.rec.Record(ctx, server.Id, "task.script", activity.Attrs{"script": config.ScriptPath, "task": task.Name}, "ran script %s (task %q)", config.ScriptPath, task.Name)
+	s.rec.Record(ctx, server.Id, "task.script", metrics.Attrs{"script": config.ScriptPath, "task": task.Name}, "ran script %s (task %q)", config.ScriptPath, task.Name)
 	if strings.TrimSpace(stderr) != "" {
 		return stdout + "\n[stderr]\n" + stderr, nil
 	}

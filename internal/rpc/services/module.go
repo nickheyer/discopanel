@@ -8,11 +8,11 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/alias"
 	"github.com/nickheyer/discopanel/internal/auth"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/module"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/config"
@@ -32,7 +32,7 @@ type ModuleService struct {
 	proxyManager  *proxy.Manager
 	authManager   *auth.Manager
 	config        *config.Config
-	rec           *activity.Recorder
+	rec           *metrics.Recorder
 	log           *logger.Logger
 	logStreamer   *logger.LogStreamer
 }
@@ -45,7 +45,7 @@ func NewModuleService(
 	authManager *auth.Manager,
 	cfg *config.Config,
 	logStreamer *logger.LogStreamer,
-	rec *activity.Recorder,
+	rec *metrics.Recorder,
 	log *logger.Logger,
 ) *ModuleService {
 	return &ModuleService{
@@ -548,7 +548,7 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 	if err := s.store.CreateModule(ctx, module); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create module: %w", err))
 	}
-	s.rec.Record(ctx, module.ServerId, "module.create", activity.Attrs{"module": module.Name, "template": template.Name}, "created module %s", module.Name)
+	s.rec.Record(ctx, module.ServerId, "module.create", metrics.Attrs{"module": module.Name, "template": template.Name}, "created module %s", module.Name)
 
 	// Create container in background
 	bgCtx := detach(ctx)
@@ -715,7 +715,7 @@ func (s *ModuleService) DeleteModule(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete module: %w", err))
 	}
 	if module != nil {
-		s.rec.Record(ctx, module.ServerId, "module.delete", activity.Attrs{"module": module.Name}, "deleted module %s", module.Name)
+		s.rec.Record(ctx, module.ServerId, "module.delete", metrics.Attrs{"module": module.Name}, "deleted module %s", module.Name)
 	}
 
 	return connect.NewResponse(&v1.DeleteModuleResponse{}), nil
@@ -745,7 +745,7 @@ func (s *ModuleService) StartModule(ctx context.Context, req *connect.Request[v1
 		}
 	}
 
-	s.rec.Record(ctx, module.ServerId, "module.start", activity.Attrs{"module": module.Name}, "started module %s", module.Name)
+	s.rec.Record(ctx, module.ServerId, "module.start", metrics.Attrs{"module": module.Name}, "started module %s", module.Name)
 
 	return connect.NewResponse(&v1.StartModuleResponse{
 		Status: "started",
@@ -762,7 +762,7 @@ func (s *ModuleService) StopModule(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop module: %w", err))
 	}
 	if module, err := s.store.GetModule(ctx, msg.Id); err == nil {
-		s.rec.Record(ctx, module.ServerId, "module.stop", activity.Attrs{"module": module.Name}, "stopped module %s", module.Name)
+		s.rec.Record(ctx, module.ServerId, "module.stop", metrics.Attrs{"module": module.Name}, "stopped module %s", module.Name)
 	}
 
 	return connect.NewResponse(&v1.StopModuleResponse{
@@ -780,7 +780,7 @@ func (s *ModuleService) RestartModule(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart module: %w", err))
 	}
 	if module, err := s.store.GetModule(ctx, msg.Id); err == nil {
-		s.rec.Record(ctx, module.ServerId, "module.restart", activity.Attrs{"module": module.Name}, "restarted module %s", module.Name)
+		s.rec.Record(ctx, module.ServerId, "module.restart", metrics.Attrs{"module": module.Name}, "restarted module %s", module.Name)
 	}
 
 	return connect.NewResponse(&v1.RestartModuleResponse{

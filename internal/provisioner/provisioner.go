@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -30,7 +30,7 @@ type Provisioner struct {
 	docker *docker.Client
 	cfg    *config.Config
 	log    *logger.Logger
-	rec    *activity.Recorder
+	rec    *metrics.Recorder
 	sink   ProgressSink
 
 	mu     sync.Mutex
@@ -45,7 +45,7 @@ type Result struct {
 	JavaMajor     int
 }
 
-func New(store *storage.Store, dockerClient *docker.Client, cfg *config.Config, rec *activity.Recorder, log *logger.Logger) *Provisioner {
+func New(store *storage.Store, dockerClient *docker.Client, cfg *config.Config, rec *metrics.Recorder, log *logger.Logger) *Provisioner {
 	return &Provisioner{
 		store:  store,
 		docker: dockerClient,
@@ -70,10 +70,10 @@ func (p *Provisioner) progress(server *v1.Server, format string, args ...any) {
 }
 
 // Progress line that also lands in the activity ledger
-func (p *Provisioner) action(ctx context.Context, server *v1.Server, source, name string, attrs activity.Attrs, format string, args ...any) {
+func (p *Provisioner) action(ctx context.Context, server *v1.Server, source, name string, attrs metrics.Attrs, format string, args ...any) {
 	p.progress(server, format, args...)
 	if p.rec != nil {
-		p.rec.Record(activity.WithSource(ctx, source), server.Id, name, attrs, format, args...)
+		p.rec.Record(metrics.WithSource(ctx, source), server.Id, name, attrs, format, args...)
 	}
 }
 
@@ -147,7 +147,7 @@ func (p *Provisioner) Ensure(ctx context.Context, server *v1.Server, cfg *v1.Ser
 			return nil, fmt.Errorf("failed to write provision manifest: %w", err)
 		}
 		p.action(ctx, server, "provisioner", "provision.install",
-			activity.Attrs{"loader": result.Loader.Name(), "loader_version": result.LoaderVersion, "mc_version": result.McVersion},
+			metrics.Attrs{"loader": result.Loader.Name(), "loader_version": result.LoaderVersion, "mc_version": result.McVersion},
 			"installed server files (%s %s, MC %s, Java %d)",
 			result.Loader.Name(), result.LoaderVersion, result.McVersion, result.JavaMajor)
 	} else {
@@ -415,7 +415,7 @@ func (p *Provisioner) disableClientOnlyMods(ctx context.Context, server *v1.Serv
 			p.progress(server, "could not disable client-only mod %s (%v)", meta.FileName, err)
 			continue
 		}
-		p.action(ctx, server, "mod check", "mod.disable", activity.Attrs{"file": meta.FileName, "reason": "client-only"}, "disabled client-only mod %s", meta.FileName)
+		p.action(ctx, server, "mod check", "mod.disable", metrics.Attrs{"file": meta.FileName, "reason": "client-only"}, "disabled client-only mod %s", meta.FileName)
 	}
 }
 

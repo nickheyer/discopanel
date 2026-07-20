@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/activity"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
@@ -139,7 +139,7 @@ func (m *Manager) checkIdleServers() {
 		}
 
 		if autopause && idleFor >= m.timeoutFor(intOrDefault(cfg.AutopauseTimeoutEst, 3600), intOrDefault(cfg.AutopauseTimeoutInit, 600), hadPlayers) {
-			if err := m.Pause(activity.WithTrace(activity.WithSource(ctx, "autopause")), server.Id); err != nil {
+			if err := m.Pause(metrics.WithTrace(metrics.WithSource(ctx, "autopause")), server.Id); err != nil {
 				m.log.Error("lifecycle: autopause failed for %s: %v", server.Name, err)
 			}
 			continue
@@ -186,7 +186,7 @@ func (m *Manager) timeoutFor(establishedSecs, initialSecs int, hadPlayers bool) 
 func (m *Manager) stopIdle(serverID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := m.Stop(activity.WithTrace(activity.WithSource(ctx, "autostop")), serverID); err != nil {
+	if err := m.Stop(metrics.WithTrace(metrics.WithSource(ctx, "autostop")), serverID); err != nil {
 		m.log.Error("lifecycle: autostop failed for server %s: %v", serverID, err)
 	}
 }

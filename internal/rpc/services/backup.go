@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/nickheyer/discopanel/internal/activity"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -170,7 +170,7 @@ func (s *ServerService) RestoreBackup(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restore backup: %w", err))
 	}
 
-	s.rec.Record(ctx, server.Id, "backup.restore", activity.Attrs{"file": req.Msg.FileName}, "restored backup %s", req.Msg.FileName)
+	s.rec.Record(ctx, server.Id, "backup.restore", metrics.Attrs{"file": req.Msg.FileName}, "restored backup %s", req.Msg.FileName)
 	return connect.NewResponse(&v1.RestoreBackupResponse{
 		Message: fmt.Sprintf("Restored %s", req.Msg.FileName),
 	}), nil

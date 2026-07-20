@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/activity"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/events"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -136,7 +136,7 @@ func (m *Manager) SleepingInfo(serverID string) (*proxy.SleepingServer, bool) {
 
 // Resumes a paused server for an incoming login (hot path)
 func (m *Manager) WakeServer(ctx context.Context, serverID string) error {
-	return m.Wake(activity.WithTrace(activity.WithSource(ctx, "wake-on-connect")), serverID)
+	return m.Wake(metrics.WithTrace(metrics.WithSource(ctx, "wake-on-connect")), serverID)
 }
 
 // Cold-starts a stopped server asynchronously for wake-on-connect login
@@ -147,7 +147,7 @@ func (m *Manager) StartServer(serverID string) error {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 		defer cancel()
-		if err := m.Start(activity.WithTrace(activity.WithSource(ctx, "wake-on-connect")), serverID); err != nil {
+		if err := m.Start(metrics.WithTrace(metrics.WithSource(ctx, "wake-on-connect")), serverID); err != nil {
 			m.log.Error("lifecycle: wake-on-connect start failed for %s: %v", serverID, err)
 		}
 	}()

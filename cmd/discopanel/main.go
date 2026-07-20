@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -172,7 +171,7 @@ func main() {
 	eventBus := events.NewBus(log)
 
 	// One recorder owns the per-server activity ledger
-	rec := activity.NewRecorder(store, log)
+	rec := metrics.NewRecorder(store, log)
 
 	// Initialize metrics collector, the panel side health source
 	metricsCollector := metrics.NewCollector(store, dockerClient, cfg, eventBus, log, metrics.DefaultConfig())
@@ -283,7 +282,7 @@ func main() {
 
 				startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 				defer cancel()
-				if err := lifecycleManager.Start(activity.WithTrace(activity.WithSource(startCtx, "autostart")), server.Id); err != nil {
+				if err := lifecycleManager.Start(metrics.WithTrace(metrics.WithSource(startCtx, "autostart")), server.Id); err != nil {
 					log.Error("Failed to auto-start server %s: %v", server.Name, err)
 					return
 				}
@@ -402,7 +401,7 @@ func main() {
 		go func() {
 			defer stopWG.Done()
 			log.Info("Stopping managed server: %s", server.Name)
-			stopCtx, stopCancel := context.WithTimeout(activity.WithTrace(activity.WithSource(ctx, "system")), 25*time.Second)
+			stopCtx, stopCancel := context.WithTimeout(metrics.WithTrace(metrics.WithSource(ctx, "system")), 25*time.Second)
 			defer stopCancel()
 			if err := lifecycleManager.Stop(stopCtx, server.Id); err != nil {
 				log.Error("Failed to stop server %s: %v", server.Name, err)

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -49,7 +48,7 @@ type Hub struct {
 	log         *logger.Logger
 	sender      *command.Sender
 	metrics     *metrics.Collector
-	rec         *activity.Recorder
+	rec         *metrics.Recorder
 
 	upgrader websocket.Upgrader
 
@@ -81,7 +80,7 @@ type Client struct {
 }
 
 // Creates a new WebSocket hub
-func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer *rbac.Enforcer, store *storage.Store, docker *docker.Client, sender *command.Sender, metricsCollector *metrics.Collector, rec *activity.Recorder, log *logger.Logger) *Hub {
+func NewHub(logStreamer *logger.LogStreamer, authManager *auth.Manager, enforcer *rbac.Enforcer, store *storage.Store, docker *docker.Client, sender *command.Sender, metricsCollector *metrics.Collector, rec *metrics.Recorder, log *logger.Logger) *Hub {
 	return &Hub{
 		logStreamer: logStreamer,
 		authManager: authManager,
@@ -490,9 +489,9 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 		}
 	}
 
-	ctx := activity.WithTrace(context.Background())
+	ctx := metrics.WithTrace(context.Background())
 	if c.user != nil && c.user.Username != "" {
-		ctx = activity.WithSource(ctx, c.user.Username)
+		ctx = metrics.WithSource(ctx, c.user.Username)
 	}
 
 	output, err := c.hub.sender.Run(ctx, msg.ServerId, msg.Command, silent)

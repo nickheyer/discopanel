@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
@@ -55,7 +54,7 @@ func (s *Session) close() {
 type Hub struct {
 	collector *Collector
 	bus       *events.Bus
-	rec       *activity.Recorder
+	rec       *Recorder
 	log       *logger.Logger
 
 	mu       sync.Mutex
@@ -63,7 +62,7 @@ type Hub struct {
 	sink     ConsoleSink
 }
 
-func NewHub(collector *Collector, bus *events.Bus, rec *activity.Recorder, log *logger.Logger) *Hub {
+func NewHub(collector *Collector, bus *events.Bus, rec *Recorder, log *logger.Logger) *Hub {
 	return &Hub{
 		collector: collector,
 		bus:       bus,
@@ -216,8 +215,8 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 		// Boot replay repeats the live report, skip stale copies
 		fresh := h.collector.ApplyAgentExit(serverID, p.Exited)
 		if fresh && p.Exited.GetCrashed() {
-			rctx := activity.WithTrace(activity.WithSource(ctx, "runtime"))
-			attrs := activity.Attrs{"exit_code": strconv.Itoa(int(p.Exited.GetExitCode()))}
+			rctx := WithTrace(WithSource(ctx, "runtime"))
+			attrs := Attrs{"exit_code": strconv.Itoa(int(p.Exited.GetExitCode()))}
 			if path := p.Exited.GetCrashReportPath(); path != "" {
 				attrs["crash_report"] = path
 			}

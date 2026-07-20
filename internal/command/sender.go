@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
 
@@ -35,7 +35,7 @@ type Sender struct {
 	docker   *docker.Client
 	config   *config.Config
 	agent    ConsoleAgent
-	rec      *activity.Recorder
+	rec      *metrics.Recorder
 	streamer *logger.LogStreamer
 }
 
@@ -53,7 +53,7 @@ func (s *Sender) SetAgent(agent ConsoleAgent) {
 }
 
 // Wires ledger and console echo after construction
-func (s *Sender) SetJournal(rec *activity.Recorder, streamer *logger.LogStreamer) {
+func (s *Sender) SetJournal(rec *metrics.Recorder, streamer *logger.LogStreamer) {
 	s.rec = rec
 	s.streamer = streamer
 }
@@ -110,7 +110,7 @@ func (s *Sender) Run(ctx context.Context, serverID, cmd string, silent bool) (st
 
 	output, err := s.SendCommand(ctx, server.Id, cmd)
 	if err == nil {
-		s.rec.Record(ctx, server.Id, "command.run", activity.Attrs{"command": cmd}, "ran command %q", cmd)
+		s.rec.Record(ctx, server.Id, "command.run", metrics.Attrs{"command": cmd}, "ran command %q", cmd)
 	}
 	if !silent && s.streamer != nil && (output != "" || err != nil) {
 		s.streamer.AddCommandOutput(server.Id, output, err == nil, commandTime)

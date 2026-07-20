@@ -13,8 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
@@ -566,7 +566,7 @@ func (p *Provisioner) adoptServerPackVersion(ctx context.Context, server *v1.Ser
 	}
 	javaVersion := int32(docker.RequiredJavaMajor(evidence))
 	p.action(ctx, server, "provisioner", "provision.mc_version",
-		activity.Attrs{"from": server.McVersion, "to": evidence},
+		metrics.Attrs{"from": server.McVersion, "to": evidence},
 		"server pack ships MC %s, replacing configured %s", evidence, server.McVersion)
 	if err := p.store.UpdateServerFields(ctx, server.Id, map[string]any{
 		"mc_version":   evidence,

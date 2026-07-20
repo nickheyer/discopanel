@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/proxy"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -25,12 +25,12 @@ type ProxyService struct {
 	docker       *docker.Client
 	proxyManager *proxy.Manager
 	config       *config.Config
-	rec          *activity.Recorder
+	rec          *metrics.Recorder
 	log          *logger.Logger
 }
 
 // Creates a new proxy service
-func NewProxyService(store *storage.Store, dockerClient *docker.Client, proxyManager *proxy.Manager, cfg *config.Config, rec *activity.Recorder, log *logger.Logger) *ProxyService {
+func NewProxyService(store *storage.Store, dockerClient *docker.Client, proxyManager *proxy.Manager, cfg *config.Config, rec *metrics.Recorder, log *logger.Logger) *ProxyService {
 	return &ProxyService{
 		store:        store,
 		docker:       dockerClient,
@@ -577,7 +577,7 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 		if hostname != "" {
 			msgText = "routed hostname " + hostname
 		}
-		s.rec.Record(ctx, server.Id, "routing.update", activity.Attrs{"hostname": hostname, "listener": listenerID}, "%s", msgText)
+		s.rec.Record(ctx, server.Id, "routing.update", metrics.Attrs{"hostname": hostname, "listener": listenerID}, "%s", msgText)
 	}
 
 	// Save only the columns this request owns

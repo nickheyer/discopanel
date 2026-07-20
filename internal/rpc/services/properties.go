@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
 	"github.com/nickheyer/discopanel/internal/lifecycle"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
@@ -29,12 +29,12 @@ type PropertiesService struct {
 	config    *config.Config
 	docker    *docker.Client
 	lifecycle *lifecycle.Manager
-	rec       *activity.Recorder
+	rec       *metrics.Recorder
 	log       *logger.Logger
 }
 
 // Creates new config service
-func NewPropertiesService(store *storage.Store, cfg *config.Config, docker *docker.Client, lifecycleManager *lifecycle.Manager, rec *activity.Recorder, log *logger.Logger) *PropertiesService {
+func NewPropertiesService(store *storage.Store, cfg *config.Config, docker *docker.Client, lifecycleManager *lifecycle.Manager, rec *metrics.Recorder, log *logger.Logger) *PropertiesService {
 	return &PropertiesService{
 		store:     store,
 		config:    cfg,
@@ -112,7 +112,7 @@ func (s *PropertiesService) UpdateServerProperties(ctx context.Context, req *con
 		s.log.Error("Failed to save server config: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save server properties"))
 	}
-	s.rec.Record(ctx, server.Id, "properties.update", activity.Attrs{"changed": strconv.Itoa(len(msg.Updates))}, "updated server properties (%d changed)", len(msg.Updates))
+	s.rec.Record(ctx, server.Id, "properties.update", metrics.Attrs{"changed": strconv.Itoa(len(msg.Updates))}, "updated server properties (%d changed)", len(msg.Updates))
 
 	// Restarts running servers so new config applies
 	if server.ContainerId != "" && s.lifecycle != nil {

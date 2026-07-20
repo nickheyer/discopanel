@@ -9,7 +9,6 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
-	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -42,7 +41,7 @@ type Server struct {
 	docker           *docker.Client
 	sender           *command.Sender
 	config           *config.Config
-	rec              *activity.Recorder
+	rec              *metrics.Recorder
 	log              *logger.Logger
 	handler          http.Handler
 	proxyManager     *proxy.Manager
@@ -62,7 +61,7 @@ type Server struct {
 }
 
 // Creates new Connect RPC server
-func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, agentHub *metrics.Hub, rec *activity.Recorder, log *logger.Logger) (*Server, error) {
+func NewServer(store *storage.Store, docker *docker.Client, sender *command.Sender, cfg *config.Config, proxyManager *proxy.Manager, sched *scheduler.Scheduler, lifecycleManager *lifecycle.Manager, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, agentHub *metrics.Hub, rec *metrics.Recorder, log *logger.Logger) (*Server, error) {
 	// RBAC init failure is fatal, authz must never silently vanish
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
@@ -303,7 +302,7 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 			// Set user in context
 			ctx = auth.WithUser(ctx, user)
 			// Ledger events in one request share user and trace
-			ctx = activity.WithTrace(activity.WithSource(ctx, user.Username))
+			ctx = metrics.WithTrace(metrics.WithSource(ctx, user.Username))
 
 			// Authenticated-only procedures (no specific resource permission needed)
 			if rbac.AuthenticatedOnlyProcedures[procedure] {

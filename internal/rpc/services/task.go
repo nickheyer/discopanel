@@ -7,8 +7,8 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/nickheyer/discopanel/internal/activity"
 	storage "github.com/nickheyer/discopanel/internal/db"
+	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/scheduler"
 	"github.com/nickheyer/discopanel/internal/webhook"
 	"github.com/nickheyer/discopanel/pkg/logger"
@@ -25,12 +25,12 @@ var _ discopanelv1connect.TaskServiceHandler = (*TaskService)(nil)
 type TaskService struct {
 	store     *storage.Store
 	scheduler *scheduler.Scheduler
-	rec       *activity.Recorder
+	rec       *metrics.Recorder
 	log       *logger.Logger
 }
 
 // NewTaskService creates a new task service
-func NewTaskService(store *storage.Store, sched *scheduler.Scheduler, rec *activity.Recorder, log *logger.Logger) *TaskService {
+func NewTaskService(store *storage.Store, sched *scheduler.Scheduler, rec *metrics.Recorder, log *logger.Logger) *TaskService {
 	return &TaskService{
 		store:     store,
 		scheduler: sched,
@@ -161,7 +161,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 	}
 
 	s.log.Info("Created scheduled task: %s for server %s", task.Name, task.ServerId)
-	s.rec.Record(ctx, task.ServerId, "task.create", activity.Attrs{"task": task.Name, "type": task.TaskType.Name()}, "created task %q", task.Name)
+	s.rec.Record(ctx, task.ServerId, "task.create", metrics.Attrs{"task": task.Name, "type": task.TaskType.Name()}, "created task %q", task.Name)
 
 	task.Server = nil
 	return connect.NewResponse(&v1.CreateTaskResponse{
@@ -254,7 +254,7 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 	}
 
 	s.log.Info("Updated scheduled task: %s", task.Name)
-	s.rec.Record(ctx, task.ServerId, "task.update", activity.Attrs{"task": task.Name}, "updated task %q", task.Name)
+	s.rec.Record(ctx, task.ServerId, "task.update", metrics.Attrs{"task": task.Name}, "updated task %q", task.Name)
 
 	task.Server = nil
 	return connect.NewResponse(&v1.UpdateTaskResponse{
@@ -275,7 +275,7 @@ func (s *TaskService) DeleteTask(ctx context.Context, req *connect.Request[v1.De
 	}
 
 	s.log.Info("Deleted scheduled task: %s", task.Name)
-	s.rec.Record(ctx, task.ServerId, "task.delete", activity.Attrs{"task": task.Name}, "deleted task %q", task.Name)
+	s.rec.Record(ctx, task.ServerId, "task.delete", metrics.Attrs{"task": task.Name}, "deleted task %q", task.Name)
 
 	return connect.NewResponse(&v1.DeleteTaskResponse{}), nil
 }
@@ -301,7 +301,7 @@ func (s *TaskService) ToggleTask(ctx context.Context, req *connect.Request[v1.To
 	}
 
 	s.log.Info("Toggled task %s to status %s", task.Name, task.Status)
-	s.rec.Record(ctx, task.ServerId, "task.toggle", activity.Attrs{"task": task.Name, "status": task.Status.Name()}, "set task %q to %s", task.Name, task.Status.Name())
+	s.rec.Record(ctx, task.ServerId, "task.toggle", metrics.Attrs{"task": task.Name, "status": task.Status.Name()}, "set task %q to %s", task.Name, task.Status.Name())
 
 	task.Server = nil
 	return connect.NewResponse(&v1.ToggleTaskResponse{

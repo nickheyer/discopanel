@@ -18,7 +18,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/nickheyer/discopanel/internal/activity"
 	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -48,7 +47,7 @@ type ServerService struct {
 	config           *config.Config
 	proxy            *proxy.Manager
 	lifecycle        *lifecycle.Manager
-	rec              *activity.Recorder
+	rec              *metrics.Recorder
 	log              *logger.Logger
 	logStreamer      *logger.LogStreamer
 	metricsCollector *metrics.Collector
@@ -68,7 +67,7 @@ type faviconEntry struct {
 }
 
 // NewServerService creates a new server service
-func NewServerService(store *storage.Store, docker *docker.Client, sender *command.Sender, config *config.Config, proxy *proxy.Manager, lifecycleManager *lifecycle.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, uploadManager *transfer.UploadManager, rec *activity.Recorder, log *logger.Logger) *ServerService {
+func NewServerService(store *storage.Store, docker *docker.Client, sender *command.Sender, config *config.Config, proxy *proxy.Manager, lifecycleManager *lifecycle.Manager, logStreamer *logger.LogStreamer, metricsCollector *metrics.Collector, moduleManager *module.Manager, bus *events.Bus, uploadManager *transfer.UploadManager, rec *metrics.Recorder, log *logger.Logger) *ServerService {
 	return &ServerService{
 		store:            store,
 		docker:           docker,
@@ -801,7 +800,7 @@ func (s *ServerService) applyModpackSelection(ctx context.Context, server *v1.Se
 
 	// Pack art becomes the server icon like an upload would
 	s.adoptModpackIcon(ctx, server, modpack)
-	s.rec.Record(ctx, server.Id, "modpack.select", activity.Attrs{"modpack": modpack.Name}, "selected modpack %s", modpack.Name)
+	s.rec.Record(ctx, server.Id, "modpack.select", metrics.Attrs{"modpack": modpack.Name}, "selected modpack %s", modpack.Name)
 	return nil
 }
 

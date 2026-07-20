@@ -1,4 +1,4 @@
-package activity
+package metrics
 
 import (
 	"context"

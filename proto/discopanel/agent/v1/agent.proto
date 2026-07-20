@@ -102,6 +102,8 @@ message Exited {
   bool boot_failed = 8;
   // True when the server reached ready before this exit
   bool was_ready = 9;
+  // True when a supervisor stop signal preceded this exit
+  bool stop_requested = 10;
 }
 
 // Signals the javaagent hooked the game's error logging

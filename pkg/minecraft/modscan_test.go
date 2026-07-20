@@ -243,3 +243,36 @@ func TestHasReportedModID(t *testing.T) {
 		t.Fatal("declared id comparisons must stay exact")
 	}
 }
+
+func TestNestedServiceJarProvidesModID(t *testing.T) {
+	var inner bytes.Buffer
+	w := zip.NewWriter(&inner)
+	f, err := w.Create("META-INF/mods.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("[[mods]]\nmodId = \"connectormod\"\nversion = \"1.0.0\"\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	writeTestJar(t, dir, "connector.jar", map[string]string{
+		"META-INF/jarjar/connector-mod.jar": inner.String(),
+	})
+
+	meta, err := ReadModJar(filepath.Join(dir, "connector.jar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !meta.HasModID("connectormod") {
+		t.Fatalf("nested service jar mod must be visible, got %+v", meta.Mods)
+	}
+	for _, m := range meta.Mods {
+		if m.ID == "connectormod" && m.Declared {
+			t.Fatal("nested mod must not count as declared")
+		}
+	}
+}

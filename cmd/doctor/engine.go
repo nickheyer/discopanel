@@ -96,22 +96,33 @@ func lastTouch(inc *runtimespec.DoctorIncident) time.Time {
 	return inc.LastActivity()
 }
 
-// Counts exits inside the loop window
+// Counts loop-evidence exits inside the window
 func exitsWithin(history []*agentv1.Exited, window time.Duration) int {
 	cutoff := time.Now().Add(-window).UnixMilli()
 	n := 0
 	for i := range history {
-		if history[i].ExitedAtUnixMs > cutoff {
+		if history[i].ExitedAtUnixMs > cutoff && loopEvidence(history[i]) {
 			n++
 		}
 	}
 	return n
 }
 
+// Requested stops that did not crash are supervisor artifacts
+func loopEvidence(e *agentv1.Exited) bool {
+	return e.Crashed || !e.StopRequested
+}
+
 // Runs one repair pass for a fresh exit
 func (e *engine) respond(ctx context.Context, srv *serverInfo, j *runtimespec.DoctorState, exit *agentv1.Exited, history []*agentv1.Exited) {
 	exitedAt := time.UnixMilli(exit.ExitedAtUnixMs)
 	if time.Since(exitedAt) > crashLoopWindow {
+		e.saveJournal(srv, j)
+		return
+	}
+
+	// Requested stops are supervisor artifacts, never loop evidence
+	if !loopEvidence(exit) {
 		e.saveJournal(srv, j)
 		return
 	}
@@ -366,11 +377,15 @@ func (e *engine) revertAll(srv *serverInfo, modsDir string, inc *runtimespec.Doc
 	}
 }
 
-// Undoes unverified guesses before planning new ones
-func (e *engine) revertGuesses(srv *serverInfo, modsDir string, inc *runtimespec.DoctorIncident) {
+// Undoes guesses the recurring crash proves wrong
+// A guess for another crash signature stays in effect
+func (e *engine) revertGuesses(srv *serverInfo, modsDir string, inc *runtimespec.DoctorIncident, signature string) {
 	for i := len(inc.Actions) - 1; i >= 0; i-- {
 		a := &inc.Actions[i]
 		if a.Reverted || a.Kind != runtimespec.ActionDisable || a.Evidence != runtimespec.EvidenceFrame {
+			continue
+		}
+		if a.Cause != signature {
 			continue
 		}
 		if e.undoAction(srv, modsDir, a) {
@@ -401,11 +416,12 @@ func (e *engine) exhaust(ctx context.Context, srv *serverInfo, j *runtimespec.Do
 
 // Stops a server exiting over and over to break the loop
 func (e *engine) breakCrashLoop(ctx context.Context, srv *serverInfo, history []*agentv1.Exited) {
-	if exitsWithin(history, crashLoopWindow) < crashLoopThreshold {
+	n := exitsWithin(history, crashLoopWindow)
+	if n < crashLoopThreshold {
 		return
 	}
 	e.logf("%s: %d exits in %d minutes, stopping to break the loop",
-		srv.Name, crashLoopThreshold, int(crashLoopWindow.Minutes()))
+		srv.Name, n, int(crashLoopWindow.Minutes()))
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	defer cancel()
 	if err := e.panel.Stop(sctx, srv.ID); err != nil {

@@ -65,6 +65,7 @@ type DoctorAction struct {
 	Range     string    `json:"range,omitempty"`   // Version range for installs
 	Dialect   string    `json:"dialect,omitempty"` // Metadata dialect for installs
 	Evidence  string    `json:"evidence"`
+	Cause     string    `json:"cause,omitempty"` // Crash signature a frame guess answered
 	AppliedAt time.Time `json:"applied_at"`
 	Reverted  bool      `json:"reverted,omitempty"`
 }

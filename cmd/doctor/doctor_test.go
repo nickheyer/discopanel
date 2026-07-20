@@ -153,6 +153,54 @@ func TestWantedStopStandsDown(t *testing.T) {
 	}
 }
 
+func TestRequestedStopArtifactNeverBreaksLoop(t *testing.T) {
+	srv := testServer(t)
+	now := time.Now().UnixMilli()
+	for i := range 3 {
+		runtimespec.AppendExitHistory(srv.DataPath, &agentv1.Exited{
+			ExitCode: 1, Crashed: true, BootFailed: true,
+			ExitedAtUnixMs: now - int64(60000*(3-i)),
+		})
+	}
+	runtimespec.AppendExitHistory(srv.DataPath, &agentv1.Exited{
+		ExitCode: 143, StopRequested: true, ExitedAtUnixMs: now,
+	})
+	j := &runtimespec.DoctorState{Version: 1, Incident: &runtimespec.DoctorIncident{
+		OpenedAt: time.Now(), Passes: 2,
+	}}
+	if err := runtimespec.SaveDoctor(srv.DataPath, j); err != nil {
+		t.Fatal(err)
+	}
+
+	panel := &fakePanel{}
+	e := &engine{panel: panel, logf: t.Logf}
+	e.checkServer(context.Background(), srv)
+
+	if panel.stops != 0 || panel.restarts != 0 {
+		t.Fatalf("artifact exit must not act, got %d stops %d restarts", panel.stops, panel.restarts)
+	}
+	got := runtimespec.LoadDoctor(srv.DataPath)
+	if got.Incident == nil || got.Incident.Passes != 2 {
+		t.Fatalf("incident must stay open untouched, got %+v", got.Incident)
+	}
+	if got.LastHandledMs != now {
+		t.Fatal("artifact exit must be stamped handled")
+	}
+}
+
+func TestExitsWithinSkipsRequestedStops(t *testing.T) {
+	now := time.Now().UnixMilli()
+	history := []*agentv1.Exited{
+		{Crashed: true, ExitedAtUnixMs: now - 1000},
+		{StopRequested: true, ExitedAtUnixMs: now - 2000},
+		{StopRequested: true, Crashed: true, ExitedAtUnixMs: now - 3000},
+		{ExitedAtUnixMs: now - 4000},
+	}
+	if got := exitsWithin(history, time.Minute); got != 3 {
+		t.Fatalf("want 3 evidence exits, got %d", got)
+	}
+}
+
 func TestOrderSourcersPrefersPackSource(t *testing.T) {
 	infos := []indexers.IndexerInfo{
 		{Name: "aaa"},
@@ -168,6 +216,104 @@ func TestOrderSourcersPrefersPackSource(t *testing.T) {
 	got = orderSourcers(infos, "")
 	if len(got) != 3 || got[0].Name != "aaa" || got[1].Name != "mmm" || got[2].Name != "zzz" {
 		t.Fatalf("no pack source keeps registry order, got %+v", got)
+	}
+}
+
+func TestRevertGuessesScopedToSignature(t *testing.T) {
+	srv := testServer(t)
+	modsDir := filepath.Join(srv.DataPath, "mods")
+	if err := os.MkdirAll(modsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeModJar(t, modsDir+"_disabled", "m1.jar", `{"id":"m1"}`)
+
+	inc := &runtimespec.DoctorIncident{Actions: []runtimespec.DoctorAction{{
+		Kind: runtimespec.ActionDisable, File: "m1.jar",
+		Evidence: runtimespec.EvidenceFrame, Cause: "java.awt.HeadlessException",
+	}}}
+	e := &engine{panel: &fakePanel{}, logf: t.Logf}
+
+	e.revertGuesses(srv, modsDir, inc, "java.net.ConnectException")
+	if inc.Actions[0].Reverted {
+		t.Fatal("other signature must not revert the guess")
+	}
+	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "m1.jar")); err != nil {
+		t.Fatal("guessed jar must stay disabled")
+	}
+
+	e.revertGuesses(srv, modsDir, inc, "java.awt.HeadlessException")
+	if !inc.Actions[0].Reverted {
+		t.Fatal("matching signature must revert the guess")
+	}
+	if _, err := os.Stat(filepath.Join(modsDir, "m1.jar")); err != nil {
+		t.Fatal("reverted jar must return to mods")
+	}
+}
+
+func TestCrossSignatureCrashKeepsEarlierGuess(t *testing.T) {
+	srv := testServer(t)
+	modsDir := filepath.Join(srv.DataPath, "mods")
+	writeModJar(t, modsDir, "m2.jar", `{"id":"m2"}`)
+	writeModJar(t, modsDir+"_disabled", "m1.jar", `{"id":"m1"}`)
+
+	j := &runtimespec.DoctorState{Version: 1, Incident: &runtimespec.DoctorIncident{
+		OpenedAt: time.Now(), Passes: 1, Budget: 8,
+		Actions: []runtimespec.DoctorAction{{
+			Kind: runtimespec.ActionDisable, File: "m1.jar",
+			Evidence: runtimespec.EvidenceFrame, Cause: "java.awt.HeadlessException",
+			AppliedAt: time.Now(),
+		}},
+		Tried: []string{"disable:m1.jar"},
+	}}
+	if err := runtimespec.SaveDoctor(srv.DataPath, j); err != nil {
+		t.Fatal(err)
+	}
+
+	exit := crashExit(&agentv1.FatalError{Causes: []*agentv1.CrashCause{{
+		Type: "java.net.ConnectException",
+		Frames: []*agentv1.CrashFrame{{
+			ClassName:      "com.example.Phone",
+			MethodName:     "home",
+			SourceLocation: "union:/data/mods/m2.jar%23615!/",
+		}},
+	}}})
+	runtimespec.AppendExitHistory(srv.DataPath, exit)
+
+	panel := &fakePanel{}
+	e := &engine{panel: panel, logf: t.Logf}
+	e.checkServer(context.Background(), srv)
+
+	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "m1.jar")); err != nil {
+		t.Fatal("earlier guess must survive a different crash")
+	}
+	if _, err := os.Stat(filepath.Join(modsDir+"_disabled", "m2.jar")); err != nil {
+		t.Fatal("new crash frame mod must be disabled")
+	}
+	if panel.restarts != 1 {
+		t.Fatalf("expected one verify restart, got %d", panel.restarts)
+	}
+	got := runtimespec.LoadDoctor(srv.DataPath)
+	var m2 *runtimespec.DoctorAction
+	for i := range got.Incident.Actions {
+		if got.Incident.Actions[i].File == "m2.jar" {
+			m2 = &got.Incident.Actions[i]
+		}
+	}
+	if m2 == nil || m2.Cause != "java.net.ConnectException" {
+		t.Fatalf("new guess must record its crash signature, got %+v", m2)
+	}
+}
+
+func TestMissingDepFromMessage(t *testing.T) {
+	cases := map[string]string{
+		"Mod connectorextras_architectury_bridge requires connectormod 1.0.0-beta.18 or above\nCurrently, connectormod is not installed": "connectormod",
+		"Mod extra_compat requires temporalapi 1.6.5 or above, and below 1.7.0\nCurrently, temporalapi is not installed":                  "temporalapi",
+		"Attempted to load class net/minecraft/client/Minecraft": "",
+	}
+	for msg, want := range cases {
+		if got := missingDepFromMessage(msg); got != want {
+			t.Fatalf("want %q from %q, got %q", want, msg, got)
+		}
 	}
 }
 

@@ -71,7 +71,7 @@ func (e *engine) plan(srv *serverInfo, exit *agentv1.Exited, modsDir string, for
 		return nil
 	}
 
-	e.revertGuesses(srv, modsDir, inc)
+	e.revertGuesses(srv, modsDir, inc, fatalSignature(fatal))
 
 	if actions := e.planRegistry(srv, exit, fatal, metas, modsDir, force, excludes, inc); len(actions) > 0 {
 		return actions
@@ -92,6 +92,12 @@ func (e *engine) planVerdicts(srv *serverInfo, failed []*agentv1.FailedMod, meta
 		switch classifyFailedMod(fm) {
 		case failMissingDep:
 			missing := missingDepsOf(fm.GetModId(), solved)
+			// Loader text names deps nested jar metadata hides
+			if len(missing) == 0 {
+				if dep := missingDepFromMessage(fm.GetErrorMessage()); dep != "" {
+					missing = append(missing, minecraft.DepIssue{Kind: minecraft.DepMissing, ModID: fm.GetModId(), DepID: dep})
+				}
+			}
 			for _, dep := range missing {
 				resolved := false
 				// A dep we disabled earlier comes back before anything else
@@ -180,6 +186,18 @@ func accompliceAction(fm *agentv1.FailedMod, blamedFile string, metas []minecraf
 	return runtimespec.DoctorAction{}, false
 }
 
+// Forge phrases missing deps as requires id version or above
+var requiresPattern = regexp.MustCompile(`requires ([a-z][a-z0-9_.-]*)`)
+
+// Pulls the missing dep id out of loader text
+func missingDepFromMessage(msg string) string {
+	m := requiresPattern.FindStringSubmatch(msg)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
 func missingDepsOf(modID string, issues []minecraft.DepIssue) []minecraft.DepIssue {
 	var out []minecraft.DepIssue
 	for _, issue := range issues {
@@ -212,11 +230,20 @@ func planFrameGuess(fatal *agentv1.FatalError, metas []minecraft.ModJarMeta, for
 	if isStallFatal(fatal) {
 		reason = "the boot stalled inside this mod's code"
 	}
-	a := runtimespec.DoctorAction{Kind: runtimespec.ActionDisable, File: file, Reason: reason, Evidence: runtimespec.EvidenceFrame}
+	a := runtimespec.DoctorAction{Kind: runtimespec.ActionDisable, File: file, Reason: reason, Evidence: runtimespec.EvidenceFrame, Cause: fatalSignature(fatal)}
 	if inc.HasTried(a.Key()) {
 		return nil
 	}
 	return []runtimespec.DoctorAction{a}
+}
+
+// Deepest cause type names one crash's identity
+func fatalSignature(fatal *agentv1.FatalError) string {
+	causes := fatal.GetCauses()
+	if len(causes) == 0 {
+		return ""
+	}
+	return causes[len(causes)-1].GetType()
 }
 
 // Stall dump fatals carry BootStall thread causes

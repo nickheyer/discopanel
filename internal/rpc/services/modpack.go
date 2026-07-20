@@ -48,19 +48,18 @@ func NewModpackService(store *storage.Store, cfg *config.Config, uploadManager *
 	}
 }
 
-// Creates indexer by name, fetching fuego key if needed
+// Creates indexer by name with its declared credential
 func (s *ModpackService) getIndexer(ctx context.Context, name string) (indexers.ModpackIndexer, error) {
 	apiKey := ""
-	if name == "fuego" {
+	if info, ok := indexers.LookupIndexer(name); ok && info.CredentialProperty != "" {
 		globalSettings, _, err := s.store.GetGlobalSettings(ctx)
 		if err != nil || globalSettings == nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get global settings"))
 		}
-		if globalSettings.CfApiKey != nil {
-			apiKey = *globalSettings.CfApiKey
-		}
+		apiKey = propertyValueByKey(globalSettings, info.CredentialProperty)
 		if apiKey == "" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("CurseForge API key not configured"))
+			return nil, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("indexer %q requires the %s setting", name, info.CredentialProperty))
 		}
 	}
 	idx, err := indexers.NewIndexer(name, apiKey, s.config.Server.UserAgent)

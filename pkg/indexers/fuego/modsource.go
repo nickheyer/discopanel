@@ -14,33 +14,55 @@ var _ indexers.ModSourcer = (*FuegoIndexer)(nil)
 const maxSourceHits = 3
 
 // Finds candidate jars for a mod id
-// Exact slug lookup first, fuzzy search covers slug drift
+// Exact slug first, search hits next, their required deps last
 func (f *FuegoIndexer) SourceMod(ctx context.Context, q indexers.ModQuery) ([]indexers.ModCandidate, error) {
 	lt := queryLoaderType(q.Loaders)
 	if lt == ModLoaderAny {
 		return nil, fmt.Errorf("no curseforge loader filter matches %v", q.Loaders)
 	}
 
-	var mods []Modpack
 	if mod, err := f.client.GetModBySlug(ctx, q.ModID, ModsClassID); err == nil {
-		mods = append(mods, *mod)
-	}
-	if len(mods) == 0 {
-		resp, err := f.client.SearchProjects(ctx, q.ModID, ModsClassID, q.McVersion, lt, 0, maxSourceHits)
-		if err != nil {
-			return nil, err
+		if c, _, err := f.modCandidate(ctx, mod, q.McVersion, lt); err == nil && c != nil {
+			return []indexers.ModCandidate{*c}, nil
 		}
-		mods = resp.Data
+	}
+
+	resp, err := f.client.SearchProjects(ctx, q.ModID, ModsClassID, q.McVersion, lt, 0, maxSourceHits)
+	if err != nil {
+		return nil, err
 	}
 
 	var out []indexers.ModCandidate
-	for i := range mods {
-		c, err := f.modCandidate(ctx, &mods[i], q.McVersion, lt)
-		if err != nil || c == nil {
-			continue
+	var depIDs []int
+	seen := map[int]bool{}
+	for i := range resp.Data {
+		hit := &resp.Data[i]
+		seen[hit.ID] = true
+		c, deps, err := f.modCandidate(ctx, hit, q.McVersion, lt)
+		if err == nil && c != nil {
+			out = append(out, *c)
 		}
-		out = append(out, *c)
+		for _, id := range deps {
+			if !seen[id] && len(depIDs) < maxSourceHits {
+				seen[id] = true
+				depIDs = append(depIDs, id)
+			}
+		}
 	}
+
+	// Addons of the wanted mod point at it as a dependency
+	if len(depIDs) > 0 {
+		if mods, err := f.client.GetModsByIDs(ctx, depIDs); err == nil {
+			for i := range mods {
+				c, _, err := f.modCandidate(ctx, &mods[i], q.McVersion, lt)
+				if err != nil || c == nil {
+					continue
+				}
+				out = append(out, *c)
+			}
+		}
+	}
+
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no curseforge mod offers %q for MC %s", q.ModID, q.McVersion)
 	}
@@ -58,13 +80,14 @@ func queryLoaderType(loaders []string) ModLoaderType {
 }
 
 // Builds one candidate from a mod's newest matching file
-func (f *FuegoIndexer) modCandidate(ctx context.Context, mod *Modpack, mcVersion string, lt ModLoaderType) (*indexers.ModCandidate, error) {
+// Required dep ids return even when the candidate fails
+func (f *FuegoIndexer) modCandidate(ctx context.Context, mod *Modpack, mcVersion string, lt ModLoaderType) (*indexers.ModCandidate, []int, error) {
 	files, err := f.client.GetModpackFiles(ctx, mod.ID, mcVersion, lt)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(files) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	newest := &files[0]
 	for i := range files {
@@ -72,9 +95,15 @@ func (f *FuegoIndexer) modCandidate(ctx context.Context, mod *Modpack, mcVersion
 			newest = &files[i]
 		}
 	}
+	var deps []int
+	for _, d := range newest.Dependencies {
+		if d.RelationType == RelationRequiredDependency && d.ModID > 0 {
+			deps = append(deps, d.ModID)
+		}
+	}
 	dlURL, err := f.client.ResolveDownloadURL(ctx, mod.ID, newest)
 	if err != nil {
-		return nil, err
+		return nil, deps, err
 	}
 	algo, sum := newest.BestHash()
 	return &indexers.ModCandidate{
@@ -83,5 +112,5 @@ func (f *FuegoIndexer) modCandidate(ctx context.Context, mod *Modpack, mcVersion
 		URL:      dlURL,
 		HashAlgo: algo,
 		HashSum:  sum,
-	}, nil
+	}, deps, nil
 }

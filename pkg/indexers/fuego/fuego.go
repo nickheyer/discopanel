@@ -149,6 +149,9 @@ type Dependency struct {
 	RelationType int `json:"relationType"`
 }
 
+// CurseForge relation type marking a required dependency
+const RelationRequiredDependency = 3
+
 type FileIndex struct {
 	GameVersion       string `json:"gameVersion"`
 	FileID            int    `json:"fileId"`

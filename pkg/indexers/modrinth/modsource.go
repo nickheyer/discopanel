@@ -16,9 +16,9 @@ var _ indexers.ModSourcer = (*ModrinthIndexer)(nil)
 const maxSourceHits = 3
 
 // Finds candidate jars for a mod id
-// Direct project lookup first, fuzzy search covers slug drift
+// Direct lookup first, search hits next, their required deps last
 func (m *ModrinthIndexer) SourceMod(ctx context.Context, q indexers.ModQuery) ([]indexers.ModCandidate, error) {
-	direct, err := m.projectCandidate(ctx, q.ModID, q)
+	direct, _, err := m.projectCandidate(ctx, q.ModID, q)
 	if err != nil && !isNotFound(err) {
 		return nil, err
 	}
@@ -30,18 +30,37 @@ func (m *ModrinthIndexer) SourceMod(ctx context.Context, q indexers.ModQuery) ([
 	if err != nil {
 		return nil, err
 	}
+
 	var out []indexers.ModCandidate
+	var depIDs []string
+	seen := map[string]bool{}
 	for _, hit := range resp.Hits {
 		if hit.ProjectID == "" {
 			continue
 		}
-		c, err := m.projectCandidate(ctx, hit.ProjectID, q)
+		seen[hit.ProjectID] = true
+		c, deps, err := m.projectCandidate(ctx, hit.ProjectID, q)
+		if err == nil && c != nil {
+			c.Origin = "modrinth project " + hit.Slug
+			out = append(out, *c)
+		}
+		for _, id := range deps {
+			if !seen[id] && len(depIDs) < maxSourceHits {
+				seen[id] = true
+				depIDs = append(depIDs, id)
+			}
+		}
+	}
+
+	// Addons of the wanted mod point at it as a dependency
+	for _, id := range depIDs {
+		c, _, err := m.projectCandidate(ctx, id, q)
 		if err != nil || c == nil {
 			continue
 		}
-		c.Origin = "modrinth project " + hit.Slug
 		out = append(out, *c)
 	}
+
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no %s project offers %q for MC %s", strings.Join(q.Loaders, "/"), q.ModID, q.McVersion)
 	}
@@ -49,10 +68,11 @@ func (m *ModrinthIndexer) SourceMod(ctx context.Context, q indexers.ModQuery) ([
 }
 
 // Builds one candidate from a project's best matching version
-func (m *ModrinthIndexer) projectCandidate(ctx context.Context, projectID string, q indexers.ModQuery) (*indexers.ModCandidate, error) {
+// Required dep ids return even when the candidate fails
+func (m *ModrinthIndexer) projectCandidate(ctx context.Context, projectID string, q indexers.ModQuery) (*indexers.ModCandidate, []string, error) {
 	versions, err := m.client.GetProjectVersionsFiltered(ctx, projectID, q.Loaders, []string{q.McVersion})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var pick *Version
 	for i := range versions {
@@ -65,11 +85,17 @@ func (m *ModrinthIndexer) projectCandidate(ctx context.Context, projectID string
 		pick = &versions[0]
 	}
 	if pick == nil {
-		return nil, nil
+		return nil, nil, nil
+	}
+	var deps []string
+	for _, d := range pick.Dependencies {
+		if d.DependencyType == "required" && d.ProjectID != nil && *d.ProjectID != "" {
+			deps = append(deps, *d.ProjectID)
+		}
 	}
 	file := primaryVersionFile(pick)
 	if file == nil {
-		return nil, nil
+		return nil, deps, nil
 	}
 	algo, sum := "", ""
 	switch {
@@ -84,7 +110,7 @@ func (m *ModrinthIndexer) projectCandidate(ctx context.Context, projectID string
 		URL:      file.URL,
 		HashAlgo: algo,
 		HashSum:  sum,
-	}, nil
+	}, deps, nil
 }
 
 // Primary file wins, first file is the fallback

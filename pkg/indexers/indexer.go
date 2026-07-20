@@ -116,6 +116,14 @@ func NewIndexer(name string, apiKey string, userAgent string) (ModpackIndexer, e
 	return entry.factory(apiKey, userAgent), nil
 }
 
+// Looks up one registered indexer's declared facts
+func LookupIndexer(name string) (IndexerInfo, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	entry, ok := registry[name]
+	return entry.info, ok
+}
+
 // Lists every registered indexer sorted by name
 func Indexers() []IndexerInfo {
 	registryMu.RLock()

@@ -96,8 +96,15 @@ final class FatalErrors {
                 .setUncaught(uncaught);
 
         Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
-        Throwable cause = error;
-        while (cause != null && seen.add(cause) && fatal.getCausesCount() < MAX_CAUSES) {
+        List<Throwable> ordered = new ArrayList<Throwable>();
+        addCauseChain(error, seen, ordered);
+        // Suppressed failures often hide the real crash
+        for (int i = 0; i < ordered.size() && ordered.size() < MAX_CAUSES; i++) {
+            for (Throwable sup : ordered.get(i).getSuppressed()) {
+                addCauseChain(sup, seen, ordered);
+            }
+        }
+        for (Throwable cause : ordered) {
             AgentProto.CrashCause.Builder cb = AgentProto.CrashCause.newBuilder()
                     .setType(cause.getClass().getName());
             if (cause.getMessage() != null) {
@@ -108,13 +115,21 @@ final class FatalErrors {
                 cb.addFrames(encodeFrame(frames[i], index));
             }
             fatal.addCauses(cb);
-            cause = cause.getCause();
         }
 
         for (AgentProto.FailedMod mod : failedMods(error, index)) {
             fatal.addFailedMods(mod);
         }
         return fatal.build();
+    }
+
+    /** Walks one cause chain into the ordered list, cycle safe */
+    private static void addCauseChain(Throwable error, Set<Throwable> seen, List<Throwable> ordered) {
+        Throwable cause = error;
+        while (cause != null && seen.add(cause) && ordered.size() < MAX_CAUSES) {
+            ordered.add(cause);
+            cause = cause.getCause();
+        }
     }
 
     /** Reports stuck threads as a boot stall fatal error */

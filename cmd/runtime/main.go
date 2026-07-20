@@ -231,7 +231,7 @@ func (s *supervisor) setFatalError(fatal *agentv1.FatalError) {
 		s.mu.Unlock()
 		return
 	}
-	if s.fatal == nil || len(fatal.GetFailedMods()) > 0 || len(s.fatal.GetFailedMods()) == 0 {
+	if s.fatal == nil || fatalRank(fatal) >= fatalRank(s.fatal) {
 		s.fatal = fatal
 	}
 	ready := s.ready
@@ -245,6 +245,18 @@ func (s *supervisor) fatalError() *agentv1.FatalError {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.fatal
+}
+
+// Ranks competing fatals, failed mods beat main thread beats rest
+// Background thread deaths never displace the boot-killing error
+func fatalRank(f *agentv1.FatalError) int {
+	switch {
+	case len(f.GetFailedMods()) > 0:
+		return 3
+	case f.GetThread() == "main":
+		return 2
+	}
+	return 1
 }
 
 // Prints one line so capture misses stay diagnosable
@@ -558,6 +570,7 @@ func (s *supervisor) reportExit(exitCode int) {
 		OomKilled:          oomKilled,
 		BootFailed:         crashed && !wasReady,
 		WasReady:           wasReady,
+		StopRequested:      requested,
 		CrashReportPath:    reportPath,
 		CrashReportExcerpt: excerpt,
 		ExitedAtUnixMs:     time.Now().UnixMilli(),

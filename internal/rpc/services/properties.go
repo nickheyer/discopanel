@@ -323,6 +323,26 @@ func propertyCategoryIndex(slug string) int {
 	return -1
 }
 
+// Reads one settings field by its property key
+func propertyValueByKey(config any, key string) string {
+	configValue := reflect.ValueOf(config).Elem()
+	configType := configValue.Type()
+	for i := 0; i < configType.NumField(); i++ {
+		if strings.Split(configType.Field(i).Tag.Get("json"), ",")[0] != key {
+			continue
+		}
+		fieldValue := configValue.Field(i)
+		if fieldValue.Kind() == reflect.Pointer {
+			if fieldValue.IsNil() {
+				return ""
+			}
+			fieldValue = fieldValue.Elem()
+		}
+		return fmt.Sprintf("%v", fieldValue.Interface())
+	}
+	return ""
+}
+
 func buildPropertyCategories(config any) ([]*v1.PropertyCategory, error) {
 	categories := make([]*v1.PropertyCategory, 0, len(propertyCategorySlugs))
 	for _, c := range propertyCategorySlugs {

@@ -275,6 +275,10 @@ func parseJarEntries(meta *ModJarMeta, r *zip.Reader, depth int, topLevel bool) 
 				}
 			}
 		}
+		// Service jars nest mods without jarjar metadata
+		if strings.HasPrefix(f.Name, "META-INF/jarjar/") && strings.HasSuffix(strings.ToLower(f.Name), ".jar") {
+			nested = append(nested, f.Name)
+		}
 	}
 
 	// Legacy metadata only speaks when no toml is present
@@ -287,7 +291,13 @@ func parseJarEntries(meta *ModJarMeta, r *zip.Reader, depth int, topLevel bool) 
 	if depth <= 0 {
 		return
 	}
+	// Metadata lists and directory scans name the same jars
+	seen := map[string]bool{}
 	for _, path := range nested {
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
 		parseNestedJar(meta, r, path, depth-1)
 	}
 }

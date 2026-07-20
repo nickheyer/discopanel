@@ -20,7 +20,8 @@
 		Terminal,
 		Cpu,
 		Server,
-		Package
+		Package,
+		ExternalLink
 	} from '@lucide/svelte';
 	import ModuleDialog from '$lib/components/server/ModuleDialog.svelte';
 	import ModuleLogsDialog from '$lib/components/server/ModuleLogsDialog.svelte';
@@ -36,6 +37,8 @@
 	let modules = $state<Module[]>([]);
 	let loading = $state(true);
 	let actionLoading = $state<string | null>(null);
+	let aliasValues = $state<Record<string, Record<string, string>>>({});
+	let aliasKey = '';
 
 	let editDialogOpen = $state(false);
 	let logsDialogOpen = $state(false);
@@ -90,11 +93,34 @@
 				silent ? silentCallOptions : undefined
 			);
 			modules = response.modules;
+			// Refetches aliases when ids or statuses change
+			const key = modules.map((m) => `${m.id}:${m.status}`).join(',');
+			if (key !== aliasKey) {
+				aliasKey = key;
+				modules.forEach((m) => loadAliases(m));
+			}
 		} catch {
 			if (!silent) toast.error('Failed to load modules');
 		} finally {
 			if (!silent) loading = false;
 		}
+	}
+
+	async function loadAliases(module: Module) {
+		try {
+			const response = await rpcClient.module.getResolvedAliases(
+				{ serverId: module.serverId || undefined, moduleId: module.id },
+				silentCallOptions
+			);
+			aliasValues = { ...aliasValues, [module.id]: response.aliases };
+		} catch {
+			/* Ignore alias lookup errors */
+		}
+	}
+
+	function resolve(input: string, moduleId: string): string {
+		const vals = aliasValues[moduleId] ?? {};
+		return input.replace(/\{\{[^}]+\}\}/g, (match) => vals[match] ?? match);
 	}
 
 	async function handleStartModule(module: Module) {
@@ -287,6 +313,27 @@
 							<span class="tabular">CPU: {module.cpuPercent.toFixed(1)}%</span>
 						{/if}
 					</div>
+
+					{#if module.accessUrls?.length}
+						<div class="mt-3 space-y-1">
+							{#each module.accessUrls as url, i (i)}
+								{@const resolved = resolve(url, module.id)}
+								<div class="flex items-center gap-2 rounded-md bg-muted/40 px-2 py-1.5">
+									<ExternalLink class="size-3 shrink-0 text-muted-foreground" />
+									<!-- eslint-disable svelte/no-navigation-without-resolve -- external URL -->
+									<a
+										href={resolved}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="truncate font-mono text-xs text-primary hover:underline"
+									>
+										{resolved}
+									</a>
+									<!-- eslint-enable svelte/no-navigation-without-resolve -->
+								</div>
+							{/each}
+						</div>
+					{/if}
 
 					<div class="mt-3 flex items-center justify-between gap-2 border-t pt-2.5">
 						<div class="flex min-w-0 items-center gap-1">

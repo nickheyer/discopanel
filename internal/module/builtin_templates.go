@@ -20,23 +20,32 @@ const (
 // Default web port for the seeded doctor instance
 func doctorPorts(cfg *config.Config) []*v1.ModulePort {
 	port := int32(8190)
-	if cfg != nil && cfg.Module.PortRangeMax > 0 {
-		port = int32(cfg.Module.PortRangeMax)
+	proxied := false
+	if cfg != nil {
+		if cfg.Module.PortRangeMax > 0 {
+			port = int32(cfg.Module.PortRangeMax)
+		}
+		// Direct host bind keeps doctor reachable without proxy
+		proxied = cfg.Proxy.Enabled
 	}
 	return []*v1.ModulePort{
-		{Name: "Web", ContainerPort: 8190, HostPort: port, Protocol: "http", ProxyEnabled: false},
+		{Name: "Web", ContainerPort: 8190, HostPort: port, Protocol: "http", ProxyEnabled: proxied},
 	}
 }
 
 func doctorEnv() string {
 	return `{
-		"DISCOPANEL_URL": "http://host.docker.internal:{{config.server.port}}",
 		"DISCOPANEL_DATA_DIR": "{{config.storage.data_dir}}",
 		"POLL_INTERVAL": "15s",
 		"DOCTOR_MODE": "repair",
 		"DOCTOR_INSTALL_DEPS": "on",
 		"PORT": "8190"
 	}`
+}
+
+// Default access urls for the seeded doctor instance
+func doctorAccessURLs() []string {
+	return []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"}
 }
 
 func doctorVolumes() string {
@@ -151,7 +160,6 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			},
 			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
 			DefaultEnv: `{
-				"DISCOPANEL_URL": "http://host.docker.internal:{{config.server.port}}",
 				"POLL_INTERVAL": "10s",
 				"PORT": "{{module.ports.Web.container_port}}"
 			}`,
@@ -168,13 +176,13 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			Type:           v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN,
 			DockerImage:    "nickheyer/discopanel-doctor:latest",
 			Category:       "automation",
-			SupportsProxy:  false,
+			SupportsProxy:  true,
 			RequiresServer: false,
 			Icon:           "stethoscope",
 			Ports: []*v1.ModulePort{
-				{Name: "Web", ContainerPort: 8190, HostPort: 0, Protocol: "http", ProxyEnabled: false},
+				{Name: "Web", ContainerPort: 8190, HostPort: 0, Protocol: "http", ProxyEnabled: true},
 			},
-			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
+			DefaultAccessUrls: doctorAccessURLs(),
 			DefaultEnv:        doctorEnv(),
 			DefaultVolumes:    doctorVolumes(),
 			HealthCheckPath:   "/health",

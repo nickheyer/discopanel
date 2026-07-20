@@ -220,6 +220,11 @@ func (c *Client) buildModuleEnv(module *v1.Module, server *v1.Server, aliasCtx *
 		fmt.Sprintf("DISCOPANEL_MODULE_NAME=%s", module.Name),
 	)
 
+	// Deploy-agnostic panel URL, later env overrides still win
+	if aliasCtx != nil && aliasCtx.Config != nil {
+		env = append(env, fmt.Sprintf("DISCOPANEL_URL=%s", c.ModulePanelURL(aliasCtx.Config.Server.Port)))
+	}
+
 	// Add module API token if available
 	if module.TokenPlaintext != "" {
 		env = append(env, fmt.Sprintf("DISCOPANEL_API_TOKEN=%s", module.TokenPlaintext))

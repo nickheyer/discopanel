@@ -89,6 +89,10 @@ type Client struct {
 	// Background image refresh bookkeeping for ensureImage
 	refreshMu      sync.Mutex
 	imageRefreshed map[string]time.Time
+
+	// Cached module-facing panel URL, stable per process
+	panelURLOnce sync.Once
+	panelURL     string
 }
 
 // Registers panel-side health source for container status
@@ -847,6 +851,19 @@ func (c *Client) PanelAgentURL(ctx context.Context, panelPort string) (string, e
 		}
 	}
 	return "", fmt.Errorf("no gateway on network %s", c.config.NetworkName)
+}
+
+// Resolves and caches the URL module containers reach the panel at
+func (c *Client) ModulePanelURL(panelPort string) string {
+	c.panelURLOnce.Do(func() {
+		url, err := c.PanelAgentURL(context.Background(), panelPort)
+		if err != nil {
+			c.log.Warn("Falling back to host gateway for module panel URL: %v", err)
+			url = "http://host.docker.internal:" + panelPort
+		}
+		c.panelURL = url
+	})
+	return c.panelURL
 }
 
 // Creates the Docker network and attaches self when containerized

@@ -118,6 +118,7 @@ func (m *Manager) seedDoctorModule() {
 			Ports:                 doctorPorts(m.config),
 			EnvOverrides:          doctorEnv(),
 			VolumeOverrides:       doctorVolumes(),
+			AccessUrls:            doctorAccessURLs(),
 			Uid:                   doctorUID,
 			Gid:                   doctorGID,
 		}
@@ -126,12 +127,6 @@ func (m *Manager) seedDoctorModule() {
 			return
 		}
 		m.logger.Info("Seeded the global doctor module")
-	} else if doctor.Uid == "" {
-		// Root era instances rebuild non root via hash drift
-		doctor.Uid, doctor.Gid = doctorUID, doctorGID
-		if err := m.store.UpdateModule(ctx, doctor); err != nil {
-			m.logger.Warn("Doctor seed: failed to backfill uid: %v", err)
-		}
 	}
 
 	// AutoStart off means the user disabled it, respect that
@@ -407,11 +402,13 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 
 	// Update proxy route if enabled (handles primary and additional ports)
 	if m.proxyManager != nil {
-		server, err := m.store.GetServer(ctx, module.ServerId)
-		if err == nil && server.ProxyHostname != "" {
-			if err := m.proxyManager.AddModuleRoute(module, server); err != nil {
-				m.logger.Error("Failed to add proxy route for module %s: %v", module.Name, err)
-			}
+		// Global modules route without a server hostname
+		var server *v1.Server
+		if module.ServerId != "" {
+			server, _ = m.store.GetServer(ctx, module.ServerId)
+		}
+		if err := m.proxyManager.AddModuleRoute(module, server); err != nil {
+			m.logger.Error("Failed to add proxy route for module %s: %v", module.Name, err)
 		}
 	}
 

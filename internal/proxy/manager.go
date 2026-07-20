@@ -459,7 +459,7 @@ func (m *Manager) AddModuleRoute(module *v1.Module, server *v1.Server) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !m.config.Enabled || server.ProxyHostname == "" {
+	if !m.config.Enabled || !hasProxyPorts(module) {
 		return nil
 	}
 
@@ -473,6 +473,12 @@ func (m *Manager) AddModuleRoute(module *v1.Module, server *v1.Server) error {
 		return fmt.Errorf("failed to get module container IP: %w", err)
 	}
 
+	// Hostless modules route every hostname on their port
+	hostname := ""
+	if server != nil {
+		hostname = server.ProxyHostname
+	}
+
 	// Add routes for all proxy-enabled ports
 	for _, port := range module.Ports {
 		if port == nil || !port.ProxyEnabled || port.HostPort == 0 {
@@ -484,14 +490,29 @@ func (m *Manager) AddModuleRoute(module *v1.Module, server *v1.Server) error {
 			protocol = "tcp"
 		}
 
+		// Handshake routing cannot match without a hostname
+		if hostname == "" && protocol == "minecraft" {
+			continue
+		}
+
 		routeID := fmt.Sprintf("%s-port-%d", module.Id, port.HostPort)
-		if err := m.addPortRouteUnlocked(routeID, server.ProxyHostname, containerIP,
+		if err := m.addPortRouteUnlocked(routeID, hostname, containerIP,
 			int(port.HostPort), m.moduleContainerPort(module, port), protocol, module.Name, port.Name); err != nil {
 			m.logger.Error("Failed to add port route for %s: %v", port.Name, err)
 		}
 	}
 
 	return nil
+}
+
+// True when any port wants proxy routing
+func hasProxyPorts(module *v1.Module) bool {
+	for _, port := range module.Ports {
+		if port != nil && port.ProxyEnabled && port.HostPort != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Resolves a container port from the template when unset
@@ -575,10 +596,14 @@ func (m *Manager) RemoveModuleRoute(moduleID string) error {
 		return err
 	}
 
-	// Get the server to find the hostname
-	server, err := m.store.GetServer(context.Background(), module.ServerId)
-	if err != nil {
-		return err
+	// Hostless modules registered under the catch all key
+	hostname := ""
+	if module.ServerId != "" {
+		server, err := m.store.GetServer(context.Background(), module.ServerId)
+		if err != nil {
+			return err
+		}
+		hostname = server.ProxyHostname
 	}
 
 	// Remove all port routes
@@ -586,7 +611,7 @@ func (m *Manager) RemoveModuleRoute(moduleID string) error {
 		if port == nil || port.HostPort == 0 {
 			continue
 		}
-		m.removePortRouteUnlocked(int(port.HostPort), server.ProxyHostname, module.Name, port.Name)
+		m.removePortRouteUnlocked(int(port.HostPort), hostname, module.Name, port.Name)
 	}
 
 	return nil
@@ -599,10 +624,8 @@ func (m *Manager) removePortRouteUnlocked(hostPort int, hostname, moduleName, po
 		return // No proxy for this port
 	}
 
-	if hostname != "" {
-		proxy.RemoveRoute(hostname)
-		m.logger.Info("Removed module route: %s:%d (module: %s, port: %s)", hostname, hostPort, moduleName, portName)
-	}
+	proxy.RemoveRoute(hostname)
+	m.logger.Info("Removed module route: %s:%d (module: %s, port: %s)", hostname, hostPort, moduleName, portName)
 
 	// Check if this proxy has any remaining routes
 	routes := proxy.GetRoutes()
@@ -618,7 +641,7 @@ func (m *Manager) removePortRouteUnlocked(hostPort int, hostname, moduleName, po
 
 // Updates proxy routes for a module's ports
 func (m *Manager) UpdateModuleRoute(module *v1.Module, server *v1.Server) error {
-	if !m.config.Enabled || server.ProxyHostname == "" {
+	if !m.config.Enabled || !hasProxyPorts(module) {
 		return nil
 	}
 
@@ -632,6 +655,12 @@ func (m *Manager) UpdateModuleRoute(module *v1.Module, server *v1.Server) error 
 		return fmt.Errorf("failed to get module container IP: %w", err)
 	}
 
+	// Hostless modules route every hostname on their port
+	hostname := ""
+	if server != nil {
+		hostname = server.ProxyHostname
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -641,16 +670,22 @@ func (m *Manager) UpdateModuleRoute(module *v1.Module, server *v1.Server) error 
 			continue
 		}
 
+		protocol := port.Protocol
+		if protocol == "" {
+			protocol = "tcp"
+		}
+
+		// Handshake routing cannot match without a hostname
+		if hostname == "" && protocol == "minecraft" {
+			continue
+		}
+
 		containerPort := m.moduleContainerPort(module, port)
 		proxy, exists := m.proxies[int(port.HostPort)]
 		if !exists {
 			// Need to add it
-			protocol := port.Protocol
-			if protocol == "" {
-				protocol = "tcp"
-			}
 			routeID := fmt.Sprintf("%s-port-%d", module.Id, port.HostPort)
-			if err := m.addPortRouteUnlocked(routeID, server.ProxyHostname, containerIP,
+			if err := m.addPortRouteUnlocked(routeID, hostname, containerIP,
 				int(port.HostPort), containerPort, protocol, module.Name, port.Name); err != nil {
 				m.logger.Error("Failed to add port route for %s: %v", port.Name, err)
 			}
@@ -661,9 +696,9 @@ func (m *Manager) UpdateModuleRoute(module *v1.Module, server *v1.Server) error 
 			m.logger.Error("No container port declared for %s", port.Name)
 			continue
 		}
-		proxy.UpdateRoute(server.ProxyHostname, containerIP, containerPort)
+		proxy.UpdateRoute(hostname, containerIP, containerPort)
 		m.logger.Info("Updated module route: %s:%d -> %s:%d (module: %s, port: %s)",
-			server.ProxyHostname, port.HostPort, containerIP, containerPort, module.Name, port.Name)
+			hostname, port.HostPort, containerIP, containerPort, module.Name, port.Name)
 	}
 
 	return nil

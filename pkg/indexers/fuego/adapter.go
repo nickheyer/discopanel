@@ -2,13 +2,13 @@ package fuego
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/nickheyer/discopanel/pkg/indexers"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/utils"
@@ -21,8 +21,9 @@ func init() {
 			return NewIndexer(apiKey, userAgent)
 		},
 		indexers.WithCredentialProperty("cfApiKey"),
-		indexers.WithPackSource("curseforge"),
+		indexers.WithPackSource(optionsv1.PackSource_PACK_SOURCE_CURSEFORGE),
 		indexers.WithForceIncludeProperty("cfForceIncludeMods"),
+		indexers.WithRequestRate(4, 8),
 	)
 }
 
@@ -46,24 +47,79 @@ func (f *FuegoIndexer) GetIndexerName() string {
 	return "fuego"
 }
 
+// Loader facet names per CurseForge loader code
+var loaderNames = map[ModLoaderType]string{
+	ModLoaderForge:    "forge",
+	ModLoaderFabric:   "fabric",
+	ModLoaderQuilt:    "quilt",
+	ModLoaderNeoForge: "neoforge",
+}
+
 // Maps a loader name onto the CurseForge loader type
 func loaderType(modLoader string) ModLoaderType {
-	switch strings.ToLower(modLoader) {
-	case "forge":
-		return ModLoaderForge
-	case "fabric":
-		return ModLoaderFabric
-	case "neoforge":
-		return ModLoaderNeoForge
-	case "quilt":
-		return ModLoaderQuilt
+	name := strings.ToLower(modLoader)
+	for code, facet := range loaderNames {
+		if facet == name {
+			return code
+		}
+	}
+	return ModLoaderAny
+}
+
+// Maps CurseForge release codes onto the proto enum
+func releaseType(code int) v1.ReleaseType {
+	switch code {
+	case 2:
+		return v1.ReleaseType_RELEASE_TYPE_BETA
+	case 3:
+		return v1.ReleaseType_RELEASE_TYPE_ALPHA
 	default:
-		return ModLoaderAny
+		return v1.ReleaseType_RELEASE_TYPE_RELEASE
+	}
+}
+
+// Normalizes one Fuego modpack into a proto row
+func toModpack(fm *Modpack) *v1.IndexedModpack {
+	categories := make([]string, len(fm.Categories))
+	for i, cat := range fm.Categories {
+		categories[i] = cat.Name
+	}
+
+	var gameVersions, modLoaders []string
+	for _, file := range fm.LatestFiles {
+		gameVersions = append(gameVersions, file.GameVersions...)
+	}
+	for _, fileIndex := range fm.LatestFilesIndexes {
+		if fileIndex.ModLoader != nil {
+			if facet, ok := loaderNames[ModLoaderType(*fileIndex.ModLoader)]; ok {
+				modLoaders = append(modLoaders, facet)
+			}
+		}
+	}
+
+	return &v1.IndexedModpack{
+		Id:            fmt.Sprintf("fuego-%d", fm.ID),
+		IndexerId:     strconv.Itoa(fm.ID),
+		Indexer:       "fuego",
+		Name:          fm.Name,
+		Slug:          fm.Slug,
+		Summary:       fm.Summary,
+		Description:   fm.Summary, // Fuego search carries no separate description
+		LogoUrl:       fm.Logo.ThumbnailURL,
+		WebsiteUrl:    fm.Links.WebsiteURL,
+		DownloadCount: int32(fm.DownloadCount),
+		Categories:    categories,
+		GameVersions:  utils.DeduplicateStrings(gameVersions),
+		ModLoaders:    utils.DeduplicateStrings(modLoaders),
+		LatestFileId:  strconv.Itoa(fm.MainFileID),
+		DateCreated:   timestamppb.New(fm.DateCreated),
+		DateModified:  timestamppb.New(fm.DateModified),
+		DateReleased:  timestamppb.New(fm.DateReleased),
 	}
 }
 
 // Search for modpacks
-func (f *FuegoIndexer) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*indexers.SearchResult, error) {
+func (f *FuegoIndexer) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*v1.SearchModpacksResponse, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -74,84 +130,18 @@ func (f *FuegoIndexer) SearchModpacks(ctx context.Context, query string, gameVer
 		return nil, err
 	}
 
-	// Normalizes Fuego modpacks into proto rows
 	modpacks := make([]*v1.IndexedModpack, len(resp.Data))
-	for i, fm := range resp.Data {
-		// Extract categories
-		categories := make([]string, len(fm.Categories))
-		for j, cat := range fm.Categories {
-			categories[j] = cat.Name
-		}
-
-		// Extract game versions and mod loaders from files
-		gameVersions := []string{}
-		modLoaders := []string{}
-
-		for _, file := range fm.LatestFiles {
-			gameVersions = append(gameVersions, file.GameVersions...)
-		}
-
-		for _, fileIndex := range fm.LatestFilesIndexes {
-			if fileIndex.ModLoader != nil {
-				switch *fileIndex.ModLoader {
-				case 1:
-					modLoaders = append(modLoaders, "forge")
-				case 4:
-					modLoaders = append(modLoaders, "fabric")
-				case 5:
-					modLoaders = append(modLoaders, "quilt")
-				case 6:
-					modLoaders = append(modLoaders, "neoforge")
-				}
-			}
-		}
-
-		// Deduplicate
-		gameVersions = utils.DeduplicateStrings(gameVersions)
-		modLoaders = utils.DeduplicateStrings(modLoaders)
-
-		logoURL := ""
-		if fm.Logo.ThumbnailURL != "" {
-			logoURL = fm.Logo.ThumbnailURL
-		}
-
-		// Encodes slice columns as JSON strings
-		categoriesJSON, _ := json.Marshal(categories)
-		gameVersionsJSON, _ := json.Marshal(gameVersions)
-		modLoadersJSON, _ := json.Marshal(modLoaders)
-
-		modpacks[i] = &v1.IndexedModpack{
-			Id:            fmt.Sprintf("fuego-%d", fm.ID),
-			IndexerId:     strconv.Itoa(fm.ID),
-			Indexer:       "fuego",
-			Name:          fm.Name,
-			Slug:          fm.Slug,
-			Summary:       fm.Summary,
-			Description:   fm.Summary, // Fuego doesn't provide separate description in search
-			LogoUrl:       logoURL,
-			WebsiteUrl:    fm.Links.WebsiteURL,
-			DownloadCount: int32(fm.DownloadCount),
-			Categories:    string(categoriesJSON),
-			GameVersions:  string(gameVersionsJSON),
-			ModLoaders:    string(modLoadersJSON),
-			LatestFileId:  strconv.Itoa(fm.MainFileID),
-			DateCreated:   timestamppb.New(fm.DateCreated),
-			DateModified:  timestamppb.New(fm.DateModified),
-			DateReleased:  timestamppb.New(fm.DateReleased),
-		}
+	for i := range resp.Data {
+		modpacks[i] = toModpack(&resp.Data[i])
 	}
-
-	return &indexers.SearchResult{
-		Modpacks:   modpacks,
-		TotalCount: resp.Pagination.TotalCount,
-		PageSize:   limit,
-		Offset:     offset,
+	return &v1.SearchModpacksResponse{
+		Modpacks: modpacks,
+		Total:    int32(resp.Pagination.TotalCount),
 	}, nil
 }
 
 // Get a specific modpack
 func (f *FuegoIndexer) GetModpack(ctx context.Context, modpackID string) (*v1.IndexedModpack, error) {
-	// Convert string ID to int
 	id, err := strconv.Atoi(modpackID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid modpack ID: %s", modpackID)
@@ -161,74 +151,11 @@ func (f *FuegoIndexer) GetModpack(ctx context.Context, modpackID string) (*v1.In
 	if err != nil {
 		return nil, err
 	}
-
-	// Extract categories
-	categories := make([]string, len(fm.Categories))
-	for i, cat := range fm.Categories {
-		categories[i] = cat.Name
-	}
-
-	// Extract game versions and mod loaders from files
-	gameVersions := []string{}
-	modLoaders := []string{}
-
-	for _, file := range fm.LatestFiles {
-		gameVersions = append(gameVersions, file.GameVersions...)
-	}
-
-	for _, fileIndex := range fm.LatestFilesIndexes {
-		if fileIndex.ModLoader != nil {
-			switch *fileIndex.ModLoader {
-			case 1:
-				modLoaders = append(modLoaders, "forge")
-			case 4:
-				modLoaders = append(modLoaders, "fabric")
-			case 5:
-				modLoaders = append(modLoaders, "quilt")
-			case 6:
-				modLoaders = append(modLoaders, "neoforge")
-			}
-		}
-	}
-
-	// Deduplicate
-	gameVersions = utils.DeduplicateStrings(gameVersions)
-	modLoaders = utils.DeduplicateStrings(modLoaders)
-
-	logoURL := ""
-	if fm.Logo.ThumbnailURL != "" {
-		logoURL = fm.Logo.ThumbnailURL
-	}
-
-	// Encodes slice columns as JSON strings
-	categoriesJSON, _ := json.Marshal(categories)
-	gameVersionsJSON, _ := json.Marshal(gameVersions)
-	modLoadersJSON, _ := json.Marshal(modLoaders)
-
-	return &v1.IndexedModpack{
-		Id:            fmt.Sprintf("fuego-%d", fm.ID),
-		IndexerId:     strconv.Itoa(fm.ID),
-		Indexer:       "fuego",
-		Name:          fm.Name,
-		Slug:          fm.Slug,
-		Summary:       fm.Summary,
-		Description:   fm.Summary, // Fuego doesn't provide separate description in search
-		LogoUrl:       logoURL,
-		WebsiteUrl:    fm.Links.WebsiteURL,
-		DownloadCount: int32(fm.DownloadCount),
-		Categories:    string(categoriesJSON),
-		GameVersions:  string(gameVersionsJSON),
-		ModLoaders:    string(modLoadersJSON),
-		LatestFileId:  strconv.Itoa(fm.MainFileID),
-		DateCreated:   timestamppb.New(fm.DateCreated),
-		DateModified:  timestamppb.New(fm.DateModified),
-		DateReleased:  timestamppb.New(fm.DateReleased),
-	}, nil
+	return toModpack(fm), nil
 }
 
 // Get files for a modpack
 func (f *FuegoIndexer) GetModpackFiles(ctx context.Context, modpackID string, gameVersion string, modLoader string) ([]*v1.IndexedModpackFile, error) {
-	// Convert string ID to int
 	id, err := strconv.Atoi(modpackID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid modpack ID: %s", modpackID)
@@ -242,15 +169,6 @@ func (f *FuegoIndexer) GetModpackFiles(ctx context.Context, modpackID string, ga
 	// Normalizes Fuego files into proto rows
 	result := make([]*v1.IndexedModpackFile, len(files))
 	for i, file := range files {
-		// Determine release type
-		releaseType := "release"
-		switch file.ReleaseType {
-		case 2:
-			releaseType = "beta"
-		case 3:
-			releaseType = "alpha"
-		}
-
 		// Extract primary mod loader w/ best effort score matching
 		fileLoader := ""
 		if loader, ok := minecraft.DetectModpackLoader(file.GameVersions...); ok {
@@ -262,8 +180,6 @@ func (f *FuegoIndexer) GetModpackFiles(ctx context.Context, modpackID string, ga
 			serverPackID = strconv.Itoa(*file.ServerPackFileID)
 		}
 
-		gameVersionsJSON, _ := json.Marshal(file.GameVersions)
-
 		result[i] = &v1.IndexedModpackFile{
 			Id:               strconv.Itoa(file.ID),
 			ModpackId:        fmt.Sprintf("fuego-%s", modpackID),
@@ -271,9 +187,9 @@ func (f *FuegoIndexer) GetModpackFiles(ctx context.Context, modpackID string, ga
 			FileName:         file.FileName,
 			FileDate:         timestamppb.New(file.FileDate),
 			FileLength:       file.FileLength,
-			ReleaseType:      releaseType,
+			ReleaseType:      releaseType(file.ReleaseType),
 			DownloadUrl:      file.DownloadURL,
-			GameVersions:     string(gameVersionsJSON),
+			GameVersions:     file.GameVersions,
 			ModLoader:        fileLoader,
 			ServerPackFileId: &serverPackID,
 		}

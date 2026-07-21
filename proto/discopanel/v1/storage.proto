@@ -56,133 +56,368 @@ enum ServerStatus {
   }];
 }
 
-// Minecraft server software type
+// Minecraft server software type.
+// Loader annotations carry every per-loader fact, the
+// registry in pkg/minecraft reads them from descriptors.
 enum ModLoader {
   option (discopanel.options.v1.enum_type) = {label: "Mod Loader"};
   MOD_LOADER_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
-  MOD_LOADER_VANILLA = 1 [(discopanel.options.v1.value) = {
-    label: "Vanilla"
-    desc: "Vanilla Minecraft server without mod support"
-  }];
-  MOD_LOADER_FORGE = 2 [(discopanel.options.v1.value) = {
-    label: "Minecraft Forge"
-    desc: "The original and most widely used modding platform"
-  }];
-  MOD_LOADER_FABRIC = 3 [(discopanel.options.v1.value) = {
-    label: "Fabric"
-    desc: "Lightweight and fast modding platform"
-  }];
-  MOD_LOADER_QUILT = 4 [(discopanel.options.v1.value) = {
-    label: "Quilt"
-    desc: "Fork of Fabric with additional features"
-  }];
-  MOD_LOADER_PAPER = 5 [(discopanel.options.v1.value) = {
-    label: "Paper"
-    desc: "Performance-optimized fork of Spigot"
-  }];
-  MOD_LOADER_SPIGOT = 6 [(discopanel.options.v1.value) = {
-    label: "Spigot"
-    desc: "High-performance fork of Bukkit"
-  }];
-  MOD_LOADER_BUKKIT = 7 [(discopanel.options.v1.value) = {
-    label: "Bukkit"
-    desc: "The original plugin API for Minecraft servers"
-  }];
-  MOD_LOADER_PURPUR = 8 [(discopanel.options.v1.value) = {
-    label: "Purpur"
-    desc: "Fork of Paper with additional gameplay features"
-  }];
-  MOD_LOADER_SPONGE_VANILLA = 9 [(discopanel.options.v1.value) = {
-    name: "spongevanilla"
-    label: "SpongeVanilla"
-    desc: "Plugin platform with advanced API"
-  }];
-  MOD_LOADER_SPONGE_FORGE = 10 [(discopanel.options.v1.value) = {
-    name: "spongeforge"
-    label: "SpongeForge"
-    desc: "Sponge plugin platform on top of Forge"
-  }];
-  MOD_LOADER_MOHIST = 11 [(discopanel.options.v1.value) = {
-    label: "Mohist"
-    desc: "Hybrid server combining Forge and Paper"
-  }];
-  MOD_LOADER_CATSERVER = 12 [(discopanel.options.v1.value) = {
-    label: "Catserver"
-    desc: "Hybrid server implementation"
-  }];
-  MOD_LOADER_ARCLIGHT = 13 [(discopanel.options.v1.value) = {
-    label: "Arclight"
-    desc: "Modern hybrid implementation for Forge, NeoForge, and Fabric"
-  }];
-  MOD_LOADER_AUTO_CURSEFORGE = 14 [(discopanel.options.v1.value) = {
-    label: "Auto CurseForge"
-    desc: "Automatic CurseForge modpack installer"
-  }];
-  MOD_LOADER_MODRINTH = 15 [(discopanel.options.v1.value) = {
-    label: "Modrinth"
-    desc: "Modern open-source modpack platform"
-  }];
-  MOD_LOADER_NEOFORGE = 16 [(discopanel.options.v1.value) = {
-    label: "NeoForge"
-    desc: "Modern fork of Forge with improved features"
-  }];
-  MOD_LOADER_FOLIA = 17 [(discopanel.options.v1.value) = {
-    label: "Folia"
-    desc: "Regionized multithreaded fork of Paper"
-  }];
-  MOD_LOADER_CUSTOM = 18 [(discopanel.options.v1.value) = {
-    label: "Custom"
-    desc: "Custom server implementation"
-  }];
-  MOD_LOADER_PUFFERFISH = 19 [(discopanel.options.v1.value) = {
-    label: "Pufferfish"
-    desc: "Performance-focused fork of Paper"
-  }];
-  MOD_LOADER_MAGMA = 20 [(discopanel.options.v1.value) = {
-    label: "Magma"
-    desc: "Hybrid server supporting both Forge mods and Bukkit plugins"
-  }];
-  MOD_LOADER_MAGMA_MAINTAINED = 21 [(discopanel.options.v1.value) = {
-    label: "Magma Maintained"
-    desc: "Maintained fork of Magma hybrid server"
-  }];
-  MOD_LOADER_KETTING = 22 [(discopanel.options.v1.value) = {
-    label: "Ketting"
-    desc: "Modern hybrid server for Forge and Bukkit"
-  }];
-  MOD_LOADER_YOUER = 23 [(discopanel.options.v1.value) = {
-    label: "Youer"
-    desc: "NeoForge hybrid server by the Mohist team"
-  }];
-  MOD_LOADER_BANNER = 24 [(discopanel.options.v1.value) = {
-    label: "Banner"
-    desc: "Fabric hybrid server by the Mohist team"
-  }];
-  MOD_LOADER_LIMBO = 25 [(discopanel.options.v1.value) = {
-    label: "Limbo"
-    desc: "Lightweight server for holding players"
-  }];
-  MOD_LOADER_NANO_LIMBO = 26 [(discopanel.options.v1.value) = {
-    name: "nanolimbo"
-    label: "NanoLimbo"
-    desc: "Ultra-lightweight server for holding players"
-  }];
-  MOD_LOADER_CRUCIBLE = 27 [(discopanel.options.v1.value) = {
-    label: "Crucible"
-    desc: "Legacy hybrid server implementation"
-  }];
-  MOD_LOADER_GLOWSTONE = 28 [(discopanel.options.v1.value) = {
-    label: "Glowstone"
-    desc: "Open-source Minecraft server implementation"
-  }];
-  MOD_LOADER_FTBA = 29 [(discopanel.options.v1.value) = {
-    label: "Feed The Beast"
-    desc: "FTB modpack platform, upload the server files yourself"
-  }];
-  MOD_LOADER_CURSEFORGE = 30 [(discopanel.options.v1.value) = {
-    label: "CurseForge"
-    desc: "Popular modpack platform"
-  }];
+  MOD_LOADER_VANILLA = 1 [
+    (discopanel.options.v1.value) = {
+      label: "Vanilla"
+      desc: "Vanilla Minecraft server without mod support"
+    },
+    (discopanel.options.v1.loader) = {category: MOD_LOADER_CATEGORY_VANILLA}
+  ];
+  MOD_LOADER_FORGE = 2 [
+    (discopanel.options.v1.value) = {
+      label: "Minecraft Forge"
+      desc: "The original and most widely used modding platform"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_FORGE
+      mods_directory: "mods"
+      dialects: ["forge"]
+      builtins: [
+        "forge",
+        "fml",
+        "minecraft",
+        "java",
+        "mixin"
+      ]
+      maven_ranges: true
+      facets: ["forge"]
+      markers: ["libraries/net/minecraftforge"]
+    }
+  ];
+  MOD_LOADER_FABRIC = 3 [
+    (discopanel.options.v1.value) = {
+      label: "Fabric"
+      desc: "Lightweight and fast modding platform"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_FABRIC
+      mods_directory: "mods"
+      dialects: ["fabric"]
+      builtins: [
+        "fabricloader",
+        "minecraft",
+        "java",
+        "mixin"
+      ]
+      facets: ["fabric"]
+      markers: [
+        "libraries/net/fabricmc/fabric-loader",
+        "fabric-server-launch.jar"
+      ]
+    }
+  ];
+  MOD_LOADER_QUILT = 4 [
+    (discopanel.options.v1.value) = {
+      label: "Quilt"
+      desc: "Fork of Fabric with additional features"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_FABRIC
+      mods_directory: "mods"
+      dialects: [
+        "quilt",
+        "fabric"
+      ]
+      builtins: [
+        "quilt_loader",
+        "quilt_base"
+      ]
+      facets: [
+        "quilt",
+        "fabric"
+      ]
+      markers: [
+        "libraries/org/quiltmc/quilt-loader",
+        "quilt-server-launch.jar"
+      ]
+    }
+  ];
+  MOD_LOADER_PAPER = 5 [
+    (discopanel.options.v1.value) = {
+      label: "Paper"
+      desc: "Performance-optimized fork of Spigot"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_PAPER
+      mods_directory: "plugins"
+    }
+  ];
+  MOD_LOADER_SPIGOT = 6 [
+    (discopanel.options.v1.value) = {
+      label: "Spigot"
+      desc: "High-performance fork of Bukkit"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_BUKKIT
+      mods_directory: "plugins"
+    }
+  ];
+  MOD_LOADER_BUKKIT = 7 [
+    (discopanel.options.v1.value) = {
+      label: "Bukkit"
+      desc: "The original plugin API for Minecraft servers"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_BUKKIT
+      mods_directory: "plugins"
+    }
+  ];
+  MOD_LOADER_PURPUR = 8 [
+    (discopanel.options.v1.value) = {
+      label: "Purpur"
+      desc: "Fork of Paper with additional gameplay features"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_PAPER
+      mods_directory: "plugins"
+    }
+  ];
+  MOD_LOADER_SPONGE_VANILLA = 9 [
+    (discopanel.options.v1.value) = {
+      name: "spongevanilla"
+      label: "SpongeVanilla"
+      desc: "Plugin platform with advanced API"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_SPONGE
+      mods_directory: "mods"
+    }
+  ];
+  MOD_LOADER_SPONGE_FORGE = 10 [
+    (discopanel.options.v1.value) = {
+      name: "spongeforge"
+      label: "SpongeForge"
+      desc: "Sponge plugin platform on top of Forge"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_SPONGE
+      mods_directory: "mods"
+      dialects: ["forge"]
+    }
+  ];
+  MOD_LOADER_MOHIST = 11 [
+    (discopanel.options.v1.value) = {
+      label: "Mohist"
+      desc: "Hybrid server combining Forge and Paper"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_HYBRID
+      mods_directory: "mods"
+      dialects: ["forge"]
+    }
+  ];
+  MOD_LOADER_CATSERVER = 12 [
+    (discopanel.options.v1.value) = {
+      label: "Catserver"
+      desc: "Hybrid server implementation"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_HYBRID
+      mods_directory: "mods"
+      dialects: ["forge"]
+    }
+  ];
+  MOD_LOADER_ARCLIGHT = 13 [
+    (discopanel.options.v1.value) = {
+      label: "Arclight"
+      desc: "Modern hybrid implementation for Forge, NeoForge, and Fabric"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_HYBRID
+      mods_directory: "mods"
+    }
+  ];
+  MOD_LOADER_AUTO_CURSEFORGE = 14 [
+    (discopanel.options.v1.value) = {
+      label: "Auto CurseForge"
+      desc: "Automatic CurseForge modpack installer"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_MODPACK
+      mods_directory: "mods"
+      pack_source: PACK_SOURCE_CURSEFORGE
+    }
+  ];
+  MOD_LOADER_MODRINTH = 15 [
+    (discopanel.options.v1.value) = {
+      label: "Modrinth"
+      desc: "Modern open-source modpack platform"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_MODPACK
+      mods_directory: "mods"
+      pack_source: PACK_SOURCE_MODRINTH
+    }
+  ];
+  MOD_LOADER_NEOFORGE = 16 [
+    (discopanel.options.v1.value) = {
+      label: "NeoForge"
+      desc: "Modern fork of Forge with improved features"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_FORGE
+      mods_directory: "mods"
+      dialects: [
+        "neoforge",
+        "forge"
+      ]
+      builtins: ["neoforge"]
+      maven_ranges: true
+      facets: ["neoforge"]
+      markers: ["libraries/net/neoforged"]
+    }
+  ];
+  MOD_LOADER_FOLIA = 17 [
+    (discopanel.options.v1.value) = {
+      label: "Folia"
+      desc: "Regionized multithreaded fork of Paper"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_PAPER
+      mods_directory: "plugins"
+    }
+  ];
+  MOD_LOADER_CUSTOM = 18 [
+    (discopanel.options.v1.value) = {
+      label: "Custom"
+      desc: "Custom server implementation"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_OTHER
+      mods_directory: "mods"
+    }
+  ];
+  MOD_LOADER_PUFFERFISH = 19 [
+    (discopanel.options.v1.value) = {
+      label: "Pufferfish"
+      desc: "Performance-focused fork of Paper"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_PAPER
+      mods_directory: "plugins"
+    }
+  ];
+  MOD_LOADER_MAGMA = 20 [
+    (discopanel.options.v1.value) = {
+      label: "Magma"
+      desc: "Hybrid server supporting both Forge mods and Bukkit plugins"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_HYBRID
+      mods_directory: "mods"
+      dialects: ["forge"]
+    }
+  ];
+  MOD_LOADER_MAGMA_MAINTAINED = 21 [
+    (discopanel.options.v1.value) = {
+      label: "Magma Maintained"
+      desc: "Maintained fork of Magma hybrid server"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_HYBRID
+      mods_directory: "mods"
+      dialects: ["forge"]
+    }
+  ];
+  MOD_LOADER_KETTING = 22 [
+    (discopanel.options.v1.value) = {
+      label: "Ketting"
+      desc: "Modern hybrid server for Forge and Bukkit"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_HYBRID
+      mods_directory: "mods"
+      dialects: ["forge"]
+    }
+  ];
+  MOD_LOADER_YOUER = 23 [
+    (discopanel.options.v1.value) = {
+      label: "Youer"
+      desc: "NeoForge hybrid server by the Mohist team"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_HYBRID
+      mods_directory: "mods"
+      dialects: [
+        "neoforge",
+        "forge"
+      ]
+    }
+  ];
+  MOD_LOADER_BANNER = 24 [
+    (discopanel.options.v1.value) = {
+      label: "Banner"
+      desc: "Fabric hybrid server by the Mohist team"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_HYBRID
+      mods_directory: "mods"
+      dialects: ["fabric"]
+    }
+  ];
+  MOD_LOADER_LIMBO = 25 [
+    (discopanel.options.v1.value) = {
+      label: "Limbo"
+      desc: "Lightweight server for holding players"
+    },
+    (discopanel.options.v1.loader) = {category: MOD_LOADER_CATEGORY_LIGHTWEIGHT}
+  ];
+  MOD_LOADER_NANO_LIMBO = 26 [
+    (discopanel.options.v1.value) = {
+      name: "nanolimbo"
+      label: "NanoLimbo"
+      desc: "Ultra-lightweight server for holding players"
+    },
+    (discopanel.options.v1.loader) = {category: MOD_LOADER_CATEGORY_LIGHTWEIGHT}
+  ];
+  MOD_LOADER_CRUCIBLE = 27 [
+    (discopanel.options.v1.value) = {
+      label: "Crucible"
+      desc: "Legacy hybrid server implementation"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_OTHER
+      mods_directory: "mods"
+      dialects: ["forge"]
+    }
+  ];
+  MOD_LOADER_GLOWSTONE = 28 [
+    (discopanel.options.v1.value) = {
+      label: "Glowstone"
+      desc: "Open-source Minecraft server implementation"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_OTHER
+      mods_directory: "plugins"
+    }
+  ];
+  MOD_LOADER_FTBA = 29 [
+    (discopanel.options.v1.value) = {
+      label: "Feed The Beast"
+      desc: "FTB modpack platform, upload the server files yourself"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_MODPACK
+      mods_directory: "mods"
+    }
+  ];
+  MOD_LOADER_CURSEFORGE = 30 [
+    (discopanel.options.v1.value) = {
+      label: "CurseForge"
+      desc: "Popular modpack platform"
+    },
+    (discopanel.options.v1.loader) = {
+      category: MOD_LOADER_CATEGORY_MODPACK
+      mods_directory: "mods"
+      pack_source: PACK_SOURCE_CURSEFORGE
+    }
+  ];
 }
 
 // Task type enumeration
@@ -361,12 +596,122 @@ enum ModuleEventAction {
   }];
 }
 
+// What caused a task execution
+enum TaskTrigger {
+  option (discopanel.options.v1.enum_type) = {label: "Task Trigger"};
+  TASK_TRIGGER_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
+  TASK_TRIGGER_SCHEDULED = 1 [(discopanel.options.v1.value) = {label: "Scheduled"}];
+  TASK_TRIGGER_MANUAL = 2 [(discopanel.options.v1.value) = {label: "Manual"}];
+  TASK_TRIGGER_EVENT = 3 [(discopanel.options.v1.value) = {label: "Event"}];
+}
+
+// Identity backend an account or role assignment came from
+enum AuthProvider {
+  option (discopanel.options.v1.enum_type) = {label: "Auth Provider"};
+  AUTH_PROVIDER_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
+  AUTH_PROVIDER_LOCAL = 1 [(discopanel.options.v1.value) = {label: "Local"}];
+  AUTH_PROVIDER_OIDC = 2 [(discopanel.options.v1.value) = {label: "OIDC"}];
+  // Synthetic admin identity while auth is disabled
+  AUTH_PROVIDER_NONE = 3 [(discopanel.options.v1.value) = {label: "None"}];
+  AUTH_PROVIDER_ANONYMOUS = 4 [(discopanel.options.v1.value) = {label: "Anonymous"}];
+  // Module container identity minted per api token
+  AUTH_PROVIDER_MODULE = 5 [(discopanel.options.v1.value) = {label: "Module"}];
+}
+
+// How a role assignment came to exist
+enum RoleSource {
+  option (discopanel.options.v1.enum_type) = {label: "Role Source"};
+  ROLE_SOURCE_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
+  ROLE_SOURCE_LOCAL = 1 [(discopanel.options.v1.value) = {label: "Local"}];
+  ROLE_SOURCE_OIDC = 2 [(discopanel.options.v1.value) = {label: "OIDC"}];
+  ROLE_SOURCE_INVITE = 3 [(discopanel.options.v1.value) = {label: "Invite"}];
+}
+
+// Who wrote the server icon
+enum IconSource {
+  option (discopanel.options.v1.enum_type) = {label: "Icon Source"};
+  ICON_SOURCE_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
+  ICON_SOURCE_UPLOAD = 1 [(discopanel.options.v1.value) = {label: "Upload"}];
+  ICON_SOURCE_MODPACK = 2 [(discopanel.options.v1.value) = {label: "Modpack"}];
+}
+
+// Stability channel of a modpack file
+enum ReleaseType {
+  option (discopanel.options.v1.enum_type) = {label: "Release Type"};
+  RELEASE_TYPE_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
+  RELEASE_TYPE_RELEASE = 1 [(discopanel.options.v1.value) = {label: "Release"}];
+  RELEASE_TYPE_BETA = 2 [(discopanel.options.v1.value) = {label: "Beta"}];
+  RELEASE_TYPE_ALPHA = 3 [(discopanel.options.v1.value) = {label: "Alpha"}];
+}
+
+// Transport protocol for a mapped port
+enum ModuleProtocol {
+  option (discopanel.options.v1.enum_type) = {label: "Protocol"};
+  MODULE_PROTOCOL_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
+  // Raw TCP forwarding without protocol parsing
+  MODULE_PROTOCOL_TCP = 1 [(discopanel.options.v1.value) = {label: "TCP"}];
+  MODULE_PROTOCOL_UDP = 2 [(discopanel.options.v1.value) = {label: "UDP"}];
+  // Minecraft handshake parsing for hostname routing
+  MODULE_PROTOCOL_MINECRAFT = 3 [(discopanel.options.v1.value) = {label: "Minecraft"}];
+  // HTTP reverse proxy with Host header routing
+  MODULE_PROTOCOL_HTTP = 4 [(discopanel.options.v1.value) = {label: "HTTP"}];
+}
+
+// Every action the activity ledger records
+enum ServerActionKind {
+  option (discopanel.options.v1.enum_type) = {label: "Server Action"};
+  SERVER_ACTION_KIND_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
+  SERVER_ACTION_KIND_SERVER_CREATE = 1 [(discopanel.options.v1.value) = {label: "Server Created"}];
+  SERVER_ACTION_KIND_SERVER_START = 2 [(discopanel.options.v1.value) = {label: "Server Started"}];
+  SERVER_ACTION_KIND_SERVER_STOP = 3 [(discopanel.options.v1.value) = {label: "Server Stopped"}];
+  SERVER_ACTION_KIND_SERVER_PAUSE = 4 [(discopanel.options.v1.value) = {label: "Server Paused"}];
+  SERVER_ACTION_KIND_SERVER_WAKE = 5 [(discopanel.options.v1.value) = {label: "Server Woken"}];
+  SERVER_ACTION_KIND_SERVER_CRASH = 6 [(discopanel.options.v1.value) = {label: "Server Crashed"}];
+  SERVER_ACTION_KIND_SERVER_OOM = 7 [(discopanel.options.v1.value) = {label: "Out Of Memory"}];
+  SERVER_ACTION_KIND_SERVER_BOOT_FAILED = 8 [(discopanel.options.v1.value) = {label: "Boot Failed"}];
+  SERVER_ACTION_KIND_CONTAINER_RECREATE = 9 [(discopanel.options.v1.value) = {label: "Container Recreated"}];
+  SERVER_ACTION_KIND_CONTAINER_REMOVE = 10 [(discopanel.options.v1.value) = {label: "Container Removed"}];
+  SERVER_ACTION_KIND_RUNTIME_UPDATE = 11 [(discopanel.options.v1.value) = {label: "Runtime Updated"}];
+  SERVER_ACTION_KIND_COMMAND_RUN = 12 [(discopanel.options.v1.value) = {label: "Command Run"}];
+  SERVER_ACTION_KIND_TASK_CREATE = 13 [(discopanel.options.v1.value) = {label: "Task Created"}];
+  SERVER_ACTION_KIND_TASK_UPDATE = 14 [(discopanel.options.v1.value) = {label: "Task Updated"}];
+  SERVER_ACTION_KIND_TASK_DELETE = 15 [(discopanel.options.v1.value) = {label: "Task Deleted"}];
+  SERVER_ACTION_KIND_TASK_TOGGLE = 16 [(discopanel.options.v1.value) = {label: "Task Toggled"}];
+  SERVER_ACTION_KIND_TASK_COMMAND = 17 [(discopanel.options.v1.value) = {label: "Task Command"}];
+  SERVER_ACTION_KIND_TASK_SCRIPT = 18 [(discopanel.options.v1.value) = {label: "Task Script"}];
+  SERVER_ACTION_KIND_BACKUP_CREATE = 19 [(discopanel.options.v1.value) = {label: "Backup Created"}];
+  SERVER_ACTION_KIND_BACKUP_RESTORE = 20 [(discopanel.options.v1.value) = {label: "Backup Restored"}];
+  SERVER_ACTION_KIND_MOD_INSTALL = 21 [(discopanel.options.v1.value) = {label: "Mod Installed"}];
+  SERVER_ACTION_KIND_MOD_ENABLE = 22 [(discopanel.options.v1.value) = {label: "Mod Enabled"}];
+  SERVER_ACTION_KIND_MOD_DISABLE = 23 [(discopanel.options.v1.value) = {label: "Mod Disabled"}];
+  SERVER_ACTION_KIND_MOD_DELETE = 24 [(discopanel.options.v1.value) = {label: "Mod Deleted"}];
+  SERVER_ACTION_KIND_MODULE_CREATE = 25 [(discopanel.options.v1.value) = {label: "Module Created"}];
+  SERVER_ACTION_KIND_MODULE_START = 26 [(discopanel.options.v1.value) = {label: "Module Started"}];
+  SERVER_ACTION_KIND_MODULE_STOP = 27 [(discopanel.options.v1.value) = {label: "Module Stopped"}];
+  SERVER_ACTION_KIND_MODULE_RESTART = 28 [(discopanel.options.v1.value) = {label: "Module Restarted"}];
+  SERVER_ACTION_KIND_MODULE_DELETE = 29 [(discopanel.options.v1.value) = {label: "Module Deleted"}];
+  SERVER_ACTION_KIND_FILE_UPLOAD = 30 [(discopanel.options.v1.value) = {label: "File Uploaded"}];
+  SERVER_ACTION_KIND_FILE_EDIT = 31 [(discopanel.options.v1.value) = {label: "File Edited"}];
+  SERVER_ACTION_KIND_FILE_DELETE = 32 [(discopanel.options.v1.value) = {label: "File Deleted"}];
+  SERVER_ACTION_KIND_FILE_MOVE = 33 [(discopanel.options.v1.value) = {label: "File Moved"}];
+  SERVER_ACTION_KIND_FILE_RENAME = 34 [(discopanel.options.v1.value) = {label: "File Renamed"}];
+  SERVER_ACTION_KIND_FILE_MKDIR = 35 [(discopanel.options.v1.value) = {label: "Folder Created"}];
+  SERVER_ACTION_KIND_FILE_ARCHIVE = 36 [(discopanel.options.v1.value) = {label: "Archive Created"}];
+  SERVER_ACTION_KIND_FILE_EXTRACT = 37 [(discopanel.options.v1.value) = {label: "Archive Extracted"}];
+  SERVER_ACTION_KIND_ICON_UPLOAD = 38 [(discopanel.options.v1.value) = {label: "Icon Uploaded"}];
+  SERVER_ACTION_KIND_MODPACK_SELECT = 39 [(discopanel.options.v1.value) = {label: "Modpack Selected"}];
+  SERVER_ACTION_KIND_PROPERTIES_UPDATE = 40 [(discopanel.options.v1.value) = {label: "Properties Updated"}];
+  SERVER_ACTION_KIND_ROUTING_UPDATE = 41 [(discopanel.options.v1.value) = {label: "Routing Updated"}];
+  SERVER_ACTION_KIND_PROVISION_INSTALL = 42 [(discopanel.options.v1.value) = {label: "Provisioned"}];
+  SERVER_ACTION_KIND_PROVISION_MC_VERSION = 43 [(discopanel.options.v1.value) = {label: "Version Pinned"}];
+}
+
 // Extra port mapping for container
 message AdditionalPort {
   string name = 1; // User-friendly name for the port (e.g., "BlueMap Web")
   int32 container_port = 2; // Port inside the container
   int32 host_port = 3; // Port on the host machine
-  string protocol = 4; // One of "tcp" or "udp", defaults to "tcp"
+  ModuleProtocol protocol = 4; // Defaults to TCP when unspecified
 }
 
 // Volume mount configuration for container
@@ -404,8 +749,8 @@ message DockerOverrides {
 
 // One RBAC permission entry
 message Permission {
-  string resource = 1;
-  string action = 2;
+  discopanel.options.v1.ResourceType resource = 1;
+  discopanel.options.v1.ActionType action = 2;
   string object_id = 3;
 }
 
@@ -417,8 +762,8 @@ message ModulePort {
   int32 container_port = 2;
   // Port number on the host. 0 means auto-allocate.
   int32 host_port = 3;
-  // Protocol: "tcp" or "udp". Defaults to "tcp".
-  string protocol = 4;
+  // Defaults to TCP when unspecified.
+  ModuleProtocol protocol = 4;
   // Whether to route traffic through the DiscoPanel proxy.
   bool proxy_enabled = 5;
 }
@@ -505,7 +850,7 @@ message User {
         where: "username = ? AND auth_provider = ?"
         params: [
           "username string",
-          "provider string"
+          "provider AuthProvider"
         ]
       },
       {
@@ -519,7 +864,7 @@ message User {
   string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
   string username = 2 [(protogorm.v1.db) = {tag: "not null;uniqueIndex:idx_user_provider"}];
   optional string email = 3 [(protogorm.v1.db) = {tag: "index"}];
-  string auth_provider = 4 [(protogorm.v1.db) = {tag: "not null;default:'local';uniqueIndex:idx_user_provider"}];
+  AuthProvider auth_provider = 4 [(protogorm.v1.db) = {tag: "not null;default:1;uniqueIndex:idx_user_provider"}];
   bool is_active = 5 [(protogorm.v1.db) = {tag: "not null;default:true"}];
   repeated string roles = 6 [(protogorm.v1.db) = {skip: true}];
   google.protobuf.Timestamp created_at = 7 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
@@ -623,8 +968,8 @@ message Server {
 
   // SHA-256 of the runtime agent's bearer token
   string agent_token_hash = 52 [(protogorm.v1.db) = {redact: true}];
-  // Who wrote server-icon.png, upload or modpack
-  string icon_source = 53;
+  // Who wrote server-icon.png
+  IconSource icon_source = 53;
 }
 
 // TCP proxy listener endpoint
@@ -722,7 +1067,7 @@ message UserRole {
   string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
   string user_id = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
   string role_name = 3 [(protogorm.v1.db) = {tag: "not null;index"}];
-  string source = 4 [(protogorm.v1.db) = {tag: "not null;default:'local'"}];
+  RoleSource source = 4 [(protogorm.v1.db) = {tag: "not null;default:1"}];
   google.protobuf.Timestamp created_at = 5 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
 }
 
@@ -954,8 +1299,11 @@ message ScheduledTask {
   google.protobuf.Timestamp last_run = 12;
   string timezone = 13 [(protogorm.v1.db) = {tag: "default:UTC"}];
 
-  // Task configuration (JSON string based on task type)
-  string config = 14 [(protogorm.v1.db) = {tag: "type:text"}];
+  // Typed config, the field matching task_type is set
+  CommandTaskConfig command_config = 14;
+  BackupTaskConfig backup_config = 24;
+  ScriptTaskConfig script_config = 25;
+  WebhookTaskConfig webhook_config = 26;
 
   // Execution settings
   int32 timeout = 15 [(protogorm.v1.db) = {tag: "default:300"}];
@@ -1011,7 +1359,7 @@ message TaskExecution {
   string output = 8 [(protogorm.v1.db) = {tag: "type:text"}];
   string error = 9 [(protogorm.v1.db) = {tag: "type:text"}];
   int32 retry_num = 10 [(protogorm.v1.db) = {tag: "default:0"}];
-  string trigger = 11 [(protogorm.v1.db) = {tag: "default:scheduled"}]; // "scheduled", "manual", "startup"
+  TaskTrigger trigger = 11 [(protogorm.v1.db) = {tag: "not null;default:1"}];
   ScheduledTask task = 12 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
   Server server = 13 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
 }
@@ -1026,7 +1374,7 @@ message ServerAction {
   google.protobuf.Timestamp timestamp = 2 [(protogorm.v1.db) = {tag: "not null"}];
   string source = 3 [(protogorm.v1.db) = {tag: "not null;default:''"}]; // Username or subsystem like crash doctor, scheduler, runtime
   string message = 4 [(protogorm.v1.db) = {tag: "not null"}];
-  string name = 5; // Dotted action key like server.start or mod.disable
+  ServerActionKind kind = 5;
   map<string, string> attrs = 6; // Structured details for drill-down
   string trace_id = 7; // Shared by every action of one operation
   string server_id = 8 [(protogorm.v1.db) = {tag: "not null;index"}];
@@ -1109,10 +1457,10 @@ message ModuleTemplate {
   string docker_image = 5 [(protogorm.v1.db) = {tag: "not null"}];
   // JSON Schema for dynamic UI form generation.
   string config_schema = 6 [(protogorm.v1.db) = {tag: "type:text"}];
-  // JSON object of default environment variables.
-  string default_env = 7 [(protogorm.v1.db) = {tag: "type:text"}];
-  // JSON array of default volume mounts.
-  string default_volumes = 8 [(protogorm.v1.db) = {tag: "type:text"}];
+  // Default environment variables.
+  map<string, string> default_env = 7;
+  // Default volume mounts.
+  repeated VolumeMount default_volumes = 8;
   // HTTP path for health checks (e.g., "/health").
   string health_check_path = 9;
   // Port to use for health checks. 0 uses the first configured port.
@@ -1210,10 +1558,10 @@ message Module {
   ModuleStatus status = 6 [(protogorm.v1.db) = {tag: "not null;default:1"}];
   // JSON module configuration.
   string config = 7 [(protogorm.v1.db) = {tag: "type:text"}];
-  // JSON object of environment variable overrides.
-  string env_overrides = 8 [(protogorm.v1.db) = {tag: "type:text"}];
-  // JSON array of volume mount overrides.
-  string volume_overrides = 9 [(protogorm.v1.db) = {tag: "type:text"}];
+  // Environment variable overrides.
+  map<string, string> env_overrides = 8;
+  // Volume mount overrides.
+  repeated VolumeMount volume_overrides = 9;
   // Memory limit in MB.
   int32 memory = 10 [(protogorm.v1.db) = {tag: "default:512"}];
   // CPU limit as a fraction (e.g., 0.5 = 50%).
@@ -1333,9 +1681,9 @@ message IndexedModpack {
   string logo_url = 8;
   string website_url = 9;
   int32 download_count = 10;
-  string categories = 11; // JSON array
-  string game_versions = 12; // JSON array
-  string mod_loaders = 13; // JSON array
+  repeated string categories = 11;
+  repeated string game_versions = 12;
+  repeated string mod_loaders = 13;
   string latest_file_id = 14;
   google.protobuf.Timestamp date_created = 15;
   google.protobuf.Timestamp date_modified = 16;
@@ -1370,9 +1718,9 @@ message IndexedModpackFile {
   string file_name = 4;
   google.protobuf.Timestamp file_date = 5;
   int64 file_length = 6;
-  string release_type = 7;
+  ReleaseType release_type = 7;
   string download_url = 8;
-  string game_versions = 9;
+  repeated string game_versions = 9;
   string mod_loader = 10;
   optional string server_pack_file_id = 11;
   IndexedModpack modpack = 12 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
@@ -1454,6 +1802,66 @@ message ServerProperties {
         kind: QUERY_KIND_GET
         where: "server_id = ?"
         params: ["serverID string"]
+      }
+    ]
+  };
+  option (discopanel.options.v1.prop_categories) = {
+    categories: [
+      {
+        slug: "jvm"
+        label: "JVM"
+      },
+      {
+        slug: "server"
+        label: "Server Settings"
+      },
+      {
+        slug: "game"
+        label: "Game Settings"
+      },
+      {
+        slug: "world"
+        label: "World Generation"
+      },
+      {
+        slug: "rcon"
+        label: "RCON"
+      },
+      {
+        slug: "resourcepack"
+        label: "Resource Pack"
+      },
+      {
+        slug: "management"
+        label: "Management Server"
+      },
+      {
+        slug: "ops"
+        label: "Ops/Admins"
+      },
+      {
+        slug: "whitelist"
+        label: "Whitelist"
+      },
+      {
+        slug: "autopause"
+        label: "Auto-Pause"
+      },
+      {
+        slug: "autostop"
+        label: "Auto-Stop"
+      },
+      {
+        slug: "curseforge"
+        label: "CurseForge"
+      },
+      {
+        slug: "modrinth"
+        label: "Modrinth"
+      },
+      {
+        slug: "proxy"
+        label: "Proxy"
       }
     ]
   };
@@ -1665,10 +2073,16 @@ message ServerProperties {
   optional string difficulty = 28 [(discopanel.options.v1.prop) = {
     prop: "difficulty"
     default_value: "easy"
-    desc: "Difficulty level (peaceful,easy,normal,hard)"
+    desc: "Difficulty level"
     input: "select"
     label: "Difficulty"
     category: "game"
+    options: [
+      "peaceful",
+      "easy",
+      "normal",
+      "hard"
+    ]
   }];
   optional int32 max_players = 29 [(discopanel.options.v1.prop) = {
     prop: "max-players"
@@ -1805,10 +2219,16 @@ message ServerProperties {
   optional string mode = 45 [(discopanel.options.v1.prop) = {
     prop: "gamemode"
     default_value: "survival"
-    desc: "Game mode (creative,survival,adventure,spectator)"
+    desc: "Game mode"
     input: "select"
     label: "Game Mode"
     category: "game"
+    options: [
+      "creative",
+      "survival",
+      "adventure",
+      "spectator"
+    ]
   }];
   optional bool pvp = 46 [(discopanel.options.v1.prop) = {
     prop: "pvp"
@@ -2438,10 +2858,15 @@ message ServerProperties {
   }];
   optional string modrinth_modpack_version_type = 128 [(discopanel.options.v1.prop) = {
     default_value: "release"
-    desc: "Version type for modpack (release, beta, alpha)"
+    desc: "Version type for modpack"
     input: "select"
     label: "Modrinth Modpack Version Type"
     category: "modrinth"
+    options: [
+      "release",
+      "beta",
+      "alpha"
+    ]
   }];
   optional string modrinth_version = 129 [(discopanel.options.v1.prop) = {
     default_value: ""
@@ -2480,16 +2905,26 @@ message ServerProperties {
   }];
   optional string modrinth_download_dependencies = 134 [(discopanel.options.v1.prop) = {
     default_value: "none"
-    desc: "Dependency download mode (none, required, optional)"
+    desc: "Dependency download mode"
     input: "select"
     label: "Modrinth Download Dependencies"
     category: "modrinth"
+    options: [
+      "none",
+      "required",
+      "optional"
+    ]
   }];
   optional string modrinth_projects_default_version_type = 135 [(discopanel.options.v1.prop) = {
     default_value: "release"
-    desc: "Default version type to select (release, beta, alpha)"
+    desc: "Default version type to select"
     input: "select"
     label: "Modrinth Default Version Type"
     category: "modrinth"
+    options: [
+      "release",
+      "beta",
+      "alpha"
+    ]
   }];
 }

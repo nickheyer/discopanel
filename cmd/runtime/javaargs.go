@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -19,7 +20,7 @@ func gcLogPath() string {
 }
 
 // Assembles the full java argv, including javaagent port
-func buildJavaArgs(spec *runtimespec.LaunchSpec, agentPort int) ([]string, error) {
+func buildJavaArgs(spec *v1.LaunchSpec, agentPort int) ([]string, error) {
 	args := []string{"java"}
 
 	// AUTO_MEMORY derives heap from container memory limit
@@ -69,9 +70,9 @@ func buildJavaArgs(spec *runtimespec.LaunchSpec, agentPort int) ([]string, error
 		useAikar = true
 	}
 	if useZGC {
-		args = append(args, zgcFlags(spec.JavaMajor)...)
+		args = append(args, zgcFlags(int(spec.JavaMajor))...)
 	} else if useMeowice {
-		args = append(args, meowiceFlags(spec.JavaMajor)...)
+		args = append(args, meowiceFlags(int(spec.JavaMajor))...)
 	} else if useAikar {
 		args = append(args, aikarFlags(heapMB)...)
 	}
@@ -169,21 +170,21 @@ func buildJavaArgs(spec *runtimespec.LaunchSpec, agentPort int) ([]string, error
 
 	// Containers are always headless, jar launches get nogui
 	switch spec.Kind {
-	case runtimespec.LaunchKindJar:
+	case v1.LaunchKind_LAUNCH_KIND_JAR:
 		if spec.Jar == "" {
 			return nil, fmt.Errorf("launch spec kind=jar but no jar path set")
 		}
 		args = append(args, "-jar", spec.Jar)
 		args = append(args, extraArgs...)
 		args = append(args, "nogui")
-	case runtimespec.LaunchKindArgsFile:
+	case v1.LaunchKind_LAUNCH_KIND_ARGS_FILE:
 		if spec.ArgsFile == "" {
 			return nil, fmt.Errorf("launch spec kind=args-file but no args file set")
 		}
 		args = append(args, "@"+spec.ArgsFile)
 		args = append(args, extraArgs...)
 		args = append(args, "nogui")
-	case runtimespec.LaunchKindCustom:
+	case v1.LaunchKind_LAUNCH_KIND_CUSTOM:
 		if spec.Exec == "" {
 			return nil, fmt.Errorf("launch spec kind=custom but no exec command set")
 		}

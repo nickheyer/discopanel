@@ -3,8 +3,9 @@ package minecraft
 import (
 	"testing"
 
-	"github.com/nickheyer/discopanel/pkg/protometa"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 )
 
 // Rows must match the proto enum exactly
@@ -34,7 +35,8 @@ func TestRegistryRowsConsistent(t *testing.T) {
 			t.Errorf("proto value %s mapped twice", l)
 		}
 		seenProto[l] = true
-		if row.Info.Name == "" || row.Info.DisplayName == "" || row.Info.Description == "" || row.Info.Category == "" {
+		if row.Info.Name == "" || row.Info.DisplayName == "" || row.Info.Description == "" ||
+			row.Info.Category == optionsv1.ModLoaderCategory_MOD_LOADER_CATEGORY_UNSPECIFIED {
 			t.Errorf("loader %s misses display facts", l)
 		}
 		for _, d := range row.Dialects {

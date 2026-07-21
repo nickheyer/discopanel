@@ -9,15 +9,15 @@ import (
 )
 
 // Represents the Minecraft server.properties file
-type ServerProperties map[string]string
+type PropertiesFile map[string]string
 
 // Loads the server.properties file into a map
-func LoadServerProperties(serverDataPath string) (ServerProperties, error) {
+func LoadPropertiesFile(serverDataPath string) (PropertiesFile, error) {
 	data, err := os.ReadFile(filepath.Join(serverDataPath, "server.properties"))
 	if err != nil {
 		return nil, err
 	}
-	props := ServerProperties{}
+	props := PropertiesFile{}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -31,7 +31,7 @@ func LoadServerProperties(serverDataPath string) (ServerProperties, error) {
 }
 
 // Saves the server.properties file
-func SaveServerProperties(serverDataPath string, properties ServerProperties) error {
+func SavePropertiesFile(serverDataPath string, properties PropertiesFile) error {
 	propertiesPath := filepath.Join(serverDataPath, "server.properties")
 
 	// Ensure directory exists

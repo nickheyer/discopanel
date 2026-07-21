@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package discopanel.v1;
 
+import "discopanel/options/v1/options.proto";
 import "discopanel/v1/storage.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -10,29 +11,116 @@ option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;dis
 // Task scheduling and management service
 service TaskService {
   // List all tasks for a server
-  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_READ
+      object_id_field: "server_id"
+    };
+  }
   // Get a specific task
-  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_TASK
+    };
+  }
   // Create a new scheduled task
-  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_CREATE
+      object_id_field: "server_id"
+    };
+  }
   // Update an existing task
-  rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
+  rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_TASK
+    };
+  }
   // Delete a task
-  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse);
+  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_DELETE
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_TASK
+    };
+  }
   // Toggle task enabled/disabled status
-  rpc ToggleTask(ToggleTaskRequest) returns (ToggleTaskResponse);
+  rpc ToggleTask(ToggleTaskRequest) returns (ToggleTaskResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_TASK
+    };
+  }
   // Manually trigger a task execution
-  rpc TriggerTask(TriggerTaskRequest) returns (TriggerTaskResponse);
+  rpc TriggerTask(TriggerTaskRequest) returns (TriggerTaskResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_TASK
+    };
+  }
   // Get execution history for a task
-  rpc ListTaskExecutions(ListTaskExecutionsRequest) returns (ListTaskExecutionsResponse);
+  rpc ListTaskExecutions(ListTaskExecutionsRequest) returns (ListTaskExecutionsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_READ
+      object_id_field: "task_id"
+      scope: OBJECT_SCOPE_TASK
+    };
+  }
   // Get execution history for a server
-  rpc ListServerExecutions(ListServerExecutionsRequest) returns (ListServerExecutionsResponse);
+  rpc ListServerExecutions(ListServerExecutionsRequest) returns (ListServerExecutionsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_READ
+      object_id_field: "server_id"
+    };
+  }
   // Get a specific execution
-  rpc GetTaskExecution(GetTaskExecutionRequest) returns (GetTaskExecutionResponse);
+  rpc GetTaskExecution(GetTaskExecutionRequest) returns (GetTaskExecutionResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_TASK_EXECUTION
+    };
+  }
   // Cancel a running execution
-  rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
+  rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_TASK_EXECUTION
+    };
+  }
   // Get scheduler status
-  rpc GetSchedulerStatus(GetSchedulerStatusRequest) returns (GetSchedulerStatusResponse);
+  rpc GetSchedulerStatus(GetSchedulerStatusRequest) returns (GetSchedulerStatusResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_TASKS
+      action: ACTION_TYPE_READ
+    };
+  }
+}
+
+// Outbound webhook body, unspecified event means manual delivery
+message WebhookPayload {
+  TriggeredEventType event = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  Server server = 3;
+  map<string, string> data = 4;
 }
 
 // List tasks request
@@ -69,8 +157,11 @@ message CreateTaskRequest {
   google.protobuf.Timestamp run_at = 8;
   string timezone = 9;
 
-  // Task configuration (JSON)
-  string config = 10;
+  // Typed config matching task_type
+  CommandTaskConfig command_config = 10;
+  BackupTaskConfig backup_config = 16;
+  ScriptTaskConfig script_config = 17;
+  WebhookTaskConfig webhook_config = 18;
 
   // Execution settings
   int32 timeout = 11;
@@ -101,8 +192,11 @@ message UpdateTaskRequest {
   optional google.protobuf.Timestamp run_at = 8;
   optional string timezone = 9;
 
-  // Task configuration
-  optional string config = 10;
+  // Typed config matching task_type, set replaces stored config
+  CommandTaskConfig command_config = 10;
+  BackupTaskConfig backup_config = 17;
+  ScriptTaskConfig script_config = 18;
+  WebhookTaskConfig webhook_config = 19;
 
   // Execution settings
   optional int32 timeout = 11;
@@ -112,7 +206,7 @@ message UpdateTaskRequest {
 
   // Event triggers (only used when schedule == SCHEDULE_TYPE_EVENT)
   repeated TriggeredEventType event_triggers = 15;
-  bool clear_event_triggers = 16;  // If true, clear event_triggers before applying new ones
+  bool clear_event_triggers = 16; // If true, clear event_triggers before applying new ones
 }
 
 // Updated task details

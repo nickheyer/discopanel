@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
-	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
 const (
@@ -282,13 +281,13 @@ func scriptVar(s, key string) string {
 }
 
 // Locates the launch entry produced by a Forge installer
-func detectForgeLaunch(dataPath, vendorPath string) (*runtimespec.LaunchSpec, error) {
+func detectForgeLaunch(dataPath, vendorPath string) (*v1.LaunchSpec, error) {
 	pattern := filepath.Join(dataPath, "libraries", "net", filepath.FromSlash(vendorPath), "*", "unix_args.txt")
 	if matches, err := filepath.Glob(pattern); err == nil && len(matches) > 0 {
 		rel, err := filepath.Rel(dataPath, matches[len(matches)-1])
 		if err == nil {
-			return &runtimespec.LaunchSpec{
-				Kind:     runtimespec.LaunchKindArgsFile,
+			return &v1.LaunchSpec{
+				Kind:     v1.LaunchKind_LAUNCH_KIND_ARGS_FILE,
 				ArgsFile: filepath.ToSlash(rel),
 			}, nil
 		}
@@ -305,7 +304,7 @@ func detectForgeLaunch(dataPath, vendorPath string) (*runtimespec.LaunchSpec, er
 			if strings.Contains(name, "installer") {
 				continue
 			}
-			return &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: name}, nil
+			return &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: name}, nil
 		}
 	}
 

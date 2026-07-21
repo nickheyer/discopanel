@@ -12,6 +12,7 @@ import (
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/config"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -37,7 +38,7 @@ func (c *Client) DesiredConfigHash(server *v1.Server, serverConfig *v1.ServerPro
 	useProxy := server.ProxyHostname != ""
 	w("port", strconv.Itoa(int(server.Port)), strconv.Itoa(models.InContainerPort(server)), strconv.FormatBool(useProxy))
 	for _, p := range server.AdditionalPorts {
-		w("extra-port", strconv.Itoa(int(p.GetHostPort())), strconv.Itoa(int(p.GetContainerPort())), p.GetProtocol())
+		w("extra-port", strconv.Itoa(int(p.GetHostPort())), strconv.Itoa(int(p.GetContainerPort())), protometa.Name(p.GetProtocol()))
 	}
 
 	w("data", TranslateToHostPath(server.DataPath))
@@ -91,9 +92,9 @@ func (c *Client) DesiredModuleConfigHash(module *v1.Module, template *v1.ModuleT
 		if p == nil {
 			continue
 		}
-		w("port", strconv.Itoa(int(p.HostPort)), strconv.Itoa(int(p.ContainerPort)), p.Protocol, strconv.FormatBool(p.ProxyEnabled))
+		w("port", strconv.Itoa(int(p.HostPort)), strconv.Itoa(int(p.ContainerPort)), protometa.Name(p.Protocol), strconv.FormatBool(p.ProxyEnabled))
 	}
-	vols := c.parseModuleVolumes(module.VolumeOverrides, aliasCtx)
+	vols := c.resolveModuleVolumes(module.VolumeOverrides, aliasCtx)
 	if server != nil {
 		resolveWorldSources(vols, server.DataPath)
 	}

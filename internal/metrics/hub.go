@@ -2,11 +2,11 @@ package metrics
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -222,15 +222,15 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 			}
 			switch {
 			case p.Exited.GetOomKilled():
-				h.rec.Announce(rctx, serverID, "server.oom", attrs, "server was killed after running out of memory (exit code %d), raise the container memory or lower the heap", p.Exited.GetExitCode())
+				h.rec.Announce(rctx, serverID, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_OOM, attrs, "server was killed after running out of memory (exit code %d), raise the container memory or lower the heap", p.Exited.GetExitCode())
 			case p.Exited.GetBootFailed() && p.Exited.GetCrashReportPath() != "":
-				h.rec.Announce(rctx, serverID, "server.boot_failed", attrs, "server failed to start (crash report: %s)", p.Exited.GetCrashReportPath())
+				h.rec.Announce(rctx, serverID, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_BOOT_FAILED, attrs, "server failed to start (crash report: %s)", p.Exited.GetCrashReportPath())
 			case p.Exited.GetBootFailed():
-				h.rec.Announce(rctx, serverID, "server.boot_failed", attrs, "server failed to start (exit code %d)", p.Exited.GetExitCode())
+				h.rec.Announce(rctx, serverID, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_BOOT_FAILED, attrs, "server failed to start (exit code %d)", p.Exited.GetExitCode())
 			case p.Exited.GetCrashReportPath() != "":
-				h.rec.Announce(rctx, serverID, "server.crash", attrs, "server crashed (exit code %d, crash report: %s)", p.Exited.GetExitCode(), p.Exited.GetCrashReportPath())
+				h.rec.Announce(rctx, serverID, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_CRASH, attrs, "server crashed (exit code %d, crash report: %s)", p.Exited.GetExitCode(), p.Exited.GetCrashReportPath())
 			default:
-				h.rec.Announce(rctx, serverID, "server.crash", attrs, "server exited abnormally (exit code %d)", p.Exited.GetExitCode())
+				h.rec.Announce(rctx, serverID, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_CRASH, attrs, "server exited abnormally (exit code %d)", p.Exited.GetExitCode())
 			}
 		}
 		if fresh {
@@ -265,7 +265,7 @@ func (h *Hub) HandleMessage(ctx context.Context, serverID string, msg *agentv1.A
 // Updates roster, emits bus event, replaces agent SLP diffing
 func (h *Hub) handlePlayerEvent(ctx context.Context, serverID string, ev *agentv1.PlayerEvent) {
 	player := ev.GetPlayer()
-	data := map[string]any{"player": player}
+	data := map[string]string{"player": player}
 	if d := ev.GetDetail(); d != "" {
 		data["detail"] = d
 	}
@@ -293,11 +293,7 @@ func (h *Hub) handlePlayerEvent(ctx context.Context, serverID string, ev *agentv
 	}
 }
 
-// Durable stamp of the newest exit the panel processed
-type exitAckStamp struct {
-	AckedUnixMs int64 `json:"acked_unix_ms"`
-}
-
+// Stamp file holds the acked exit time as unix millis
 func exitAckPath(dataPath string) string {
 	return filepath.Join(dataPath, runtimespec.StateDir, "exit-ack.json")
 }
@@ -311,11 +307,11 @@ func readExitAck(dataPath string) time.Time {
 	if err != nil {
 		return time.Time{}
 	}
-	var s exitAckStamp
-	if json.Unmarshal(data, &s) != nil || s.AckedUnixMs <= 0 {
+	ms, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil || ms <= 0 {
 		return time.Time{}
 	}
-	return time.UnixMilli(s.AckedUnixMs)
+	return time.UnixMilli(ms)
 }
 
 // Persists the stamp so replays stay stale across panel restarts
@@ -326,9 +322,5 @@ func writeExitAck(dataPath string, exitedAt time.Time) error {
 	if err := os.MkdirAll(filepath.Join(dataPath, runtimespec.StateDir), 0755); err != nil {
 		return err
 	}
-	data, err := json.Marshal(exitAckStamp{AckedUnixMs: exitedAt.UnixMilli()})
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(exitAckPath(dataPath), data, 0644)
+	return os.WriteFile(exitAckPath(dataPath), []byte(strconv.FormatInt(exitedAt.UnixMilli(), 10)), 0644)
 }

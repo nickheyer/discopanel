@@ -17,10 +17,12 @@ import (
 	"github.com/nickheyer/discopanel/pkg/files"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Receives human-readable provisioning progress lines for a server
@@ -71,10 +73,10 @@ func (p *Provisioner) progress(server *v1.Server, format string, args ...any) {
 }
 
 // Progress line that also lands in the activity ledger
-func (p *Provisioner) action(ctx context.Context, server *v1.Server, source, name string, attrs metrics.Attrs, format string, args ...any) {
+func (p *Provisioner) action(ctx context.Context, server *v1.Server, source string, kind v1.ServerActionKind, attrs metrics.Attrs, format string, args ...any) {
 	p.progress(server, format, args...)
 	if p.rec != nil {
-		p.rec.Record(metrics.WithSource(ctx, source), server.Id, name, attrs, format, args...)
+		p.rec.Record(metrics.WithSource(ctx, source), server.Id, kind, attrs, format, args...)
 	}
 }
 
@@ -91,7 +93,7 @@ func (p *Provisioner) serverLock(serverID string) *sync.Mutex {
 
 // Identifies the modpack a server should be provisioned from
 type desiredModpack struct {
-	source    string // "curseforge" | "modrinth" | "zip"
+	source    optionsv1.PackSource
 	id        string
 	versionID string // Empty means whatever is installed or latest
 }
@@ -128,36 +130,35 @@ func (p *Provisioner) Ensure(ctx context.Context, server *v1.Server, cfg *v1.Ser
 			return nil, err
 		}
 
-		mref := (*runtimespec.ModpackRef)(nil)
+		mref := (*v1.ModpackRef)(nil)
 		if desired != nil {
-			mref = &runtimespec.ModpackRef{
+			mref = &v1.ModpackRef{
 				Source:    desired.source,
-				ID:        desired.id,
-				VersionID: desired.versionID,
+				Id:        desired.id,
+				VersionId: desired.versionID,
 			}
 		}
-		if err := runtimespec.WriteManifest(server.DataPath, &runtimespec.Manifest{
+		if err := runtimespec.WriteManifest(server.DataPath, &v1.Manifest{
 			Version:       1,
-			Loader:        protometa.Name(server.ModLoader),
+			Loader:        server.ModLoader,
 			LoaderVersion: result.LoaderVersion,
 			McVersion:     result.McVersion,
-			JavaMajor:     result.JavaMajor,
+			JavaMajor:     int32(result.JavaMajor),
 			Modpack:       mref,
-			ProvisionedAt: time.Now().UTC().Format(time.RFC3339),
+			ProvisionedAt: timestamppb.Now(),
 		}); err != nil {
 			return nil, fmt.Errorf("failed to write provision manifest: %w", err)
 		}
-		p.action(ctx, server, "provisioner", "provision.install",
+		p.action(ctx, server, "provisioner", v1.ServerActionKind_SERVER_ACTION_KIND_PROVISION_INSTALL,
 			metrics.Attrs{"loader": protometa.Name(result.Loader), "loader_version": result.LoaderVersion, "mc_version": result.McVersion},
 			"installed server files (%s %s, MC %s, Java %d)",
 			protometa.Name(result.Loader), result.LoaderVersion, result.McVersion, result.JavaMajor)
 	} else {
-		manifestLoader, _ := protometa.FromName[v1.ModLoader](manifest.Loader)
 		result = &Result{
-			Loader:        manifestLoader,
+			Loader:        manifest.Loader,
 			LoaderVersion: manifest.LoaderVersion,
 			McVersion:     manifest.McVersion,
-			JavaMajor:     manifest.JavaMajor,
+			JavaMajor:     int(manifest.JavaMajor),
 		}
 		p.progress(server, "server files verified (%s %s, MC %s, Java %d)",
 			protometa.Name(result.Loader), result.LoaderVersion, result.McVersion, result.JavaMajor)
@@ -176,11 +177,11 @@ func (p *Provisioner) Ensure(ctx context.Context, server *v1.Server, cfg *v1.Ser
 	return result, nil
 }
 
-func (p *Provisioner) needsInstall(server *v1.Server, manifest *runtimespec.Manifest, desired *desiredModpack, force bool) bool {
+func (p *Provisioner) needsInstall(server *v1.Server, manifest *v1.Manifest, desired *desiredModpack, force bool) bool {
 	if force || manifest == nil {
 		return true
 	}
-	if manifest.Loader != protometa.Name(server.ModLoader) {
+	if manifest.Loader != server.ModLoader {
 		return true
 	}
 	// Modpack servers derive MC version from the pack
@@ -188,16 +189,16 @@ func (p *Provisioner) needsInstall(server *v1.Server, manifest *runtimespec.Mani
 		return true
 	}
 
-	var installed *runtimespec.ModpackRef = manifest.Modpack
+	var installed *v1.ModpackRef = manifest.Modpack
 	switch {
 	case desired == nil && installed != nil,
 		desired != nil && installed == nil:
 		return true
 	case desired != nil && installed != nil:
-		if desired.source != installed.Source || desired.id != installed.ID {
+		if desired.source != installed.Source || desired.id != installed.Id {
 			return true
 		}
-		if desired.versionID != "" && desired.versionID != installed.VersionID {
+		if desired.versionID != "" && desired.versionID != installed.VersionId {
 			return true
 		}
 	}
@@ -240,20 +241,16 @@ func (p *Provisioner) snapshotWorld(server *v1.Server) {
 
 // Derives the modpack identity from server and config
 func (p *Provisioner) desiredModpackFor(server *v1.Server, cfg *v1.ServerProperties) *desiredModpack {
-	pack := minecraft.PackPlatformFor(server.ModLoader)
-	if pack == nil {
-		return nil
-	}
-	switch pack.Source {
-	case "curseforge":
+	switch minecraft.PackSourceFor(server.ModLoader) {
+	case optionsv1.PackSource_PACK_SOURCE_CURSEFORGE:
 		if v := strVal(cfg.CfModpackZip); v != "" {
-			return &desiredModpack{source: "zip", id: v}
+			return &desiredModpack{source: optionsv1.PackSource_PACK_SOURCE_ZIP, id: v}
 		}
 		slug, fileID := parseCurseForgeRef(strVal(cfg.CfPageUrl), strVal(cfg.CfSlug), strVal(cfg.CfFileId))
-		return &desiredModpack{source: "curseforge", id: slug, versionID: fileID}
-	case "modrinth":
+		return &desiredModpack{source: optionsv1.PackSource_PACK_SOURCE_CURSEFORGE, id: slug, versionID: fileID}
+	case optionsv1.PackSource_PACK_SOURCE_MODRINTH:
 		project, version := parseModrinthRef(strVal(cfg.ModrinthModpack), strVal(cfg.ModrinthVersion))
-		return &desiredModpack{source: "modrinth", id: project, versionID: version}
+		return &desiredModpack{source: optionsv1.PackSource_PACK_SOURCE_MODRINTH, id: project, versionID: version}
 	default:
 		return nil
 	}
@@ -360,12 +357,12 @@ func (p *Provisioner) install(ctx context.Context, server *v1.Server, cfg *v1.Se
 }
 
 // Computes java requirement, writes launch spec, builds Result
-func (p *Provisioner) finishLaunch(server *v1.Server, spec *runtimespec.LaunchSpec, loader v1.ModLoader, loaderVersion, mcVersion string) (*Result, error) {
+func (p *Provisioner) finishLaunch(server *v1.Server, spec *v1.LaunchSpec, loader v1.ModLoader, loaderVersion, mcVersion string) (*Result, error) {
 	javaMajor := docker.RequiredJavaMajor(mcVersion)
 	spec.Version = 1
-	spec.Loader = protometa.Name(loader)
+	spec.Loader = loader
 	spec.McVersion = mcVersion
-	spec.JavaMajor = javaMajor
+	spec.JavaMajor = int32(javaMajor)
 
 	if !launchTargetExists(server.DataPath, spec) {
 		return nil, fmt.Errorf("launch target %q missing after installation", launchTarget(spec))
@@ -382,24 +379,24 @@ func (p *Provisioner) finishLaunch(server *v1.Server, spec *runtimespec.LaunchSp
 	}, nil
 }
 
-func launchTarget(spec *runtimespec.LaunchSpec) string {
+func launchTarget(spec *v1.LaunchSpec) string {
 	switch spec.Kind {
-	case runtimespec.LaunchKindJar:
+	case v1.LaunchKind_LAUNCH_KIND_JAR:
 		return spec.Jar
-	case runtimespec.LaunchKindArgsFile:
+	case v1.LaunchKind_LAUNCH_KIND_ARGS_FILE:
 		return spec.ArgsFile
 	default:
 		return spec.Exec
 	}
 }
 
-func launchTargetExists(dataPath string, spec *runtimespec.LaunchSpec) bool {
+func launchTargetExists(dataPath string, spec *v1.LaunchSpec) bool {
 	switch spec.Kind {
-	case runtimespec.LaunchKindJar:
+	case v1.LaunchKind_LAUNCH_KIND_JAR:
 		return fileExists(joinData(dataPath, spec.Jar))
-	case runtimespec.LaunchKindArgsFile:
+	case v1.LaunchKind_LAUNCH_KIND_ARGS_FILE:
 		return fileExists(joinData(dataPath, spec.ArgsFile))
-	case runtimespec.LaunchKindCustom:
+	case v1.LaunchKind_LAUNCH_KIND_CUSTOM:
 		return spec.Exec != ""
 	default:
 		return false
@@ -416,7 +413,7 @@ func (p *Provisioner) disableClientOnlyMods(ctx context.Context, server *v1.Serv
 			p.progress(server, "could not disable client-only mod %s (%v)", meta.FileName, err)
 			continue
 		}
-		p.action(ctx, server, "mod check", "mod.disable", metrics.Attrs{"file": meta.FileName, "reason": "client-only"}, "disabled client-only mod %s", meta.FileName)
+		p.action(ctx, server, "mod check", v1.ServerActionKind_SERVER_ACTION_KIND_MOD_DISABLE, metrics.Attrs{"file": meta.FileName, "reason": "client-only"}, "disabled client-only mod %s", meta.FileName)
 	}
 }
 

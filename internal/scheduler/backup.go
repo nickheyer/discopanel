@@ -16,10 +16,7 @@ import (
 
 // Archives server data, pausing world saves for consistency
 func (s *Scheduler) executeBackupTask(ctx context.Context, server *v1.Server, task *v1.ScheduledTask) (string, error) {
-	config := &v1.BackupTaskConfig{}
-	if err := unmarshalTaskConfig(task.Config, config); err != nil {
-		return "", fmt.Errorf("invalid backup config: %w", err)
-	}
+	config := task.GetBackupConfig()
 
 	if s.appConfig == nil || s.appConfig.Storage.BackupDir == "" {
 		return "", fmt.Errorf("backup directory is not configured")
@@ -64,7 +61,7 @@ func (s *Scheduler) executeBackupTask(ctx context.Context, server *v1.Server, ta
 
 	output := fmt.Sprintf("backup created: %s (%d files, %s, took %s)",
 		filepath.Base(destPath), count, formatBytes(size), time.Since(start).Round(time.Millisecond))
-	s.rec.Record(ctx, server.Id, "backup.create",
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_BACKUP_CREATE,
 		metrics.Attrs{"file": filepath.Base(destPath), "size": formatBytes(size), "task": task.Name},
 		"backed up %s (%d files, %s, task %q)",
 		filepath.Base(destPath), count, formatBytes(size), task.Name)

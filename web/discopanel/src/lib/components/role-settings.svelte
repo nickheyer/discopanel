@@ -41,9 +41,10 @@
 		Save,
 		ShieldCheck
 	} from '@lucide/svelte';
-	import { create } from '@bufbuild/protobuf';
+	import { create, clone } from '@bufbuild/protobuf';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import type { Role, Permission } from '$lib/proto/discopanel/v1/storage_pb';
+	import { PermissionSchema } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { ScopeableObject, ResourceActions } from '$lib/proto/discopanel/v1/role_pb';
 	import {
 		CreateRoleRequestSchema,
@@ -51,6 +52,13 @@
 		GetPermissionMatrixRequestSchema,
 		UpdatePermissionsRequestSchema
 	} from '$lib/proto/discopanel/v1/role_pb';
+	import {
+		ResourceType,
+		ResourceTypeSchema,
+		ActionType,
+		ActionTypeSchema
+	} from '$lib/proto/discopanel/options/v1/options_pb';
+	import { enumLabel } from '$lib/proto-meta';
 	import { getRoleBadgeVariant } from '$lib/utils/role-colors';
 
 	type PermSection = 'global' | 'scoped';
@@ -73,11 +81,9 @@
 	let deleteTarget = $state<Role | null>(null);
 	let deleteOpen = $state(false);
 
-	// Scoped permissions state
-	let scopedPermissions = $state<
-		{ resource: string; action: string; objectId: string; objectName: string }[]
-	>([]);
-	let scopedResource = $state('');
+	// Scoped permissions state, proto rows with real object ids
+	let scopedPermissions = $state<Permission[]>([]);
+	let scopedResource = $state<ResourceType>(ResourceType.UNSPECIFIED);
 
 	let newRoleForm = $state({
 		name: '',
@@ -92,9 +98,9 @@
 
 	let scopeableResources = $derived([...new Set(availableObjects.map((o) => o.resource))]);
 
-	// Map resource to scope source (e.g., "files" to "servers")
+	// Maps resource to the resource its objects come from
 	let scopeSourceMap = $derived.by(() => {
-		const map: Record<string, string> = {};
+		const map: Partial<Record<ResourceType, ResourceType>> = {};
 		for (const obj of availableObjects) {
 			if (obj.scopeSource && !map[obj.resource]) {
 				map[obj.resource] = obj.scopeSource;
@@ -117,18 +123,23 @@
 
 	let scopedCount = $derived(scopedPermissions.length);
 
-	let allActions = $derived([...new Set(resourceActions.flatMap((ra) => ra.actions))].sort());
+	let allActions = $derived(
+		[...new Set(resourceActions.flatMap((ra) => ra.actions))].sort((a, b) => a - b)
+	);
 
+	// Unspecified pair is the wildcard row
 	function hasFullAccess(roleName: string): boolean {
 		const perms = permissionMatrix[roleName] || [];
-		return perms.some((p) => p.resource === '*' && p.action === '*');
+		return perms.some(
+			(p) => p.resource === ResourceType.UNSPECIFIED && p.action === ActionType.UNSPECIFIED
+		);
 	}
 
-	function formatResourceName(resource: string): string {
-		return resource.replace(/_/g, ' ');
+	function formatResourceName(resource: ResourceType): string {
+		return enumLabel(ResourceTypeSchema, resource);
 	}
 
-	function getResourcePermCount(resource: string): number {
+	function getResourcePermCount(resource: ResourceType): number {
 		const ra = resourceActions.find((r) => r.resource === resource);
 		if (!ra) return 0;
 		return ra.actions.filter((act) => editingPermissions[`${resource}:${act}`]).length;
@@ -210,27 +221,21 @@
 	function openPermissionsDialog(role: Role) {
 		editingRole = role;
 		activeSection = 'global';
-		scopedResource = '';
+		scopedResource = ResourceType.UNSPECIFIED;
 
 		const permMap: Record<string, boolean> = {};
-		const scoped: typeof scopedPermissions = [];
+		const scoped: Permission[] = [];
 		const rolePerms = permissionMatrix[role.name] || [];
 
 		for (const perm of rolePerms) {
-			if (perm.resource === '*' && perm.action === '*') {
+			if (perm.resource === ResourceType.UNSPECIFIED && perm.action === ActionType.UNSPECIFIED) {
 				for (const ra of resourceActions) {
 					for (const act of ra.actions) {
 						permMap[`${ra.resource}:${act}`] = true;
 					}
 				}
 			} else if (perm.objectId && perm.objectId !== '*') {
-				const obj = availableObjects.find((o) => o.id === perm.objectId);
-				scoped.push({
-					resource: perm.resource,
-					action: perm.action,
-					objectId: perm.objectId,
-					objectName: obj?.name || perm.objectId
-				});
+				scoped.push(clone(PermissionSchema, perm));
 			} else {
 				permMap[`${perm.resource}:${perm.action}`] = true;
 			}
@@ -244,22 +249,16 @@
 		if (!editingRole) return;
 		savingPermissions = true;
 
-		const permissions: { resource: string; action: string; objectId: string }[] = [];
+		const permissions: Permission[] = [];
 
 		for (const [key, enabled] of Object.entries(editingPermissions)) {
 			if (enabled) {
-				const [resource, action] = key.split(':');
-				permissions.push({ resource, action, objectId: '*' });
+				const [resource, action] = key.split(':').map(Number);
+				permissions.push(create(PermissionSchema, { resource, action, objectId: '*' }));
 			}
 		}
 
-		for (const sp of scopedPermissions) {
-			permissions.push({
-				resource: sp.resource,
-				action: sp.action,
-				objectId: sp.objectId
-			});
-		}
+		permissions.push(...scopedPermissions);
 
 		try {
 			const request = create(UpdatePermissionsRequestSchema, {
@@ -286,7 +285,7 @@
 		};
 	}
 
-	function toggleResourceAll(resource: string) {
+	function toggleResourceAll(resource: ResourceType) {
 		const ra = resourceActions.find((r) => r.resource === resource);
 		if (!ra) return;
 		const allEnabled = ra.actions.every((act) => editingPermissions[`${resource}:${act}`]);
@@ -297,38 +296,36 @@
 		editingPermissions = updated;
 	}
 
-	function isResourceAllChecked(resource: string): boolean {
+	function isResourceAllChecked(resource: ResourceType): boolean {
 		const ra = resourceActions.find((r) => r.resource === resource);
 		if (!ra) return false;
 		return ra.actions.every((act) => editingPermissions[`${resource}:${act}`]);
 	}
 
-	function isResourceIndeterminate(resource: string): boolean {
+	function isResourceIndeterminate(resource: ResourceType): boolean {
 		const ra = resourceActions.find((r) => r.resource === resource);
 		if (!ra) return false;
 		const checked = ra.actions.filter((act) => editingPermissions[`${resource}:${act}`]).length;
 		return checked > 0 && checked < ra.actions.length;
 	}
 
-	function isScopedChecked(resource: string, action: string, objectId: string): boolean {
+	function isScopedChecked(resource: ResourceType, action: ActionType, objectId: string): boolean {
 		return scopedPermissions.some(
 			(sp) => sp.resource === resource && sp.action === action && sp.objectId === objectId
 		);
 	}
 
-	function toggleScopedPermission(
-		resource: string,
-		action: string,
-		objectId: string,
-		objectName: string
-	) {
+	function toggleScopedPermission(resource: ResourceType, action: ActionType, objectId: string) {
 		const index = scopedPermissions.findIndex(
 			(sp) => sp.resource === resource && sp.action === action && sp.objectId === objectId
 		);
 		if (index >= 0) {
 			scopedPermissions = scopedPermissions.filter((_, i) => i !== index);
 		} else {
-			scopedPermissions = [...scopedPermissions, { resource, action, objectId, objectName }];
+			scopedPermissions = [
+				...scopedPermissions,
+				create(PermissionSchema, { resource, action, objectId })
+			];
 		}
 	}
 
@@ -589,7 +586,9 @@
 										</TableHead>
 										{#each allActions as action (action)}
 											<TableHead class="px-3 text-center">
-												<span class="text-xs font-medium capitalize">{action}</span>
+												<span class="text-xs font-medium">
+													{enumLabel(ActionTypeSchema, action)}
+												</span>
 											</TableHead>
 										{/each}
 									</TableRow>
@@ -606,7 +605,7 @@
 														indeterminate={isResourceIndeterminate(ra.resource)}
 														onCheckedChange={() => toggleResourceAll(ra.resource)}
 													/>
-													<span class="text-sm capitalize">{formatResourceName(ra.resource)}</span>
+													<span class="text-sm">{formatResourceName(ra.resource)}</span>
 													{#if count > 0}
 														<Badge variant="secondary" class="ml-auto px-1.5 py-0 text-[10px]">
 															{count}/{total}
@@ -645,18 +644,20 @@
 							<div class="flex flex-wrap gap-1.5">
 								{#each scopeableResources as res (res)}
 									{@const objectCount = availableObjects.filter((o) => o.resource === res).length}
-									{@const source = scopeSourceMap[res]}
-									{@const isForeign = source && source !== res}
+									{@const source = scopeSourceMap[res] ?? res}
+									{@const isForeign = source !== res}
 									<button
-										onclick={() => (scopedResource = scopedResource === res ? '' : res)}
-										class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium capitalize transition-colors {scopedResource ===
+										onclick={() =>
+											(scopedResource =
+												scopedResource === res ? ResourceType.UNSPECIFIED : res)}
+										class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors {scopedResource ===
 										res
 											? 'border-primary/40 bg-primary/10 text-primary'
 											: 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
 									>
 										{formatResourceName(res)}
 										{#if isForeign}
-											<span class="normal-case opacity-60">via {formatResourceName(source)}</span>
+											<span class="opacity-60">via {formatResourceName(source)}</span>
 										{/if}
 										<span class="tabular opacity-75">{objectCount}</span>
 									</button>
@@ -664,8 +665,8 @@
 							</div>
 
 							{#if scopedResource}
-								{@const activeSource = scopeSourceMap[scopedResource]}
-								{@const activeForeign = activeSource && activeSource !== scopedResource}
+								{@const activeSource = scopeSourceMap[scopedResource] ?? scopedResource}
+								{@const activeForeign = activeSource !== scopedResource}
 								{#if filteredObjects.length === 0}
 									<EmptyState
 										icon={ShieldAlert}
@@ -697,11 +698,9 @@
 															editingPermissions[`${scopedResource}:${action}`] || false}
 														<TableHead class="px-3 text-center">
 															<span
-																class="text-xs font-medium capitalize {coveredByGlobal
-																	? 'opacity-50'
-																	: ''}"
+																class="text-xs font-medium {coveredByGlobal ? 'opacity-50' : ''}"
 															>
-																{action}
+																{enumLabel(ActionTypeSchema, action)}
 															</span>
 															{#if coveredByGlobal}
 																<div class="text-[9px] font-normal text-muted-foreground">
@@ -732,12 +731,7 @@
 																		checked={checked || coveredByGlobal}
 																		disabled={coveredByGlobal}
 																		onCheckedChange={() =>
-																			toggleScopedPermission(
-																				scopedResource,
-																				action,
-																				obj.id,
-																				obj.name
-																			)}
+																			toggleScopedPermission(scopedResource, action, obj.id)}
 																	/>
 																</div>
 															</TableCell>

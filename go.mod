@@ -4,9 +4,6 @@ go 1.25.0
 
 tool github.com/nickheyer/protogorm/cmd/protogorm
 
-// Drop once protogorm is tagged upstream
-replace github.com/nickheyer/protogorm => ../protogorm
-
 require (
 	connectrpc.com/connect v1.19.1
 	connectrpc.com/grpcreflect v1.3.0
@@ -16,13 +13,12 @@ require (
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
-	github.com/go-gormigrate/gormigrate/v2 v2.1.5
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/gnostic v0.7.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/mholt/archives v0.1.5
-	github.com/nickheyer/protogorm v0.0.0-00010101000000-000000000000
+	github.com/nickheyer/protogorm v0.0.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.20.1
 	github.com/tidwall/gjson v1.18.0

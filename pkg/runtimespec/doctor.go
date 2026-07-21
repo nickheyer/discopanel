@@ -1,98 +1,42 @@
 package runtimespec
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
-	"time"
 
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Shared journal contract between the panel and the doctor module
+// Doctor journal on disk is the DoctorState proto as protojson
 
 const DoctorFileName = "doctor.json"
 
-// Action kinds a doctor incident may record
-const (
-	ActionDisable     = "disable"
-	ActionEnable      = "enable"
-	ActionInstall     = "install"
-	ActionDisablePack = "disable_pack"
-)
-
-// Evidence grades ordered strongest first
-const (
-	EvidenceVerdict  = "verdict"
-	EvidenceSolver   = "solver"
-	EvidenceRegistry = "registry"
-	EvidenceFrame    = "frame"
-)
-
-// Durable record of the doctor's work on one server
-type DoctorState struct {
-	Version  int             `json:"version"`
-	Incident *DoctorIncident `json:"incident,omitempty"`
-	Resolved *DoctorIncident `json:"resolved,omitempty"`
-
-	// Files the doctor never wants provisioned again
-	Excludes []string `json:"excludes,omitempty"`
-
-	// Newest exit the doctor already responded to
-	LastHandledMs int64 `json:"last_handled_ms,omitempty"`
-}
-
-// One repair campaign, opened on crash and closed on outcome
-type DoctorIncident struct {
-	OpenedAt time.Time      `json:"opened_at"`
-	ClosedAt time.Time      `json:"closed_at,omitzero"`
-	Passes   int            `json:"passes"`
-	Budget   int            `json:"budget"`
-	Actions  []DoctorAction `json:"actions"`
-	Tried    []string       `json:"tried,omitempty"`
-	Outcome  string         `json:"outcome,omitempty"`
-	Summary  string         `json:"summary,omitempty"`
-	Cause    string         `json:"cause,omitempty"` // Plain language crash classification
-}
-
-// One reversible repair step
-type DoctorAction struct {
-	Kind      string    `json:"kind"`
-	File      string    `json:"file"`
-	ModID     string    `json:"mod_id,omitempty"`
-	Reason    string    `json:"reason,omitempty"`
-	Range     string    `json:"range,omitempty"`   // Version range for installs
-	Dialect   string    `json:"dialect,omitempty"` // Metadata dialect for installs
-	Evidence  string    `json:"evidence"`
-	Cause     string    `json:"cause,omitempty"` // Crash signature a frame guess answered
-	AppliedAt time.Time `json:"applied_at"`
-	Reverted  bool      `json:"reverted,omitempty"`
-}
-
 // Installs key on mod id until file sourced
-func (a *DoctorAction) Key() string {
-	if a.Kind == ActionInstall {
-		return a.Kind + ":" + a.ModID
+func ActionKey(a *v1.DoctorAction) string {
+	if a.Kind == v1.DoctorActionKind_DOCTOR_ACTION_KIND_INSTALL {
+		return a.Kind.String() + ":" + a.ModId
 	}
-	return a.Kind + ":" + a.File
+	return a.Kind.String() + ":" + a.File
 }
 
-func (inc *DoctorIncident) HasTried(key string) bool {
+func HasTried(inc *v1.DoctorIncident, key string) bool {
 	return slices.Contains(inc.Tried, key)
 }
 
-func (inc *DoctorIncident) MarkTried(key string) {
-	if !inc.HasTried(key) {
+func MarkTried(inc *v1.DoctorIncident, key string) {
+	if !HasTried(inc, key) {
 		inc.Tried = append(inc.Tried, key)
 	}
 }
 
 // Counts live disables, the budget consumers
-func (inc *DoctorIncident) DisabledCount() int {
+func DisabledCount(inc *v1.DoctorIncident) int {
 	n := 0
-	for i := range inc.Actions {
-		if inc.Actions[i].Kind == ActionDisable && !inc.Actions[i].Reverted {
+	for _, a := range inc.Actions {
+		if a.Kind == v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE && !a.Reverted {
 			n++
 		}
 	}
@@ -100,11 +44,11 @@ func (inc *DoctorIncident) DisabledCount() int {
 }
 
 // Time of the incident's newest activity
-func (inc *DoctorIncident) LastActivity() time.Time {
+func LastActivity(inc *v1.DoctorIncident) *timestamppb.Timestamp {
 	last := inc.OpenedAt
-	for i := range inc.Actions {
-		if inc.Actions[i].AppliedAt.After(last) {
-			last = inc.Actions[i].AppliedAt
+	for _, a := range inc.Actions {
+		if a.AppliedAt != nil && (last == nil || a.AppliedAt.AsTime().After(last.AsTime())) {
+			last = a.AppliedAt
 		}
 	}
 	return last
@@ -117,9 +61,8 @@ func IncidentHeldFiles(dataPath string) []string {
 		return nil
 	}
 	var files []string
-	for i := range j.Incident.Actions {
-		a := &j.Incident.Actions[i]
-		if a.Kind == ActionDisable && !a.Reverted {
+	for _, a := range j.Incident.Actions {
+		if a.Kind == v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE && !a.Reverted {
 			files = append(files, a.File)
 		}
 	}
@@ -135,23 +78,23 @@ func DoctorPath(dataPath string) string {
 	return filepath.Join(dataPath, StateDir, DoctorFileName)
 }
 
-func LoadDoctor(dataPath string) *DoctorState {
+func LoadDoctor(dataPath string) *v1.DoctorState {
 	data, err := os.ReadFile(DoctorPath(dataPath))
 	if err != nil {
-		return &DoctorState{Version: 1}
+		return &v1.DoctorState{Version: 1}
 	}
-	var s DoctorState
-	if json.Unmarshal(data, &s) != nil {
-		return &DoctorState{Version: 1}
+	var s v1.DoctorState
+	if protojson.Unmarshal(data, &s) != nil {
+		return &v1.DoctorState{Version: 1}
 	}
 	return &s
 }
 
-func SaveDoctor(dataPath string, s *DoctorState) error {
+func SaveDoctor(dataPath string, s *v1.DoctorState) error {
 	if err := os.MkdirAll(filepath.Join(dataPath, StateDir), 0755); err != nil {
 		return err
 	}
-	data, err := json.Marshal(s)
+	data, err := protojson.Marshal(s)
 	if err != nil {
 		return err
 	}

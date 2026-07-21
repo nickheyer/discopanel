@@ -12,7 +12,7 @@ import (
 type Event struct {
 	Type     v1.TriggeredEventType
 	ServerId string
-	Data     map[string]any
+	Data     map[string]string
 }
 
 // Reacts to emitted event, runs serialized on its own queue

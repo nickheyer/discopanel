@@ -47,6 +47,8 @@
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import type { ApiToken } from '$lib/proto/discopanel/v1/storage_pb';
+	import { AuthProvider, AuthProviderSchema } from '$lib/proto/discopanel/v1/storage_pb';
+	import { enumLabel } from '$lib/proto-meta';
 
 	let user = $derived($currentUser);
 	let passwordForm = $state({
@@ -78,7 +80,9 @@
 	);
 
 	let primaryRole = $derived(user?.roles?.[0] ?? 'user');
-	let providerLabel = $derived((user?.authProvider || 'local').toUpperCase());
+	let providerLabel = $derived(
+		enumLabel(AuthProviderSchema, user?.authProvider || AuthProvider.LOCAL).toUpperCase()
+	);
 
 	onMount(() => {
 		loadTokens();
@@ -267,7 +271,7 @@
 			</SectionCard>
 
 			<SectionCard title="Security" description="Password and sign-in">
-				{#if user.authProvider === 'local' || !user.authProvider}
+				{#if user.authProvider === AuthProvider.LOCAL || !user.authProvider}
 					<form
 						onsubmit={(e) => {
 							e.preventDefault();

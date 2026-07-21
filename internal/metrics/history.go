@@ -54,30 +54,17 @@ func (c *Collector) sampleHistory() {
 		if !c.ServerAlive(id) {
 			continue
 		}
-		// Stale heap without a live agent must not record
-		var heapUsed float64
-		if m.AgentConnected {
-			heapUsed = m.HeapUsedMb
-		}
 		t := traffic[id]
 		if t == nil {
 			t = &v1.ProxyRoute{}
 		}
-		batch = append(batch, &v1.MetricsSample{
-			ServerId:         id,
-			Timestamp:        timestamppb.New(now),
-			Tps:              m.Tps,
-			Mspt:             m.Mspt,
-			Players:          int32(m.PlayersOnline),
-			CpuPercent:       m.CpuPercent,
-			MemoryMb:         m.MemoryUsage,
-			HeapUsedMb:       heapUsed,
-			DiskBytes:        m.DiskUsage,
-			ProxyActiveConns: t.ActiveConnections,
-			ProxyBytesIn:     t.BytesToBackend,
-			ProxyBytesOut:    t.BytesToClient,
-			ProxyLogins:      t.Logins,
-		})
+		sample := m.Sample(id)
+		sample.Timestamp = timestamppb.New(now)
+		sample.ProxyActiveConns = t.ActiveConnections
+		sample.ProxyBytesIn = t.BytesToBackend
+		sample.ProxyBytesOut = t.BytesToClient
+		sample.ProxyLogins = t.Logins
+		batch = append(batch, sample)
 	}
 	if err := c.store.CreateMetricsSample(ctx, batch...); err != nil {
 		c.log.Debug("Metrics history: failed to insert samples: %v", err)

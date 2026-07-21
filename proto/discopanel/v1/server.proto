@@ -2,58 +2,186 @@ syntax = "proto3";
 
 package discopanel.v1;
 
+import "discopanel/options/v1/options.proto";
 import "discopanel/v1/storage.proto";
 import "google/protobuf/timestamp.proto";
-import "discopanel/options/v1/options.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
 // Minecraft server management
 service ServerService {
   // Get all servers with optional stats
-  rpc ListServers(ListServersRequest) returns (ListServersResponse);
+  rpc ListServers(ListServersRequest) returns (ListServersResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_READ
+    };
+  }
   // Get single server details
-  rpc GetServer(GetServerRequest) returns (GetServerResponse);
+  rpc GetServer(GetServerRequest) returns (GetServerResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+    };
+  }
   // Fetch container logs
-  rpc GetServerLogs(GetServerLogsRequest) returns (GetServerLogsResponse);
+  rpc GetServerLogs(GetServerLogsRequest) returns (GetServerLogsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+    };
+  }
   // Delete container logs
-  rpc ClearServerLogs(ClearServerLogsRequest) returns (ClearServerLogsResponse);
+  rpc ClearServerLogs(ClearServerLogsRequest) returns (ClearServerLogsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+    };
+  }
   // Find unused port
-  rpc GetNextAvailablePort(GetNextAvailablePortRequest) returns (GetNextAvailablePortResponse);
+  rpc GetNextAvailablePort(GetNextAvailablePortRequest) returns (GetNextAvailablePortResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_READ
+    };
+  }
   // Host physical memory and per-server allocations
-  rpc GetHostMemory(GetHostMemoryRequest) returns (GetHostMemoryResponse);
+  rpc GetHostMemory(GetHostMemoryRequest) returns (GetHostMemoryResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_READ
+    };
+  }
   // Create new server instance
-  rpc CreateServer(CreateServerRequest) returns (CreateServerResponse);
+  rpc CreateServer(CreateServerRequest) returns (CreateServerResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_CREATE
+    };
+  }
   // Modify server settings
-  rpc UpdateServer(UpdateServerRequest) returns (UpdateServerResponse);
+  rpc UpdateServer(UpdateServerRequest) returns (UpdateServerResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+    };
+  }
   // Set a custom server icon from an uploaded image
-  rpc UploadServerIcon(UploadServerIconRequest) returns (UploadServerIconResponse);
+  rpc UploadServerIcon(UploadServerIconRequest) returns (UploadServerIconResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+    };
+  }
   // Remove server and data
-  rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
+  rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_DELETE
+      object_id_field: "id"
+    };
+  }
   // Start server container
-  rpc StartServer(StartServerRequest) returns (StartServerResponse);
+  rpc StartServer(StartServerRequest) returns (StartServerResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_START
+      object_id_field: "id"
+    };
+  }
   // Stop server container
-  rpc StopServer(StopServerRequest) returns (StopServerResponse);
+  rpc StopServer(StopServerRequest) returns (StopServerResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_STOP
+      object_id_field: "id"
+    };
+  }
   // Stop and start container
-  rpc RestartServer(RestartServerRequest) returns (RestartServerResponse);
+  rpc RestartServer(RestartServerRequest) returns (RestartServerResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_RESTART
+      object_id_field: "id"
+    };
+  }
   // Destroy and recreate container from scratch
-  rpc RecreateServer(RecreateServerRequest) returns (RecreateServerResponse);
+  rpc RecreateServer(RecreateServerRequest) returns (RecreateServerResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_RESTART
+      object_id_field: "id"
+    };
+  }
   // Execute console command
-  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
+  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_COMMAND
+      object_id_field: "id"
+    };
+  }
   // Upload server logs to mclo.gs
-  rpc UploadToMCLogs(UploadToMCLogsRequest) returns (UploadToMCLogsResponse);
+  rpc UploadToMCLogs(UploadToMCLogsRequest) returns (UploadToMCLogsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+    };
+  }
   // Performance findings for a server (the autopilot health check)
-  rpc GetServerPerformanceReport(GetServerPerformanceReportRequest) returns (GetServerPerformanceReportResponse);
+  rpc GetServerPerformanceReport(GetServerPerformanceReportRequest) returns (GetServerPerformanceReportResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+    };
+  }
   // Historical metrics samples for charts
-  rpc GetServerMetricsHistory(GetServerMetricsHistoryRequest) returns (GetServerMetricsHistoryResponse);
+  rpc GetServerMetricsHistory(GetServerMetricsHistoryRequest) returns (GetServerMetricsHistoryResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+    };
+  }
   // Hide a finding until its content changes, restore un-hides
-  rpc DismissPerformanceFinding(DismissPerformanceFindingRequest) returns (DismissPerformanceFindingResponse);
+  rpc DismissPerformanceFinding(DismissPerformanceFindingRequest) returns (DismissPerformanceFindingResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+    };
+  }
   // Ledger of automation actions taken on a server
-  rpc GetServerActions(GetServerActionsRequest) returns (GetServerActionsResponse);
+  rpc GetServerActions(GetServerActionsRequest) returns (GetServerActionsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+    };
+  }
   // List world backups for a server
-  rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse);
+  rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+    };
+  }
   // Restore a world backup onto a stopped server
-  rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse);
+  rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_SERVERS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+    };
+  }
 }
 
 // Server list options
@@ -222,7 +350,7 @@ message StartServerRequest {
 
 // Start operation status
 message StartServerResponse {
-  string status = 1;
+  ServerStatus status = 1;
 }
 
 // Server to stop
@@ -232,7 +360,7 @@ message StopServerRequest {
 
 // Stop operation status
 message StopServerResponse {
-  string status = 1;
+  ServerStatus status = 1;
 }
 
 // Server to restart
@@ -242,7 +370,7 @@ message RestartServerRequest {
 
 // Restart operation status
 message RestartServerResponse {
-  string status = 1;
+  ServerStatus status = 1;
 }
 
 // Server to recreate
@@ -252,7 +380,7 @@ message RecreateServerRequest {
 
 // Recreate operation status
 message RecreateServerResponse {
-  string status = 1;
+  ServerStatus status = 1;
 }
 
 // Console command to execute

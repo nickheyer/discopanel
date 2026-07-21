@@ -6,13 +6,17 @@ import (
 	"sort"
 	"sync"
 
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
+// Pseudo indexer name for uploaded modpack archives
+const ManualIndexer = "manual"
+
 // Interface for modpack indexing services
 type ModpackIndexer interface {
-	// Searches for modpacks matching given criteria
-	SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*SearchResult, error)
+	// Searches for modpacks, fills modpacks and total only
+	SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*v1.SearchModpacksResponse, error)
 
 	// Retrieves detailed info for one modpack
 	GetModpack(ctx context.Context, modpackID string) (*v1.IndexedModpack, error)
@@ -22,14 +26,6 @@ type ModpackIndexer interface {
 
 	// Name of this indexer, e.g. fuego or modrinth
 	GetIndexerName() string
-}
-
-// Results of a modpack search
-type SearchResult struct {
-	Modpacks   []*v1.IndexedModpack
-	TotalCount int
-	PageSize   int
-	Offset     int
 }
 
 // Asks an indexer for jars providing one mod id
@@ -61,9 +57,11 @@ type IndexerFactory func(apiKey string, userAgent string) ModpackIndexer
 // Registration facts one indexer declares about itself
 type IndexerInfo struct {
 	Name                 string
-	CredentialProperty   string // Property key holding this indexer's API key
-	ForceIncludeProperty string // Property key holding protected file patterns
-	PackSource           string // Modpack source string this indexer serves
+	CredentialProperty   string               // Property key holding this indexer's API key
+	ForceIncludeProperty string               // Property key holding protected file patterns
+	PackSource           optionsv1.PackSource // Platform this indexer serves
+	RequestsPerSec       float64              // Request pacing, zero uses the default
+	RequestBurst         int
 }
 
 // Tunes registration metadata for one indexer
@@ -79,9 +77,17 @@ func WithForceIncludeProperty(key string) IndexerOption {
 	return func(i *IndexerInfo) { i.ForceIncludeProperty = key }
 }
 
-// Declares the modpack source this indexer serves
-func WithPackSource(source string) IndexerOption {
+// Declares the modpack platform this indexer serves
+func WithPackSource(source optionsv1.PackSource) IndexerOption {
 	return func(i *IndexerInfo) { i.PackSource = source }
+}
+
+// Declares request pacing toward the upstream API
+func WithRequestRate(perSec float64, burst int) IndexerOption {
+	return func(i *IndexerInfo) {
+		i.RequestsPerSec = perSec
+		i.RequestBurst = burst
+	}
 }
 
 type indexerEntry struct {
@@ -122,6 +128,18 @@ func LookupIndexer(name string) (IndexerInfo, bool) {
 	defer registryMu.RUnlock()
 	entry, ok := registry[name]
 	return entry.info, ok
+}
+
+// Pack source behind an indexed modpack row.
+// Manual uploads carry curseforge format archives.
+func PackSourceFor(indexer string) optionsv1.PackSource {
+	if indexer == ManualIndexer {
+		return optionsv1.PackSource_PACK_SOURCE_CURSEFORGE
+	}
+	if info, ok := LookupIndexer(indexer); ok {
+		return info.PackSource
+	}
+	return optionsv1.PackSource_PACK_SOURCE_UNSPECIFIED
 }
 
 // Lists every registered indexer sorted by name

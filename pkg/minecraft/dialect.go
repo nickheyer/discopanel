@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
@@ -27,7 +26,7 @@ func ResolveDialects(loader v1.ModLoader, dataPath, modsDir string) []string {
 func DetectDialects(dataPath, modsDir string) []string {
 	if dataPath != "" {
 		if spec, err := runtimespec.ReadLaunchSpec(dataPath); err == nil && spec != nil {
-			if row, ok := nameIndex[strings.ToLower(spec.Loader)]; ok && len(row.Dialects) > 0 {
+			if row, ok := loaderIndex[spec.Loader]; ok && len(row.Dialects) > 0 {
 				return slices.Clone(row.Dialects)
 			}
 		}

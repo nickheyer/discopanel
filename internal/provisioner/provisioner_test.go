@@ -147,7 +147,7 @@ func TestManagementSecretPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	readSecret := func() string {
-		props, err := minecraft.LoadServerProperties(server.DataPath)
+		props, err := minecraft.LoadPropertiesFile(server.DataPath)
 		if err != nil {
 			t.Fatal(err)
 		}

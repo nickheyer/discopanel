@@ -1,28 +1,23 @@
 package minecraft
 
 import (
+	"cmp"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/protometa"
 	utils "github.com/nickheyer/discopanel/pkg/utils"
 )
 
-// One row of loader facts keyed by proto enum
-// Adding a loader is one enum value plus one row
-// Dialects nil means the install on disk testifies instead
-// Builtins, MavenRanges, Facets, Markers live on defining rows
-// Info is the wire row itself, names come from enum annotations
+// One row of loader facts keyed by proto enum.
+// Every fact comes from ModLoader descriptor annotations,
+// adding a loader is one annotated enum value.
 type LoaderInfo struct {
-	Info        *v1.ModLoaderInfo
-	Dialects    []string      // Manifest formats read, native first
-	Builtins    []string      // Dep ids the platform itself provides
-	MavenRanges bool          // Native manifest speaks maven ranges
-	Facets      []string      // Indexer loader names that source jars
-	Markers     []string      // Data-dir paths proving the platform installed
-	Pack        *PackPlatform // Present on loaders that install packs
+	Info *v1.ModLoaderInfo
+	*optionsv1.LoaderMeta
 }
 
 // Proto enum this row describes
@@ -30,152 +25,8 @@ func (r LoaderInfo) Loader() v1.ModLoader {
 	return r.Info.Loader
 }
 
-// Pack platform facts shared by every loader on that platform
-type PackPlatform struct {
-	Source string
-}
-
-var curseforgePlatform = &PackPlatform{Source: "curseforge"}
-
-var modrinthPlatform = &PackPlatform{Source: "modrinth"}
-
-// Rows in display order, forks precede nothing they depend on
-var registry = []LoaderInfo{
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_VANILLA, Category: "Vanilla"},
-	},
-	{
-		Info:        &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_FORGE, Category: "Forge", ModsDirectory: "mods"},
-		Dialects:    []string{"forge"},
-		Builtins:    []string{"forge", "fml", "minecraft", "java", "mixin"},
-		MavenRanges: true,
-		Facets:      []string{"forge"},
-		Markers:     []string{"libraries/net/minecraftforge"},
-	},
-	{
-		Info:        &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_NEOFORGE, Category: "Forge", ModsDirectory: "mods"},
-		Dialects:    []string{"neoforge", "forge"},
-		Builtins:    []string{"neoforge"},
-		MavenRanges: true,
-		Facets:      []string{"neoforge"},
-		Markers:     []string{"libraries/net/neoforged"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_FABRIC, Category: "Fabric", ModsDirectory: "mods"},
-		Dialects: []string{"fabric"},
-		Builtins: []string{"fabricloader", "minecraft", "java", "mixin"},
-		Facets:   []string{"fabric"},
-		Markers: []string{
-			"libraries/net/fabricmc/fabric-loader",
-			"fabric-server-launch.jar",
-		},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_QUILT, Category: "Fabric", ModsDirectory: "mods"},
-		Dialects: []string{"quilt", "fabric"},
-		Builtins: []string{"quilt_loader", "quilt_base"},
-		Facets:   []string{"quilt", "fabric"},
-		Markers: []string{
-			"libraries/org/quiltmc/quilt-loader",
-			"quilt-server-launch.jar",
-		},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_BUKKIT, Category: "Bukkit", ModsDirectory: "plugins"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_SPIGOT, Category: "Bukkit", ModsDirectory: "plugins"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_PAPER, Category: "Paper", ModsDirectory: "plugins"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_PURPUR, Category: "Paper", ModsDirectory: "plugins"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_PUFFERFISH, Category: "Paper", ModsDirectory: "plugins"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_FOLIA, Category: "Paper", ModsDirectory: "plugins"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_MAGMA, Category: "Hybrid", ModsDirectory: "mods"},
-		Dialects: []string{"forge"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_MAGMA_MAINTAINED, Category: "Hybrid", ModsDirectory: "mods"},
-		Dialects: []string{"forge"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_KETTING, Category: "Hybrid", ModsDirectory: "mods"},
-		Dialects: []string{"forge"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_MOHIST, Category: "Hybrid", ModsDirectory: "mods"},
-		Dialects: []string{"forge"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_YOUER, Category: "Hybrid", ModsDirectory: "mods"},
-		Dialects: []string{"neoforge", "forge"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_BANNER, Category: "Hybrid", ModsDirectory: "mods"},
-		Dialects: []string{"fabric"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_CATSERVER, Category: "Hybrid", ModsDirectory: "mods"},
-		Dialects: []string{"forge"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_ARCLIGHT, Category: "Hybrid", ModsDirectory: "mods"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_SPONGE_VANILLA, Category: "Sponge", ModsDirectory: "mods"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_SPONGE_FORGE, Category: "Sponge", ModsDirectory: "mods"},
-		Dialects: []string{"forge"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_LIMBO, Category: "Lightweight"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_NANO_LIMBO, Category: "Lightweight"},
-	},
-	{
-		Info:     &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_CRUCIBLE, Category: "Other", ModsDirectory: "mods"},
-		Dialects: []string{"forge"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_GLOWSTONE, Category: "Other", ModsDirectory: "plugins"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_CUSTOM, Category: "Other", ModsDirectory: "mods"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_AUTO_CURSEFORGE, Category: "Modpack", ModsDirectory: "mods"},
-		Pack: curseforgePlatform,
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_CURSEFORGE, Category: "Modpack", ModsDirectory: "mods"},
-		Pack: curseforgePlatform,
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_FTBA, Category: "Modpack", ModsDirectory: "mods"},
-	},
-	{
-		Info: &v1.ModLoaderInfo{Loader: v1.ModLoader_MOD_LOADER_MODRINTH, Category: "Modpack", ModsDirectory: "mods"},
-		Pack: modrinthPlatform,
-	},
-}
-
-// Pack platform for a loader, nil when packs never install
-func PackPlatformFor(loader v1.ModLoader) *PackPlatform {
-	if row, ok := loaderIndex[loader]; ok {
-		return row.Pack
-	}
-	return nil
-}
+// Rows sorted by category then enum number
+var registry []LoaderInfo
 
 var (
 	loaderIndex  = map[v1.ModLoader]*LoaderInfo{}
@@ -184,14 +35,31 @@ var (
 )
 
 func init() {
+	for _, l := range protometa.Values[v1.ModLoader]() {
+		meta := protometa.Loader(l)
+		registry = append(registry, LoaderInfo{
+			Info: &v1.ModLoaderInfo{
+				Loader:          l,
+				Name:            protometa.Name(l),
+				DisplayName:     protometa.Label(l),
+				Description:     protometa.Desc(l),
+				Category:        meta.Category,
+				ModsDirectory:   meta.ModsDirectory,
+				SupportsMods:    meta.ModsDirectory != "",
+				SupportsPlugins: meta.ModsDirectory == "plugins",
+			},
+			LoaderMeta: meta,
+		})
+	}
+	slices.SortStableFunc(registry, func(a, b LoaderInfo) int {
+		if c := cmp.Compare(a.Category, b.Category); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Loader(), b.Loader())
+	})
 	for i := range registry {
 		row := &registry[i]
-		l := row.Info.Loader
-		row.Info.Name = protometa.Name(l)
-		row.Info.DisplayName = protometa.Label(l)
-		row.Info.Description = protometa.Desc(l)
-		row.Info.SupportsMods = row.Info.ModsDirectory != ""
-		row.Info.SupportsPlugins = row.Info.ModsDirectory == "plugins"
+		l := row.Loader()
 		loaderIndex[l] = row
 		nameIndex[protometa.Name(l)] = row
 		if len(row.Dialects) > 0 && row.Dialects[0] == protometa.Name(l) {
@@ -215,22 +83,34 @@ func LoaderFor(loader v1.ModLoader) LoaderInfo {
 	if row, ok := loaderIndex[loader]; ok {
 		return *row
 	}
-	return LoaderInfo{Info: &v1.ModLoaderInfo{
-		Loader:      loader,
-		Name:        protometa.Name(loader),
-		DisplayName: protometa.Label(loader),
-		Description: "Unknown mod loader",
-		Category:    "Other",
-	}}
+	return LoaderInfo{
+		Info: &v1.ModLoaderInfo{
+			Loader:      loader,
+			Name:        protometa.Name(loader),
+			DisplayName: protometa.Label(loader),
+			Description: "Unknown mod loader",
+			Category:    optionsv1.ModLoaderCategory_MOD_LOADER_CATEGORY_OTHER,
+		},
+		LoaderMeta: &optionsv1.LoaderMeta{},
+	}
 }
 
-// Maps an indexed modpack to the loader a server runs
-func ServerLoaderForModpack(indexer string) (v1.ModLoader, bool) {
-	switch indexer {
-	case "fuego", "manual":
-		return v1.ModLoader_MOD_LOADER_AUTO_CURSEFORGE, true
-	case "modrinth":
-		return v1.ModLoader_MOD_LOADER_MODRINTH, true
+// Pack source a loader installs from, unspecified when none
+func PackSourceFor(loader v1.ModLoader) optionsv1.PackSource {
+	if row, ok := loaderIndex[loader]; ok {
+		return row.PackSource
+	}
+	return optionsv1.PackSource_PACK_SOURCE_UNSPECIFIED
+}
+
+// Maps a pack source to the loader that auto installs it
+func LoaderForPackSource(src optionsv1.PackSource) (v1.ModLoader, bool) {
+	if src != optionsv1.PackSource_PACK_SOURCE_UNSPECIFIED {
+		for i := range registry {
+			if registry[i].PackSource == src {
+				return registry[i].Loader(), true
+			}
+		}
 	}
 	return v1.ModLoader_MOD_LOADER_UNSPECIFIED, false
 }
@@ -259,7 +139,7 @@ func PackLoaderNames() []string {
 
 // Returns the mods storage path for a server
 func GetModsPath(serverDataPath string, loader v1.ModLoader) string {
-	dir := LoaderFor(loader).Info.ModsDirectory
+	dir := LoaderFor(loader).ModsDirectory
 	if dir == "" {
 		return ""
 	}
@@ -268,7 +148,7 @@ func GetModsPath(serverDataPath string, loader v1.ModLoader) string {
 
 // Checks if a file is a valid mod for loader
 func IsValidModFile(filename string, loader v1.ModLoader) bool {
-	if LoaderFor(loader).Info.ModsDirectory == "" {
+	if LoaderFor(loader).ModsDirectory == "" {
 		return false
 	}
 	return strings.EqualFold(filepath.Ext(filename), ".jar")

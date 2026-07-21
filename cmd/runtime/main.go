@@ -19,6 +19,7 @@ import (
 	"time"
 
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -55,7 +56,7 @@ func main() {
 		fmt.Printf("[discopanel-runtime] WARN: agent spec version %d is newer than this runtime understands (%d), update the runtime image\n",
 			agentSpec.Version, runtimespec.AgentSpecVersion)
 	}
-	agentEnabled := agentSpec != nil && agentSpec.Enabled && agentSpec.PanelURL != "" && agentSpec.Token != ""
+	agentEnabled := agentSpec != nil && agentSpec.Enabled && agentSpec.PanelUrl != "" && agentSpec.Token != ""
 
 	uid := getEnvInt("UID", 1000)
 	gid := getEnvInt("GID", 1000)
@@ -157,7 +158,7 @@ func main() {
 	}()
 
 	if agentEnabled {
-		gcTail := newGCLogTail(gcLogPath(), spec.JavaMajor)
+		gcTail := newGCLogTail(gcLogPath(), int(spec.JavaMajor))
 		go gcTail.run(sup.done())
 		go sup.runProcSampler(gcTail)
 		if agentListener != nil {
@@ -185,8 +186,8 @@ func main() {
 
 // Holds the shared state of a running server process
 type supervisor struct {
-	spec        *runtimespec.LaunchSpec
-	agentSpec   *runtimespec.AgentSpec
+	spec        *v1.LaunchSpec
+	agentSpec   *v1.AgentSpec
 	startedAt   time.Time
 	pid         int
 	events      *consoleEvents
@@ -651,11 +652,11 @@ func exitCodeOf(cmd *exec.Cmd, waitErr error) int {
 	return 1
 }
 
-func launchTarget(spec *runtimespec.LaunchSpec) string {
+func launchTarget(spec *v1.LaunchSpec) string {
 	switch spec.Kind {
-	case runtimespec.LaunchKindJar:
+	case v1.LaunchKind_LAUNCH_KIND_JAR:
 		return spec.Jar
-	case runtimespec.LaunchKindArgsFile:
+	case v1.LaunchKind_LAUNCH_KIND_ARGS_FILE:
 		return "@" + spec.ArgsFile
 	default:
 		return spec.Exec

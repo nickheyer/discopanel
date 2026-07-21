@@ -26,7 +26,9 @@ import (
 	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1/agentv1connect"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/transfer"
 	web "github.com/nickheyer/discopanel/web/discopanel"
 	"golang.org/x/net/http2"
@@ -286,9 +288,10 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			procedure := req.Spec().Procedure
+			perm := protometa.Perm(procedure)
 
 			// Public procedures - no auth required
-			if rbac.PublicProcedures[procedure] {
+			if perm.GetPublic() {
 				return next(ctx, req)
 			}
 
@@ -305,20 +308,19 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 			ctx = metrics.WithTrace(metrics.WithSource(ctx, user.Username))
 
 			// Authenticated-only procedures (no specific resource permission needed)
-			if rbac.AuthenticatedOnlyProcedures[procedure] {
+			if perm.GetSession() {
 				return next(ctx, req)
 			}
 
-			// Unmapped procedures fail closed
-			perm, ok := rbac.ProcedurePermissions[procedure]
-			if !ok {
-				s.log.Error("RBAC mapping missing for %s", procedure)
-				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("no permission mapping for %s", procedure))
+			// Unannotated procedures fail closed
+			if perm == nil {
+				s.log.Error("RBAC annotation missing for %s", procedure)
+				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("no permission annotation for %s", procedure))
 			}
 
 			objectID := "*"
-			if perm.ObjectIDField != "" {
-				objectID = extractObjectID(req, perm.ObjectIDField)
+			if perm.ObjectIdField != "" {
+				objectID = extractObjectID(req, perm.ObjectIdField)
 				if objectID != "*" {
 					resolved, err := s.resolveScopeObject(ctx, perm.Scope, objectID)
 					if err != nil {
@@ -333,7 +335,7 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 				return nil, connect.NewError(connect.CodeInternal, err)
 			}
 			if !allowed {
-				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("insufficient permissions for %s/%s", perm.Resource, perm.Action))
+				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("insufficient permissions for %s/%s", protometa.Name(perm.Resource), protometa.Name(perm.Action)))
 			}
 
 			return next(ctx, req)
@@ -343,17 +345,17 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 
 // Lists high-frequency endpoints excluded from logging
 var pollingProcedures = []string{
-	"/discopanel.v1.AuthService/GetAuthStatus",
-	"/discopanel.v1.ServerService/ListServers",
-	"/discopanel.v1.ServerService/GetServer",
-	"/discopanel.v1.ServerService/GetServerLogs",
-	"/discopanel.v1.ProxyService/GetProxyStatus",
-	"/discopanel.v1.SupportService/GetApplicationLogs",
-	"/discopanel.v1.UploadService/UploadChunk",
-	"/discopanel.v1.UploadService/GetUploadStatus",
-	"/discopanel.v1.FileService/GetExtractionStatus",
-	"/discopanel.v1.ServerService/GetServerPerformanceReport",
-	"/discopanel.v1.ServerService/GetServerActions",
+	discopanelv1connect.AuthServiceGetAuthStatusProcedure,
+	discopanelv1connect.ServerServiceListServersProcedure,
+	discopanelv1connect.ServerServiceGetServerProcedure,
+	discopanelv1connect.ServerServiceGetServerLogsProcedure,
+	discopanelv1connect.ProxyServiceGetProxyStatusProcedure,
+	discopanelv1connect.SupportServiceGetApplicationLogsProcedure,
+	discopanelv1connect.UploadServiceUploadChunkProcedure,
+	discopanelv1connect.UploadServiceGetUploadStatusProcedure,
+	discopanelv1connect.FileServiceGetExtractionStatusProcedure,
+	discopanelv1connect.ServerServiceGetServerPerformanceReportProcedure,
+	discopanelv1connect.ServerServiceGetServerActionsProcedure,
 }
 
 // Reports whether a procedure is a polling endpoint
@@ -440,21 +442,21 @@ func isConnectPath(path string) bool {
 }
 
 // Resolves scoped ids to the owning server id
-func (s *Server) resolveScopeObject(ctx context.Context, scope rbac.ObjectScope, objectID string) (string, error) {
+func (s *Server) resolveScopeObject(ctx context.Context, scope optionsv1.ObjectScope, objectID string) (string, error) {
 	switch scope {
-	case rbac.ScopeTask:
+	case optionsv1.ObjectScope_OBJECT_SCOPE_TASK:
 		task, err := s.store.GetScheduledTask(ctx, objectID)
 		if err != nil {
 			return "", fmt.Errorf("task not found")
 		}
 		return task.ServerId, nil
-	case rbac.ScopeTaskExecution:
+	case optionsv1.ObjectScope_OBJECT_SCOPE_TASK_EXECUTION:
 		execution, err := s.store.GetTaskExecution(ctx, objectID)
 		if err != nil {
 			return "", fmt.Errorf("task execution not found")
 		}
 		return execution.ServerId, nil
-	case rbac.ScopeModule:
+	case optionsv1.ObjectScope_OBJECT_SCOPE_MODULE:
 		mod, err := s.store.GetModule(ctx, objectID)
 		if err != nil {
 			return "", fmt.Errorf("module not found")

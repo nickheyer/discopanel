@@ -33,7 +33,7 @@ const maxInlineFileBytes = 10 << 20
 
 // Tracks an in-progress or completed extraction
 type extractionOp struct {
-	State          string // "extracting", "completed", "failed"
+	State          v1.ExtractionState
 	FilesExtracted atomic.Int32
 	Error          string
 	CompletedAt    time.Time
@@ -220,7 +220,7 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
 	uploadedPath := filepath.Join(targetPath, targetFilename)
-	s.rec.Record(ctx, server.Id, "file.upload", metrics.Attrs{"path": uploadedPath}, "uploaded file %s", uploadedPath)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_FILE_UPLOAD, metrics.Attrs{"path": uploadedPath}, "uploaded file %s", uploadedPath)
 
 	return connect.NewResponse(&v1.SaveUploadedFileResponse{
 		Message: "File uploaded successfully",
@@ -256,7 +256,7 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 		s.log.Error("Failed to write file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update file"))
 	}
-	s.rec.Record(ctx, server.Id, "file.edit", metrics.Attrs{"path": msg.Path}, "edited file %s", msg.Path)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_FILE_EDIT, metrics.Attrs{"path": msg.Path}, "edited file %s", msg.Path)
 
 	return connect.NewResponse(&v1.UpdateFileResponse{
 		Message: "File updated successfully",
@@ -310,7 +310,7 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete %s", p))
 		}
 	}
-	s.rec.Record(ctx, server.Id, "file.delete", metrics.Attrs{"paths": strings.Join(paths, ", ")}, "deleted %s", strings.Join(paths, ", "))
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_FILE_DELETE, metrics.Attrs{"paths": strings.Join(paths, ", ")}, "deleted %s", strings.Join(paths, ", "))
 
 	return connect.NewResponse(&v1.DeleteFileResponse{}), nil
 }
@@ -369,7 +369,7 @@ func (s *FileService) RenameFile(ctx context.Context, req *connect.Request[v1.Re
 		s.log.Error("Failed to rename file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to rename file"))
 	}
-	s.rec.Record(ctx, server.Id, "file.rename", metrics.Attrs{"from": msg.Path, "to": newPath}, "renamed %s to %s", msg.Path, msg.NewName)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_FILE_RENAME, metrics.Attrs{"from": msg.Path, "to": newPath}, "renamed %s to %s", msg.Path, msg.NewName)
 
 	return connect.NewResponse(&v1.RenameFileResponse{
 		Message: "File renamed successfully",
@@ -422,7 +422,7 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 
 	// Start async extraction
 	opID := uuid.New().String()
-	op := &extractionOp{State: "extracting"}
+	op := &extractionOp{State: v1.ExtractionState_EXTRACTION_STATE_EXTRACTING}
 	s.extractions.Store(opID, op)
 
 	bgCtx := detach(ctx)
@@ -430,11 +430,11 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		_, err := files.ExtractArchive(bgCtx, fullArchivePath, destPath, &op.FilesExtracted)
 		if err != nil {
 			op.Error = err.Error()
-			op.State = "failed"
+			op.State = v1.ExtractionState_EXTRACTION_STATE_FAILED
 			s.log.Error("Extraction %s failed: %v", opID, err)
 		} else {
-			op.State = "completed"
-			s.rec.Record(bgCtx, server.Id, "file.extract", metrics.Attrs{"archive": msg.Path, "files": strconv.Itoa(int(op.FilesExtracted.Load()))}, "extracted %s (%d files)", msg.Path, op.FilesExtracted.Load())
+			op.State = v1.ExtractionState_EXTRACTION_STATE_COMPLETED
+			s.rec.Record(bgCtx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_FILE_EXTRACT, metrics.Attrs{"archive": msg.Path, "files": strconv.Itoa(int(op.FilesExtracted.Load()))}, "extracted %s (%d files)", msg.Path, op.FilesExtracted.Load())
 			s.log.Info("Extraction %s completed: %d files", opID, op.FilesExtracted.Load())
 		}
 		op.CompletedAt = time.Now()
@@ -494,7 +494,7 @@ func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.
 		s.log.Error("Failed to create folder: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create folder"))
 	}
-	s.rec.Record(ctx, server.Id, "file.mkdir", metrics.Attrs{"path": msg.Path}, "created folder %s", msg.Path)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_FILE_MKDIR, metrics.Attrs{"path": msg.Path}, "created folder %s", msg.Path)
 
 	return connect.NewResponse(&v1.CreateFolderResponse{
 		Message: "Folder created successfully",
@@ -550,7 +550,7 @@ func (s *FileService) MoveFile(ctx context.Context, req *connect.Request[v1.Move
 		}
 		os.RemoveAll(srcFull)
 	}
-	s.rec.Record(ctx, server.Id, "file.move", metrics.Attrs{"from": msg.SourcePath, "to": msg.DestinationPath}, "moved %s to %s", msg.SourcePath, msg.DestinationPath)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_FILE_MOVE, metrics.Attrs{"from": msg.SourcePath, "to": msg.DestinationPath}, "moved %s to %s", msg.SourcePath, msg.DestinationPath)
 
 	return connect.NewResponse(&v1.MoveFileResponse{
 		Message: "File moved successfully",
@@ -654,7 +654,7 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 	}
 
 	archivePath, _ := filepath.Rel(server.DataPath, destFull)
-	s.rec.Record(ctx, server.Id, "file.archive", metrics.Attrs{"path": archivePath}, "created archive %s", archivePath)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_FILE_ARCHIVE, metrics.Attrs{"path": archivePath}, "created archive %s", archivePath)
 	return connect.NewResponse(&v1.CreateArchiveResponse{
 		Message:       "Archive created successfully",
 		ArchivePath:   archivePath,

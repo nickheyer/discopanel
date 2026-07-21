@@ -1,11 +1,14 @@
-// Defines contract between provisioner and runtime entrypoint, stdlib only
+// File paths and IO for the panel to runtime contract.
+// Every spec on disk is a v1 proto message held as protojson.
 package runtimespec
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 const (
@@ -28,52 +31,6 @@ const (
 	AgentSpecVersion = 1
 )
 
-// Launch kinds understood by the runtime entrypoint
-const (
-	LaunchKindJar      = "jar"       // Java <flags> -jar <Jar> <args> nogui
-	LaunchKindArgsFile = "args-file" // Java <flags> @<ArgsFile> nogui (modern Forge/NeoForge)
-	LaunchKindCustom   = "custom"    // Java <flags> <Exec tokens verbatim>
-)
-
-// Tells runtime entrypoint how to start the server process
-type LaunchSpec struct {
-	Version   int    `json:"version"`
-	Kind      string `json:"kind"`
-	Jar       string `json:"jar,omitempty"`
-	ArgsFile  string `json:"args_file,omitempty"`
-	Exec      string `json:"exec,omitempty"` // Whitespace-tokenized for LaunchKindCustom
-	Loader    string `json:"loader"`
-	McVersion string `json:"mc_version"`
-	JavaMajor int    `json:"java_major"`
-}
-
-// Tells runtime supervisor how to reach the panel's agent endpoint
-type AgentSpec struct {
-	Version  int    `json:"version"`
-	Enabled  bool   `json:"enabled"`
-	PanelURL string `json:"panel_url"`
-	Token    string `json:"token"`
-	ServerID string `json:"server_id"`
-}
-
-// Identifies the modpack a server was provisioned from
-type ModpackRef struct {
-	Source    string `json:"source"` // "curseforge" | "modrinth" | "zip"
-	ID        string `json:"id"`
-	VersionID string `json:"version_id,omitempty"`
-}
-
-// Records the provisioned state of a server data directory
-type Manifest struct {
-	Version       int         `json:"version"`
-	Loader        string      `json:"loader"`
-	LoaderVersion string      `json:"loader_version,omitempty"`
-	McVersion     string      `json:"mc_version"`
-	JavaMajor     int         `json:"java_major"`
-	Modpack       *ModpackRef `json:"modpack,omitempty"`
-	ProvisionedAt string      `json:"provisioned_at"`
-}
-
 func LaunchPath(dataDir string) string {
 	return filepath.Join(dataDir, StateDir, LaunchFileName)
 }
@@ -82,8 +39,12 @@ func AgentPath(dataDir string) string {
 	return filepath.Join(dataDir, StateDir, AgentFileName)
 }
 
+func ManifestPath(dataDir string) string {
+	return filepath.Join(dataDir, StateDir, ManifestFileName)
+}
+
 // Loads agent spec, nil when absent
-func ReadAgentSpec(dataDir string) (*AgentSpec, error) {
+func ReadAgentSpec(dataDir string) (*v1.AgentSpec, error) {
 	data, err := os.ReadFile(AgentPath(dataDir))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -91,22 +52,22 @@ func ReadAgentSpec(dataDir string) (*AgentSpec, error) {
 		}
 		return nil, err
 	}
-	var spec AgentSpec
-	if err := json.Unmarshal(data, &spec); err != nil {
+	var spec v1.AgentSpec
+	if err := protojson.Unmarshal(data, &spec); err != nil {
 		return nil, fmt.Errorf("invalid agent spec: %w", err)
 	}
 	return &spec, nil
 }
 
 // Persists agent spec, file kept unreadable by group or world
-func WriteAgentSpec(dataDir string, spec *AgentSpec) error {
+func WriteAgentSpec(dataDir string, spec *v1.AgentSpec) error {
 	if err := os.MkdirAll(filepath.Join(dataDir, StateDir), 0755); err != nil {
 		return err
 	}
 	if spec.Version == 0 {
 		spec.Version = AgentSpecVersion
 	}
-	data, err := json.MarshalIndent(spec, "", "  ")
+	data, err := protojson.Marshal(spec)
 	if err != nil {
 		return err
 	}
@@ -131,32 +92,28 @@ func WriteAgentSpec(dataDir string, spec *AgentSpec) error {
 	return nil
 }
 
-func ManifestPath(dataDir string) string {
-	return filepath.Join(dataDir, StateDir, ManifestFileName)
-}
-
 // Loads the launch spec from a server data directory
-func ReadLaunchSpec(dataDir string) (*LaunchSpec, error) {
+func ReadLaunchSpec(dataDir string) (*v1.LaunchSpec, error) {
 	data, err := os.ReadFile(LaunchPath(dataDir))
 	if err != nil {
 		return nil, err
 	}
-	var spec LaunchSpec
-	if err := json.Unmarshal(data, &spec); err != nil {
+	var spec v1.LaunchSpec
+	if err := protojson.Unmarshal(data, &spec); err != nil {
 		return nil, fmt.Errorf("invalid launch spec: %w", err)
 	}
 	return &spec, nil
 }
 
 // Persists the launch spec into a server data directory
-func WriteLaunchSpec(dataDir string, spec *LaunchSpec) error {
+func WriteLaunchSpec(dataDir string, spec *v1.LaunchSpec) error {
 	if err := os.MkdirAll(filepath.Join(dataDir, StateDir), 0755); err != nil {
 		return err
 	}
 	if spec.Version == 0 {
 		spec.Version = LaunchSpecVersion
 	}
-	data, err := json.MarshalIndent(spec, "", "  ")
+	data, err := protojson.Marshal(spec)
 	if err != nil {
 		return err
 	}
@@ -164,7 +121,7 @@ func WriteLaunchSpec(dataDir string, spec *LaunchSpec) error {
 }
 
 // Loads provision manifest, nil when absent
-func ReadManifest(dataDir string) (*Manifest, error) {
+func ReadManifest(dataDir string) (*v1.Manifest, error) {
 	data, err := os.ReadFile(ManifestPath(dataDir))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -172,19 +129,19 @@ func ReadManifest(dataDir string) (*Manifest, error) {
 		}
 		return nil, err
 	}
-	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
+	var m v1.Manifest
+	if err := protojson.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("invalid provision manifest: %w", err)
 	}
 	return &m, nil
 }
 
 // Persists the provision manifest into a server data directory
-func WriteManifest(dataDir string, m *Manifest) error {
+func WriteManifest(dataDir string, m *v1.Manifest) error {
 	if err := os.MkdirAll(filepath.Join(dataDir, StateDir), 0755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(m, "", "  ")
+	data, err := protojson.Marshal(m)
 	if err != nil {
 		return err
 	}

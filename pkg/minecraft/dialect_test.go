@@ -100,7 +100,7 @@ func TestResolveDialects(t *testing.T) {
 	}
 
 	// A launch spec naming a loader outranks stale libraries
-	if err := runtimespec.WriteLaunchSpec(dir, &runtimespec.LaunchSpec{Loader: "fabric"}); err != nil {
+	if err := runtimespec.WriteLaunchSpec(dir, &v1.LaunchSpec{Loader: v1.ModLoader_MOD_LOADER_FABRIC}); err != nil {
 		t.Fatal(err)
 	}
 	if got := ResolveDialects(v1.ModLoader_MOD_LOADER_MODRINTH, dir, mods); !slices.Equal(got, []string{"fabric"}) {
@@ -108,7 +108,7 @@ func TestResolveDialects(t *testing.T) {
 	}
 
 	// Hybrid brands in the spec resolve through their registry row
-	if err := runtimespec.WriteLaunchSpec(dir, &runtimespec.LaunchSpec{Loader: "mohist"}); err != nil {
+	if err := runtimespec.WriteLaunchSpec(dir, &v1.LaunchSpec{Loader: v1.ModLoader_MOD_LOADER_MOHIST}); err != nil {
 		t.Fatal(err)
 	}
 	if got := ResolveDialects(v1.ModLoader_MOD_LOADER_CUSTOM, dir, mods); !slices.Equal(got, []string{"forge"}) {

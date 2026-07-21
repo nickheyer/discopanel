@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	web "github.com/nickheyer/discopanel/web/discopanel"
 	"gopkg.in/yaml.v3"
 )
@@ -79,7 +79,7 @@ func NewOpenAPIHandler(log *logger.Logger, isAuthEnabled func() bool) http.Handl
 						}
 						// Mark public operations as no-auth
 						procedure := "/" + strings.TrimPrefix(path, "/")
-						if rbac.PublicProcedures[procedure] {
+						if perm := protometa.Perm(procedure); perm.GetPublic() {
 							op["security"] = []any{}
 						}
 					}

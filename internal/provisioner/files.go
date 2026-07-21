@@ -53,7 +53,7 @@ func (p *Provisioner) applyConfigFiles(ctx context.Context, server *v1.Server, c
 
 // Merges annotated fields and custom pairs into server.properties
 func (p *Provisioner) writeServerProperties(server *v1.Server, cfg *v1.ServerProperties, mcVersion string) error {
-	props := minecraft.ServerProperties{}
+	props := minecraft.PropertiesFile{}
 
 	m := cfg.ProtoReflect()
 	for _, pr := range protometa.Props(m.Descriptor()) {
@@ -81,7 +81,7 @@ func (p *Provisioner) writeServerProperties(server *v1.Server, cfg *v1.ServerPro
 	if minecraft.SupportsManagementProtocol(mcVersion) {
 		if agentEnabled {
 			secret := ""
-			if existing, err := minecraft.LoadServerProperties(server.DataPath); err == nil {
+			if existing, err := minecraft.LoadPropertiesFile(server.DataPath); err == nil {
 				secret = existing["management-server-secret"]
 			}
 			if secret == "" {
@@ -116,11 +116,11 @@ func (p *Provisioner) writeServerProperties(server *v1.Server, cfg *v1.ServerPro
 		}
 	}
 
-	return minecraft.SaveServerProperties(server.DataPath, props)
+	return minecraft.SavePropertiesFile(server.DataPath, props)
 }
 
 // Picks a management port that avoids game and RCON binds
-func pickManagementPort(props minecraft.ServerProperties) int {
+func pickManagementPort(props minecraft.PropertiesFile) int {
 	taken := map[string]bool{
 		props["server-port"]: true,
 		props["rcon.port"]:   true,

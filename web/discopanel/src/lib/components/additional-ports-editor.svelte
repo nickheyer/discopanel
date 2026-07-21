@@ -5,8 +5,13 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Plus, X, AlertCircle } from '@lucide/svelte';
 	import type { AdditionalPort } from '$lib/proto/discopanel/v1/storage_pb';
-	import { AdditionalPortSchema } from '$lib/proto/discopanel/v1/storage_pb';
+	import {
+		AdditionalPortSchema,
+		ModuleProtocol,
+		ModuleProtocolSchema
+	} from '$lib/proto/discopanel/v1/storage_pb';
 	import { create } from '@bufbuild/protobuf';
+	import { enumLabel } from '$lib/proto-meta';
 
 	interface Props {
 		ports?: AdditionalPort[];
@@ -27,7 +32,8 @@
 			const duplicate = ports.some(
 				(p, i) => i !== index && p.hostPort === value && p.protocol === port.protocol
 			);
-			if (duplicate) return `Duplicate port ${value}/${port.protocol}`;
+			if (duplicate)
+				return `Duplicate port ${value}/${enumLabel(ModuleProtocolSchema, port.protocol || ModuleProtocol.TCP)}`;
 			return '';
 		});
 	});
@@ -37,7 +43,7 @@
 			name: '',
 			containerPort: findNextAvailablePort(),
 			hostPort: findNextAvailablePort(),
-			protocol: 'tcp'
+			protocol: ModuleProtocol.TCP
 		});
 		ports = [...ports, newPort];
 		onchange?.(ports);
@@ -132,16 +138,20 @@
 						<div class="sm:col-span-2">
 							<Select
 								type="single"
-								value={port.protocol}
-								onValueChange={(v) => updatePort(index, 'protocol', v)}
+								value={String(port.protocol)}
+								onValueChange={(v) => updatePort(index, 'protocol', Number(v))}
 								{disabled}
 							>
 								<SelectTrigger class="h-8 w-full text-xs">
-									<span>{port.protocol.toUpperCase()}</span>
+									<span>{enumLabel(ModuleProtocolSchema, port.protocol || ModuleProtocol.TCP)}</span>
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="tcp">TCP</SelectItem>
-									<SelectItem value="udp">UDP</SelectItem>
+									<SelectItem value={String(ModuleProtocol.TCP)}>
+										{enumLabel(ModuleProtocolSchema, ModuleProtocol.TCP)}
+									</SelectItem>
+									<SelectItem value={String(ModuleProtocol.UDP)}>
+										{enumLabel(ModuleProtocolSchema, ModuleProtocol.UDP)}
+									</SelectItem>
 								</SelectContent>
 							</Select>
 						</div>

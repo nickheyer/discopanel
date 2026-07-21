@@ -170,7 +170,7 @@ func (s *ServerService) RestoreBackup(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restore backup: %w", err))
 	}
 
-	s.rec.Record(ctx, server.Id, "backup.restore", metrics.Attrs{"file": req.Msg.FileName}, "restored backup %s", req.Msg.FileName)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_BACKUP_RESTORE, metrics.Attrs{"file": req.Msg.FileName}, "restored backup %s", req.Msg.FileName)
 	return connect.NewResponse(&v1.RestoreBackupResponse{
 		Message: fmt.Sprintf("Restored %s", req.Msg.FileName),
 	}), nil

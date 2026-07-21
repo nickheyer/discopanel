@@ -93,21 +93,9 @@ func (s *ProxyService) GetProxyStatus(ctx context.Context, req *connect.Request[
 		listeners = []*v1.ProxyListener{}
 	}
 
-	// Convert listeners to proto format and ports array
-	protoListeners := make([]*v1.ProxyListener, len(listeners))
 	listenPorts := make([]int32, len(listeners))
 	for i, l := range listeners {
-		listenPorts[i] = int32(l.Port)
-		protoListeners[i] = &v1.ProxyListener{
-			Id:          l.Id,
-			Name:        l.Name,
-			Description: l.Description,
-			Port:        int32(l.Port),
-			Enabled:     l.Enabled,
-			IsDefault:   l.IsDefault,
-			CreatedAt:   l.CreatedAt,
-			UpdatedAt:   l.UpdatedAt,
-		}
+		listenPorts[i] = l.Port
 	}
 
 	// Primary port
@@ -129,7 +117,7 @@ func (s *ProxyService) GetProxyStatus(ctx context.Context, req *connect.Request[
 		Enabled:      proxyConfig.Enabled,
 		BaseUrl:      proxyConfig.BaseUrl,
 		ListenPorts:  listenPorts,
-		Listeners:    protoListeners,
+		Listeners:    listeners,
 		ListenPort:   primaryPort,
 		Running:      running,
 		ActiveRoutes: activeRoutes,
@@ -137,7 +125,7 @@ func (s *ProxyService) GetProxyStatus(ctx context.Context, req *connect.Request[
 }
 
 // Updates proxy configuration
-func (s *ProxyService) UpdateProxyConfig(ctx context.Context, req *connect.Request[v1.UpdateProxyConfigRequest]) (*connect.Response[v1.UpdateProxyConfigResponse], error) {
+func (s *ProxyService) UpdateProxyConfig(ctx context.Context, req *connect.Request[v1.UpdateProxyConfigRequest]) (*connect.Response[v1.GetProxyStatusResponse], error) {
 	msg := req.Msg
 
 	// Save to database
@@ -179,21 +167,8 @@ func (s *ProxyService) UpdateProxyConfig(ctx context.Context, req *connect.Reque
 		}
 	}
 
-	// Return updated status (same as GetProxyStatus response)
-	statusResp, err := s.GetProxyStatus(ctx, connect.NewRequest(&v1.GetProxyStatusRequest{}))
-	if err != nil {
-		return nil, err
-	}
-
-	return connect.NewResponse(&v1.UpdateProxyConfigResponse{
-		Enabled:      statusResp.Msg.Enabled,
-		BaseUrl:      statusResp.Msg.BaseUrl,
-		ListenPorts:  statusResp.Msg.ListenPorts,
-		Listeners:    statusResp.Msg.Listeners,
-		ListenPort:   statusResp.Msg.ListenPort,
-		Running:      statusResp.Msg.Running,
-		ActiveRoutes: statusResp.Msg.ActiveRoutes,
-	}), nil
+	// Return updated status, callers read it like GetProxyStatus
+	return s.GetProxyStatus(ctx, connect.NewRequest(&v1.GetProxyStatusRequest{}))
 }
 
 // Gets proxy listeners
@@ -219,16 +194,7 @@ func (s *ProxyService) GetProxyListeners(ctx context.Context, req *connect.Reque
 		}
 
 		protoListeners[i] = &v1.ProxyListenerWithCount{
-			Listener: &v1.ProxyListener{
-				Id:          listener.Id,
-				Name:        listener.Name,
-				Description: listener.Description,
-				Port:        int32(listener.Port),
-				Enabled:     listener.Enabled,
-				IsDefault:   listener.IsDefault,
-				CreatedAt:   listener.CreatedAt,
-				UpdatedAt:   listener.UpdatedAt,
-			},
+			Listener:    listener,
 			ServerCount: count,
 		}
 	}
@@ -282,18 +248,7 @@ func (s *ProxyService) CreateProxyListener(ctx context.Context, req *connect.Req
 		}
 	}
 
-	return connect.NewResponse(&v1.CreateProxyListenerResponse{
-		Listener: &v1.ProxyListener{
-			Id:          listener.Id,
-			Name:        listener.Name,
-			Description: listener.Description,
-			Port:        int32(listener.Port),
-			Enabled:     listener.Enabled,
-			IsDefault:   listener.IsDefault,
-			CreatedAt:   listener.CreatedAt,
-			UpdatedAt:   listener.UpdatedAt,
-		},
-	}), nil
+	return connect.NewResponse(&v1.CreateProxyListenerResponse{Listener: listener}), nil
 }
 
 // Updates a proxy listener
@@ -351,18 +306,7 @@ func (s *ProxyService) UpdateProxyListener(ctx context.Context, req *connect.Req
 		}
 	}
 
-	return connect.NewResponse(&v1.UpdateProxyListenerResponse{
-		Listener: &v1.ProxyListener{
-			Id:          listener.Id,
-			Name:        listener.Name,
-			Description: listener.Description,
-			Port:        int32(listener.Port),
-			Enabled:     listener.Enabled,
-			IsDefault:   listener.IsDefault,
-			CreatedAt:   listener.CreatedAt,
-			UpdatedAt:   listener.UpdatedAt,
-		},
-	}), nil
+	return connect.NewResponse(&v1.UpdateProxyListenerResponse{Listener: listener}), nil
 }
 
 // Deletes a proxy listener
@@ -390,9 +334,7 @@ func (s *ProxyService) DeleteProxyListener(ctx context.Context, req *connect.Req
 		}
 	}
 
-	return connect.NewResponse(&v1.DeleteProxyListenerResponse{
-		Status: "deleted",
-	}), nil
+	return connect.NewResponse(&v1.DeleteProxyListenerResponse{}), nil
 }
 
 // Gets server routing configuration
@@ -577,7 +519,7 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 		if hostname != "" {
 			msgText = "routed hostname " + hostname
 		}
-		s.rec.Record(ctx, server.Id, "routing.update", metrics.Attrs{"hostname": hostname, "listener": listenerID}, "%s", msgText)
+		s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_ROUTING_UPDATE, metrics.Attrs{"hostname": hostname, "listener": listenerID}, "%s", msgText)
 	}
 
 	// Save only the columns this request owns
@@ -593,7 +535,6 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 	}
 
 	return connect.NewResponse(&v1.UpdateServerRoutingResponse{
-		Status:          "Routing updated successfully",
 		Hostname:        hostname,
 		ProxyListenerId: listenerID,
 	}), nil

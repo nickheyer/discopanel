@@ -29,18 +29,18 @@ func doctorPorts(cfg *config.Config) []*v1.ModulePort {
 		proxied = cfg.Proxy.Enabled
 	}
 	return []*v1.ModulePort{
-		{Name: "Web", ContainerPort: 8190, HostPort: port, Protocol: "http", ProxyEnabled: proxied},
+		{Name: "Web", ContainerPort: 8190, HostPort: port, Protocol: v1.ModuleProtocol_MODULE_PROTOCOL_HTTP, ProxyEnabled: proxied},
 	}
 }
 
-func doctorEnv() string {
-	return `{
+func doctorEnv() map[string]string {
+	return map[string]string{
 		"DISCOPANEL_DATA_DIR": "{{config.storage.data_dir}}",
-		"POLL_INTERVAL": "15s",
-		"DOCTOR_MODE": "repair",
+		"POLL_INTERVAL":       "15s",
+		"DOCTOR_MODE":         "repair",
 		"DOCTOR_INSTALL_DEPS": "on",
-		"PORT": "8190"
-	}`
+		"PORT":                "8190",
+	}
 }
 
 // Default access urls for the seeded doctor instance
@@ -48,8 +48,10 @@ func doctorAccessURLs() []string {
 	return []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"}
 }
 
-func doctorVolumes() string {
-	return `[{"source": "{{config.storage.data_dir}}", "target": "/data", "read_only": false}]`
+func doctorVolumes() []*v1.VolumeMount {
+	return []*v1.VolumeMount{
+		{Source: "{{config.storage.data_dir}}", Target: "/data"},
+	}
 }
 
 // Seeds missing built-in templates, never touches existing rows
@@ -68,23 +70,25 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			RequiresServer: true,
 			Icon:           "users",
 			Ports: []*v1.ModulePort{
-				{Name: "Bedrock", ContainerPort: 19132, HostPort: 0, Protocol: "udp", ProxyEnabled: true},
+				{Name: "Bedrock", ContainerPort: 19132, HostPort: 0, Protocol: v1.ModuleProtocol_MODULE_PROTOCOL_UDP, ProxyEnabled: true},
 			},
 			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Bedrock.host_port}}"},
-			DefaultEnv: `{
-				"PUID": "{{host.uid}}",
-				"PGID": "{{host.gid}}",
-				"OVERWRITE_CONFIG": "false",
-				"BEDROCK_ADDRESS": "0.0.0.0",
-				"BEDROCK_PORT": "{{module.ports.Bedrock.container_port}}",
-				"BEDROCK_MOTD1": "GeyserMC",
-				"BEDROCK_MOTD2": "Minecraft Server",
+			DefaultEnv: map[string]string{
+				"PUID":               "{{host.uid}}",
+				"PGID":               "{{host.gid}}",
+				"OVERWRITE_CONFIG":   "false",
+				"BEDROCK_ADDRESS":    "0.0.0.0",
+				"BEDROCK_PORT":       "{{module.ports.Bedrock.container_port}}",
+				"BEDROCK_MOTD1":      "GeyserMC",
+				"BEDROCK_MOTD2":      "Minecraft Server",
 				"BEDROCK_SERVERNAME": "Geyser",
-				"REMOTE_ADDRESS": "discopanel-server-{{server.id}}",
-				"REMOTE_PORT": "{{server.container_port}}",
-				"REMOTE_AUTH_TYPE": "offline"
-			}`,
-			DefaultVolumes:  `[{"source": "{{server.data_path}}/modules/geyser", "target": "/data", "read_only": false}]`,
+				"REMOTE_ADDRESS":     "discopanel-server-{{server.id}}",
+				"REMOTE_PORT":        "{{server.container_port}}",
+				"REMOTE_AUTH_TYPE":   "offline",
+			},
+			DefaultVolumes: []*v1.VolumeMount{
+				{Source: "{{server.data_path}}/modules/geyser", Target: "/data"},
+			},
 			Documentation:   "Geyser acts as a proxy, translating Bedrock packets to Java packets.",
 			HealthCheckPort: 19132,
 			DefaultMemory:   1024,
@@ -100,14 +104,13 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			RequiresServer: true,
 			Icon:           "chart-bar",
 			Ports: []*v1.ModulePort{
-				{Name: "Metrics", ContainerPort: 9225, HostPort: 0, Protocol: "http", ProxyEnabled: true},
+				{Name: "Metrics", ContainerPort: 9225, HostPort: 0, Protocol: v1.ModuleProtocol_MODULE_PROTOCOL_HTTP, ProxyEnabled: true},
 			},
 			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Metrics.host_port}}/metrics"},
-			DefaultEnv: `{
+			DefaultEnv: map[string]string{
 				"EXPORT_SERVERS": "discopanel-server-{{server.id}}:{{server.container_port}}",
-				"EXPORT_PORT": "{{module.ports.Metrics.container_port}}"
-			}`,
-			DefaultVolumes:  `[]`,
+				"EXPORT_PORT":    "{{module.ports.Metrics.container_port}}",
+			},
 			HealthCheckPath: "/metrics",
 			HealthCheckPort: 9225,
 			Documentation:   "Exports server status, player count, TPS, and other metrics in Prometheus format. Connect to /metrics endpoint to scrape metrics.",
@@ -125,16 +128,15 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			Icon:           "map",
 			DefaultCmd:     "-r -u -w",
 			Ports: []*v1.ModulePort{
-				{Name: "Web", ContainerPort: 8100, HostPort: 0, Protocol: "http", ProxyEnabled: true},
+				{Name: "Web", ContainerPort: 8100, HostPort: 0, Protocol: v1.ModuleProtocol_MODULE_PROTOCOL_HTTP, ProxyEnabled: true},
 			},
 			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
-			DefaultEnv:        `{}`,
-			DefaultVolumes: `[
-				{"source": "{{server.data_path}}/modules/bluemap/config", "target": "/app/config", "read_only": false, "create_dir": true},
-				{"source": "{{server.data_path}}/world", "target": "/app/world", "read_only": true},
-				{"source": "{{server.data_path}}/modules/bluemap/data", "target": "/app/data", "read_only": false, "create_dir": true},
-				{"source": "{{server.data_path}}/modules/bluemap/web", "target": "/app/web", "read_only": false, "create_dir": true}
-				]`,
+			DefaultVolumes: []*v1.VolumeMount{
+				{Source: "{{server.data_path}}/modules/bluemap/config", Target: "/app/config", CreateDir: true},
+				{Source: "{{server.data_path}}/world", Target: "/app/world", ReadOnly: true},
+				{Source: "{{server.data_path}}/modules/bluemap/data", Target: "/app/data", CreateDir: true},
+				{Source: "{{server.data_path}}/modules/bluemap/web", Target: "/app/web", CreateDir: true},
+			},
 			HealthCheckPath:         "/",
 			HealthCheckPort:         8100,
 			Documentation:           "Renders 3D maps of your Minecraft worlds accessible via a web interface. Supports overworld, nether, and end dimensions. World volumes are mounted read-only from the server data path. Config, data, and web assets are stored in the bluemap module directory.",
@@ -156,14 +158,13 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			RequiresServer: true,
 			Icon:           "monitor",
 			Ports: []*v1.ModulePort{
-				{Name: "Web", ContainerPort: 8181, HostPort: 0, Protocol: "http", ProxyEnabled: true},
+				{Name: "Web", ContainerPort: 8181, HostPort: 0, Protocol: v1.ModuleProtocol_MODULE_PROTOCOL_HTTP, ProxyEnabled: true},
 			},
 			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
-			DefaultEnv: `{
+			DefaultEnv: map[string]string{
 				"POLL_INTERVAL": "10s",
-				"PORT": "{{module.ports.Web.container_port}}"
-			}`,
-			DefaultVolumes:  `[]`,
+				"PORT":          "{{module.ports.Web.container_port}}",
+			},
 			HealthCheckPath: "/health",
 			HealthCheckPort: 8181,
 			Documentation:   "Displays a real-time status dashboard for the attached Minecraft server. Fetches status via the DiscoPanel API including player count, TPS, CPU/memory usage, and server configuration. Automatically refreshes every 10 seconds.",
@@ -180,7 +181,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			RequiresServer: false,
 			Icon:           "stethoscope",
 			Ports: []*v1.ModulePort{
-				{Name: "Web", ContainerPort: 8190, HostPort: 0, Protocol: "http", ProxyEnabled: true},
+				{Name: "Web", ContainerPort: 8190, HostPort: 0, Protocol: v1.ModuleProtocol_MODULE_PROTOCOL_HTTP, ProxyEnabled: true},
 			},
 			DefaultAccessUrls: doctorAccessURLs(),
 			DefaultEnv:        doctorEnv(),

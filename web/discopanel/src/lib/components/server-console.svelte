@@ -5,7 +5,8 @@
 	import { create } from '@bufbuild/protobuf';
 	import { timestampDate } from '@bufbuild/protobuf/wkt';
 	import type { Server, ServerAction } from '$lib/proto/discopanel/v1/storage_pb';
-	import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ServerStatus, ServerActionKindSchema } from '$lib/proto/discopanel/v1/storage_pb';
+	import { enumLabel } from '$lib/proto-meta';
 	import type { LogEntry } from '$lib/proto/discopanel/v1/server_pb';
 	import {
 		GetServerLogsRequestSchema,
@@ -96,7 +97,7 @@
 
 	function actionDetails(a: ServerAction): [string, string][] {
 		const rows: [string, string][] = [];
-		if (a.name) rows.push(['action', a.name]);
+		if (a.kind) rows.push(['action', enumLabel(ServerActionKindSchema, a.kind)]);
 		for (const key of Object.keys(a.attrs).sort()) rows.push([key, a.attrs[key]]);
 		if (a.traceId) rows.push(['trace', a.traceId]);
 		return rows;

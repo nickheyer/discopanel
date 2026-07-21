@@ -15,9 +15,18 @@
 	import {
 		ModuleEventAction,
 		ModuleEventActionSchema,
+		ModuleEventHookSchema,
+		ModulePortSchema,
+		ModuleProtocol,
+		ModuleProtocolSchema,
 		TriggeredEventType,
-		type ModuleTemplate
+		VolumeMountSchema,
+		type ModuleEventHook,
+		type ModulePort,
+		type ModuleTemplate,
+		type VolumeMount
 	} from '$lib/proto/discopanel/v1/storage_pb';
+	import { create, clone } from '@bufbuild/protobuf';
 	import { enumDesc, enumLabel } from '$lib/proto-meta';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import {
@@ -43,29 +52,6 @@
 	interface EnvVar {
 		key: string;
 		value: string;
-	}
-
-	interface VolumeMount {
-		hostPath: string;
-		containerPath: string;
-		readOnly: boolean;
-		createDir: boolean;
-	}
-
-	interface PortConfig {
-		name: string;
-		containerPort: number;
-		hostPort: number;
-		protocol: string;
-		proxyEnabled: boolean;
-	}
-
-	interface EventHook {
-		event: TriggeredEventType;
-		action: ModuleEventAction;
-		command: string;
-		delaySeconds: number;
-		condition: string;
 	}
 
 	interface MetadataEntry {
@@ -98,9 +84,9 @@
 	let defaultRestartAfterInit = $state(false);
 	let envVars = $state<EnvVar[]>([]);
 	let volumes = $state<VolumeMount[]>([]);
-	let ports = $state<PortConfig[]>([]);
+	let ports = $state<ModulePort[]>([]);
 	let suggestedDependencies = $state('');
-	let defaultHooks = $state<EventHook[]>([]);
+	let defaultHooks = $state<ModuleEventHook[]>([]);
 	let metadata = $state<MetadataEntry[]>([]);
 
 	const navItems: {
@@ -156,43 +142,15 @@
 
 	let activeItem = $derived(navItems.find((item) => item.id === activeSection) ?? navItems[0]);
 
-	// Serializes env rows into json object string
-	function envVarsToJson(): string {
-		const obj: Record<string, string> = {};
+	// Collects env rows into the proto map field
+	function envVarsToMap(): { [key: string]: string } {
+		const map: { [key: string]: string } = {};
 		for (const env of envVars) {
 			if (env.key.trim()) {
-				obj[env.key.trim()] = env.value;
+				map[env.key.trim()] = env.value;
 			}
 		}
-		return JSON.stringify(obj);
-	}
-
-	// Serializes volume rows into snake case json
-	function volumesToJson(): string {
-		return JSON.stringify(
-			volumes
-				.filter((v) => v.hostPath.trim() && v.containerPath.trim())
-				.map((v) => ({
-					source: v.hostPath.trim(),
-					target: v.containerPath.trim(),
-					read_only: v.readOnly,
-					create_dir: v.createDir
-				}))
-		);
-	}
-
-	// Parses stored snake case volumes into form rows
-	function parseVolumes(json: string): VolumeMount[] {
-		try {
-			return JSON.parse(json || '[]').map((v: Record<string, unknown>) => ({
-				hostPath: v.source || '',
-				containerPath: v.target || '',
-				readOnly: v.read_only || false,
-				createDir: v.create_dir || false
-			}));
-		} catch {
-			return [];
-		}
+		return map;
 	}
 
 	function addEnvVar() {
@@ -204,7 +162,7 @@
 	}
 
 	function addVolume() {
-		volumes = [...volumes, { hostPath: '', containerPath: '', readOnly: false, createDir: false }];
+		volumes = [...volumes, create(VolumeMountSchema, {})];
 	}
 
 	function removeVolume(index: number) {
@@ -214,7 +172,13 @@
 	function addPort() {
 		ports = [
 			...ports,
-			{ name: '', containerPort: 0, hostPort: 0, protocol: 'tcp', proxyEnabled: supportsProxy }
+			create(ModulePortSchema, {
+				name: '',
+				containerPort: 0,
+				hostPort: 0,
+				protocol: ModuleProtocol.TCP,
+				proxyEnabled: supportsProxy
+			})
 		];
 	}
 
@@ -225,13 +189,13 @@
 	function addDefaultHook() {
 		defaultHooks = [
 			...defaultHooks,
-			{
+			create(ModuleEventHookSchema, {
 				event: TriggeredEventType.SERVER_START,
 				action: ModuleEventAction.START,
 				command: '',
 				delaySeconds: 0,
 				condition: ''
-			}
+			})
 		];
 	}
 
@@ -305,31 +269,11 @@
 		defaultInitCommandDelay = t.defaultInitCommandDelay;
 		defaultRestartAfterInit = t.defaultRestartAfterInit;
 
-		try {
-			const envObj = JSON.parse(t.defaultEnv || '{}');
-			envVars = Object.entries(envObj).map(([key, value]) => ({ key, value: String(value) }));
-		} catch {
-			envVars = [];
-		}
-
-		volumes = parseVolumes(t.defaultVolumes);
-
-		ports = t.ports.map((p) => ({
-			name: p.name,
-			containerPort: p.containerPort,
-			hostPort: p.hostPort,
-			protocol: p.protocol,
-			proxyEnabled: p.proxyEnabled
-		}));
-
+		envVars = Object.entries(t.defaultEnv).map(([key, value]) => ({ key, value }));
+		volumes = t.defaultVolumes.map((v) => clone(VolumeMountSchema, v));
+		ports = t.ports.map((p) => clone(ModulePortSchema, p));
 		suggestedDependencies = t.suggestedDependencies.join(', ');
-		defaultHooks = t.defaultHooks.map((h) => ({
-			event: h.event,
-			action: h.action,
-			command: h.command,
-			delaySeconds: h.delaySeconds,
-			condition: h.condition
-		}));
+		defaultHooks = t.defaultHooks.map((h) => clone(ModuleEventHookSchema, h));
 
 		metadata = Object.entries(t.metadata || {}).map(([key, value]) => ({ key, value }));
 		activeSection = 'basic';
@@ -372,12 +316,16 @@
 					`Ignored ${droppedPorts} port row${droppedPorts === 1 ? '' : 's'} without a container port`
 				);
 			}
+			for (const v of volumes) {
+				v.source = v.source.trim();
+				v.target = v.target.trim();
+			}
 			const payload = {
 				name: name.trim(),
 				description: description.trim(),
 				dockerImage: dockerImage.trim(),
-				defaultEnv: envVarsToJson(),
-				defaultVolumes: volumesToJson(),
+				defaultEnv: envVarsToMap(),
+				defaultVolumes: volumes.filter((v) => v.source && v.target),
 				healthCheckPath: healthCheckPath.trim(),
 				healthCheckPort,
 				requiresServer,
@@ -385,26 +333,14 @@
 				icon: icon.trim(),
 				category: category.trim(),
 				documentation: documentation.trim(),
-				ports: validPorts.map((p) => ({
-					name: p.name,
-					containerPort: p.containerPort,
-					hostPort: p.hostPort,
-					protocol: p.protocol,
-					proxyEnabled: p.proxyEnabled
-				})),
+				ports: validPorts,
 				suggestedDependencies: suggestedDependencies.trim()
 					? suggestedDependencies
 							.split(',')
 							.map((s) => s.trim())
 							.filter((s) => s)
 					: [],
-				defaultHooks: defaultHooks.map((h) => ({
-					event: h.event,
-					action: h.action,
-					command: h.command,
-					delaySeconds: h.delaySeconds,
-					condition: h.condition
-				})),
+				defaultHooks,
 				metadata: metadataToMap(),
 				defaultUid,
 				defaultGid,
@@ -708,19 +644,22 @@
 													<Label>Protocol</Label>
 													<Select
 														type="single"
-														value={port.protocol}
+														value={String(port.protocol)}
 														onValueChange={(v) => {
-															if (v) port.protocol = v;
+															if (v) port.protocol = Number(v);
 														}}
 													>
 														<SelectTrigger class="w-full">
-															<span class="uppercase">{port.protocol}</span>
+															<span class="uppercase">
+																{enumLabel(ModuleProtocolSchema, port.protocol || ModuleProtocol.TCP)}
+															</span>
 														</SelectTrigger>
 														<SelectContent>
-															<SelectItem value="tcp">TCP</SelectItem>
-															<SelectItem value="udp">UDP</SelectItem>
-															<SelectItem value="minecraft">MINECRAFT</SelectItem>
-															<SelectItem value="http">HTTP</SelectItem>
+															{#each [ModuleProtocol.TCP, ModuleProtocol.UDP, ModuleProtocol.MINECRAFT, ModuleProtocol.HTTP] as proto (proto)}
+																<SelectItem value={String(proto)}>
+																	{enumLabel(ModuleProtocolSchema, proto)}
+																</SelectItem>
+															{/each}
 														</SelectContent>
 													</Select>
 												</div>
@@ -843,7 +782,7 @@
 												<div class="space-y-2">
 													<Label>Host path</Label>
 													<Input
-														bind:value={vol.hostPath}
+														bind:value={vol.source}
 														placeholder="/host/path or {'{{alias}}'}"
 														class="font-mono"
 													/>
@@ -851,7 +790,7 @@
 												<div class="space-y-2">
 													<Label>Container path</Label>
 													<Input
-														bind:value={vol.containerPath}
+														bind:value={vol.target}
 														placeholder="/container/path"
 														class="font-mono"
 													/>

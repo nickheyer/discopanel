@@ -1,10 +1,11 @@
 import { rpcClient } from '$lib/api/rpc-client';
 import { serversStore } from '$lib/stores/servers';
 import { toast } from 'svelte-sonner';
+import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
 
-export type ServerAction = 'start' | 'stop' | 'restart' | 'recreate';
+export type ServerOp = 'start' | 'stop' | 'restart' | 'recreate';
 
-const ACTION_VERBS: Record<ServerAction, string> = {
+const ACTION_VERBS: Record<ServerOp, string> = {
 	start: 'Starting',
 	stop: 'Stopping',
 	restart: 'Restarting',
@@ -12,8 +13,8 @@ const ACTION_VERBS: Record<ServerAction, string> = {
 };
 
 export async function runServerAction(
-	action: ServerAction,
-	server: { id: string; name: string },
+	action: ServerOp,
+	server: Pick<Server, 'id' | 'name'>,
 	refetch: () => Promise<unknown> = () => serversStore.fetchServers(true)
 ): Promise<void> {
 	try {

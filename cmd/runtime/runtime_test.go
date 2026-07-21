@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"google.golang.org/protobuf/proto"
 )
@@ -621,7 +622,7 @@ func TestBuildJavaArgs(t *testing.T) {
 		t.Setenv(key, "")
 	}
 
-	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar", JavaMajor: 21}
+	spec := &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: "server.jar", JavaMajor: 21}
 	args, err := buildJavaArgs(spec, 43210)
 	if err != nil {
 		t.Fatal(err)
@@ -643,7 +644,7 @@ func TestBuildJavaArgs(t *testing.T) {
 		}
 	}
 
-	spec = &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindArgsFile, ArgsFile: "libraries/net/args.txt", JavaMajor: 21}
+	spec = &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_ARGS_FILE, ArgsFile: "libraries/net/args.txt", JavaMajor: 21}
 	args, err = buildJavaArgs(spec, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -652,7 +653,7 @@ func TestBuildJavaArgs(t *testing.T) {
 		t.Errorf("args-file launch must end with nogui, got %v", args[len(args)-3:])
 	}
 
-	spec = &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindCustom, Exec: "run.sh --custom", JavaMajor: 21}
+	spec = &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_CUSTOM, Exec: "run.sh --custom", JavaMajor: 21}
 	args, err = buildJavaArgs(spec, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -662,7 +663,7 @@ func TestBuildJavaArgs(t *testing.T) {
 	}
 
 	// A user picked collector keeps the default Aikar G1 out
-	spec = &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar", JavaMajor: 21}
+	spec = &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: "server.jar", JavaMajor: 21}
 	t.Setenv("JVM_OPTS", "-XX:+UseZGC")
 	args, err = buildJavaArgs(spec, 0)
 	if err != nil {

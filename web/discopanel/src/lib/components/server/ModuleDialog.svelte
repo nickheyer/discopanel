@@ -23,9 +23,21 @@
 		Module,
 		ModulePort,
 		ModuleDependency,
-		ModuleEventHook
+		ModuleEventHook,
+		VolumeMount
 	} from '$lib/proto/discopanel/v1/storage_pb';
-	import { ModuleEventAction, ModuleEventActionSchema, TriggeredEventType } from '$lib/proto/discopanel/v1/storage_pb';
+	import {
+		ModuleEventAction,
+		ModuleEventActionSchema,
+		TriggeredEventType,
+		ModuleProtocol,
+		ModuleProtocolSchema,
+		ModulePortSchema,
+		ModuleDependencySchema,
+		ModuleEventHookSchema,
+		VolumeMountSchema
+	} from '$lib/proto/discopanel/v1/storage_pb';
+	import { create, clone } from '@bufbuild/protobuf';
 	import { enumLabel } from '$lib/proto-meta';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import {
@@ -60,12 +72,6 @@
 	interface EnvVar {
 		key: string;
 		value: string;
-	}
-	interface VolumeMount {
-		hostPath: string;
-		containerPath: string;
-		readOnly: boolean;
-		createDir: boolean;
 	}
 	interface MetadataEntry {
 		key: string;
@@ -149,92 +155,16 @@
 		}
 	};
 
-	function envVarsToJson(): string {
-		const obj: Record<string, string> = {};
+	function envVarsToMap(): { [key: string]: string } {
+		const map: { [key: string]: string } = {};
 		for (const env of envVars) {
-			if (env.key.trim()) obj[env.key.trim()] = env.value;
+			if (env.key.trim()) map[env.key.trim()] = env.value;
 		}
-		return JSON.stringify(obj);
+		return map;
 	}
 
-	function volumesToJson(): string {
-		return JSON.stringify(
-			volumes
-				.filter((v) => v.hostPath.trim() && v.containerPath.trim())
-				.map((v) => ({
-					source: v.hostPath.trim(),
-					target: v.containerPath.trim(),
-					read_only: v.readOnly,
-					create_dir: v.createDir
-				}))
-		);
-	}
-
-	function parseEnvVars(json: string): EnvVar[] {
-		try {
-			return Object.entries(JSON.parse(json || '{}')).map(([key, value]) => ({
-				key,
-				value: String(value)
-			}));
-		} catch {
-			return [];
-		}
-	}
-
-	function parseVolumes(json: string): VolumeMount[] {
-		try {
-			return JSON.parse(json || '[]').map((v: Record<string, unknown>) => ({
-				hostPath: v.source || '',
-				containerPath: v.target || '',
-				readOnly: v.read_only || false,
-				createDir: v.create_dir || false
-			}));
-		} catch {
-			return [];
-		}
-	}
-
-	function parsePorts(p: ModulePort[] | undefined): ModulePort[] {
-		return (
-			p?.map(
-				(x) =>
-					({
-						name: x.name,
-						containerPort: x.containerPort,
-						hostPort: x.hostPort,
-						protocol: x.protocol || 'tcp',
-						proxyEnabled: x.proxyEnabled
-					}) as ModulePort
-			) || []
-		);
-	}
-
-	function parseDependencies(d: ModuleDependency[] | undefined): ModuleDependency[] {
-		return (
-			d?.map(
-				(x) =>
-					({
-						moduleId: x.moduleId,
-						waitForHealthy: x.waitForHealthy,
-						timeoutSeconds: x.timeoutSeconds
-					}) as ModuleDependency
-			) || []
-		);
-	}
-
-	function parseEventHooks(h: ModuleEventHook[] | undefined): ModuleEventHook[] {
-		return (
-			h?.map(
-				(x) =>
-					({
-						event: x.event,
-						action: x.action,
-						command: x.command,
-						delaySeconds: x.delaySeconds,
-						condition: x.condition
-					}) as ModuleEventHook
-			) || []
-		);
+	function parseEnvVars(m: { [key: string]: string } | undefined): EnvVar[] {
+		return m ? Object.entries(m).map(([key, value]) => ({ key, value })) : [];
 	}
 
 	function parseMetadata(m: { [key: string]: string } | undefined): MetadataEntry[] {
@@ -256,7 +186,7 @@
 		envVars = envVars.filter((_, idx) => idx !== i);
 	}
 	function addVolume() {
-		volumes = [...volumes, { hostPath: '', containerPath: '', readOnly: false, createDir: false }];
+		volumes = [...volumes, create(VolumeMountSchema, {})];
 	}
 	function removeVolume(i: number) {
 		volumes = volumes.filter((_, idx) => idx !== i);
@@ -264,7 +194,13 @@
 	function addPort() {
 		ports = [
 			...ports,
-			{ name: '', containerPort: 0, hostPort: 0, protocol: 'tcp', proxyEnabled: true } as ModulePort
+			create(ModulePortSchema, {
+				name: '',
+				containerPort: 0,
+				hostPort: 0,
+				protocol: ModuleProtocol.TCP,
+				proxyEnabled: true
+			})
 		];
 	}
 	function removePort(i: number) {
@@ -273,7 +209,7 @@
 	function addDependency() {
 		dependencies = [
 			...dependencies,
-			{ moduleId: '', waitForHealthy: true, timeoutSeconds: 60 } as ModuleDependency
+			create(ModuleDependencySchema, { moduleId: '', waitForHealthy: true, timeoutSeconds: 60 })
 		];
 	}
 	function removeDependency(i: number) {
@@ -282,13 +218,13 @@
 	function addEventHook() {
 		eventHooks = [
 			...eventHooks,
-			{
+			create(ModuleEventHookSchema, {
 				event: TriggeredEventType.SERVER_START,
 				action: ModuleEventAction.START,
 				command: '',
 				delaySeconds: 0,
 				condition: ''
-			} as ModuleEventHook
+			})
 		];
 	}
 	function removeEventHook(i: number) {
@@ -369,9 +305,9 @@
 				.catch(() => ({ port: 8100 })),
 			loadServerModules()
 		]);
-		envVars = parseEnvVars(template.defaultEnv || '{}');
-		volumes = parseVolumes(template.defaultVolumes || '[]');
-		ports = parsePorts(template.ports);
+		envVars = parseEnvVars(template.defaultEnv);
+		volumes = template.defaultVolumes.map((v) => clone(VolumeMountSchema, v));
+		ports = template.ports.map((p) => clone(ModulePortSchema, p));
 		memory = template.defaultMemory;
 		uid = template.defaultUid;
 		gid = template.defaultGid;
@@ -385,7 +321,7 @@
 				nextPort++;
 			}
 		}
-		eventHooks = parseEventHooks(template.defaultHooks);
+		eventHooks = template.defaultHooks.map((h) => clone(ModuleEventHookSchema, h));
 		metadata = parseMetadata(template.metadata);
 		step = 'configure';
 	}
@@ -472,14 +408,14 @@
 				initCommand = module.initCommand;
 				initCommandDelay = module.initCommandDelay;
 				restartAfterInit = module.restartAfterInit;
-				envVars = parseEnvVars(module.envOverrides || '{}');
-				volumes = parseVolumes(module.volumeOverrides || '[]');
-				ports = parsePorts(module.ports);
-				dependencies = parseDependencies(module.dependencies);
+				envVars = parseEnvVars(module.envOverrides);
+				volumes = module.volumeOverrides.map((v) => clone(VolumeMountSchema, v));
+				ports = module.ports.map((p) => clone(ModulePortSchema, p));
+				dependencies = module.dependencies.map((d) => clone(ModuleDependencySchema, d));
 				healthCheckInterval = module.healthCheckInterval || 30;
 				healthCheckTimeout = module.healthCheckTimeout || 5;
 				healthCheckRetries = module.healthCheckRetries || 3;
-				eventHooks = parseEventHooks(module.eventHooks);
+				eventHooks = module.eventHooks.map((h) => clone(ModuleEventHookSchema, h));
 				metadata = parseMetadata(module.metadata);
 				loadServerModules();
 			});
@@ -502,35 +438,19 @@
 
 		submitting = true;
 		try {
-			const portsPayload = ports
-				.filter((p) => p.containerPort > 0)
-				.map((p) => ({
-					name: p.name,
-					containerPort: p.containerPort,
-					hostPort: p.hostPort,
-					protocol: p.protocol,
-					proxyEnabled: p.proxyEnabled
-				}));
+			const portsPayload = ports.filter((p) => p.containerPort > 0);
 			const droppedPorts = ports.length - portsPayload.length;
 			if (droppedPorts > 0) {
 				toast.warning(
 					`Ignored ${droppedPorts} port row${droppedPorts === 1 ? '' : 's'} without a container port`
 				);
 			}
-			const depsPayload = dependencies
-				.filter((d) => d.moduleId)
-				.map((d) => ({
-					moduleId: d.moduleId,
-					waitForHealthy: d.waitForHealthy,
-					timeoutSeconds: d.timeoutSeconds
-				}));
-			const hooksPayload = eventHooks.map((h) => ({
-				event: h.event,
-				action: h.action,
-				command: h.command,
-				delaySeconds: h.delaySeconds,
-				condition: h.condition
-			}));
+			const depsPayload = dependencies.filter((d) => d.moduleId);
+			for (const v of volumes) {
+				v.source = v.source.trim();
+				v.target = v.target.trim();
+			}
+			const volumesPayload = volumes.filter((v) => v.source && v.target);
 
 			if (mode === 'create' && selectedTemplate) {
 				await rpcClient.module.createModule({
@@ -538,8 +458,8 @@
 					serverId: serverId || '',
 					templateId: selectedTemplate.id,
 					config: '{}',
-					envOverrides: envVarsToJson(),
-					volumeOverrides: volumesToJson(),
+					envOverrides: envVarsToMap(),
+					volumeOverrides: volumesPayload,
 					memory,
 					cpuLimit,
 					autoStart,
@@ -551,7 +471,7 @@
 					healthCheckInterval,
 					healthCheckTimeout,
 					healthCheckRetries,
-					eventHooks: hooksPayload,
+					eventHooks,
 					metadata: metadataToMap(),
 					uid,
 					gid,
@@ -564,8 +484,8 @@
 				await rpcClient.module.updateModule({
 					id: module.id,
 					name,
-					envOverrides: envVarsToJson(),
-					volumeOverrides: volumesToJson(),
+					envOverrides: envVarsToMap(),
+					volumeOverrides: volumesPayload,
 					memory,
 					cpuLimit,
 					autoStart,
@@ -576,7 +496,7 @@
 					healthCheckInterval,
 					healthCheckTimeout,
 					healthCheckRetries,
-					eventHooks: hooksPayload,
+					eventHooks,
 					metadata: metadataToMap(),
 					uid,
 					gid,
@@ -905,19 +825,25 @@
 														<Label>Protocol</Label>
 														<Select
 															type="single"
-															value={port.protocol}
+															value={String(port.protocol)}
 															onValueChange={(v) => {
-																if (v) port.protocol = v;
+																if (v) port.protocol = Number(v);
 															}}
 														>
 															<SelectTrigger class="w-full">
-																<span class="uppercase">{port.protocol}</span>
+																<span class="uppercase">
+																	{enumLabel(
+																		ModuleProtocolSchema,
+																		port.protocol || ModuleProtocol.TCP
+																	)}
+																</span>
 															</SelectTrigger>
 															<SelectContent>
-																<SelectItem value="tcp">TCP</SelectItem>
-																<SelectItem value="udp">UDP</SelectItem>
-																<SelectItem value="minecraft">MINECRAFT</SelectItem>
-																<SelectItem value="http">HTTP</SelectItem>
+																{#each [ModuleProtocol.TCP, ModuleProtocol.UDP, ModuleProtocol.MINECRAFT, ModuleProtocol.HTTP] as proto (proto)}
+																	<SelectItem value={String(proto)}>
+																		{enumLabel(ModuleProtocolSchema, proto)}
+																	</SelectItem>
+																{/each}
 															</SelectContent>
 														</Select>
 													</div>
@@ -944,7 +870,8 @@
 																class="h-7 text-xs"
 																onclick={() => {
 																	port.proxyEnabled = false;
-																	if (port.protocol === 'http') port.protocol = 'tcp';
+																	if (port.protocol === ModuleProtocol.HTTP)
+																		port.protocol = ModuleProtocol.TCP;
 																}}
 															>
 																Fix: switch to direct TCP binding
@@ -1057,7 +984,7 @@
 													<div class="space-y-1.5">
 														<Label>Host path</Label>
 														<Input
-															bind:value={vol.hostPath}
+															bind:value={vol.source}
 															placeholder="/host/path"
 															class="font-mono"
 														/>
@@ -1065,7 +992,7 @@
 													<div class="space-y-1.5">
 														<Label>Container path</Label>
 														<Input
-															bind:value={vol.containerPath}
+															bind:value={vol.target}
 															placeholder="/container/path"
 															class="font-mono"
 														/>

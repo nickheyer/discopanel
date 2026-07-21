@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -149,15 +150,15 @@ func (s *AuthService) Register(ctx context.Context, req *connect.Request[v1.Regi
 
 	// First user gets admin, invite gives invite roles, else default
 	if isFirstUser {
-		_ = s.store.AssignRole(ctx, user.Id, "admin", "local")
+		_ = s.store.AssignRole(ctx, user.Id, "admin", v1.RoleSource_ROLE_SOURCE_LOCAL)
 	} else if invite != nil && len(invite.Roles) > 0 {
 		for _, roleName := range invite.Roles {
-			_ = s.store.AssignRole(ctx, user.Id, roleName, "invite")
+			_ = s.store.AssignRole(ctx, user.Id, roleName, v1.RoleSource_ROLE_SOURCE_INVITE)
 		}
 	} else {
 		defaultRoles, _ := s.store.GetDefaultRoles(ctx)
 		for _, role := range defaultRoles {
-			_ = s.store.AssignRole(ctx, user.Id, role.Name, "local")
+			_ = s.store.AssignRole(ctx, user.Id, role.Name, v1.RoleSource_ROLE_SOURCE_LOCAL)
 		}
 	}
 
@@ -181,22 +182,13 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, req *connect.Request[v
 
 	// Auth disabled means synthetic admin has no db row
 	if !s.authManager.IsAnyAuthEnabled() {
-		roles := authUser.Roles
-		protoUser := &v1.User{
-			Id:           authUser.Id,
-			Username:     authUser.Username,
-			AuthProvider: authUser.Provider,
-			IsActive:     true,
-			Roles:        roles,
-		}
-
 		var permissions []*v1.Permission
-		for _, role := range roles {
+		for _, role := range authUser.Roles {
 			permissions = append(permissions, s.enforcer.GetPermissionsForRole(role)...)
 		}
 
 		return connect.NewResponse(&v1.GetCurrentUserResponse{
-			User:        protoUser,
+			User:        authUser,
 			Permissions: permissions,
 		}), nil
 	}
@@ -215,7 +207,7 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, req *connect.Request[v
 	seen := make(map[string]bool)
 	for _, role := range roles {
 		for _, p := range s.enforcer.GetPermissionsForRole(role) {
-			key := p.Resource + ":" + p.Action + ":" + p.ObjectId
+			key := fmt.Sprintf("%d:%d:%s", p.Resource, p.Action, p.ObjectId)
 			if !seen[key] {
 				seen[key] = true
 				permissions = append(permissions, p)

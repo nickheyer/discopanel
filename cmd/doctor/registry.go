@@ -9,7 +9,7 @@ import (
 
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
-	"github.com/nickheyer/discopanel/pkg/runtimespec"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
 // One registry entry the crash names as unbound or missing
@@ -69,7 +69,7 @@ func parseUnboundRefs(texts ...string) []registryRef {
 }
 
 // Plans repairs for content referencing an absent namespace
-func (e *engine) planRegistry(srv *serverInfo, exit *agentv1.Exited, fatal *agentv1.FatalError, metas []minecraft.ModJarMeta, modsDir string, force, excludes []string, inc *runtimespec.DoctorIncident) []runtimespec.DoctorAction {
+func (e *engine) planRegistry(srv *serverInfo, exit *agentv1.Exited, fatal *agentv1.FatalError, metas []minecraft.ModJarMeta, modsDir string, force, excludes []string, inc *v1.DoctorIncident) []*v1.DoctorAction {
 	texts := make([]string, 0, len(fatal.GetCauses())+2)
 	for _, c := range fatal.GetCauses() {
 		texts = append(texts, c.GetMessage())
@@ -103,12 +103,12 @@ func (e *engine) planRegistry(srv *serverInfo, exit *agentv1.Exited, fatal *agen
 		}
 		// A provider we disabled earlier comes back first
 		if file := nsProvider(disabledMetas, ns); file != "" && !minecraft.MatchesPatterns(file, excludes) {
-			add(runtimespec.DoctorAction{Kind: runtimespec.ActionEnable, File: file, ModID: ns, Reason: "provides the missing " + ns + " content", Evidence: runtimespec.EvidenceRegistry})
+			add(&v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_ENABLE, File: file, ModId: ns, Reason: "provides the missing " + ns + " content", Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_REGISTRY})
 			continue
 		}
 		// Sourcing the provider beats disabling its dependents
 		if modsDir != "" && e.installer != nil {
-			add(runtimespec.DoctorAction{Kind: runtimespec.ActionInstall, ModID: ns, Reason: "provides the missing " + ns + " content", Evidence: runtimespec.EvidenceRegistry})
+			add(&v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_INSTALL, ModId: ns, Reason: "provides the missing " + ns + " content", Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_REGISTRY})
 		}
 		ids := make([]string, 0, len(byNS[ns]))
 		for _, ref := range byNS[ns] {
@@ -119,7 +119,7 @@ func (e *engine) planRegistry(srv *serverInfo, exit *agentv1.Exited, fatal *agen
 			if minecraft.MatchesPatterns(filepath.Base(rel), force) {
 				continue
 			}
-			add(runtimespec.DoctorAction{Kind: runtimespec.ActionDisablePack, File: rel, Reason: "references " + ns + " content that is not installed", Evidence: runtimespec.EvidenceRegistry})
+			add(&v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE_PACK, File: rel, Reason: "references " + ns + " content that is not installed", Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_REGISTRY})
 			found = true
 		}
 		if found {
@@ -131,7 +131,7 @@ func (e *engine) planRegistry(srv *serverInfo, exit *agentv1.Exited, fatal *agen
 				continue
 			}
 			if minecraft.ZipRefsAny(filepath.Join(modsDir, metas[i].FileName), ids) {
-				add(runtimespec.DoctorAction{Kind: runtimespec.ActionDisable, File: metas[i].FileName, Reason: "references " + ns + " content that is not installed", Evidence: runtimespec.EvidenceRegistry})
+				add(&v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: metas[i].FileName, Reason: "references " + ns + " content that is not installed", Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_REGISTRY})
 			}
 		}
 	}

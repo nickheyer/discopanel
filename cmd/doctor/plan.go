@@ -8,6 +8,7 @@ import (
 
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -22,16 +23,16 @@ func removeFile(p string) error {
 
 // Dedups planned actions against each other and tried keys
 type actionPlan struct {
-	inc     *runtimespec.DoctorIncident
-	actions []runtimespec.DoctorAction
+	inc     *v1.DoctorIncident
+	actions []*v1.DoctorAction
 }
 
-func (p *actionPlan) add(a runtimespec.DoctorAction) {
-	if p.inc.HasTried(a.Key()) {
+func (p *actionPlan) add(a *v1.DoctorAction) {
+	if runtimespec.HasTried(p.inc, runtimespec.ActionKey(a)) {
 		return
 	}
 	for i := range p.actions {
-		if p.actions[i].Key() == a.Key() {
+		if runtimespec.ActionKey(p.actions[i]) == runtimespec.ActionKey(a) {
 			return
 		}
 	}
@@ -58,7 +59,7 @@ func effectiveFatal(srv *serverInfo, exit *agentv1.Exited) *agentv1.FatalError {
 }
 
 // Chooses this pass's actions from the strongest available evidence
-func (e *engine) plan(srv *serverInfo, exit *agentv1.Exited, modsDir string, force []string, inc *runtimespec.DoctorIncident) []runtimespec.DoctorAction {
+func (e *engine) plan(srv *serverInfo, exit *agentv1.Exited, modsDir string, force []string, inc *v1.DoctorIncident) []*v1.DoctorAction {
 	metas := minecraft.ScanModsDir(modsDir)
 	excludes := journalExcludes(srv)
 
@@ -81,7 +82,7 @@ func (e *engine) plan(srv *serverInfo, exit *agentv1.Exited, modsDir string, for
 }
 
 // Remedies loader verdicts by failure reason, not by reflex
-func (e *engine) planVerdicts(srv *serverInfo, failed []*agentv1.FailedMod, metas []minecraft.ModJarMeta, modsDir string, force, excludes []string, inc *runtimespec.DoctorIncident) []runtimespec.DoctorAction {
+func (e *engine) planVerdicts(srv *serverInfo, failed []*agentv1.FailedMod, metas []minecraft.ModJarMeta, modsDir string, force, excludes []string, inc *v1.DoctorIncident) []*v1.DoctorAction {
 	plan := &actionPlan{inc: inc}
 	add := plan.add
 	solved := minecraft.SolveDeps(metas, serverDialects(srv))
@@ -90,7 +91,7 @@ func (e *engine) planVerdicts(srv *serverInfo, failed []*agentv1.FailedMod, meta
 	for _, fm := range failed {
 		file := resolveFailedMod(fm, metas).ModFile
 		switch classifyFailedMod(fm) {
-		case failMissingDep:
+		case v1.FailedModClass_FAILED_MOD_CLASS_MISSING_DEPENDENCY:
 			missing := missingDepsOf(fm.GetModId(), solved)
 			// Loader text names deps nested jar metadata hides
 			if len(missing) == 0 {
@@ -106,44 +107,44 @@ func (e *engine) planVerdicts(srv *serverInfo, failed []*agentv1.FailedMod, meta
 						minecraft.MatchesPatterns(disabledMetas[j].FileName, excludes) {
 						continue
 					}
-					a := runtimespec.DoctorAction{Kind: runtimespec.ActionEnable, File: disabledMetas[j].FileName, ModID: dep.DepID, Reason: "needed by " + dep.ModID, Evidence: runtimespec.EvidenceSolver}
-					if !inc.HasTried(a.Key()) {
+					a := &v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_ENABLE, File: disabledMetas[j].FileName, ModId: dep.DepID, Reason: "needed by " + dep.ModID, Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_SOLVER}
+					if !runtimespec.HasTried(inc, runtimespec.ActionKey(a)) {
 						add(a)
 						resolved = true
 					}
 					break
 				}
 				if !resolved && e.installer != nil {
-					a := runtimespec.DoctorAction{Kind: runtimespec.ActionInstall, ModID: dep.DepID, Range: dep.Range, Dialect: depDialect(metas, dep), Evidence: runtimespec.EvidenceSolver}
-					if !inc.HasTried(a.Key()) {
+					a := &v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_INSTALL, ModId: dep.DepID, Range: dep.Range, Dialect: depDialect(metas, dep), Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_SOLVER}
+					if !runtimespec.HasTried(inc, runtimespec.ActionKey(a)) {
 						add(a)
 						resolved = true
 					}
 				}
 				if !resolved && file != "" && !minecraft.MatchesPatterns(file, force) {
-					add(runtimespec.DoctorAction{Kind: runtimespec.ActionDisable, File: file, ModID: fm.GetModId(), Reason: "requires missing " + dep.DepID, Evidence: runtimespec.EvidenceVerdict})
+					add(&v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: file, ModId: fm.GetModId(), Reason: "requires missing " + dep.DepID, Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_VERDICT})
 				}
 			}
 			// The loader saw a dep problem our solver cannot map
 			if len(missing) == 0 && file != "" && !minecraft.MatchesPatterns(file, force) {
-				add(runtimespec.DoctorAction{Kind: runtimespec.ActionDisable, File: file, ModID: fm.GetModId(), Reason: "unresolvable dependency", Evidence: runtimespec.EvidenceVerdict})
+				add(&v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: file, ModId: fm.GetModId(), Reason: "unresolvable dependency", Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_VERDICT})
 			}
-		case failDuplicate:
+		case v1.FailedModClass_FAILED_MOD_CLASS_DUPLICATE:
 			for _, issue := range solved {
 				if issue.Kind == minecraft.DepDuplicate && issue.ModID == fm.GetModId() && issue.OtherFile != "" && !minecraft.MatchesPatterns(issue.OtherFile, force) {
-					add(runtimespec.DoctorAction{Kind: runtimespec.ActionDisable, File: issue.OtherFile, ModID: fm.GetModId(), Reason: "older duplicate of " + issue.File, Evidence: runtimespec.EvidenceVerdict})
+					add(&v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: issue.OtherFile, ModId: fm.GetModId(), Reason: "older duplicate of " + issue.File, Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_VERDICT})
 				}
 			}
-		case failJava:
+		case v1.FailedModClass_FAILED_MOD_CLASS_JAVA_VERSION:
 			// Jars cannot fix the JVM
-		case failModError:
+		case v1.FailedModClass_FAILED_MOD_CLASS_MOD_ERROR:
 			// A linkage failure convicts the crashing frame, not the reporter
-			if a, ok := accompliceAction(fm, file, metas, force); ok && !inc.HasTried(a.Key()) {
+			if a, ok := accompliceAction(fm, file, metas, force); ok && !runtimespec.HasTried(inc, runtimespec.ActionKey(a)) {
 				add(a)
 				continue
 			}
 			if file != "" && !minecraft.MatchesPatterns(file, force) {
-				add(runtimespec.DoctorAction{Kind: runtimespec.ActionDisable, File: file, ModID: fm.GetModId(), Reason: "the loader reported it cannot load", Evidence: runtimespec.EvidenceVerdict})
+				add(&v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: file, ModId: fm.GetModId(), Reason: "the loader reported it cannot load", Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_VERDICT})
 			}
 		}
 	}
@@ -163,9 +164,9 @@ var linkageErrorTypes = map[string]bool{
 }
 
 // First installed jar in the failure frames names the culprit
-func accompliceAction(fm *agentv1.FailedMod, blamedFile string, metas []minecraft.ModJarMeta, force []string) (runtimespec.DoctorAction, bool) {
+func accompliceAction(fm *agentv1.FailedMod, blamedFile string, metas []minecraft.ModJarMeta, force []string) (*v1.DoctorAction, bool) {
 	if !linkageErrorTypes[simpleTypeName(fm.GetErrorType())] {
-		return runtimespec.DoctorAction{}, false
+		return nil, false
 	}
 	for _, frame := range fm.GetFrames() {
 		jar := jarFromLocation(frame.GetSourceLocation())
@@ -175,15 +176,15 @@ func accompliceAction(fm *agentv1.FailedMod, blamedFile string, metas []minecraf
 		}
 		// The reporter crashing in its own code convicts itself
 		if jar == blamedFile || minecraft.MatchesPatterns(jar, force) {
-			return runtimespec.DoctorAction{}, false
+			return nil, false
 		}
 		id := ""
 		if len(meta.Mods) > 0 {
 			id = meta.Mods[0].ID
 		}
-		return runtimespec.DoctorAction{Kind: runtimespec.ActionDisable, File: jar, ModID: id, Reason: "its code crashed " + fm.GetModId() + " during load", Evidence: runtimespec.EvidenceVerdict}, true
+		return &v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: jar, ModId: id, Reason: "its code crashed " + fm.GetModId() + " during load", Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_VERDICT}, true
 	}
-	return runtimespec.DoctorAction{}, false
+	return nil, false
 }
 
 // Forge phrases missing deps as requires id version or above
@@ -221,7 +222,7 @@ func depDialect(metas []minecraft.ModJarMeta, issue minecraft.DepIssue) string {
 }
 
 // Crash frame mods are guesses worth one try
-func planFrameGuess(fatal *agentv1.FatalError, metas []minecraft.ModJarMeta, force []string, inc *runtimespec.DoctorIncident) []runtimespec.DoctorAction {
+func planFrameGuess(fatal *agentv1.FatalError, metas []minecraft.ModJarMeta, force []string, inc *v1.DoctorIncident) []*v1.DoctorAction {
 	_, file := attributeFatal(fatal, metas)
 	if file == "" || minecraft.MatchesPatterns(file, force) {
 		return nil
@@ -230,11 +231,11 @@ func planFrameGuess(fatal *agentv1.FatalError, metas []minecraft.ModJarMeta, for
 	if isStallFatal(fatal) {
 		reason = "the boot stalled inside this mod's code"
 	}
-	a := runtimespec.DoctorAction{Kind: runtimespec.ActionDisable, File: file, Reason: reason, Evidence: runtimespec.EvidenceFrame, Cause: fatalSignature(fatal)}
-	if inc.HasTried(a.Key()) {
+	a := &v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: file, Reason: reason, Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_FRAME, Cause: fatalSignature(fatal)}
+	if runtimespec.HasTried(inc, runtimespec.ActionKey(a)) {
 		return nil
 	}
-	return []runtimespec.DoctorAction{a}
+	return []*v1.DoctorAction{a}
 }
 
 // Deepest cause type names one crash's identity

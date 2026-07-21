@@ -9,7 +9,6 @@ import (
 
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
-	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
 const (
@@ -24,7 +23,7 @@ func (p *Provisioner) installVanilla(ctx context.Context, server *v1.Server) (*R
 	if err := p.downloadVanillaJar(ctx, server, server.McVersion, "server.jar"); err != nil {
 		return nil, err
 	}
-	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar"}
+	spec := &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: "server.jar"}
 	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_VANILLA, "", server.McVersion)
 }
 
@@ -106,7 +105,7 @@ func (p *Provisioner) installFabric(ctx context.Context, server *v1.Server, load
 		return nil, err
 	}
 
-	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "fabric-server-launch.jar"}
+	spec := &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: "fabric-server-launch.jar"}
 	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_FABRIC, loaderVersion, mc)
 }
 
@@ -162,7 +161,7 @@ func (p *Provisioner) installQuilt(ctx context.Context, server *v1.Server, cfg *
 		return nil, fmt.Errorf("Quilt installer failed: %w", err)
 	}
 
-	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "quilt-server-launch.jar"}
+	spec := &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: "quilt-server-launch.jar"}
 	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_QUILT, loaderVersion, mc)
 }
 
@@ -201,7 +200,7 @@ func (p *Provisioner) installPaperMC(ctx context.Context, server *v1.Server, pro
 	if project == "folia" {
 		loader = v1.ModLoader_MOD_LOADER_FOLIA
 	}
-	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar"}
+	spec := &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: "server.jar"}
 	return p.finishLaunch(server, spec, loader, fmt.Sprintf("%d", build.ID), mc)
 }
 
@@ -240,7 +239,7 @@ func (p *Provisioner) installPurpur(ctx context.Context, server *v1.Server) (*Re
 		return nil, err
 	}
 
-	spec := &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar"}
+	spec := &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: "server.jar"}
 	return p.finishLaunch(server, spec, v1.ModLoader_MOD_LOADER_PURPUR, buildNum, mc)
 }
 
@@ -268,14 +267,14 @@ func (p *Provisioner) installCustom(ctx context.Context, server *v1.Server, cfg 
 		}
 	}
 
-	var spec *runtimespec.LaunchSpec
+	var spec *v1.LaunchSpec
 	switch {
 	case customExec != "":
-		spec = &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindCustom, Exec: customExec}
+		spec = &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_CUSTOM, Exec: customExec}
 	case jarRel != "":
-		spec = &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: filepath.ToSlash(jarRel)}
+		spec = &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: filepath.ToSlash(jarRel)}
 	case fileExists(joinData(server.DataPath, "server.jar")):
-		spec = &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: "server.jar"}
+		spec = &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: "server.jar"}
 	default:
 		return nil, fmt.Errorf("custom server requires a Custom Server JAR (URL or data-dir path) or a Custom JAR Execution command")
 	}

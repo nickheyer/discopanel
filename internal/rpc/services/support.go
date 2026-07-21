@@ -25,7 +25,8 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
-	"github.com/nickheyer/discopanel/pkg/protometa"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -46,25 +47,7 @@ type SupportService struct {
 	log    *logger.Logger
 	// Guards the temporary bundle registry
 	bundlesMu sync.Mutex
-	bundles   map[string]*BundleInfo
-}
-
-// Stores information about a generated bundle
-type BundleInfo struct {
-	ID        string
-	Filename  string
-	Path      string
-	Size      int64
-	CreatedAt time.Time
-}
-
-// Contains user-provided contact and issue information
-type UploadUserInfo struct {
-	DiscordUsername  string
-	Email            string
-	GithubUsername   string
-	IssueDescription string
-	StepsToReproduce string
+	bundles   map[string]*v1.GenerateSupportBundleResponse
 }
 
 // Creates a new support service
@@ -74,20 +57,17 @@ func NewSupportService(store *storage.Store, docker *docker.Client, config *conf
 		docker:  docker,
 		config:  config,
 		log:     log,
-		bundles: make(map[string]*BundleInfo),
+		bundles: make(map[string]*v1.GenerateSupportBundleResponse),
 	}
 }
 
-// Selects support bundle content
-type bundleOptions struct {
-	includeLogs       bool
-	includeConfigs    bool
-	includeSystemInfo bool
-	serverIDs         []string
+// Bundle archives live in the temp dir under their filename
+func (s *SupportService) bundlePath(filename string) string {
+	return filepath.Join(s.config.Storage.TempDir, filename)
 }
 
 // Assembles a support bundle archive on disk
-func (s *SupportService) buildBundle(ctx context.Context, opts bundleOptions) (*BundleInfo, error) {
+func (s *SupportService) buildBundle(ctx context.Context, includeLogs, includeConfigs, includeSystemInfo bool, serverIDs []string) (*v1.GenerateSupportBundleResponse, error) {
 	// Scratch space for the scrubbed database copy
 	tempDir, err := os.MkdirTemp(s.config.Storage.TempDir, "support-bundle-")
 	if err != nil {
@@ -110,22 +90,22 @@ func (s *SupportService) buildBundle(ctx context.Context, opts bundleOptions) (*
 	tarWriter := tar.NewWriter(gzipWriter)
 	defer tarWriter.Close()
 
-	if opts.includeLogs {
-		if err := s.addLogsToBundle(ctx, tarWriter, opts.serverIDs); err != nil {
+	if includeLogs {
+		if err := s.addLogsToBundle(ctx, tarWriter, serverIDs); err != nil {
 			s.log.Warn("Continuing without logs: %v", err)
 		}
 	}
 
-	if opts.includeConfigs {
+	if includeConfigs {
 		if err := s.addDatabaseToBundle(ctx, tarWriter, tempDir); err != nil {
 			s.log.Warn("Continuing without database: %v", err)
 		}
-		if err := s.addServerPropertiesToBundle(ctx, tarWriter, opts.serverIDs); err != nil {
+		if err := s.addServerPropertiesToBundle(ctx, tarWriter, serverIDs); err != nil {
 			s.log.Warn("Continuing without server configs: %v", err)
 		}
 	}
 
-	if opts.includeSystemInfo {
+	if includeSystemInfo {
 		if err := s.addSystemInfoToBundle(ctx, tarWriter); err != nil {
 			s.log.Warn("Continuing without system info: %v", err)
 		}
@@ -141,12 +121,11 @@ func (s *SupportService) buildBundle(ctx context.Context, opts bundleOptions) (*
 		return nil, fmt.Errorf("failed to stat bundle file: %w", err)
 	}
 
-	return &BundleInfo{
-		ID:        uuid.New().String(),
+	return &v1.GenerateSupportBundleResponse{
+		BundleId:  uuid.New().String(),
 		Filename:  bundleFileName,
-		Path:      bundlePath,
 		Size:      fileInfo.Size(),
-		CreatedAt: time.Now(),
+		CreatedAt: timestamppb.Now(),
 	}, nil
 }
 
@@ -155,48 +134,38 @@ func (s *SupportService) GenerateSupportBundle(ctx context.Context, req *connect
 	msg := req.Msg
 	s.log.Info("Generating support bundle (logs=%v, configs=%v, system=%v)", msg.IncludeLogs, msg.IncludeConfigs, msg.IncludeSystemInfo)
 
-	bundleInfo, err := s.buildBundle(ctx, bundleOptions{
-		includeLogs:       msg.IncludeLogs,
-		includeConfigs:    msg.IncludeConfigs,
-		includeSystemInfo: msg.IncludeSystemInfo,
-		serverIDs:         msg.ServerIds,
-	})
+	bundle, err := s.buildBundle(ctx, msg.IncludeLogs, msg.IncludeConfigs, msg.IncludeSystemInfo, msg.ServerIds)
 	if err != nil {
 		s.log.Error("Failed to build support bundle: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create support bundle"))
 	}
+	bundle.Message = "Support bundle created successfully"
 
 	// Store bundle info for download
 	s.bundlesMu.Lock()
-	s.bundles[bundleInfo.ID] = bundleInfo
+	s.bundles[bundle.BundleId] = bundle
 	s.bundlesMu.Unlock()
 
 	// Clean up old bundles after 1 hour
 	go func() {
 		time.Sleep(1 * time.Hour)
-		s.cleanupBundle(bundleInfo.ID)
+		s.cleanupBundle(bundle.BundleId)
 	}()
 
-	return connect.NewResponse(&v1.GenerateSupportBundleResponse{
-		BundleId:  bundleInfo.ID,
-		Filename:  bundleInfo.Filename,
-		Size:      bundleInfo.Size,
-		CreatedAt: timestamppb.New(bundleInfo.CreatedAt),
-		Message:   "Support bundle created successfully",
-	}), nil
+	return connect.NewResponse(bundle), nil
 }
 
 // Downloads a support bundle
 func (s *SupportService) DownloadSupportBundle(ctx context.Context, req *connect.Request[v1.DownloadSupportBundleRequest]) (*connect.Response[v1.DownloadSupportBundleResponse], error) {
 	s.bundlesMu.Lock()
-	bundleInfo, exists := s.bundles[req.Msg.BundleId]
+	bundle, exists := s.bundles[req.Msg.BundleId]
 	s.bundlesMu.Unlock()
 	if !exists {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("bundle not found or expired"))
 	}
 
 	// Read the bundle file
-	bundleData, err := os.ReadFile(bundleInfo.Path)
+	bundleData, err := os.ReadFile(s.bundlePath(bundle.Filename))
 	if err != nil {
 		s.log.Error("Failed to read bundle file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read bundle"))
@@ -207,7 +176,7 @@ func (s *SupportService) DownloadSupportBundle(ctx context.Context, req *connect
 
 	return connect.NewResponse(&v1.DownloadSupportBundleResponse{
 		Content:  bundleData,
-		Filename: bundleInfo.Filename,
+		Filename: bundle.Filename,
 		MimeType: "application/gzip",
 	}), nil
 }
@@ -217,29 +186,15 @@ func (s *SupportService) UploadSupportBundle(ctx context.Context, req *connect.R
 	msg := req.Msg
 	s.log.Info("Generating support bundle for upload (logs=%v, configs=%v, system=%v)", msg.IncludeLogs, msg.IncludeConfigs, msg.IncludeSystemInfo)
 
-	bundleInfo, err := s.buildBundle(ctx, bundleOptions{
-		includeLogs:       msg.IncludeLogs,
-		includeConfigs:    msg.IncludeConfigs,
-		includeSystemInfo: msg.IncludeSystemInfo,
-		serverIDs:         msg.ServerIds,
-	})
+	bundle, err := s.buildBundle(ctx, msg.IncludeLogs, msg.IncludeConfigs, msg.IncludeSystemInfo, msg.ServerIds)
 	if err != nil {
 		s.log.Error("Failed to build support bundle: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create support bundle"))
 	}
-	defer os.Remove(bundleInfo.Path)
-
-	// Build user info for upload
-	userInfo := &UploadUserInfo{
-		DiscordUsername:  msg.DiscordUsername,
-		Email:            msg.Email,
-		GithubUsername:   msg.GithubUsername,
-		IssueDescription: msg.IssueDescription,
-		StepsToReproduce: msg.StepsToReproduce,
-	}
+	defer os.Remove(s.bundlePath(bundle.Filename))
 
 	// Upload the bundle to support server
-	referenceID, err := s.uploadBundleToServer(bundleInfo.Path, bundleInfo.Filename, userInfo)
+	referenceID, err := s.uploadBundleToServer(s.bundlePath(bundle.Filename), bundle.Filename, msg)
 	if err != nil {
 		s.log.Error("Failed to upload support bundle: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to upload support bundle: %v", err))
@@ -253,7 +208,7 @@ func (s *SupportService) UploadSupportBundle(ctx context.Context, req *connect.R
 }
 
 // Uploads a bundle file to the support server
-func (s *SupportService) uploadBundleToServer(bundlePath, fileName string, userInfo *UploadUserInfo) (string, error) {
+func (s *SupportService) uploadBundleToServer(bundlePath, fileName string, userInfo *v1.UploadSupportBundleRequest) (string, error) {
 	supportURL := s.getUploadSupportUrl()
 
 	// Open the bundle file
@@ -375,7 +330,7 @@ func (s *SupportService) cleanupBundle(bundleID string) {
 	s.bundlesMu.Unlock()
 
 	if exists {
-		os.Remove(bundleInfo.Path)
+		os.Remove(s.bundlePath(bundleInfo.Filename))
 		s.log.Debug("Cleaned up support bundle %s", bundleID)
 	}
 }
@@ -561,18 +516,18 @@ func settingKeyPredicate() string {
 	return strings.Join(parts, " OR ")
 }
 
-// Redacts secret shaped keys in each task config JSON
+// Redacts secret shaped keys in each webhook task config
 func scrubTaskConfigs(db *gorm.DB) error {
 	var rows []struct {
-		ID     string
-		Config string
+		ID            string
+		WebhookConfig string
 	}
-	if err := db.Raw("SELECT id, config FROM scheduled_tasks WHERE config IS NOT NULL AND config != ''").Scan(&rows).Error; err != nil {
+	if err := db.Raw("SELECT id, webhook_config FROM scheduled_tasks WHERE webhook_config IS NOT NULL AND webhook_config != ''").Scan(&rows).Error; err != nil {
 		return err
 	}
 	for _, row := range rows {
 		var m map[string]any
-		if json.Unmarshal([]byte(row.Config), &m) != nil {
+		if json.Unmarshal([]byte(row.WebhookConfig), &m) != nil {
 			continue
 		}
 		changed := false
@@ -589,7 +544,7 @@ func scrubTaskConfigs(db *gorm.DB) error {
 		if err != nil {
 			continue
 		}
-		if err := db.Exec("UPDATE scheduled_tasks SET config = ? WHERE id = ?", string(out), row.ID).Error; err != nil {
+		if err := db.Exec("UPDATE scheduled_tasks SET webhook_config = ? WHERE id = ?", string(out), row.ID).Error; err != nil {
 			return err
 		}
 	}
@@ -662,9 +617,9 @@ func (s *SupportService) addServerPropertiesToBundle(ctx context.Context, tarWri
 	return nil
 }
 
-// Marshals a config struct with secret values redacted
-func redactedConfigJSON(cfg any) ([]byte, error) {
-	raw, err := json.Marshal(cfg)
+// Marshals a settings message with secret values redacted
+func redactedConfigJSON(cfg proto.Message) ([]byte, error) {
+	raw, err := protojson.Marshal(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -786,9 +741,9 @@ func (s *SupportService) addSystemInfoToBundle(ctx context.Context, tarWriter *t
 		serverSummaries = append(serverSummaries, &v1.ServerSummary{
 			Id:          server.Id,
 			Name:        server.Name,
-			ModLoader:   protometa.Name(server.ModLoader),
+			ModLoader:   server.ModLoader,
 			McVersion:   server.McVersion,
-			Status:      protometa.Name(server.Status),
+			Status:      server.Status,
 			Port:        int32(server.Port),
 			Memory:      int32(server.Memory),
 			AutoStart:   server.AutoStart,
@@ -807,7 +762,7 @@ func (s *SupportService) addSystemInfoToBundle(ctx context.Context, tarWriter *t
 		Servers:     serverSummaries,
 	}
 
-	jsonData, err := json.MarshalIndent(systemInfo, "", "  ")
+	jsonData, err := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(systemInfo)
 	if err != nil {
 		return fmt.Errorf("failed to marshal system info: %w", err)
 	}

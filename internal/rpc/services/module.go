@@ -19,6 +19,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 )
 
 // Compile-time check that ModuleService implements the interface
@@ -208,10 +209,10 @@ func (s *ModuleService) UpdateModuleTemplate(ctx context.Context, req *connect.R
 		template.DockerImage = *msg.DockerImage
 	}
 	if msg.DefaultEnv != nil {
-		template.DefaultEnv = *msg.DefaultEnv
+		template.DefaultEnv = msg.DefaultEnv
 	}
 	if msg.DefaultVolumes != nil {
-		template.DefaultVolumes = *msg.DefaultVolumes
+		template.DefaultVolumes = msg.DefaultVolumes
 	}
 	if msg.HealthCheckPath != nil {
 		template.HealthCheckPath = *msg.HealthCheckPath
@@ -464,16 +465,13 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		if port == nil || port.HostPort == 0 {
 			continue
 		}
-		protocol := port.Protocol
-		if protocol == "" {
-			protocol = "tcp"
-		}
+		protocol := storage.PortTransport(port.Protocol)
 		conflict, err := s.store.CheckPortAvailability(ctx, int(port.HostPort), protocol, port.ProxyEnabled, server.ProxyHostname, "")
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check port availability: %w", err))
 		}
 		if conflict != nil {
-			return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("port %d/%s: %s (used by %s)", port.HostPort, protocol, conflict.Reason, conflict.Module.Name))
+			return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("port %d/%s: %s (used by %s)", port.HostPort, protometa.Name(protocol), conflict.Reason, conflict.Module.Name))
 		}
 	}
 
@@ -546,7 +544,7 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 	if err := s.store.CreateModule(ctx, module); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create module: %w", err))
 	}
-	s.rec.Record(ctx, module.ServerId, "module.create", metrics.Attrs{"module": module.Name, "template": template.Name}, "created module %s", module.Name)
+	s.rec.Record(ctx, module.ServerId, v1.ServerActionKind_SERVER_ACTION_KIND_MODULE_CREATE, metrics.Attrs{"module": module.Name, "template": template.Name}, "created module %s", module.Name)
 
 	// Create container in background
 	bgCtx := detach(ctx)
@@ -585,10 +583,10 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		module.Config = *msg.Config
 	}
 	if msg.EnvOverrides != nil {
-		module.EnvOverrides = *msg.EnvOverrides
+		module.EnvOverrides = msg.EnvOverrides
 	}
 	if msg.VolumeOverrides != nil {
-		module.VolumeOverrides = *msg.VolumeOverrides
+		module.VolumeOverrides = msg.VolumeOverrides
 	}
 	if msg.Memory != nil {
 		module.Memory = *msg.Memory
@@ -617,16 +615,13 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 			if port == nil || port.HostPort == 0 {
 				continue
 			}
-			protocol := port.Protocol
-			if protocol == "" {
-				protocol = "tcp"
-			}
+			protocol := storage.PortTransport(port.Protocol)
 			conflict, err := s.store.CheckPortAvailability(ctx, int(port.HostPort), protocol, port.ProxyEnabled, server.ProxyHostname, module.Id)
 			if err != nil {
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check port availability: %w", err))
 			}
 			if conflict != nil {
-				return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("port %d/%s: %s (used by %s)", port.HostPort, protocol, conflict.Reason, conflict.Module.Name))
+				return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("port %d/%s: %s (used by %s)", port.HostPort, protometa.Name(protocol), conflict.Reason, conflict.Module.Name))
 			}
 		}
 
@@ -711,7 +706,7 @@ func (s *ModuleService) DeleteModule(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete module: %w", err))
 	}
 	if module != nil {
-		s.rec.Record(ctx, module.ServerId, "module.delete", metrics.Attrs{"module": module.Name}, "deleted module %s", module.Name)
+		s.rec.Record(ctx, module.ServerId, v1.ServerActionKind_SERVER_ACTION_KIND_MODULE_DELETE, metrics.Attrs{"module": module.Name}, "deleted module %s", module.Name)
 	}
 
 	return connect.NewResponse(&v1.DeleteModuleResponse{}), nil
@@ -741,10 +736,10 @@ func (s *ModuleService) StartModule(ctx context.Context, req *connect.Request[v1
 		}
 	}
 
-	s.rec.Record(ctx, module.ServerId, "module.start", metrics.Attrs{"module": module.Name}, "started module %s", module.Name)
+	s.rec.Record(ctx, module.ServerId, v1.ServerActionKind_SERVER_ACTION_KIND_MODULE_START, metrics.Attrs{"module": module.Name}, "started module %s", module.Name)
 
 	return connect.NewResponse(&v1.StartModuleResponse{
-		Status: "started",
+		Status: s.moduleStatus(ctx, msg.Id),
 	}), nil
 }
 
@@ -758,11 +753,11 @@ func (s *ModuleService) StopModule(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop module: %w", err))
 	}
 	if module, err := s.store.GetModule(ctx, msg.Id); err == nil {
-		s.rec.Record(ctx, module.ServerId, "module.stop", metrics.Attrs{"module": module.Name}, "stopped module %s", module.Name)
+		s.rec.Record(ctx, module.ServerId, v1.ServerActionKind_SERVER_ACTION_KIND_MODULE_STOP, metrics.Attrs{"module": module.Name}, "stopped module %s", module.Name)
 	}
 
 	return connect.NewResponse(&v1.StopModuleResponse{
-		Status: "stopped",
+		Status: s.moduleStatus(ctx, msg.Id),
 	}), nil
 }
 
@@ -776,11 +771,11 @@ func (s *ModuleService) RestartModule(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart module: %w", err))
 	}
 	if module, err := s.store.GetModule(ctx, msg.Id); err == nil {
-		s.rec.Record(ctx, module.ServerId, "module.restart", metrics.Attrs{"module": module.Name}, "restarted module %s", module.Name)
+		s.rec.Record(ctx, module.ServerId, v1.ServerActionKind_SERVER_ACTION_KIND_MODULE_RESTART, metrics.Attrs{"module": module.Name}, "restarted module %s", module.Name)
 	}
 
 	return connect.NewResponse(&v1.RestartModuleResponse{
-		Status: "restarted",
+		Status: s.moduleStatus(ctx, msg.Id),
 	}), nil
 }
 
@@ -795,8 +790,16 @@ func (s *ModuleService) RecreateModule(ctx context.Context, req *connect.Request
 	}
 
 	return connect.NewResponse(&v1.RecreateModuleResponse{
-		Status: "recreated",
+		Status: s.moduleStatus(ctx, msg.Id),
 	}), nil
+}
+
+// Current stored status for op responses
+func (s *ModuleService) moduleStatus(ctx context.Context, id string) v1.ModuleStatus {
+	if module, err := s.store.GetModule(ctx, id); err == nil {
+		return module.Status
+	}
+	return v1.ModuleStatus_MODULE_STATUS_UNSPECIFIED
 }
 
 // Logs and status

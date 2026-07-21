@@ -105,7 +105,7 @@ func (m *Manager) Login(ctx context.Context, username, password string) (*v1.Use
 		return nil, nil, "", time.Time{}, ErrLocalAuthDisabled
 	}
 
-	user, err := m.store.GetUserByUsernameAndProvider(ctx, username, "local")
+	user, err := m.store.GetUserByUsernameAndProvider(ctx, username, v1.AuthProvider_AUTH_PROVIDER_LOCAL)
 	if err != nil {
 		return nil, nil, "", time.Time{}, ErrInvalidCredentials
 	}
@@ -149,7 +149,7 @@ func (m *Manager) Login(ctx context.Context, username, password string) (*v1.Use
 	return user, roleNames, token, expiresAt, nil
 }
 
-func (m *Manager) ValidateSession(ctx context.Context, token string) (*AuthenticatedUser, error) {
+func (m *Manager) ValidateSession(ctx context.Context, token string) (*v1.User, error) {
 	if token == "" {
 		return nil, ErrInvalidToken
 	}
@@ -187,17 +187,8 @@ func (m *Manager) ValidateSession(ctx context.Context, token string) (*Authentic
 		return nil, err
 	}
 
-	authUser := &AuthenticatedUser{
-		Id:       user.Id,
-		Username: user.Username,
-		Roles:    roleNames,
-		Provider: user.AuthProvider,
-	}
-	if user.Email != nil {
-		authUser.Email = *user.Email
-	}
-
-	return authUser, nil
+	user.Roles = roleNames
+	return user, nil
 }
 
 func (m *Manager) Logout(ctx context.Context, token string) error {
@@ -219,7 +210,7 @@ func (m *Manager) CreateLocalUser(ctx context.Context, username, email, password
 		Id:           uuid.New().String(),
 		Username:     username,
 		Email:        emailPtr,
-		AuthProvider: "local",
+		AuthProvider: v1.AuthProvider_AUTH_PROVIDER_LOCAL,
 		IsActive:     true,
 		PasswordHash: hashedPassword,
 	}
@@ -237,7 +228,7 @@ func (m *Manager) ChangePassword(ctx context.Context, userID, oldPassword, newPa
 		return err
 	}
 
-	if user.AuthProvider != "local" {
+	if user.AuthProvider != v1.AuthProvider_AUTH_PROVIDER_LOCAL {
 		return errors.New("password change only available for local auth users")
 	}
 
@@ -254,12 +245,22 @@ func (m *Manager) ChangePassword(ctx context.Context, userID, oldPassword, newPa
 	return m.store.UpdateUser(ctx, user)
 }
 
-func (m *Manager) AnonymousUser() *AuthenticatedUser {
-	return &AuthenticatedUser{
-		Id:       "anonymous",
-		Username: "anonymous",
-		Roles:    []string{"anonymous"},
-		Provider: "anonymous",
+func (m *Manager) AnonymousUser() *v1.User {
+	return &v1.User{
+		Id:           "anonymous",
+		Username:     "anonymous",
+		Roles:        []string{"anonymous"},
+		AuthProvider: v1.AuthProvider_AUTH_PROVIDER_ANONYMOUS,
+	}
+}
+
+// Synthetic admin identity while auth is disabled
+func (m *Manager) SystemUser() *v1.User {
+	return &v1.User{
+		Id:           "admin",
+		Username:     "admin",
+		Roles:        []string{"admin"},
+		AuthProvider: v1.AuthProvider_AUTH_PROVIDER_NONE,
 	}
 }
 
@@ -272,11 +273,9 @@ func (m *Manager) IsAnyAuthEnabled() bool {
 }
 
 // Validates bearer token, handles session, API token, or anon
-func (m *Manager) AuthenticateFromHeader(ctx context.Context, authHeader string) (*AuthenticatedUser, error) {
+func (m *Manager) AuthenticateFromHeader(ctx context.Context, authHeader string) (*v1.User, error) {
 	if !m.IsAnyAuthEnabled() {
-		return &AuthenticatedUser{
-			Id: "admin", Username: "admin", Roles: []string{"admin"}, Provider: "none",
-		}, nil
+		return m.SystemUser(), nil
 	}
 
 	token := ""
@@ -431,7 +430,7 @@ func (m *Manager) GenerateModuleToken(ctx context.Context, userID, moduleName, m
 }
 
 // Validates a raw dp token and returns the user
-func (m *Manager) ValidateApiToken(ctx context.Context, rawToken string) (*AuthenticatedUser, error) {
+func (m *Manager) ValidateApiToken(ctx context.Context, rawToken string) (*v1.User, error) {
 	if !strings.HasPrefix(rawToken, "dp_") {
 		return nil, ErrInvalidToken
 	}
@@ -459,11 +458,11 @@ func (m *Manager) ValidateApiToken(ctx context.Context, rawToken string) (*Authe
 		go func() {
 			_ = m.store.UpdateApiTokenLastUsed(context.Background(), time.Now().UTC(), apiToken.Id)
 		}()
-		return &AuthenticatedUser{
-			Id:       apiToken.Id,
-			Username: apiToken.Name,
-			Roles:    []string{apiToken.ModuleRole},
-			Provider: "module",
+		return &v1.User{
+			Id:           apiToken.Id,
+			Username:     apiToken.Name,
+			Roles:        []string{apiToken.ModuleRole},
+			AuthProvider: v1.AuthProvider_AUTH_PROVIDER_MODULE,
 		}, nil
 	}
 
@@ -496,17 +495,8 @@ func (m *Manager) ValidateApiToken(ctx context.Context, rawToken string) (*Authe
 		_ = m.store.UpdateApiTokenLastUsed(context.Background(), time.Now().UTC(), apiToken.Id)
 	}()
 
-	authUser := &AuthenticatedUser{
-		Id:       user.Id,
-		Username: user.Username,
-		Roles:    roleNames,
-		Provider: user.AuthProvider,
-	}
-	if user.Email != nil {
-		authUser.Email = *user.Email
-	}
-
-	return authUser, nil
+	user.Roles = roleNames
+	return user, nil
 }
 
 func (m *Manager) GetRecoveryKey() string {

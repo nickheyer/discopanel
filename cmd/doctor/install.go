@@ -18,6 +18,7 @@ import (
 
 	"github.com/nickheyer/discopanel/pkg/indexers"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 )
 
 // Panel surface the installer reads properties through
@@ -42,15 +43,16 @@ func newDepInstaller(userAgent string, props propertySource) *depInstaller {
 }
 
 // Indexers serving the pack's source go first
-func orderSourcers(infos []indexers.IndexerInfo, packSource string) []indexers.IndexerInfo {
+func orderSourcers(infos []indexers.IndexerInfo, packSource optionsv1.PackSource) []indexers.IndexerInfo {
+	none := optionsv1.PackSource_PACK_SOURCE_UNSPECIFIED
 	out := make([]indexers.IndexerInfo, 0, len(infos))
 	for _, info := range infos {
-		if packSource != "" && info.PackSource == packSource {
+		if packSource != none && info.PackSource == packSource {
 			out = append(out, info)
 		}
 	}
 	for _, info := range infos {
-		if packSource == "" || info.PackSource != packSource {
+		if packSource == none || info.PackSource != packSource {
 			out = append(out, info)
 		}
 	}
@@ -65,13 +67,8 @@ func (in *depInstaller) Install(ctx context.Context, srv *serverInfo, modsDir, m
 	}
 	q := indexers.ModQuery{ModID: modID, McVersion: srv.McVersion, Loaders: facets}
 
-	packSource := ""
-	if pack := minecraft.PackPlatformFor(srv.ModLoader); pack != nil {
-		packSource = pack.Source
-	}
-
 	var errs []error
-	for _, info := range orderSourcers(indexers.Indexers(), packSource) {
+	for _, info := range orderSourcers(indexers.Indexers(), minecraft.PackSourceFor(srv.ModLoader)) {
 		file, err := in.fromIndexer(ctx, srv, info, modsDir, q, versionRange, dialect)
 		if err == nil {
 			return file, nil

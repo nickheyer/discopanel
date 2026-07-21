@@ -9,8 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/nickheyer/discopanel/internal/command"
@@ -213,7 +211,7 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		s.wg.Add(1)
 		go func(t *v1.ScheduledTask) {
 			defer s.wg.Done()
-			s.executeTask(t, "scheduled", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
+			s.executeTask(t, v1.TaskTrigger_TASK_TRIGGER_SCHEDULED, v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
 		}(task)
 	}
 }
@@ -225,7 +223,7 @@ func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*v1.TaskExe
 		return nil, err
 	}
 
-	execution, err := s.executeTask(task, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
+	execution, err := s.executeTask(task, v1.TaskTrigger_TASK_TRIGGER_MANUAL, v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
 	return execution, err
 }
 
@@ -246,8 +244,8 @@ func (s *Scheduler) HandleServerEvent(ctx context.Context, event events.Event) {
 }
 
 // Runs a task from an event, threads type to webhooks
-func (s *Scheduler) executeTaskForEvent(task *v1.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) {
-	s.executeTask(task, "event", eventType, eventData)
+func (s *Scheduler) executeTaskForEvent(task *v1.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]string) {
+	s.executeTask(task, v1.TaskTrigger_TASK_TRIGGER_EVENT, eventType, eventData)
 }
 
 // Marks a task in flight unless it already is
@@ -269,7 +267,7 @@ func (s *Scheduler) endTask(taskID string) {
 }
 
 // Runs a single task, trigger names what drove it
-func (s *Scheduler) executeTask(task *v1.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any) (*v1.TaskExecution, error) {
+func (s *Scheduler) executeTask(task *v1.ScheduledTask, trigger v1.TaskTrigger, eventType v1.TriggeredEventType, eventData map[string]string) (*v1.TaskExecution, error) {
 	ctx := context.Background()
 
 	if !s.tryBeginTask(task.Id) {
@@ -397,7 +395,7 @@ func (s *Scheduler) executeTask(task *v1.ScheduledTask, trigger string, eventTyp
 }
 
 // Dispatches a single execution attempt to its executor
-func (s *Scheduler) runTaskType(ctx context.Context, server *v1.Server, task *v1.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
+func (s *Scheduler) runTaskType(ctx context.Context, server *v1.Server, task *v1.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]string) (string, error) {
 	switch task.TaskType {
 	case v1.TaskType_TASK_TYPE_COMMAND:
 		return s.executeCommandTask(ctx, server, task)
@@ -474,21 +472,10 @@ func (s *Scheduler) updateNextRun(task *v1.ScheduledTask) {
 
 // Task type executors
 
-// Parses a task's JSON config into its proto message
-func unmarshalTaskConfig(cfg string, msg proto.Message) error {
-	if cfg == "" {
-		return nil
-	}
-	return protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal([]byte(cfg), msg)
-}
-
 func (s *Scheduler) executeCommandTask(ctx context.Context, server *v1.Server, task *v1.ScheduledTask) (string, error) {
-	config := &v1.CommandTaskConfig{}
-	if err := unmarshalTaskConfig(task.Config, config); err != nil {
-		return "", fmt.Errorf("invalid command config: %w", err)
-	}
+	config := task.GetCommandConfig()
 
-	if config.Command == "" {
+	if config.GetCommand() == "" {
 		return "", fmt.Errorf("no command specified")
 	}
 
@@ -498,7 +485,7 @@ func (s *Scheduler) executeCommandTask(ctx context.Context, server *v1.Server, t
 
 	output, err := s.sender.SendCommand(ctx, server.Id, config.Command)
 	if err == nil {
-		s.rec.Record(ctx, server.Id, "task.command", metrics.Attrs{"command": config.Command, "task": task.Name}, "ran command %q (task %q)", config.Command, task.Name)
+		s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_TASK_COMMAND, metrics.Attrs{"command": config.Command, "task": task.Name}, "ran command %q (task %q)", config.Command, task.Name)
 	}
 	return output, err
 }
@@ -526,12 +513,9 @@ func (s *Scheduler) executeStopTask(ctx context.Context, server *v1.Server, _ *v
 
 func (s *Scheduler) executeScriptTask(ctx context.Context, server *v1.Server, task *v1.ScheduledTask) (string, error) {
 	// Script tasks execute inside the container
-	config := &v1.ScriptTaskConfig{}
-	if err := unmarshalTaskConfig(task.Config, config); err != nil {
-		return "", fmt.Errorf("invalid config: %w", err)
-	}
+	config := task.GetScriptConfig()
 
-	if config.ScriptPath == "" {
+	if config.GetScriptPath() == "" {
 		return "", fmt.Errorf("no script/executable specified")
 	}
 
@@ -540,7 +524,7 @@ func (s *Scheduler) executeScriptTask(ctx context.Context, server *v1.Server, ta
 	if err != nil {
 		return "", err
 	}
-	s.rec.Record(ctx, server.Id, "task.script", metrics.Attrs{"script": config.ScriptPath, "task": task.Name}, "ran script %s (task %q)", config.ScriptPath, task.Name)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_TASK_SCRIPT, metrics.Attrs{"script": config.ScriptPath, "task": task.Name}, "ran script %s (task %q)", config.ScriptPath, task.Name)
 	if strings.TrimSpace(stderr) != "" {
 		return stdout + "\n[stderr]\n" + stderr, nil
 	}
@@ -595,24 +579,16 @@ func (s *Scheduler) ValidateCronExpr(expr string) error {
 	return err
 }
 
-func (s *Scheduler) executeWebhookTask(ctx context.Context, server *v1.Server, task *v1.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
-	cfg := &v1.WebhookTaskConfig{}
-	if err := unmarshalTaskConfig(task.Config, cfg); err != nil {
-		return "", fmt.Errorf("invalid webhook config: %w", err)
-	}
-	if cfg.Url == "" {
+func (s *Scheduler) executeWebhookTask(ctx context.Context, server *v1.Server, task *v1.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]string) (string, error) {
+	cfg := task.GetWebhookConfig()
+	if cfg.GetUrl() == "" {
 		return "", fmt.Errorf("webhook URL is required")
 	}
 
 	// Event runs pass the firing event, schedules fall back
-	var event string
-	switch {
-	case eventType != v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED:
-		event = webhookEventName(eventType)
-	case len(task.EventTriggers) > 0:
-		event = webhookEventName(task.EventTriggers[0])
-	default:
-		event = "manual"
+	event := eventType
+	if event == v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED && len(task.EventTriggers) > 0 {
+		event = task.EventTriggers[0]
 	}
 
 	// Pull live count from metrics so payloads report players accurately
@@ -633,24 +609,4 @@ func (s *Scheduler) executeWebhookTask(ctx context.Context, server *v1.Server, t
 		return output, nil
 	}
 	return output, fmt.Errorf("%s", result.ErrorMessage)
-}
-
-// Maps event types to lowercase webhook event names
-func webhookEventName(t v1.TriggeredEventType) string {
-	switch t {
-	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START:
-		return "server_start"
-	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP:
-		return "server_stop"
-	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_RESTART:
-		return "server_restart"
-	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_HEALTHY:
-		return "server_healthy"
-	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_JOIN:
-		return "player_join"
-	case v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_PLAYER_LEAVE:
-		return "player_leave"
-	default:
-		return "manual"
-	}
 }

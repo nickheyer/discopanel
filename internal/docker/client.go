@@ -282,10 +282,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *v1.Server, serverC
 		nat.Port(fmt.Sprintf("%d/tcp", DefaultRCONPort)): struct{}{},
 	}
 	for _, port := range server.AdditionalPorts {
-		protocol := port.GetProtocol()
-		if protocol == "" {
-			protocol = "tcp"
-		}
+		protocol := protometa.Name(models.PortTransport(port.GetProtocol()))
 		exposedPorts[nat.Port(fmt.Sprintf("%d/%s", port.GetContainerPort(), protocol))] = struct{}{}
 	}
 
@@ -303,10 +300,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *v1.Server, serverC
 	}
 	// Add additional port bindings
 	for _, port := range server.AdditionalPorts {
-		protocol := port.GetProtocol()
-		if protocol == "" {
-			protocol = "tcp"
-		}
+		protocol := protometa.Name(models.PortTransport(port.GetProtocol()))
 		portKey := nat.Port(fmt.Sprintf("%d/%s", port.GetContainerPort(), protocol))
 		portBindings[portKey] = []nat.PortBinding{
 			{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", port.GetHostPort())},
@@ -332,7 +326,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *v1.Server, serverC
 		Labels: map[string]string{
 			"discopanel.server.id":      server.Id,
 			"discopanel.server.name":    server.Name,
-			"discopanel.server.loader":  string(server.ModLoader),
+			"discopanel.server.loader":  protometa.Name(server.ModLoader),
 			"discopanel.server.version": server.McVersion,
 			"discopanel.managed":        "true",
 			LabelConfigHash:             c.DesiredConfigHash(server, serverConfig),

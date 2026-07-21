@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 
 	"connectrpc.com/connect"
 	storage "github.com/nickheyer/discopanel/internal/db"
@@ -81,25 +80,7 @@ func (s *MinecraftService) GetModLoaders(ctx context.Context, req *connect.Reque
 
 // Lists the published discopanel-runtime image variants
 func (s *MinecraftService) GetDockerImages(ctx context.Context, req *connect.Request[v1.GetDockerImagesRequest]) (*connect.Response[v1.GetDockerImagesResponse], error) {
-	runtimeImages := docker.RuntimeImages()
-
-	protoImages := make([]*v1.DockerImage, 0, len(runtimeImages))
-	for i, img := range runtimeImages {
-		display := fmt.Sprintf("Java %d (discopanel-runtime)", img.JavaMajor)
-		desc := fmt.Sprintf("Minimal Temurin %d JRE runtime; server files are provisioned by DiscoPanel", img.JavaMajor)
-		if img.Graal {
-			display = fmt.Sprintf("Java %d GraalVM (discopanel-runtime)", img.JavaMajor)
-			desc = fmt.Sprintf("Oracle GraalVM %d JIT runtime; often faster ticks on modded servers, worth benchmarking per pack", img.JavaMajor)
-		}
-		protoImages = append(protoImages, &v1.DockerImage{
-			Tag:         img.Tag,
-			DisplayName: display,
-			Description: desc,
-			Recommended: i == 0,
-		})
-	}
-
 	return connect.NewResponse(&v1.GetDockerImagesResponse{
-		Images: protoImages,
+		Images: docker.RuntimeImages(),
 	}), nil
 }

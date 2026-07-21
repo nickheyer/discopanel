@@ -10,6 +10,8 @@ import (
 	"time"
 
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 )
 
 // Reports are small, the cap only guards against garbage files
@@ -140,9 +142,9 @@ func parseFabricResolutionMods(text string) []*agentv1.FailedMod {
 			continue
 		}
 		seen[id] = true
-		fm := &agentv1.FailedMod{ModId: id, ErrorMessage: trimmed, Reason: "mod_error"}
+		fm := &agentv1.FailedMod{ModId: id, ErrorMessage: trimmed, Reason: protometa.Name(v1.FailedModClass_FAILED_MOD_CLASS_MOD_ERROR)}
 		if strings.Contains(trimmed, "requires") {
-			fm.Reason = "missing_dependency"
+			fm.Reason = protometa.Name(v1.FailedModClass_FAILED_MOD_CLASS_MISSING_DEPENDENCY)
 		}
 		mods = append(mods, fm)
 	}

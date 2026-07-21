@@ -283,14 +283,6 @@
 		return num.toString();
 	}
 
-	function parseJsonArray(jsonStr: string): string[] {
-		try {
-			return JSON.parse(jsonStr);
-		} catch {
-			return [];
-		}
-	}
-
 	async function handleModpackUpload(event: Event) {
 		const input = event.target as HTMLInputElement;
 		const files = input.files;
@@ -593,8 +585,8 @@
 			{:else if displayModpacks.length > 0}
 				<div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
 					{#each displayModpacks as modpack (modpack.id)}
-						{@const loaders = parseJsonArray(modpack.modLoaders)}
-						{@const versions = parseJsonArray(modpack.gameVersions)}
+						{@const loaders = modpack.modLoaders}
+						{@const versions = modpack.gameVersions}
 						<div
 							class="flex flex-col rounded-xl border bg-card p-4 transition-all hover:border-primary/30 hover:shadow-sm"
 						>

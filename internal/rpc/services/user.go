@@ -79,7 +79,7 @@ func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.Cr
 
 	// Assign roles
 	for _, roleName := range msg.Roles {
-		if err := s.store.AssignRole(ctx, user.Id, roleName, "local"); err != nil {
+		if err := s.store.AssignRole(ctx, user.Id, roleName, v1.RoleSource_ROLE_SOURCE_LOCAL); err != nil {
 			s.log.Error("Failed to assign role %s to user %s: %v", roleName, user.Id, err)
 		}
 	}
@@ -88,7 +88,7 @@ func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.Cr
 	if len(msg.Roles) == 0 {
 		defaultRoles, _ := s.store.GetDefaultRoles(ctx)
 		for _, role := range defaultRoles {
-			_ = s.store.AssignRole(ctx, user.Id, role.Name, "local")
+			_ = s.store.AssignRole(ctx, user.Id, role.Name, v1.RoleSource_ROLE_SOURCE_LOCAL)
 		}
 	}
 
@@ -148,7 +148,7 @@ func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.Up
 		// Add roles not in current set
 		for _, r := range msg.Roles {
 			if !currentSet[r] {
-				_ = s.store.AssignRole(ctx, user.Id, r, "local")
+				_ = s.store.AssignRole(ctx, user.Id, r, v1.RoleSource_ROLE_SOURCE_LOCAL)
 			}
 		}
 	}

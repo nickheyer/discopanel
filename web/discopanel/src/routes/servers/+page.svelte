@@ -34,7 +34,7 @@
 	} from '$lib/server-status';
 	import { loaderDisplayName } from '$lib/stores/loaders';
 	import { formatUptime } from '$lib/utils/time';
-	import { runServerAction, type ServerAction } from '$lib/server-actions';
+	import { runServerAction, type ServerOp } from '$lib/server-actions';
 	import { toast } from 'svelte-sonner';
 	import {
 		Plus,
@@ -156,7 +156,7 @@
 		);
 	});
 
-	async function handleAction(action: ServerAction, server: Server) {
+	async function handleAction(action: ServerOp, server: Server) {
 		actioningId = server.id;
 		await runServerAction(action, server);
 		actioningId = '';

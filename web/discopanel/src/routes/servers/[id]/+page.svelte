@@ -34,7 +34,7 @@
 		DeleteServerRequestSchema
 	} from '$lib/proto/discopanel/v1/server_pb';
 	import { canStop, canRestart } from '$lib/server-status';
-	import { runServerAction, type ServerAction } from '$lib/server-actions';
+	import { runServerAction, type ServerOp } from '$lib/server-actions';
 	import { loaderDisplayName } from '$lib/stores/loaders';
 	import { formatDate } from '$lib/utils/time';
 	import { copyToClipboard } from '$lib/utils/clipboard';
@@ -150,7 +150,7 @@
 		}
 	}
 
-	async function handleServerAction(action: ServerAction) {
+	async function handleServerAction(action: ServerOp) {
 		if (!server) return;
 		actionLoading = true;
 		await runServerAction(action, server, () => loadServer());

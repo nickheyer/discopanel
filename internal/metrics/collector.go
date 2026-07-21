@@ -14,6 +14,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type ServerMetrics struct {
@@ -82,6 +83,27 @@ type ServerMetrics struct {
 
 	// Live proxied connection count from the routing layer
 	ProxyActiveConns int64
+}
+
+// Renders the sampled subset as one telemetry point
+func (m *ServerMetrics) Sample(serverID string) *v1.MetricsSample {
+	// Stale heap without a live agent must not report
+	var heapUsed float64
+	if m.AgentConnected {
+		heapUsed = m.HeapUsedMb
+	}
+	return &v1.MetricsSample{
+		ServerId:         serverID,
+		Timestamp:        timestamppb.Now(),
+		Tps:              m.Tps,
+		Mspt:             m.Mspt,
+		Players:          int32(m.PlayersOnline),
+		CpuPercent:       m.CpuPercent,
+		MemoryMb:         m.MemoryUsage,
+		HeapUsedMb:       heapUsed,
+		DiskBytes:        m.DiskUsage,
+		ProxyActiveConns: m.ProxyActiveConns,
+	}
 }
 
 // Copies the metrics with slices, safe outside the lock
@@ -825,7 +847,7 @@ func (c *Collector) detectLifecycleEvents() {
 }
 
 // Emits a derived lifecycle event with optional data
-func (c *Collector) emit(ctx context.Context, t v1.TriggeredEventType, serverID string, data map[string]any) {
+func (c *Collector) emit(ctx context.Context, t v1.TriggeredEventType, serverID string, data map[string]string) {
 	if c.bus == nil {
 		return
 	}

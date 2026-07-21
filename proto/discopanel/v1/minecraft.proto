@@ -2,18 +2,25 @@ syntax = "proto3";
 
 package discopanel.v1;
 
-option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
-
+import "discopanel/options/v1/options.proto";
 import "discopanel/v1/storage.proto";
+
+option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
 // Minecraft version and runtime information
 service MinecraftService {
   // List all Minecraft versions
-  rpc GetMinecraftVersions(GetMinecraftVersionsRequest) returns (GetMinecraftVersionsResponse);
+  rpc GetMinecraftVersions(GetMinecraftVersionsRequest) returns (GetMinecraftVersionsResponse) {
+    option (discopanel.options.v1.perm) = {session: true};
+  }
   // List supported mod loaders
-  rpc GetModLoaders(GetModLoadersRequest) returns (GetModLoadersResponse);
+  rpc GetModLoaders(GetModLoadersRequest) returns (GetModLoadersResponse) {
+    option (discopanel.options.v1.perm) = {session: true};
+  }
   // List available Docker images
-  rpc GetDockerImages(GetDockerImagesRequest) returns (GetDockerImagesResponse);
+  rpc GetDockerImages(GetDockerImagesRequest) returns (GetDockerImagesResponse) {
+    option (discopanel.options.v1.perm) = {session: true};
+  }
 }
 
 // Minecraft version metadata
@@ -40,7 +47,7 @@ message ModLoaderInfo {
   string description = 3;
   bool supports_mods = 4;
   bool supports_plugins = 5;
-  string category = 6;
+  discopanel.options.v1.ModLoaderCategory category = 6;
   // True when the provisioner installs this loader itself
   bool provisionable = 7;
   ModLoader loader = 8;
@@ -71,4 +78,3 @@ message GetDockerImagesRequest {}
 message GetDockerImagesResponse {
   repeated DockerImage images = 1;
 }
-

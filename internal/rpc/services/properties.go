@@ -112,7 +112,7 @@ func (s *PropertiesService) UpdateServerProperties(ctx context.Context, req *con
 		s.log.Error("Failed to save server config: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save server properties"))
 	}
-	s.rec.Record(ctx, server.Id, "properties.update", metrics.Attrs{"changed": strconv.Itoa(len(msg.Updates))}, "updated server properties (%d changed)", len(msg.Updates))
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_PROPERTIES_UPDATE, metrics.Attrs{"changed": strconv.Itoa(len(msg.Updates))}, "updated server properties (%d changed)", len(msg.Updates))
 
 	// Restarts running servers so new config applies
 	if server.ContainerId != "" && s.lifecycle != nil {
@@ -215,36 +215,6 @@ func applyPropertyUpdates(config proto.Message, updates map[string]string) error
 	return nil
 }
 
-// Category slugs on prop annotations mapped to display order
-var propertyCategorySlugs = []struct {
-	Slug string
-	Name string
-}{
-	{"jvm", "JVM"},
-	{"server", "Server Settings"},
-	{"game", "Game Settings"},
-	{"world", "World Generation"},
-	{"rcon", "RCON"},
-	{"resourcepack", "Resource Pack"},
-	{"management", "Management Server"},
-	{"ops", "Ops/Admins"},
-	{"whitelist", "Whitelist"},
-	{"autopause", "Auto-Pause"},
-	{"autostop", "Auto-Stop"},
-	{"curseforge", "CurseForge"},
-	{"modrinth", "Modrinth"},
-	{"proxy", "Proxy"},
-}
-
-func propertyCategoryIndex(slug string) int {
-	for i, c := range propertyCategorySlugs {
-		if c.Slug == slug {
-			return i
-		}
-	}
-	return -1
-}
-
 // Reads one settings field by its property key
 func propertyValueByKey(config proto.Message, key string) string {
 	m := config.ProtoReflect()
@@ -257,15 +227,18 @@ func propertyValueByKey(config proto.Message, key string) string {
 }
 
 func buildPropertyCategories(config proto.Message) ([]*v1.PropertyCategory, error) {
-	categories := make([]*v1.PropertyCategory, 0, len(propertyCategorySlugs))
-	for _, c := range propertyCategorySlugs {
-		categories = append(categories, &v1.PropertyCategory{Name: c.Name, Properties: []*v1.ServerProperty{}})
+	m := config.ProtoReflect()
+	declared := protometa.Categories(m.Descriptor())
+	categories := make([]*v1.PropertyCategory, len(declared))
+	slugIndex := make(map[string]int, len(declared))
+	for i, c := range declared {
+		categories[i] = &v1.PropertyCategory{Name: c.Label, Properties: []*v1.ServerProperty{}}
+		slugIndex[c.Slug] = i
 	}
 
-	m := config.ProtoReflect()
 	for _, p := range protometa.Props(m.Descriptor()) {
-		categoryIndex := propertyCategoryIndex(p.Meta.Category)
-		if categoryIndex < 0 {
+		categoryIndex, ok := slugIndex[p.Meta.Category]
+		if !ok {
 			continue
 		}
 
@@ -301,7 +274,11 @@ func buildPropertyCategories(config proto.Message) ([]*v1.PropertyCategory, erro
 		}
 
 		if p.Meta.Input == "select" {
-			prop.Options = getSelectOptions(key)
+			prop.Options = p.Meta.Options
+			// Pack loader choices derive from the loader registry
+			if key == "modrinthLoader" {
+				prop.Options = minecraft.PackLoaderNames()
+			}
 		}
 
 		categories[categoryIndex].Properties = append(categories[categoryIndex].Properties, prop)
@@ -316,24 +293,4 @@ func buildPropertyCategories(config proto.Message) ([]*v1.PropertyCategory, erro
 	}
 
 	return nonEmptyCategories, nil
-}
-
-// Returns options for select fields
-func getSelectOptions(key string) []string {
-	switch key {
-	case "difficulty":
-		return []string{"peaceful", "easy", "normal", "hard"}
-	case "mode":
-		return []string{"creative", "survival", "adventure", "spectator"}
-	case "modrinthDownloadDependencies":
-		return []string{"none", "required", "optional"}
-	case "modrinthProjectsDefaultVersionType":
-		return []string{"release", "beta", "alpha"}
-	case "modrinthModpackVersionType":
-		return []string{"release", "beta", "alpha"}
-	case "modrinthLoader":
-		return minecraft.PackLoaderNames()
-	default:
-		return []string{}
-	}
 }

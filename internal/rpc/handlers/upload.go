@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,13 +9,22 @@ import (
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
+	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/transfer"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
-type uploadStreamResponse struct {
-	SessionID     string `json:"session_id"`
-	BytesReceived int64  `json:"bytes_received"`
-	Completed     bool   `json:"completed"`
+// Writes an UploadChunkResponse as protojson
+func writeChunkResponse(w http.ResponseWriter, status int, resp *v1.UploadChunkResponse) {
+	data, err := protojson.Marshal(resp)
+	if err != nil {
+		http.Error(w, "encode failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(data)
 }
 
 // Handles PUT upload streaming with bearer auth and resume offset
@@ -42,7 +50,7 @@ func NewUploadStreamHandler(uploadManager *transfer.UploadManager, authManager *
 		}
 
 		// Check RBAC uploads create permission
-		allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceUploads, rbac.ActionCreate, "*")
+		allowed, rbacErr := enforcer.Enforce(user.Roles, optionsv1.ResourceType_RESOURCE_TYPE_UPLOADS, optionsv1.ActionType_ACTION_TYPE_CREATE, "*")
 		if rbacErr != nil || !allowed {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
@@ -71,24 +79,17 @@ func NewUploadStreamHandler(uploadManager *transfer.UploadManager, authManager *
 		bytesWritten, completed, err := uploadManager.WriteStream(sessionID, r.Body, offset)
 		if err != nil {
 			log.Error("Stream upload error for session %s: %v", sessionID, err)
-			resp := uploadStreamResponse{
-				SessionID:     sessionID,
+			writeChunkResponse(w, http.StatusInternalServerError, &v1.UploadChunkResponse{
+				SessionId:     sessionID,
 				BytesReceived: offset + bytesWritten,
-				Completed:     false,
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(resp)
+			})
 			return
 		}
 
-		resp := uploadStreamResponse{
-			SessionID:     sessionID,
+		writeChunkResponse(w, http.StatusOK, &v1.UploadChunkResponse{
+			SessionId:     sessionID,
 			BytesReceived: offset + bytesWritten,
 			Completed:     completed,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		})
 	})
 }

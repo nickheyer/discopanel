@@ -7,7 +7,12 @@
 	import { registerRefresh } from '$lib/stores/refresh';
 	import { toast } from 'svelte-sonner';
 	import type { Server, Module, ModuleTemplate } from '$lib/proto/discopanel/v1/storage_pb';
-	import { ModuleStatus } from '$lib/proto/discopanel/v1/storage_pb';
+	import {
+		ModuleStatus,
+		ModuleProtocol,
+		ModuleProtocolSchema
+	} from '$lib/proto/discopanel/v1/storage_pb';
+	import { enumLabel } from '$lib/proto-meta';
 	import { TONE_BADGE, TONE_BG } from '$lib/server-status';
 	import { moduleStatusMeta } from '$lib/module-status';
 	import { getEventTypeLabel } from '$lib/utils/events';
@@ -375,9 +380,10 @@
 								<div class="flex flex-wrap gap-1.5">
 									{#each module.ports as port, i (i)}
 										<Badge variant="outline" class="font-mono">
-											{port.name || 'Port'}: {port.hostPort || '?'}:{port.containerPort}/{(
-												port.protocol || 'tcp'
-											).toUpperCase()}
+											{port.name || 'Port'}: {port.hostPort || '?'}:{port.containerPort}/{enumLabel(
+												ModuleProtocolSchema,
+												port.protocol || ModuleProtocol.TCP
+											)}
 										</Badge>
 									{/each}
 								</div>

@@ -7,25 +7,9 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import MetricsChart from '$lib/components/metrics-chart.svelte';
 	import type { Server, MetricsSample, ServerAction } from '$lib/proto/discopanel/v1/storage_pb';
+	import { ServerActionKind } from '$lib/proto/discopanel/v1/storage_pb';
 
 	let { server }: { server: Server } = $props();
-
-	interface EventMarker {
-		id: bigint;
-		ts: Date;
-		label: string;
-		tone: string;
-	}
-
-	interface SamplePoint {
-		ts: Date;
-		tps: number;
-		mspt: number;
-		players: number;
-		cpuPercent: number;
-		memoryMb: number;
-		heapUsedMb: number;
-	}
 
 	const ranges = [
 		{ key: '1h', label: '1H', hours: 1 },
@@ -34,33 +18,42 @@
 		{ key: '7d', label: '7D', hours: 168 }
 	] as const;
 
+	// Only server lifecycle kinds show as markers
+	const markerKinds: ServerActionKind[] = [
+		ServerActionKind.SERVER_CREATE,
+		ServerActionKind.SERVER_START,
+		ServerActionKind.SERVER_STOP,
+		ServerActionKind.SERVER_PAUSE,
+		ServerActionKind.SERVER_WAKE,
+		ServerActionKind.SERVER_CRASH,
+		ServerActionKind.SERVER_OOM,
+		ServerActionKind.SERVER_BOOT_FAILED
+	];
+
 	let range = $state<(typeof ranges)[number]>(ranges[0]);
-	let samples = $state<SamplePoint[]>([]);
-	let events = $state<EventMarker[]>([]);
+	let samples = $state<MetricsSample[]>([]);
+	let events = $state<ServerAction[]>([]);
 	let rangeFrom = $state(new Date());
 	let rangeTo = $state(new Date());
 	let loading = $state(true);
 	let unsubscribeMetrics: (() => void) | null = null;
 
-	function markerTone(name: string): string {
-		if (name.startsWith('doctor.') || name.startsWith('fix.')) return 'bg-amber-400';
-		if (name.includes('crash') || name.includes('oom') || name.includes('boot_failed'))
-			return 'bg-red-400';
-		if (name === 'server.start') return 'bg-emerald-400';
-		return 'bg-zinc-400';
+	function markerTone(kind: ServerActionKind): string {
+		switch (kind) {
+			case ServerActionKind.SERVER_CRASH:
+			case ServerActionKind.SERVER_OOM:
+			case ServerActionKind.SERVER_BOOT_FAILED:
+				return 'bg-red-400';
+			case ServerActionKind.SERVER_START:
+				return 'bg-emerald-400';
+			default:
+				return 'bg-zinc-400';
+		}
 	}
 
-	function toMarker(a: ServerAction, from: Date): EventMarker | null {
-		if (!a.timestamp) return null;
-		if (
-			!a.name.startsWith('server.') &&
-			!a.name.startsWith('doctor.') &&
-			!a.name.startsWith('fix.')
-		)
-			return null;
-		const ts = timestampDate(a.timestamp);
-		if (ts.getTime() < from.getTime()) return null;
-		return { id: a.id, ts, label: a.message, tone: markerTone(a.name) };
+	// Samples are filtered on ingest so timestamp always exists
+	function sampleTs(s: MetricsSample): Date {
+		return timestampDate(s.timestamp!);
 	}
 
 	async function loadEvents(from: Date) {
@@ -69,22 +62,31 @@
 				{ id: server.id, afterId: 0n },
 				silentCallOptions
 			);
-			events = res.actions
-				.map((a) => toMarker(a, from))
-				.filter((m): m is EventMarker => m !== null);
+			events = res.actions.filter(
+				(a) =>
+					a.timestamp &&
+					markerKinds.includes(a.kind) &&
+					timestampDate(a.timestamp).getTime() >= from.getTime()
+			);
 		} catch {
 			events = [];
 		}
 	}
 
-	function markerLeft(m: EventMarker): number {
+	function markerLeft(a: ServerAction): number {
+		if (!a.timestamp) return 0;
 		const span = rangeTo.getTime() - rangeFrom.getTime();
 		if (span <= 0) return 0;
-		return Math.min(100, Math.max(0, ((m.ts.getTime() - rangeFrom.getTime()) / span) * 100));
+		return Math.min(
+			100,
+			Math.max(0, ((timestampDate(a.timestamp).getTime() - rangeFrom.getTime()) / span) * 100)
+		);
 	}
 
-	function markerTitle(m: EventMarker): string {
-		return `${m.ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} ${m.label}`;
+	function markerTitle(a: ServerAction): string {
+		if (!a.timestamp) return a.message;
+		const ts = timestampDate(a.timestamp);
+		return `${ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} ${a.message}`;
 	}
 
 	// Tick charts show only after tick data is observed
@@ -96,19 +98,6 @@
 	let heapCapable = $derived(
 		(server.agentConnected && server.heapUsedMb > 0) || samples.some((s) => s.heapUsedMb > 0)
 	);
-
-	function toPoint(s: MetricsSample): SamplePoint | null {
-		if (!s.timestamp) return null;
-		return {
-			ts: timestampDate(s.timestamp),
-			tps: s.tps,
-			mspt: s.mspt,
-			players: s.players,
-			cpuPercent: s.cpuPercent,
-			memoryMb: s.memoryMb,
-			heapUsedMb: s.heapUsedMb
-		};
-	}
 
 	async function loadHistory() {
 		loading = true;
@@ -126,7 +115,7 @@
 				},
 				silentCallOptions
 			);
-			samples = response.samples.map(toPoint).filter((p): p is SamplePoint => p !== null);
+			samples = response.samples.filter((s) => s.timestamp !== undefined);
 			await loadEvents(from);
 		} catch (error) {
 			console.error('Failed to load metrics history:', error);
@@ -143,10 +132,9 @@
 
 	function appendLive(serverId: string, sample: MetricsSample) {
 		if (serverId !== server.id) return;
-		const point = toPoint(sample);
-		if (!point) return;
+		if (!sample.timestamp) return;
 		const cutoff = Date.now() - range.hours * 60 * 60 * 1000;
-		samples = [...samples.filter((p) => p.ts.getTime() >= cutoff), point];
+		samples = [...samples.filter((s) => sampleTs(s).getTime() >= cutoff), sample];
 	}
 
 	// Reload history and swap subscriptions per server
@@ -173,12 +161,12 @@
 		return v >= 1024 ? `${(v / 1024).toFixed(1)}G` : `${Math.round(v)}M`;
 	}
 
-	let tpsPoints = $derived(samples.map((s) => ({ ts: s.ts, value: s.tps })));
-	let msptPoints = $derived(samples.map((s) => ({ ts: s.ts, value: s.mspt })));
-	let playerPoints = $derived(samples.map((s) => ({ ts: s.ts, value: s.players })));
-	let cpuPoints = $derived(samples.map((s) => ({ ts: s.ts, value: s.cpuPercent })));
-	let memoryPoints = $derived(samples.map((s) => ({ ts: s.ts, value: s.memoryMb })));
-	let heapPoints = $derived(samples.map((s) => ({ ts: s.ts, value: s.heapUsedMb })));
+	let tpsPoints = $derived(samples.map((s) => ({ ts: sampleTs(s), value: s.tps })));
+	let msptPoints = $derived(samples.map((s) => ({ ts: sampleTs(s), value: s.mspt })));
+	let playerPoints = $derived(samples.map((s) => ({ ts: sampleTs(s), value: s.players })));
+	let cpuPoints = $derived(samples.map((s) => ({ ts: sampleTs(s), value: s.cpuPercent })));
+	let memoryPoints = $derived(samples.map((s) => ({ ts: sampleTs(s), value: s.memoryMb })));
+	let heapPoints = $derived(samples.map((s) => ({ ts: sampleTs(s), value: s.heapUsedMb })));
 </script>
 
 <div class="overflow-hidden rounded-xl border bg-card">
@@ -210,11 +198,13 @@
 					Events
 				</span>
 				<div class="relative h-3 flex-1 rounded bg-muted/40">
-					{#each events as m (m.id)}
+					{#each events as a (a.id)}
 						<span
-							class="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full {m.tone}"
-							style="left: {markerLeft(m)}%"
-							title={markerTitle(m)}
+							class="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full {markerTone(
+								a.kind
+							)}"
+							style="left: {markerLeft(a)}%"
+							title={markerTitle(a)}
 						></span>
 					{/each}
 				</div>

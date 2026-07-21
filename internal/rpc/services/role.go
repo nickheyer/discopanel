@@ -9,8 +9,10 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 )
 
 var _ discopanelv1connect.RoleServiceHandler = (*RoleService)(nil)
@@ -181,14 +183,31 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 		}
 	}
 
-	// Build resource_actions from procedure mappings
-	raEntries := rbac.ResourceActionsFromProcedures()
-	protoRA := make([]*v1.ResourceActions, 0, len(raEntries))
-	for _, ra := range raEntries {
-		protoRA = append(protoRA, &v1.ResourceActions{
-			Resource: ra.Resource,
-			Actions:  ra.Actions,
-		})
+	// Build resource_actions from rpc perm annotations
+	actionSet := make(map[optionsv1.ResourceType]map[optionsv1.ActionType]bool)
+	protometa.RangePerms(func(perm *optionsv1.RpcPerm) {
+		if perm.Resource == optionsv1.ResourceType_RESOURCE_TYPE_UNSPECIFIED {
+			return
+		}
+		if actionSet[perm.Resource] == nil {
+			actionSet[perm.Resource] = make(map[optionsv1.ActionType]bool)
+		}
+		actionSet[perm.Resource][perm.Action] = true
+	})
+	allActions := protometa.Values[optionsv1.ActionType]()
+	protoRA := make([]*v1.ResourceActions, 0, len(actionSet))
+	for _, res := range protometa.Values[optionsv1.ResourceType]() {
+		acts, ok := actionSet[res]
+		if !ok {
+			continue
+		}
+		ra := &v1.ResourceActions{Resource: res}
+		for _, a := range allActions {
+			if acts[a] {
+				ra.Actions = append(ra.Actions, a)
+			}
+		}
+		protoRA = append(protoRA, ra)
 	}
 
 	resp := &v1.GetPermissionMatrixResponse{
@@ -200,9 +219,9 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 	if req.Msg.IncludeObjects {
 		type idName struct{ id, name string }
 
-		// Fetchers keyed by resource constant
-		fetchers := map[string]func() []idName{
-			rbac.ResourceServers: func() []idName {
+		// Fetchers keyed by scope source resource
+		fetchers := map[optionsv1.ResourceType]func() []idName{
+			optionsv1.ResourceType_RESOURCE_TYPE_SERVERS: func() []idName {
 				items, err := s.store.ListServers(ctx)
 				if err != nil {
 					return nil
@@ -213,7 +232,7 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 				}
 				return out
 			},
-			rbac.ResourceModules: func() []idName {
+			optionsv1.ResourceType_RESOURCE_TYPE_MODULES: func() []idName {
 				items, err := s.store.ListModules(ctx)
 				if err != nil {
 					return nil
@@ -224,7 +243,7 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 				}
 				return out
 			},
-			rbac.ResourceModuleTemplates: func() []idName {
+			optionsv1.ResourceType_RESOURCE_TYPE_MODULE_TEMPLATES: func() []idName {
 				items, err := s.store.ListModuleTemplates(ctx)
 				if err != nil {
 					return nil
@@ -235,7 +254,7 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 				}
 				return out
 			},
-			rbac.ResourceProxy: func() []idName {
+			optionsv1.ResourceType_RESOURCE_TYPE_PROXY: func() []idName {
 				items, err := s.store.ListProxyListeners(ctx)
 				if err != nil {
 					return nil
@@ -246,7 +265,7 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 				}
 				return out
 			},
-			rbac.ResourceTasks: func() []idName {
+			optionsv1.ResourceType_RESOURCE_TYPE_TASKS: func() []idName {
 				items, err := s.store.ListScheduledTasks(ctx)
 				if err != nil {
 					return nil
@@ -257,7 +276,7 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 				}
 				return out
 			},
-			rbac.ResourceModpacks: func() []idName {
+			optionsv1.ResourceType_RESOURCE_TYPE_MODPACKS: func() []idName {
 				items, _, err := s.store.ListIndexedModpacks(ctx, 0, -1)
 				if err != nil {
 					return nil
@@ -271,24 +290,23 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 		}
 
 		// Collects needed source resources, fetches each once
-		fetched := make(map[string][]idName)
-		needed := make(map[string]bool)
-		for _, res := range rbac.AllResources {
-			if source, ok := rbac.ResourceScopeSource[res]; ok {
-				needed[source] = true
-			}
-		}
-		for src := range needed {
-			if fn, ok := fetchers[src]; ok {
-				fetched[src] = fn()
+		fetched := make(map[optionsv1.ResourceType][]idName)
+		allResources := protometa.Values[optionsv1.ResourceType]()
+		for _, res := range allResources {
+			if source := protometa.ScopeSource(res); source != optionsv1.ResourceType_RESOURCE_TYPE_UNSPECIFIED {
+				if _, done := fetched[source]; !done {
+					if fn, ok := fetchers[source]; ok {
+						fetched[source] = fn()
+					}
+				}
 			}
 		}
 
 		// Emits ScopeableObjects in stable resource order
 		var objects []*v1.ScopeableObject
-		for _, resource := range rbac.AllResources {
-			source, ok := rbac.ResourceScopeSource[resource]
-			if !ok {
+		for _, resource := range allResources {
+			source := protometa.ScopeSource(resource)
+			if source == optionsv1.ResourceType_RESOURCE_TYPE_UNSPECIFIED {
 				continue
 			}
 			for _, obj := range fetched[source] {

@@ -16,6 +16,7 @@ import (
 	"connectrpc.com/connect"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // Template functions for arithmetic operations
@@ -96,7 +97,7 @@ type panel struct {
 
 	mu             sync.RWMutex
 	server         *v1.Server
-	modLoaders     map[string]*v1.ModLoaderInfo
+	modLoaders     map[v1.ModLoader]*v1.ModLoaderInfo
 	modpack        *v1.IndexedModpack
 	modpackVersion string
 	err            error
@@ -157,9 +158,9 @@ func (p *panel) fetchStaticOnce(ctx context.Context) {
 	}
 
 	p.mu.Lock()
-	p.modLoaders = make(map[string]*v1.ModLoaderInfo)
+	p.modLoaders = make(map[v1.ModLoader]*v1.ModLoaderInfo)
 	for _, info := range loadersResp.Msg.GetModloaders() {
-		p.modLoaders[info.GetName()] = info
+		p.modLoaders[info.GetLoader()] = info
 	}
 	p.mu.Unlock()
 
@@ -209,7 +210,7 @@ func (p *panel) handleIndex(w http.ResponseWriter, r *http.Request) {
 	modpackVersion := p.modpackVersion
 	var modLoaderInfo *v1.ModLoaderInfo
 	if server != nil && p.modLoaders != nil {
-		modLoaderInfo = p.modLoaders[server.GetModLoader().String()]
+		modLoaderInfo = p.modLoaders[server.GetModLoader()]
 	}
 	err := p.err
 	title := p.title
@@ -284,17 +285,25 @@ func (p *panel) handleAPI(w http.ResponseWriter, r *http.Request) {
 	server := p.server
 	var modLoaderInfo *v1.ModLoaderInfo
 	if server != nil && p.modLoaders != nil {
-		modLoaderInfo = p.modLoaders[server.GetModLoader().String()]
+		modLoaderInfo = p.modLoaders[server.GetModLoader()]
 	}
 	err := p.err
 	p.mu.RUnlock()
 
-	resp := map[string]any{
-		"server":          server,
-		"mod_loader_info": modLoaderInfo,
+	// Proto payloads encode as protojson inside a thin envelope
+	resp := map[string]json.RawMessage{}
+	if server != nil {
+		if b, merr := protojson.Marshal(server); merr == nil {
+			resp["server"] = b
+		}
+	}
+	if modLoaderInfo != nil {
+		if b, merr := protojson.Marshal(modLoaderInfo); merr == nil {
+			resp["modLoaderInfo"] = b
+		}
 	}
 	if err != nil {
-		resp["error"] = err.Error()
+		resp["error"], _ = json.Marshal(err.Error())
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -15,7 +15,6 @@ import (
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	"github.com/nickheyer/discopanel/pkg/protometa"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -110,7 +109,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 
 	// Validate webhook task config
 	if taskType == v1.TaskType_TASK_TYPE_WEBHOOK {
-		if err := validateWebhookConfig(msg.Config); err != nil {
+		if err := validateWebhookConfig(msg.WebhookConfig); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -127,7 +126,10 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 		CronExpr:      msg.CronExpr,
 		IntervalSecs:  msg.IntervalSecs,
 		Timezone:      msg.Timezone,
-		Config:        msg.Config,
+		CommandConfig: msg.CommandConfig,
+		BackupConfig:  msg.BackupConfig,
+		ScriptConfig:  msg.ScriptConfig,
+		WebhookConfig: msg.WebhookConfig,
 		Timeout:       msg.Timeout,
 		RetryCount:    msg.RetryCount,
 		RetryDelay:    msg.RetryDelay,
@@ -162,7 +164,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 	}
 
 	s.log.Info("Created scheduled task: %s for server %s", task.Name, task.ServerId)
-	s.rec.Record(ctx, task.ServerId, "task.create", metrics.Attrs{"task": task.Name, "type": protometa.Name(task.TaskType)}, "created task %q", task.Name)
+	s.rec.Record(ctx, task.ServerId, v1.ServerActionKind_SERVER_ACTION_KIND_TASK_CREATE, metrics.Attrs{"task": task.Name, "type": protometa.Name(task.TaskType)}, "created task %q", task.Name)
 
 	task.Server = nil
 	return connect.NewResponse(&v1.CreateTaskResponse{
@@ -210,8 +212,17 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 	if msg.Timezone != nil {
 		task.Timezone = *msg.Timezone
 	}
-	if msg.Config != nil {
-		task.Config = *msg.Config
+	if msg.CommandConfig != nil {
+		task.CommandConfig = msg.CommandConfig
+	}
+	if msg.BackupConfig != nil {
+		task.BackupConfig = msg.BackupConfig
+	}
+	if msg.ScriptConfig != nil {
+		task.ScriptConfig = msg.ScriptConfig
+	}
+	if msg.WebhookConfig != nil {
+		task.WebhookConfig = msg.WebhookConfig
 	}
 	if msg.Timeout != nil {
 		task.Timeout = *msg.Timeout
@@ -239,7 +250,7 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 
 	// Validate webhook task config
 	if task.TaskType == v1.TaskType_TASK_TYPE_WEBHOOK {
-		if err := validateWebhookConfig(task.Config); err != nil {
+		if err := validateWebhookConfig(task.WebhookConfig); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -255,7 +266,7 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 	}
 
 	s.log.Info("Updated scheduled task: %s", task.Name)
-	s.rec.Record(ctx, task.ServerId, "task.update", metrics.Attrs{"task": task.Name}, "updated task %q", task.Name)
+	s.rec.Record(ctx, task.ServerId, v1.ServerActionKind_SERVER_ACTION_KIND_TASK_UPDATE, metrics.Attrs{"task": task.Name}, "updated task %q", task.Name)
 
 	task.Server = nil
 	return connect.NewResponse(&v1.UpdateTaskResponse{
@@ -276,7 +287,7 @@ func (s *TaskService) DeleteTask(ctx context.Context, req *connect.Request[v1.De
 	}
 
 	s.log.Info("Deleted scheduled task: %s", task.Name)
-	s.rec.Record(ctx, task.ServerId, "task.delete", metrics.Attrs{"task": task.Name}, "deleted task %q", task.Name)
+	s.rec.Record(ctx, task.ServerId, v1.ServerActionKind_SERVER_ACTION_KIND_TASK_DELETE, metrics.Attrs{"task": task.Name}, "deleted task %q", task.Name)
 
 	return connect.NewResponse(&v1.DeleteTaskResponse{}), nil
 }
@@ -302,7 +313,7 @@ func (s *TaskService) ToggleTask(ctx context.Context, req *connect.Request[v1.To
 	}
 
 	s.log.Info("Toggled task %s to status %s", task.Name, task.Status)
-	s.rec.Record(ctx, task.ServerId, "task.toggle", metrics.Attrs{"task": task.Name, "status": protometa.Name(task.Status)}, "set task %q to %s", task.Name, protometa.Name(task.Status))
+	s.rec.Record(ctx, task.ServerId, v1.ServerActionKind_SERVER_ACTION_KIND_TASK_TOGGLE, metrics.Attrs{"task": task.Name, "status": protometa.Name(task.Status)}, "set task %q to %s", task.Name, protometa.Name(task.Status))
 
 	task.Server = nil
 	return connect.NewResponse(&v1.ToggleTaskResponse{
@@ -409,15 +420,8 @@ func (s *TaskService) CancelExecution(ctx context.Context, req *connect.Request[
 }
 
 // Parses webhook task config and validates required fields
-func validateWebhookConfig(cfg string) error {
-	if cfg == "" {
-		return fmt.Errorf("webhook config is required")
-	}
-	wcfg := &v1.WebhookTaskConfig{}
-	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal([]byte(cfg), wcfg); err != nil {
-		return fmt.Errorf("invalid webhook config JSON: %v", err)
-	}
-	if wcfg.Url == "" {
+func validateWebhookConfig(wcfg *v1.WebhookTaskConfig) error {
+	if wcfg.GetUrl() == "" {
 		return fmt.Errorf("webhook URL is required")
 	}
 	if wcfg.PayloadTemplate != "" {

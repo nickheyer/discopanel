@@ -15,12 +15,17 @@ ARG RUNTIME_FLAVOR=temurin
 ARG BUILDPLATFORM=linux/amd64
 
 # Generates proto code in-image so clean checkouts build
-FROM --platform=$BUILDPLATFORM bufbuild/buf:latest AS proto-builder
+FROM --platform=$BUILDPLATFORM golang:alpine AS proto-builder
+
+COPY --from=bufbuild/buf:latest /usr/local/bin/buf /usr/local/bin/buf
 
 WORKDIR /app
-COPY buf.yaml buf.gen.yaml buf.gen.agent.yaml buf.lock ./
+COPY go.mod go.sum buf.yaml buf.gen.yaml buf.gen.agent.yaml buf.lock ./
 COPY proto/ ./proto/
-RUN buf generate \
+
+# Materializes protogorm schema then generates like make proto
+RUN go tool protogorm -options proto \
+    && buf generate --exclude-path proto/protogorm \
     && buf generate --template buf.gen.agent.yaml --path proto/discopanel/agent
 
 FROM --platform=$BUILDPLATFORM golang:alpine AS builder
@@ -34,6 +39,7 @@ ARG RUNTIME_VERSION=dev
 WORKDIR /build
 COPY go.mod go.sum ./
 COPY pkg/runtimespec ./pkg/runtimespec
+COPY pkg/protometa ./pkg/protometa
 COPY --from=proto-builder /app/pkg/proto ./pkg/proto
 COPY cmd/runtime ./cmd/runtime
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w -X main.runtimeVersion=${RUNTIME_VERSION}" -o /runtime-entrypoint ./cmd/runtime

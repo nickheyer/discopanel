@@ -486,12 +486,9 @@ func (m *Manager) AddModuleRoute(module *v1.Module, server *v1.Server) error {
 		}
 
 		protocol := port.Protocol
-		if protocol == "" {
-			protocol = "tcp"
-		}
 
 		// Handshake routing cannot match without a hostname
-		if hostname == "" && protocol == "minecraft" {
+		if hostname == "" && protocol == v1.ModuleProtocol_MODULE_PROTOCOL_MINECRAFT {
 			continue
 		}
 
@@ -534,7 +531,7 @@ func (m *Manager) moduleContainerPort(module *v1.Module, port *v1.ModulePort) in
 }
 
 // Adds a single port route, caller must hold lock
-func (m *Manager) addPortRouteUnlocked(routeID, hostname, containerIP string, hostPort, containerPort int, protocol, moduleName, portName string) error {
+func (m *Manager) addPortRouteUnlocked(routeID, hostname, containerIP string, hostPort, containerPort int, protocol v1.ModuleProtocol, moduleName, portName string) error {
 	if containerPort == 0 {
 		return fmt.Errorf("no container port declared for %s", portName)
 	}
@@ -550,17 +547,17 @@ func (m *Manager) addPortRouteUnlocked(routeID, hostname, containerIP string, ho
 
 		// Create appropriate proxy type based on protocol
 		switch protocol {
-		case "udp":
+		case v1.ModuleProtocol_MODULE_PROTOCOL_UDP:
 			proxy = NewUDPProxy(cfg)
 			m.logger.Info("Created UDP proxy for port %d", hostPort)
-		case "minecraft":
+		case v1.ModuleProtocol_MODULE_PROTOCOL_MINECRAFT:
 			proxy = NewMinecraftProxy(cfg)
 			m.logger.Info("Created Minecraft proxy for port %d", hostPort)
-		case "http":
+		case v1.ModuleProtocol_MODULE_PROTOCOL_HTTP:
 			proxy = NewHTTPProxy(cfg)
 			m.logger.Info("Created HTTP proxy for port %d", hostPort)
 		default:
-			// Raw TCP forwarding (includes "tcp")
+			// Raw TCP forwarding covers tcp and unspecified
 			proxy = NewTCPProxy(cfg)
 			m.logger.Info("Created TCP proxy for port %d", hostPort)
 		}
@@ -671,12 +668,9 @@ func (m *Manager) UpdateModuleRoute(module *v1.Module, server *v1.Server) error 
 		}
 
 		protocol := port.Protocol
-		if protocol == "" {
-			protocol = "tcp"
-		}
 
 		// Handshake routing cannot match without a hostname
-		if hostname == "" && protocol == "minecraft" {
+		if hostname == "" && protocol == v1.ModuleProtocol_MODULE_PROTOCOL_MINECRAFT {
 			continue
 		}
 

@@ -246,10 +246,10 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	claimRoles := make(map[string]bool, len(resolvedRoles))
 	for _, roleName := range resolvedRoles {
 		claimRoles[roleName] = true
-		_ = h.store.AssignRole(ctx, user.Id, roleName, "oidc")
+		_ = h.store.AssignRole(ctx, user.Id, roleName, v1.RoleSource_ROLE_SOURCE_OIDC)
 	}
 	var oidcAssigned []*v1.UserRole
-	if err := h.store.DB().WithContext(ctx).Where("user_id = ? AND source = ?", user.Id, "oidc").Find(&oidcAssigned).Error; err == nil {
+	if err := h.store.DB().WithContext(ctx).Where("user_id = ? AND source = ?", user.Id, v1.RoleSource_ROLE_SOURCE_OIDC).Find(&oidcAssigned).Error; err == nil {
 		for _, ur := range oidcAssigned {
 			if !claimRoles[ur.RoleName] {
 				_ = h.store.UnassignRole(ctx, user.Id, ur.RoleName)
@@ -316,7 +316,7 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, e
 		Id:           uuid.New().String(),
 		Username:     username,
 		Email:        emailPtr,
-		AuthProvider: "oidc",
+		AuthProvider: v1.AuthProvider_AUTH_PROVIDER_OIDC,
 		IsActive:     true,
 		OidcSubject:  sub,
 		OidcIssuer:   h.config.IssuerURI,
@@ -328,7 +328,7 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, sub, username, e
 	// Default roles keep local source so claim sync spares them
 	defaultRoles, _ := h.store.GetDefaultRoles(ctx)
 	for _, role := range defaultRoles {
-		_ = h.store.AssignRole(ctx, user.Id, role.Name, "local")
+		_ = h.store.AssignRole(ctx, user.Id, role.Name, v1.RoleSource_ROLE_SOURCE_LOCAL)
 	}
 
 	h.log.Info("OIDC: created new user %s", user.Username)

@@ -13,19 +13,11 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Request pacing profile for one indexer
-type rateSpec struct {
-	perSec rate.Limit
-	burst  int
-}
-
-// Modrinth documents 300 per minute, curseforge publishes nothing
-var indexerRates = map[string]rateSpec{
-	"fuego":    {perSec: 4, burst: 8},
-	"modrinth": {perSec: 5, burst: 10},
-}
-
-var defaultRate = rateSpec{perSec: 5, burst: 5}
+// Fallback pacing for indexers declaring no rate
+const (
+	defaultPerSec = 5
+	defaultBurst  = 5
+)
 
 // Retry tuning, vars so tests can shrink them
 var (
@@ -81,12 +73,12 @@ func stateFor(indexer, credential string) *sharedState {
 		statesLRU.MoveToFront(s.lruEl)
 		return s
 	}
-	spec, ok := indexerRates[indexer]
-	if !ok {
-		spec = defaultRate
+	perSec, burst := rate.Limit(defaultPerSec), defaultBurst
+	if info, ok := LookupIndexer(indexer); ok && info.RequestsPerSec > 0 {
+		perSec, burst = rate.Limit(info.RequestsPerSec), info.RequestBurst
 	}
 	s := &sharedState{
-		limiter: rate.NewLimiter(spec.perSec, spec.burst),
+		limiter: rate.NewLimiter(perSec, burst),
 		etags:   map[string]*list.Element{},
 		etagLRU: list.New(),
 	}

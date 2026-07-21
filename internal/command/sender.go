@@ -110,7 +110,7 @@ func (s *Sender) Run(ctx context.Context, serverID, cmd string, silent bool) (st
 
 	output, err := s.SendCommand(ctx, server.Id, cmd)
 	if err == nil {
-		s.rec.Record(ctx, server.Id, "command.run", metrics.Attrs{"command": cmd}, "ran command %q", cmd)
+		s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_COMMAND_RUN, metrics.Attrs{"command": cmd}, "ran command %q", cmd)
 	}
 	if !silent && s.streamer != nil && (output != "" || err != nil) {
 		s.streamer.AddCommandOutput(server.Id, output, err == nil, commandTime)

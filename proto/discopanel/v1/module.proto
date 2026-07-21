@@ -12,56 +12,154 @@ option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;dis
 // Manages module templates and instances on servers
 service ModuleService {
   // Lists module templates with optional filters
-  rpc ListModuleTemplates(ListModuleTemplatesRequest) returns (ListModuleTemplatesResponse);
+  rpc ListModuleTemplates(ListModuleTemplatesRequest) returns (ListModuleTemplatesResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULE_TEMPLATES
+      action: ACTION_TYPE_READ
+    };
+  }
   // Gets one module template by ID
-  rpc GetModuleTemplate(GetModuleTemplateRequest) returns (GetModuleTemplateResponse);
+  rpc GetModuleTemplate(GetModuleTemplateRequest) returns (GetModuleTemplateResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULE_TEMPLATES
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+    };
+  }
   // Creates a custom module template
-  rpc CreateModuleTemplate(CreateModuleTemplateRequest) returns (CreateModuleTemplateResponse);
+  rpc CreateModuleTemplate(CreateModuleTemplateRequest) returns (CreateModuleTemplateResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULE_TEMPLATES
+      action: ACTION_TYPE_CREATE
+    };
+  }
   // Updates a custom module template
-  rpc UpdateModuleTemplate(UpdateModuleTemplateRequest) returns (UpdateModuleTemplateResponse);
+  rpc UpdateModuleTemplate(UpdateModuleTemplateRequest) returns (UpdateModuleTemplateResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULE_TEMPLATES
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+    };
+  }
   // Deletes a custom module template
-  rpc DeleteModuleTemplate(DeleteModuleTemplateRequest) returns (DeleteModuleTemplateResponse);
+  rpc DeleteModuleTemplate(DeleteModuleTemplateRequest) returns (DeleteModuleTemplateResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULE_TEMPLATES
+      action: ACTION_TYPE_DELETE
+      object_id_field: "id"
+    };
+  }
 
   // Lists module instances with optional filters
-  rpc ListModules(ListModulesRequest) returns (ListModulesResponse);
+  rpc ListModules(ListModulesRequest) returns (ListModulesResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_READ
+    };
+  }
   // Gets one module instance by ID
-  rpc GetModule(GetModuleRequest) returns (GetModuleResponse);
+  rpc GetModule(GetModuleRequest) returns (GetModuleResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
   // Creates a module from a template on a server
-  rpc CreateModule(CreateModuleRequest) returns (CreateModuleResponse);
+  rpc CreateModule(CreateModuleRequest) returns (CreateModuleResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_CREATE
+      object_id_field: "server_id"
+    };
+  }
   // Updates a module instance configuration
-  rpc UpdateModule(UpdateModuleRequest) returns (UpdateModuleResponse);
+  rpc UpdateModule(UpdateModuleRequest) returns (UpdateModuleResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
   // Deletes a module and its container
-  rpc DeleteModule(DeleteModuleRequest) returns (DeleteModuleResponse);
+  rpc DeleteModule(DeleteModuleRequest) returns (DeleteModuleResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_DELETE
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
 
   // Starts a stopped module container
-  rpc StartModule(StartModuleRequest) returns (StartModuleResponse);
+  rpc StartModule(StartModuleRequest) returns (StartModuleResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_START
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
   // Stops a running module container
-  rpc StopModule(StopModuleRequest) returns (StopModuleResponse);
+  rpc StopModule(StopModuleRequest) returns (StopModuleResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_STOP
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
   // Restarts a module container
-  rpc RestartModule(RestartModuleRequest) returns (RestartModuleResponse);
+  rpc RestartModule(RestartModuleRequest) returns (RestartModuleResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_RESTART
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
   // Recreates a module container with current config
-  rpc RecreateModule(RecreateModuleRequest) returns (RecreateModuleResponse);
+  rpc RecreateModule(RecreateModuleRequest) returns (RecreateModuleResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_RESTART
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
 
   // Fetches recent module container logs
-  rpc GetModuleLogs(GetModuleLogsRequest) returns (GetModuleLogsResponse);
+  rpc GetModuleLogs(GetModuleLogsRequest) returns (GetModuleLogsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
   // Finds next unused module port
-  rpc GetNextAvailableModulePort(GetNextAvailableModulePortRequest) returns (GetNextAvailableModulePortResponse);
+  rpc GetNextAvailableModulePort(GetNextAvailableModulePortRequest) returns (GetNextAvailableModulePortResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_READ
+    };
+  }
   // Lists template aliases with example values
-  rpc GetAvailableAliases(GetAvailableAliasesRequest) returns (GetAvailableAliasesResponse);
+  rpc GetAvailableAliases(GetAvailableAliasesRequest) returns (GetAvailableAliasesResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_READ
+    };
+  }
   // Resolves all aliases for a given context
-  rpc GetResolvedAliases(GetResolvedAliasesRequest) returns (GetResolvedAliasesResponse);
-}
-
-// ModuleProtocol specifies the transport layer protocol for a port.
-enum ModuleProtocol {
-  MODULE_PROTOCOL_UNSPECIFIED = 0;
-  // Raw TCP forwarding without protocol parsing.
-  MODULE_PROTOCOL_TCP = 1;
-  MODULE_PROTOCOL_UDP = 2;
-  // Minecraft protocol with handshake parsing for hostname-based routing.
-  MODULE_PROTOCOL_MINECRAFT = 3;
-  // HTTP reverse proxy with Host header parsing for hostname-based routing.
-  MODULE_PROTOCOL_HTTP = 4;
+  rpc GetResolvedAliases(GetResolvedAliasesRequest) returns (GetResolvedAliasesResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_READ
+    };
+  }
 }
 
 // ListModuleTemplatesRequest filters the template list.
@@ -98,10 +196,10 @@ message CreateModuleTemplateRequest {
   string docker_image = 3;
   // JSON Schema for dynamic UI form generation.
   string config_schema = 4;
-  // JSON object of default environment variables.
-  string default_env = 5;
-  // JSON array of default volume mounts.
-  string default_volumes = 6;
+  // Default environment variables.
+  map<string, string> default_env = 5;
+  // Default volume mounts.
+  repeated VolumeMount default_volumes = 6;
   // HTTP path for health checks.
   string health_check_path = 7;
   // Port to use for health checks.
@@ -153,8 +251,8 @@ message UpdateModuleTemplateRequest {
   optional string description = 3;
   optional string docker_image = 4;
   optional string config_schema = 5;
-  optional string default_env = 6;
-  optional string default_volumes = 7;
+  map<string, string> default_env = 6;
+  repeated VolumeMount default_volumes = 7;
   optional string health_check_path = 8;
   optional int32 health_check_port = 9;
   optional bool requires_server = 10;
@@ -225,10 +323,10 @@ message CreateModuleRequest {
   string template_id = 3;
   // JSON module configuration.
   string config = 4;
-  // JSON object of environment variable overrides.
-  string env_overrides = 5;
-  // JSON array of volume mount overrides.
-  string volume_overrides = 6;
+  // Environment variable overrides.
+  map<string, string> env_overrides = 5;
+  // Volume mount overrides.
+  repeated VolumeMount volume_overrides = 6;
   // Memory limit in MB.
   int32 memory = 7;
   // CPU limit as a fraction.
@@ -282,8 +380,8 @@ message UpdateModuleRequest {
   string id = 1;
   optional string name = 2;
   optional string config = 3;
-  optional string env_overrides = 4;
-  optional string volume_overrides = 5;
+  map<string, string> env_overrides = 4;
+  repeated VolumeMount volume_overrides = 5;
   optional int32 memory = 6;
   optional double cpu_limit = 7;
   optional bool auto_start = 8;
@@ -328,8 +426,7 @@ message StartModuleRequest {
 
 // StartModuleResponse contains the operation result.
 message StartModuleResponse {
-  // Status message (e.g., "started", "already running").
-  string status = 1;
+  ModuleStatus status = 1;
 }
 
 // StopModuleRequest specifies which module to stop.
@@ -340,8 +437,7 @@ message StopModuleRequest {
 
 // StopModuleResponse contains the operation result.
 message StopModuleResponse {
-  // Status message (e.g., "stopped", "already stopped").
-  string status = 1;
+  ModuleStatus status = 1;
 }
 
 // RestartModuleRequest specifies which module to restart.
@@ -352,8 +448,7 @@ message RestartModuleRequest {
 
 // RestartModuleResponse contains the operation result.
 message RestartModuleResponse {
-  // Status message.
-  string status = 1;
+  ModuleStatus status = 1;
 }
 
 // RecreateModuleRequest specifies which module to recreate.
@@ -364,8 +459,7 @@ message RecreateModuleRequest {
 
 // RecreateModuleResponse contains the operation result.
 message RecreateModuleResponse {
-  // Status message.
-  string status = 1;
+  ModuleStatus status = 1;
 }
 
 // GetModuleLogsRequest specifies log retrieval parameters.

@@ -40,15 +40,7 @@ func main() {
 	}
 
 	// Init logger
-	logConfig := &logger.Config{
-		Enabled:    cfg.Logging.Enabled,
-		FilePath:   cfg.Logging.FilePath,
-		MaxSize:    cfg.Logging.MaxSize,
-		MaxBackups: cfg.Logging.MaxBackups,
-		MaxAge:     cfg.Logging.MaxAge,
-		Compress:   cfg.Logging.Compress,
-	}
-	log := logger.NewWithConfig(logConfig)
+	log := logger.NewWithConfig(&cfg.Logging)
 	defer log.Close()
 
 	// Create required directories

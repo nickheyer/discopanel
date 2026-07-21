@@ -21,6 +21,7 @@
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
 	import type { FileInfo } from '$lib/proto/discopanel/v1/file_pb';
+	import { ExtractionState } from '$lib/proto/discopanel/v1/file_pb';
 	import { formatBytes } from '$lib/utils';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 	import FileEditorDialog from './file-editor-dialog.svelte';
@@ -727,12 +728,12 @@
 					);
 					extractionFilesExtracted = status.filesExtracted;
 
-					if (status.state === 'completed') {
+					if (status.state === ExtractionState.COMPLETED) {
 						stopExtractionPoll();
 						extracting = false;
 						toast.success(`Extracted ${status.filesExtracted} files`);
 						await loadFiles();
-					} else if (status.state === 'failed') {
+					} else if (status.state === ExtractionState.FAILED) {
 						stopExtractionPoll();
 						extracting = false;
 						toast.error(status.error || 'Extraction failed');

@@ -7,9 +7,41 @@ import (
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"gorm.io/gorm"
 )
+
+// Casbin rows hold canonical enum names, star means any
+
+// Casbin column for a resource
+func resourceName(r optionsv1.ResourceType) string {
+	if r == optionsv1.ResourceType_RESOURCE_TYPE_UNSPECIFIED {
+		return "*"
+	}
+	return protometa.Name(r)
+}
+
+// Casbin column for an action
+func actionName(a optionsv1.ActionType) string {
+	if a == optionsv1.ActionType_ACTION_TYPE_UNSPECIFIED {
+		return "*"
+	}
+	return protometa.Name(a)
+}
+
+// Permission row from one casbin policy, unspecified means any
+func permission(p []string) *v1.Permission {
+	perm := &v1.Permission{ObjectId: p[3]}
+	if p[1] != "*" {
+		perm.Resource, _ = protometa.FromName[optionsv1.ResourceType](p[1])
+	}
+	if p[2] != "*" {
+		perm.Action, _ = protometa.FromName[optionsv1.ActionType](p[2])
+	}
+	return perm
+}
 
 // Wraps Casbin enforcer with convenience methods for RBAC
 type Enforcer struct {
@@ -56,55 +88,60 @@ m = g(r.sub, p.sub) && (p.res == "*" || r.res == p.res) && (p.act == "*" || r.ac
 	return &Enforcer{enforcer: e}, nil
 }
 
+// One seeded grant of an action on a resource
+type grant struct {
+	resource optionsv1.ResourceType
+	action   optionsv1.ActionType
+}
+
+// Every readable resource, the base browse grant set
+func readGrants(resources ...optionsv1.ResourceType) []grant {
+	grants := make([]grant, len(resources))
+	for i, r := range resources {
+		grants[i] = grant{resource: r, action: optionsv1.ActionType_ACTION_TYPE_READ}
+	}
+	return grants
+}
+
 // Ensures default roles have their base permissions
 func (e *Enforcer) SeedDefaultPolicies(anonymousEnabled bool) error {
-	policies := map[string][][]string{
-		"admin": {
-			{"admin", "*", "*", "*"},
-		},
-		"user": {
-			{"user", ResourceServers, ActionRead, "*"},
-			{"user", ResourceServers, ActionStart, "*"},
-			{"user", ResourceServers, ActionStop, "*"},
-			{"user", ResourceServers, ActionRestart, "*"},
-			{"user", ResourceServers, ActionCommand, "*"},
-			{"user", ResourceServerProperties, ActionRead, "*"},
-			{"user", ResourceMods, ActionRead, "*"},
-			{"user", ResourceModpacks, ActionRead, "*"},
-			{"user", ResourceModules, ActionRead, "*"},
-			{"user", ResourceModuleTemplates, ActionRead, "*"},
-			{"user", ResourceFiles, ActionRead, "*"},
-			{"user", ResourceTasks, ActionRead, "*"},
-			{"user", ResourceProxy, ActionRead, "*"},
-		},
-		"module": {
-			{"module", ResourceServers, ActionRead, "*"},
-			{"module", ResourceServerProperties, ActionRead, "*"},
-			{"module", ResourceModpacks, ActionRead, "*"},
-		},
-		"doctor": {
-			{"doctor", ResourceServers, ActionRead, "*"},
-			{"doctor", ResourceServers, ActionStart, "*"},
-			{"doctor", ResourceServers, ActionStop, "*"},
-			{"doctor", ResourceServers, ActionRestart, "*"},
-			{"doctor", ResourceServerProperties, ActionRead, "*"},
-			{"doctor", ResourceSettings, ActionRead, "*"},
-			{"doctor", ResourceModpacks, ActionRead, "*"},
-		},
-		"anonymous": {
-			{"anonymous", ResourceServers, ActionRead, "*"},
-			{"anonymous", ResourceServerProperties, ActionRead, "*"},
-			{"anonymous", ResourceMods, ActionRead, "*"},
-			{"anonymous", ResourceModpacks, ActionRead, "*"},
-			{"anonymous", ResourceModules, ActionRead, "*"},
-			{"anonymous", ResourceModuleTemplates, ActionRead, "*"},
-			{"anonymous", ResourceFiles, ActionRead, "*"},
-			{"anonymous", ResourceTasks, ActionRead, "*"},
-			{"anonymous", ResourceProxy, ActionRead, "*"},
-		},
+	browse := []optionsv1.ResourceType{
+		optionsv1.ResourceType_RESOURCE_TYPE_SERVERS,
+		optionsv1.ResourceType_RESOURCE_TYPE_SERVER_PROPERTIES,
+		optionsv1.ResourceType_RESOURCE_TYPE_MODS,
+		optionsv1.ResourceType_RESOURCE_TYPE_MODPACKS,
+		optionsv1.ResourceType_RESOURCE_TYPE_MODULES,
+		optionsv1.ResourceType_RESOURCE_TYPE_MODULE_TEMPLATES,
+		optionsv1.ResourceType_RESOURCE_TYPE_FILES,
+		optionsv1.ResourceType_RESOURCE_TYPE_TASKS,
+		optionsv1.ResourceType_RESOURCE_TYPE_PROXY,
+	}
+	serverOps := []grant{
+		{optionsv1.ResourceType_RESOURCE_TYPE_SERVERS, optionsv1.ActionType_ACTION_TYPE_START},
+		{optionsv1.ResourceType_RESOURCE_TYPE_SERVERS, optionsv1.ActionType_ACTION_TYPE_STOP},
+		{optionsv1.ResourceType_RESOURCE_TYPE_SERVERS, optionsv1.ActionType_ACTION_TYPE_RESTART},
 	}
 
-	for role, rolePolicies := range policies {
+	policies := map[string][]grant{
+		"admin": {{}}, // Unspecified pair seeds the star wildcard row
+		"user": append(append(readGrants(browse...), serverOps...),
+			grant{optionsv1.ResourceType_RESOURCE_TYPE_SERVERS, optionsv1.ActionType_ACTION_TYPE_COMMAND},
+		),
+		"module": readGrants(
+			optionsv1.ResourceType_RESOURCE_TYPE_SERVERS,
+			optionsv1.ResourceType_RESOURCE_TYPE_SERVER_PROPERTIES,
+			optionsv1.ResourceType_RESOURCE_TYPE_MODPACKS,
+		),
+		"doctor": append(readGrants(
+			optionsv1.ResourceType_RESOURCE_TYPE_SERVERS,
+			optionsv1.ResourceType_RESOURCE_TYPE_SERVER_PROPERTIES,
+			optionsv1.ResourceType_RESOURCE_TYPE_SETTINGS,
+			optionsv1.ResourceType_RESOURCE_TYPE_MODPACKS,
+		), serverOps...),
+		"anonymous": readGrants(browse...),
+	}
+
+	for role, grants := range policies {
 		existing, err := e.enforcer.GetFilteredPolicy(0, role)
 		if err != nil {
 			return err
@@ -113,8 +150,8 @@ func (e *Enforcer) SeedDefaultPolicies(anonymousEnabled bool) error {
 			continue
 		}
 
-		for _, p := range rolePolicies {
-			if _, err := e.enforcer.AddPolicy(p[0], p[1], p[2], p[3]); err != nil {
+		for _, g := range grants {
+			if _, err := e.enforcer.AddPolicy(role, resourceName(g.resource), actionName(g.action), "*"); err != nil {
 				return err
 			}
 		}
@@ -124,9 +161,9 @@ func (e *Enforcer) SeedDefaultPolicies(anonymousEnabled bool) error {
 }
 
 // True if any role allows action on resource/object
-func (e *Enforcer) Enforce(roles []string, resource, action, objectID string) (bool, error) {
+func (e *Enforcer) Enforce(roles []string, resource optionsv1.ResourceType, action optionsv1.ActionType, objectID string) (bool, error) {
 	for _, role := range roles {
-		allowed, err := e.enforcer.Enforce(role, resource, action, objectID)
+		allowed, err := e.enforcer.Enforce(role, resourceName(resource), actionName(action), objectID)
 		if err != nil {
 			return false, err
 		}
@@ -146,11 +183,7 @@ func (e *Enforcer) GetPermissionsForRole(role string) []*v1.Permission {
 	perms := make([]*v1.Permission, 0, len(policies))
 	for _, p := range policies {
 		if len(p) >= 4 {
-			perms = append(perms, &v1.Permission{
-				Resource: p[1],
-				Action:   p[2],
-				ObjectId: p[3],
-			})
+			perms = append(perms, permission(p))
 		}
 	}
 	return perms
@@ -172,7 +205,7 @@ func (e *Enforcer) SetPermissionsForRole(role string, perms []*v1.Permission) er
 		if objectID == "" {
 			objectID = "*"
 		}
-		_, err := e.enforcer.AddPolicy(role, p.Resource, p.Action, objectID)
+		_, err := e.enforcer.AddPolicy(role, resourceName(p.Resource), actionName(p.Action), objectID)
 		if err != nil {
 			return err
 		}
@@ -190,12 +223,7 @@ func (e *Enforcer) GetPermissionMatrix() map[string][]*v1.Permission {
 	matrix := make(map[string][]*v1.Permission)
 	for _, p := range policies {
 		if len(p) >= 4 {
-			role := p[0]
-			matrix[role] = append(matrix[role], &v1.Permission{
-				Resource: p[1],
-				Action:   p[2],
-				ObjectId: p[3],
-			})
+			matrix[p[0]] = append(matrix[p[0]], permission(p))
 		}
 	}
 	return matrix

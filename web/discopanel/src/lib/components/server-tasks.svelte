@@ -53,11 +53,17 @@
 		ScheduleTypeSchema,
 		ExecutionStatus,
 		ExecutionStatusSchema,
-		TriggeredEventType
+		TriggeredEventType,
+		TaskTrigger,
+		TaskTriggerSchema,
+		CommandTaskConfigSchema,
+		BackupTaskConfigSchema,
+		ScriptTaskConfigSchema,
+		WebhookTaskConfigSchema
 	} from '$lib/proto/discopanel/v1/storage_pb';
 	import { enumLabel } from '$lib/proto-meta';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
-	import { create } from '@bufbuild/protobuf';
+	import { create, clone } from '@bufbuild/protobuf';
 	import { timestampFromDate } from '@bufbuild/protobuf/wkt';
 	import { timestampToDate, formatDateTime } from '$lib/utils/time';
 	import { copyToClipboard } from '$lib/utils/clipboard';
@@ -103,25 +109,20 @@
 	let requireOnline = $state(true);
 	let eventTriggers = $state<TriggeredEventType[]>([TriggeredEventType.SERVER_START]);
 
-	// Form state, per type
-	let command = $state('');
-	let scriptPath = $state('');
+	// Shared webhook defaults for create and edit
+	const WEBHOOK_DEFAULTS = { maxRetries: 3, retryDelayMs: 1000, timeoutMs: 5000 };
+
+	// Form state, typed per type configs
+	let commandConfig = $state(create(CommandTaskConfigSchema, {}));
+	let scriptConfig = $state(create(ScriptTaskConfigSchema, {}));
 	let scriptArgs = $state('');
-	let backupName = $state('');
+	let backupConfig = $state(create(BackupTaskConfigSchema, { ...BACKUP_DEFAULTS }));
 	let backupPaths = $state('');
-	let backupCompress = $state(BACKUP_DEFAULTS.compress);
-	let backupRetentionDays = $state(BACKUP_DEFAULTS.retentionDays);
-	let backupMinBackups = $state(BACKUP_DEFAULTS.minBackups);
-	let backupMaxBackups = $state(BACKUP_DEFAULTS.maxBackups);
 
 	// Form state, webhook
-	let webhookUrl = $state('');
+	let webhookConfig = $state(create(WebhookTaskConfigSchema, { ...WEBHOOK_DEFAULTS }));
 	let webhookSecret = $state('');
-	let payloadTemplate = $state('');
 	let customizePayload = $state(false);
-	let webhookMaxRetries = $state(3);
-	let webhookRetryDelayMs = $state(1000);
-	let webhookTimeoutMs = $state(5000);
 	let originalWebhookHasSecret = $state(false);
 
 	const dialogSections = $derived<
@@ -307,7 +308,9 @@
 	];
 
 	// Shows custom template or the resolved preset
-	let displayValue = $derived(customizePayload ? payloadTemplate : getDefaultTemplate(webhookUrl));
+	let displayValue = $derived(
+		customizePayload ? webhookConfig.payloadTemplate : getDefaultTemplate(webhookConfig.url)
+	);
 
 	function isDiscordUrl(url: string): boolean {
 		return url.includes('discord.com/api/webhooks') || url.includes('discordapp.com/api/webhooks');
@@ -360,7 +363,7 @@
 	function applyPreset(key: string) {
 		const template = webhookTemplatePresets[key];
 		if (template) {
-			payloadTemplate = template;
+			webhookConfig.payloadTemplate = template;
 		}
 	}
 
@@ -390,24 +393,16 @@
 		retryCount = 0;
 		retryDelay = 60;
 		requireOnline = true;
-		command = '';
-		scriptPath = '';
+		commandConfig = create(CommandTaskConfigSchema, {});
+		scriptConfig = create(ScriptTaskConfigSchema, {});
 		scriptArgs = '';
-		backupName = '';
+		backupConfig = create(BackupTaskConfigSchema, { ...BACKUP_DEFAULTS });
 		backupPaths = '';
-		backupCompress = BACKUP_DEFAULTS.compress;
-		backupRetentionDays = BACKUP_DEFAULTS.retentionDays;
-		backupMinBackups = BACKUP_DEFAULTS.minBackups;
-		backupMaxBackups = BACKUP_DEFAULTS.maxBackups;
 		activeSection = 'general';
 		eventTriggers = [TriggeredEventType.SERVER_START];
-		webhookUrl = '';
+		webhookConfig = create(WebhookTaskConfigSchema, { ...WEBHOOK_DEFAULTS });
 		webhookSecret = '';
-		payloadTemplate = '';
 		customizePayload = false;
-		webhookMaxRetries = 3;
-		webhookRetryDelayMs = 1000;
-		webhookTimeoutMs = 5000;
 		originalWebhookHasSecret = false;
 		selectedTask = null;
 	}
@@ -443,46 +438,31 @@
 		retryDelay = task.retryDelay;
 		requireOnline = task.requireOnline;
 
-		let parsed: Record<string, unknown> = {};
-		try {
-			parsed = JSON.parse(task.config || '{}');
-		} catch {
-			parsed = {};
+		if (task.commandConfig) {
+			commandConfig = clone(CommandTaskConfigSchema, task.commandConfig);
 		}
-		command = typeof parsed.command === 'string' ? parsed.command : '';
-		scriptPath = typeof parsed.script_path === 'string' ? parsed.script_path : '';
-		scriptArgs = Array.isArray(parsed.args) ? parsed.args.join(' ') : '';
-		backupName = typeof parsed.backup_name === 'string' ? parsed.backup_name : '';
-		backupPaths = Array.isArray(parsed.paths) ? parsed.paths.join(', ') : '';
-		backupCompress =
-			typeof parsed.compress === 'boolean' ? parsed.compress : BACKUP_DEFAULTS.compress;
-		// Absent retention keys on saved tasks mean keep forever
-		backupRetentionDays = typeof parsed.retention_days === 'number' ? parsed.retention_days : 0;
-		backupMinBackups = typeof parsed.min_backups === 'number' ? parsed.min_backups : 0;
-		backupMaxBackups =
-			typeof parsed.max_backups === 'number' ? parsed.max_backups : BACKUP_DEFAULTS.maxBackups;
+		if (task.scriptConfig) {
+			scriptConfig = clone(ScriptTaskConfigSchema, task.scriptConfig);
+			scriptArgs = task.scriptConfig.args.join(' ');
+		}
+		if (task.backupConfig) {
+			backupConfig = clone(BackupTaskConfigSchema, task.backupConfig);
+			backupPaths = task.backupConfig.paths.join(', ');
+		}
 
 		eventTriggers =
 			task.eventTriggers && task.eventTriggers.length > 0
 				? [...task.eventTriggers]
 				: [TriggeredEventType.SERVER_START];
 
-		if (task.taskType === TaskType.WEBHOOK) {
-			try {
-				const cfg = JSON.parse(task.config || '{}');
-				webhookUrl = cfg.url || '';
-				webhookSecret = '';
-				originalWebhookHasSecret = !!cfg.secret;
-				payloadTemplate = cfg.payload_template || '';
-				// Templates matching the URL preset count as uncustomized
-				customizePayload =
-					!!payloadTemplate && payloadTemplate.trim() !== getDefaultTemplate(webhookUrl).trim();
-				webhookMaxRetries = cfg.max_retries ?? 3;
-				webhookRetryDelayMs = cfg.retry_delay_ms ?? 1000;
-				webhookTimeoutMs = cfg.timeout_ms ?? 5000;
-			} catch {
-				// Invalid config keeps the reset defaults
-			}
+		if (task.taskType === TaskType.WEBHOOK && task.webhookConfig) {
+			webhookConfig = clone(WebhookTaskConfigSchema, task.webhookConfig);
+			webhookSecret = '';
+			originalWebhookHasSecret = !!task.webhookConfig.secret;
+			// Templates matching the URL preset count as uncustomized
+			customizePayload =
+				!!webhookConfig.payloadTemplate &&
+				webhookConfig.payloadTemplate.trim() !== getDefaultTemplate(webhookConfig.url).trim();
 		}
 
 		showCreateDialog = true;
@@ -493,68 +473,16 @@
 		resetForm();
 	}
 
-	function buildTaskConfig(): string {
-		switch (taskType) {
-			case TaskType.COMMAND:
-				return JSON.stringify({ command: command.trim() });
-			case TaskType.SCRIPT:
-				return JSON.stringify({
-					script_path: scriptPath.trim(),
-					args: scriptArgs
-						.split(' ')
-						.map((a) => a.trim())
-						.filter(Boolean)
-				});
-			case TaskType.BACKUP:
-				return JSON.stringify({
-					backup_name: backupName.trim(),
-					paths: backupPaths
-						.split(',')
-						.map((p) => p.trim())
-						.filter(Boolean),
-					compress: backupCompress,
-					retention_days: backupRetentionDays,
-					min_backups: backupMinBackups,
-					max_backups: backupMaxBackups
-				});
-			default:
-				return '';
-		}
-	}
-
-	function buildWebhookConfig(): string {
-		// Always sends a concrete resolved template
-		const cfg: Record<string, unknown> = {
-			url: webhookUrl,
-			payload_template: customizePayload ? payloadTemplate : getDefaultTemplate(webhookUrl),
-			max_retries: webhookMaxRetries,
-			retry_delay_ms: webhookRetryDelayMs,
-			timeout_ms: webhookTimeoutMs
-		};
-		// Preserve existing secret on edit unless replaced
-		if (webhookSecret) {
-			cfg.secret = webhookSecret;
-		} else if (selectedTask && originalWebhookHasSecret) {
-			try {
-				const prev = JSON.parse(selectedTask.config || '{}');
-				if (prev.secret) cfg.secret = prev.secret;
-			} catch {
-				// Unreadable previous config drops the secret
-			}
-		}
-		return JSON.stringify(cfg);
-	}
-
 	async function saveTask() {
 		if (!taskName.trim()) {
 			toast.error('Task name is required');
 			return;
 		}
-		if (taskType === TaskType.COMMAND && !command.trim()) {
+		if (taskType === TaskType.COMMAND && !commandConfig.command.trim()) {
 			toast.error('A command is required for command tasks');
 			return;
 		}
-		if (taskType === TaskType.SCRIPT && !scriptPath.trim()) {
+		if (taskType === TaskType.SCRIPT && !scriptConfig.scriptPath.trim()) {
 			toast.error('A script path is required for script tasks');
 			return;
 		}
@@ -562,7 +490,7 @@
 			toast.error('A cron expression is required');
 			return;
 		}
-		if (taskType === TaskType.WEBHOOK && !webhookUrl.trim()) {
+		if (taskType === TaskType.WEBHOOK && !webhookConfig.url.trim()) {
 			toast.error('Webhook URL is required');
 			return;
 		}
@@ -573,7 +501,23 @@
 
 		creating = true;
 		try {
-			const config = taskType === TaskType.WEBHOOK ? buildWebhookConfig() : buildTaskConfig();
+			commandConfig.command = commandConfig.command.trim();
+			scriptConfig.scriptPath = scriptConfig.scriptPath.trim();
+			scriptConfig.args = scriptArgs
+				.split(' ')
+				.map((a) => a.trim())
+				.filter(Boolean);
+			backupConfig.backupName = backupConfig.backupName.trim();
+			backupConfig.paths = backupPaths
+				.split(',')
+				.map((p) => p.trim())
+				.filter(Boolean);
+			// Always sends a concrete resolved template
+			webhookConfig.payloadTemplate = customizePayload
+				? webhookConfig.payloadTemplate
+				: getDefaultTemplate(webhookConfig.url);
+			// Existing secret survives edit unless replaced
+			if (webhookSecret) webhookConfig.secret = webhookSecret;
 
 			const runAtTimestamp =
 				scheduleType === ScheduleType.ONCE && runAt
@@ -581,6 +525,12 @@
 					: undefined;
 
 			const isEventScheduled = scheduleType === ScheduleType.EVENT;
+			const typedConfigs = {
+				commandConfig: taskType === TaskType.COMMAND ? commandConfig : undefined,
+				backupConfig: taskType === TaskType.BACKUP ? backupConfig : undefined,
+				scriptConfig: taskType === TaskType.SCRIPT ? scriptConfig : undefined,
+				webhookConfig: taskType === TaskType.WEBHOOK ? webhookConfig : undefined
+			};
 			if (selectedTask) {
 				const request = create(UpdateTaskRequestSchema, {
 					id: selectedTask.id,
@@ -592,7 +542,7 @@
 					intervalSecs: scheduleType === ScheduleType.INTERVAL ? intervalSecs : undefined,
 					runAt: runAtTimestamp,
 					timezone: timezone,
-					config: config,
+					...typedConfigs,
 					timeout: timeout,
 					retryCount: retryCount,
 					retryDelay: retryDelay,
@@ -613,7 +563,7 @@
 					intervalSecs: scheduleType === ScheduleType.INTERVAL ? intervalSecs : 0,
 					runAt: runAtTimestamp,
 					timezone: timezone,
-					config: config,
+					...typedConfigs,
 					timeout: timeout,
 					retryCount: retryCount,
 					retryDelay: retryDelay,
@@ -863,12 +813,7 @@
 
 	function getWebhookUrlForDisplay(task: ScheduledTask): string {
 		if (task.taskType !== TaskType.WEBHOOK) return '';
-		try {
-			const cfg = JSON.parse(task.config || '{}');
-			return cfg.url || '';
-		} catch {
-			return '';
-		}
+		return task.webhookConfig?.url ?? '';
 	}
 
 	// Copies a template variable with named feedback
@@ -1142,7 +1087,7 @@
 									<Label for="command">RCON command *</Label>
 									<Input
 										id="command"
-										bind:value={command}
+										bind:value={commandConfig.command}
 										placeholder="say Hello World!"
 										class="font-mono"
 									/>
@@ -1153,7 +1098,7 @@
 									<Label for="scriptPath">Script path or executable *</Label>
 									<Input
 										id="scriptPath"
-										bind:value={scriptPath}
+										bind:value={scriptConfig.scriptPath}
 										placeholder="/data/scripts/cleanup.sh"
 										class="font-mono"
 									/>
@@ -1178,7 +1123,7 @@
 									<Label for="backupName">Backup name</Label>
 									<Input
 										id="backupName"
-										bind:value={backupName}
+										bind:value={backupConfig.backupName}
 										placeholder={taskName || 'Daily Backup'}
 									/>
 									<p class="text-xs text-muted-foreground">
@@ -1201,7 +1146,7 @@
 								<label
 									class="flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/40"
 								>
-									<Switch bind:checked={backupCompress} class="mt-0.5" />
+									<Switch bind:checked={backupConfig.compress} class="mt-0.5" />
 									<div class="space-y-0.5">
 										<span class="text-sm font-medium">Compress archive</span>
 										<p class="text-xs text-muted-foreground">
@@ -1215,7 +1160,7 @@
 										<Input
 											id="retentionDays"
 											type="number"
-											bind:value={backupRetentionDays}
+											bind:value={backupConfig.retentionDays}
 											min={0}
 										/>
 										<p class="text-xs text-muted-foreground">
@@ -1227,9 +1172,9 @@
 										<Input
 											id="minBackups"
 											type="number"
-											bind:value={backupMinBackups}
+											bind:value={backupConfig.minBackups}
 											min={0}
-											disabled={backupRetentionDays <= 0}
+											disabled={backupConfig.retentionDays <= 0}
 										/>
 										<p class="text-xs text-muted-foreground">
 											Never expire by age below this many, even past retention
@@ -1237,7 +1182,7 @@
 									</div>
 									<div class="space-y-2">
 										<Label for="maxBackups">Max backups</Label>
-										<Input id="maxBackups" type="number" bind:value={backupMaxBackups} min={0} />
+										<Input id="maxBackups" type="number" bind:value={backupConfig.maxBackups} min={0} />
 										<p class="text-xs text-muted-foreground">
 											Hard cap, oldest deleted first. 0 = unlimited
 										</p>
@@ -1252,7 +1197,7 @@
 									<Label for="url">Webhook URL *</Label>
 									<Input
 										id="url"
-										bind:value={webhookUrl}
+										bind:value={webhookConfig.url}
 										placeholder="https://example.com/webhook"
 										class="font-mono"
 									/>
@@ -1274,7 +1219,8 @@
 										{#if customizePayload}
 											Using a custom payload template
 										{:else}
-											Using the default {presetLabels[getDefaultPresetKey(webhookUrl)] || 'Generic'}
+											Using the default {presetLabels[getDefaultPresetKey(webhookConfig.url)] ||
+												'Generic'}
 											preset
 										{/if}
 									</p>
@@ -1283,8 +1229,8 @@
 									checked={customizePayload}
 									onCheckedChange={(checked) => {
 										customizePayload = checked;
-										if (checked && !payloadTemplate) {
-											payloadTemplate = getDefaultTemplate(webhookUrl);
+										if (checked && !webhookConfig.payloadTemplate) {
+											webhookConfig.payloadTemplate = getDefaultTemplate(webhookConfig.url);
 										}
 									}}
 								/>
@@ -1315,7 +1261,7 @@
 									readOnly={!customizePayload}
 									height="340px"
 									onChange={(v) => {
-										if (customizePayload) payloadTemplate = v;
+										if (customizePayload) webhookConfig.payloadTemplate = v;
 									}}
 								/>
 							</div>
@@ -1434,7 +1380,7 @@
 										<Input
 											id="maxRetries"
 											type="number"
-											bind:value={webhookMaxRetries}
+											bind:value={webhookConfig.maxRetries}
 											min={0}
 											max={10}
 										/>
@@ -1445,7 +1391,7 @@
 										<Input
 											id="retryDelayMs"
 											type="number"
-											bind:value={webhookRetryDelayMs}
+											bind:value={webhookConfig.retryDelayMs}
 											min={100}
 											max={60000}
 										/>
@@ -1456,7 +1402,7 @@
 										<Input
 											id="webhookTimeout"
 											type="number"
-											bind:value={webhookTimeoutMs}
+											bind:value={webhookConfig.timeoutMs}
 											min={1000}
 											max={30000}
 										/>
@@ -1554,11 +1500,7 @@
 									{getExecutionStatusLabel(execution.status)}
 								</Badge>
 								<span class="text-xs text-muted-foreground">
-									{execution.trigger === 'manual'
-										? 'Manual'
-										: execution.trigger === 'event'
-											? 'Event'
-											: 'Scheduled'}
+									{enumLabel(TaskTriggerSchema, execution.trigger || TaskTrigger.SCHEDULED)}
 								</span>
 							</div>
 							{#if execution.status === ExecutionStatus.RUNNING}

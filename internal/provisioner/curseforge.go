@@ -17,6 +17,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
@@ -76,7 +77,7 @@ type cfManifest struct {
 // Installs a CurseForge modpack from API or local zip
 func (p *Provisioner) installCurseForgePack(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
 	// Locally uploaded pack zip
-	if desired.source == "zip" {
+	if desired.source == optionsv1.PackSource_PACK_SOURCE_ZIP {
 		rel := strings.TrimPrefix(filepath.ToSlash(desired.id), "/data/")
 		zipPath := joinData(server.DataPath, rel)
 		if !fileExists(zipPath) {
@@ -514,7 +515,7 @@ func commonZipRoot(reader *zip.Reader) string {
 func (p *Provisioner) completeServerPack(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, force bool) (*Result, error) {
 	dataPath := server.DataPath
 
-	detect := func() *runtimespec.LaunchSpec {
+	detect := func() *v1.LaunchSpec {
 		if spec, err := detectForgeLaunch(dataPath, "minecraftforge/forge"); err == nil {
 			return spec
 		}
@@ -523,7 +524,7 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *v1.Server,
 		}
 		for _, jar := range []string{"fabric-server-launch.jar", "quilt-server-launch.jar", "server.jar"} {
 			if fileExists(filepath.Join(dataPath, jar)) {
-				return &runtimespec.LaunchSpec{Kind: runtimespec.LaunchKindJar, Jar: jar}
+				return &v1.LaunchSpec{Kind: v1.LaunchKind_LAUNCH_KIND_JAR, Jar: jar}
 			}
 		}
 		return nil
@@ -560,13 +561,13 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *v1.Server,
 
 // Extracted tree outranks the user MC version guess
 // Absent evidence changes nothing, uncertainty never reports
-func (p *Provisioner) adoptServerPackVersion(ctx context.Context, server *v1.Server, spec *runtimespec.LaunchSpec) {
+func (p *Provisioner) adoptServerPackVersion(ctx context.Context, server *v1.Server, spec *v1.LaunchSpec) {
 	evidence := serverPackMCVersion(server.DataPath, spec)
 	if evidence == "" || evidence == server.McVersion {
 		return
 	}
 	javaVersion := int32(docker.RequiredJavaMajor(evidence))
-	p.action(ctx, server, "provisioner", "provision.mc_version",
+	p.action(ctx, server, "provisioner", v1.ServerActionKind_SERVER_ACTION_KIND_PROVISION_MC_VERSION,
 		metrics.Attrs{"from": server.McVersion, "to": evidence},
 		"server pack ships MC %s, replacing configured %s", evidence, server.McVersion)
 	if err := p.store.UpdateServerFields(ctx, server.Id, map[string]any{
@@ -580,16 +581,16 @@ func (p *Provisioner) adoptServerPackVersion(ctx context.Context, server *v1.Ser
 }
 
 // Local MC version evidence inside an extracted server pack
-func serverPackMCVersion(dataPath string, spec *runtimespec.LaunchSpec) string {
+func serverPackMCVersion(dataPath string, spec *v1.LaunchSpec) string {
 	switch spec.Kind {
-	case runtimespec.LaunchKindJar:
+	case v1.LaunchKind_LAUNCH_KIND_JAR:
 		if v := jarMCVersion(joinData(dataPath, spec.Jar)); v != "" {
 			return v
 		}
 		if spec.Jar != "server.jar" {
 			return jarMCVersion(joinData(dataPath, "server.jar"))
 		}
-	case runtimespec.LaunchKindArgsFile:
+	case v1.LaunchKind_LAUNCH_KIND_ARGS_FILE:
 		return forgeArgsMCVersion(spec.ArgsFile)
 	}
 	return ""

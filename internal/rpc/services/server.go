@@ -29,10 +29,12 @@ import (
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/files"
+	"github.com/nickheyer/discopanel/pkg/indexers"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"github.com/nickheyer/discopanel/pkg/transfer"
 	utils "github.com/nickheyer/discopanel/pkg/utils"
@@ -256,19 +258,16 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid modpack"))
 		}
 
-		// Override mod loader based on indexer
-		loader, ok := minecraft.ServerLoaderForModpack(modpack.Indexer)
+		// Override mod loader based on the pack platform
+		loader, ok := minecraft.LoaderForPackSource(indexers.PackSourceFor(modpack.Indexer))
 		if !ok {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unsupported modpack indexer %q", modpack.Indexer))
 		}
 		modLoader = loader
 
 		// Get MC version from modpack if not explicitly set
-		if msg.McVersion == "" {
-			var gameVersions []string
-			if err := json.Unmarshal([]byte(modpack.GameVersions), &gameVersions); err == nil && len(gameVersions) > 0 {
-				msg.McVersion = minecraft.FindMostRecentMinecraftVersion(gameVersions)
-			}
+		if msg.McVersion == "" && len(modpack.GameVersions) > 0 {
+			msg.McVersion = minecraft.FindMostRecentMinecraftVersion(modpack.GameVersions)
 		}
 
 		// Set minimum memory for modpacks
@@ -378,16 +377,18 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid host port %d", protoPort.HostPort))
 		}
 
-		// Default protocol to TCP
+		// Extra ports ride plain tcp or udp only
 		protocol := protoPort.Protocol
-		if protocol == "" {
-			protocol = "tcp"
-		} else if protocol != "tcp" && protocol != "udp" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid protocol %s (must be tcp or udp)", protocol))
+		switch protocol {
+		case v1.ModuleProtocol_MODULE_PROTOCOL_UNSPECIFIED:
+			protocol = v1.ModuleProtocol_MODULE_PROTOCOL_TCP
+		case v1.ModuleProtocol_MODULE_PROTOCOL_TCP, v1.ModuleProtocol_MODULE_PROTOCOL_UDP:
+		default:
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid protocol %s (must be tcp or udp)", protometa.Name(protocol)))
 		}
 
 		// Check for duplicate ports
-		portKey := fmt.Sprintf("%d/%s", protoPort.HostPort, protocol)
+		portKey := fmt.Sprintf("%d/%s", protoPort.HostPort, protometa.Name(protocol))
 		if usedPorts[portKey] {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("duplicate host port %d/%s", protoPort.HostPort, protocol))
 		}
@@ -483,7 +484,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		s.log.Error("Failed to create server: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server"))
 	}
-	s.rec.Record(ctx, server.Id, "server.create", nil, "created the server")
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_CREATE, nil, "created the server")
 
 	// Get the server config
 	serverConfig, err := s.store.GetServerProperties(ctx, server.Id)
@@ -654,16 +655,18 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid host port %d", protoPort.HostPort))
 			}
 
-			// Default protocol to TCP
+			// Extra ports ride plain tcp or udp only
 			protocol := protoPort.Protocol
-			if protocol == "" {
-				protocol = "tcp"
-			} else if protocol != "tcp" && protocol != "udp" {
-				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid protocol %s", protocol))
+			switch protocol {
+			case v1.ModuleProtocol_MODULE_PROTOCOL_UNSPECIFIED:
+				protocol = v1.ModuleProtocol_MODULE_PROTOCOL_TCP
+			case v1.ModuleProtocol_MODULE_PROTOCOL_TCP, v1.ModuleProtocol_MODULE_PROTOCOL_UDP:
+			default:
+				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid protocol %s", protometa.Name(protocol)))
 			}
 
 			// Check for duplicate ports
-			portKey := fmt.Sprintf("%d/%s", protoPort.HostPort, protocol)
+			portKey := fmt.Sprintf("%d/%s", protoPort.HostPort, protometa.Name(protocol))
 			if usedPorts[portKey] {
 				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("duplicate host port %d/%s", protoPort.HostPort, protocol))
 			}
@@ -740,14 +743,14 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 
 // Points server loader and properties at the selected modpack
 func (s *ServerService) applyModpackSelection(ctx context.Context, server *v1.Server, serverConfig *v1.ServerProperties, modpack *v1.IndexedModpack, versionID string) error {
-	loader, ok := minecraft.ServerLoaderForModpack(modpack.Indexer)
+	loader, ok := minecraft.LoaderForPackSource(indexers.PackSourceFor(modpack.Indexer))
 	if !ok {
 		return fmt.Errorf("unsupported modpack indexer %q", modpack.Indexer)
 	}
 	server.ModLoader = loader
 
 	switch modpack.Indexer {
-	case "manual":
+	case indexers.ManualIndexer:
 		packFiles, err := s.store.GetIndexedModpackFiles(ctx, modpack.Id)
 		if err != nil || len(packFiles) == 0 {
 			return fmt.Errorf("uploaded modpack has no archive")
@@ -781,7 +784,7 @@ func (s *ServerService) applyModpackSelection(ctx context.Context, server *v1.Se
 
 	// Pack art becomes the server icon like an upload would
 	s.adoptModpackIcon(ctx, server, modpack)
-	s.rec.Record(ctx, server.Id, "modpack.select", metrics.Attrs{"modpack": modpack.Name}, "selected modpack %s", modpack.Name)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_MODPACK_SELECT, metrics.Attrs{"modpack": modpack.Name}, "selected modpack %s", modpack.Name)
 	return nil
 }
 
@@ -819,13 +822,13 @@ func (s *ServerService) recreateAfterConfigChange(ctx context.Context, server *v
 	if err := s.store.UpdateServer(ctx, server); err != nil {
 		s.log.Error("Failed to update server after container removal: %v", err)
 	}
-	s.rec.Record(ctx, server.Id, "container.remove", nil, "removed the container so new settings apply on next start")
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_CONTAINER_REMOVE, nil, "removed the container so new settings apply on next start")
 	return false
 }
 
 // Adopts modpack art as the server icon, uploads win
 func (s *ServerService) adoptModpackIcon(ctx context.Context, server *v1.Server, modpack *v1.IndexedModpack) {
-	if server.IconSource == storage.IconSourceUpload || modpack.LogoUrl == "" {
+	if server.IconSource == v1.IconSource_ICON_SOURCE_UPLOAD || modpack.LogoUrl == "" {
 		return
 	}
 	iconPNG, err := provisioner.FetchServerIcon(ctx, s.config.Server.UserAgent, modpack.LogoUrl)
@@ -841,7 +844,7 @@ func (s *ServerService) adoptModpackIcon(ctx context.Context, server *v1.Server,
 		s.log.Error("Failed to write modpack icon: %v", err)
 		return
 	}
-	server.IconSource = storage.IconSourceModpack
+	server.IconSource = v1.IconSource_ICON_SOURCE_MODPACK
 }
 
 // UploadServerIcon converts an uploaded image into server-icon.png
@@ -874,11 +877,11 @@ func (s *ServerService) UploadServerIcon(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save icon"))
 	}
 
-	server.IconSource = storage.IconSourceUpload
+	server.IconSource = v1.IconSource_ICON_SOURCE_UPLOAD
 	if err := s.store.UpdateServer(ctx, server); err != nil {
 		s.log.Error("Failed to persist icon source: %v", err)
 	}
-	s.rec.Record(ctx, server.Id, "icon.upload", nil, "uploaded a server icon")
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_ICON_UPLOAD, nil, "uploaded a server icon")
 
 	favicon := "data:image/png;base64," + base64.StdEncoding.EncodeToString(iconPNG)
 	return connect.NewResponse(&v1.UploadServerIconResponse{
@@ -945,7 +948,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 
 	if s.lifecycle.IsStarting(server.Id) {
 		return connect.NewResponse(&v1.StartServerResponse{
-			Status: string(v1.ServerStatus_SERVER_STATUS_PROVISIONING),
+			Status: v1.ServerStatus_SERVER_STATUS_PROVISIONING,
 		}), nil
 	}
 
@@ -963,7 +966,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	}()
 
 	return connect.NewResponse(&v1.StartServerResponse{
-		Status: string(v1.ServerStatus_SERVER_STATUS_PROVISIONING),
+		Status: v1.ServerStatus_SERVER_STATUS_PROVISIONING,
 	}), nil
 }
 
@@ -980,7 +983,7 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 			s.log.Error("Failed to update server status: %v", err)
 		}
 		return connect.NewResponse(&v1.StopServerResponse{
-			Status: "stopped",
+			Status: v1.ServerStatus_SERVER_STATUS_STOPPED,
 		}), nil
 	}
 
@@ -998,7 +1001,7 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 	}()
 
 	return connect.NewResponse(&v1.StopServerResponse{
-		Status: "stopping",
+		Status: v1.ServerStatus_SERVER_STATUS_STOPPING,
 	}), nil
 }
 
@@ -1018,7 +1021,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 	}()
 
 	return connect.NewResponse(&v1.RestartServerResponse{
-		Status: "restarting",
+		Status: v1.ServerStatus_SERVER_STATUS_STARTING,
 	}), nil
 }
 
@@ -1038,7 +1041,7 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 	}()
 
 	return connect.NewResponse(&v1.RecreateServerResponse{
-		Status: "recreated",
+		Status: v1.ServerStatus_SERVER_STATUS_CREATING,
 	}), nil
 }
 
@@ -1401,17 +1404,5 @@ func (s *ServerService) GetServerActions(ctx context.Context, req *connect.Reque
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to load actions: %w", err))
 	}
-	actions := make([]*v1.ServerAction, 0, len(rows))
-	for i := range rows {
-		actions = append(actions, &v1.ServerAction{
-			Id:        int64(rows[i].Id),
-			Timestamp: rows[i].Timestamp,
-			Source:    rows[i].Source,
-			Name:      rows[i].Name,
-			Message:   rows[i].Message,
-			Attrs:     rows[i].Attrs,
-			TraceId:   rows[i].TraceId,
-		})
-	}
-	return connect.NewResponse(&v1.GetServerActionsResponse{Actions: actions}), nil
+	return connect.NewResponse(&v1.GetServerActionsResponse{Actions: rows}), nil
 }

@@ -16,9 +16,9 @@ import (
 	"github.com/nickheyer/discopanel/internal/metrics"
 	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -68,7 +68,7 @@ type Client struct {
 	send chan []byte
 
 	// Authentication
-	user          *auth.AuthenticatedUser
+	user          *v1.User
 	authenticated bool
 
 	// Maps serverId to its log channel
@@ -175,26 +175,11 @@ func (h *Hub) encodeMetrics(serverID string) []byte {
 	if m == nil {
 		return nil
 	}
-	// Stale heap without a live agent must not push
-	var heapUsed float64
-	if m.AgentConnected {
-		heapUsed = m.HeapUsedMb
-	}
 	msg := &v1.WebSocketServerMessage{
 		Type: v1.WSMessageType_WS_MESSAGE_TYPE_METRICS,
 		Payload: &v1.WebSocketServerMessage_Metrics{Metrics: &v1.MetricsMessage{
 			ServerId: serverID,
-			Sample: &v1.MetricsSample{
-				Timestamp:        timestamppb.Now(),
-				Tps:              m.Tps,
-				Mspt:             m.Mspt,
-				Players:          int32(m.PlayersOnline),
-				CpuPercent:       m.CpuPercent,
-				MemoryMb:         m.MemoryUsage,
-				HeapUsedMb:       heapUsed,
-				DiskBytes:        m.DiskUsage,
-				ProxyActiveConns: m.ProxyActiveConns,
-			},
+			Sample:   m.Sample(serverID),
 		}},
 	}
 	data, err := proto.Marshal(msg)
@@ -320,12 +305,7 @@ func (c *Client) handleAuth(msg *v1.AuthMessage) {
 
 	// No auth providers enabled, grants full admin access
 	if !c.hub.authManager.IsAnyAuthEnabled() {
-		c.user = &auth.AuthenticatedUser{
-			Id:       "admin",
-			Username: "admin",
-			Roles:    []string{"admin"},
-			Provider: "none",
-		}
+		c.user = c.hub.authManager.SystemUser()
 		c.authenticated = true
 		c.sendAuthOk()
 		return
@@ -334,7 +314,7 @@ func (c *Client) handleAuth(msg *v1.AuthMessage) {
 	ctx := context.Background()
 
 	if msg.Token != "" {
-		var user *auth.AuthenticatedUser
+		var user *v1.User
 		var err error
 		if strings.HasPrefix(msg.Token, "dp_") {
 			user, err = c.hub.authManager.ValidateApiToken(ctx, msg.Token)
@@ -371,7 +351,7 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 	}
 
 	// Check permission
-	allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionRead, msg.ServerId)
+	allowed, err := c.hub.enforcer.Enforce(c.user.Roles, optionsv1.ResourceType_RESOURCE_TYPE_SERVERS, optionsv1.ActionType_ACTION_TYPE_READ, msg.ServerId)
 	if err != nil || !allowed {
 		c.sendError("permission denied")
 		return
@@ -482,7 +462,7 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 
 	// Check command permission
 	if c.user != nil {
-		allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionCommand, msg.ServerId)
+		allowed, err := c.hub.enforcer.Enforce(c.user.Roles, optionsv1.ResourceType_RESOURCE_TYPE_SERVERS, optionsv1.ActionType_ACTION_TYPE_COMMAND, msg.ServerId)
 		if err != nil || !allowed {
 			c.sendCommandResult(msg.ServerId, false, "", "permission denied")
 			return

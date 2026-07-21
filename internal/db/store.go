@@ -12,18 +12,13 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-)
-
-// Icon provenance values, uploads always win over pack art
-const (
-	IconSourceUpload  = "upload"
-	IconSourceModpack = "modpack"
 )
 
 const MinecraftDefaultPort = 25565
@@ -38,11 +33,10 @@ func InContainerPort(s *v1.Server) int {
 
 // Splits the platform's force include list into patterns
 func ForceIncludePatterns(loader v1.ModLoader, cfg *v1.ServerProperties) []string {
-	pack := minecraft.PackPlatformFor(loader)
-	if cfg == nil || pack == nil {
+	if cfg == nil {
 		return nil
 	}
-	field := platformField(pack.Source, cfg)
+	field := platformField(minecraft.PackSourceFor(loader), cfg)
 	if field == nil || *field == nil {
 		return nil
 	}
@@ -50,11 +44,11 @@ func ForceIncludePatterns(loader v1.ModLoader, cfg *v1.ServerProperties) []strin
 }
 
 // Selects the platform's force include column
-func platformField(source string, cfg *v1.ServerProperties) **string {
+func platformField(source optionsv1.PackSource, cfg *v1.ServerProperties) **string {
 	switch source {
-	case "curseforge":
+	case optionsv1.PackSource_PACK_SOURCE_CURSEFORGE:
 		return &cfg.CfForceIncludeMods
-	case "modrinth":
+	case optionsv1.PackSource_PACK_SOURCE_MODRINTH:
 		return &cfg.ModrinthForceIncludeFiles
 	}
 	return nil
@@ -173,27 +167,10 @@ func (s *Store) DeleteServer(ctx context.Context, id string) error {
 
 // Uses datetime() since stored timestamps may lack UTC offset
 
-// Scan target for bucketed metrics aggregation
-type metricsBucketRow struct {
-	ServerId         string  `gorm:"column:server_id"`
-	Bucket           int64   `gorm:"column:bucket"`
-	Tps              float64 `gorm:"column:tps"`
-	Mspt             float64 `gorm:"column:mspt"`
-	Players          int32   `gorm:"column:players"`
-	CpuPercent       float64 `gorm:"column:cpu_percent"`
-	MemoryMb         float64 `gorm:"column:memory_mb"`
-	HeapUsedMb       float64 `gorm:"column:heap_used_mb"`
-	DiskBytes        int64   `gorm:"column:disk_bytes"`
-	ProxyActiveConns int64   `gorm:"column:proxy_active_conns"`
-	ProxyBytesIn     int64   `gorm:"column:proxy_bytes_in"`
-	ProxyBytesOut    int64   `gorm:"column:proxy_bytes_out"`
-	ProxyLogins      int64   `gorm:"column:proxy_logins"`
-}
-
 // Returns ordered samples, aggregated into buckets when bucketSeconds is positive
 func (s *Store) GetMetricsHistory(ctx context.Context, serverID string, from, to time.Time, bucketSeconds int) ([]*v1.MetricsSample, error) {
+	var samples []*v1.MetricsSample
 	if bucketSeconds <= 0 {
-		var samples []*v1.MetricsSample
 		err := s.db.WithContext(ctx).
 			Where("server_id = ? AND datetime(timestamp) >= datetime(?) AND datetime(timestamp) <= datetime(?)",
 				serverID, from.UTC(), to.UTC()).
@@ -202,8 +179,8 @@ func (s *Store) GetMetricsHistory(ctx context.Context, serverID string, from, to
 		return samples, err
 	}
 	query := `
-		SELECT server_id,
-			(CAST(strftime('%s', timestamp) AS INTEGER) / ?) * ? AS bucket,
+		SELECT server_id, ? AS resolution,
+			datetime((CAST(strftime('%s', timestamp) AS INTEGER) / ?) * ?, 'unixepoch') AS timestamp,
 			AVG(tps) AS tps, AVG(mspt) AS mspt, MAX(players) AS players,
 			AVG(cpu_percent) AS cpu_percent, AVG(memory_mb) AS memory_mb,
 			AVG(heap_used_mb) AS heap_used_mb, MAX(disk_bytes) AS disk_bytes,
@@ -211,36 +188,12 @@ func (s *Store) GetMetricsHistory(ctx context.Context, serverID string, from, to
 			SUM(proxy_bytes_out) AS proxy_bytes_out, SUM(proxy_logins) AS proxy_logins
 		FROM metrics_samples
 		WHERE server_id = ? AND datetime(timestamp) >= datetime(?) AND datetime(timestamp) <= datetime(?)
-		GROUP BY bucket
-		ORDER BY bucket ASC`
-	var rows []metricsBucketRow
-	err := s.db.WithContext(ctx).
-		Raw(query, bucketSeconds, bucketSeconds, serverID, from.UTC(), to.UTC()).
-		Scan(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-	samples := make([]*v1.MetricsSample, 0, len(rows))
-	for _, r := range rows {
-		sample := &v1.MetricsSample{
-			Timestamp:        timestamppb.New(time.Unix(r.Bucket, 0).UTC()),
-			Tps:              r.Tps,
-			Mspt:             r.Mspt,
-			Players:          r.Players,
-			CpuPercent:       r.CpuPercent,
-			MemoryMb:         r.MemoryMb,
-			HeapUsedMb:       r.HeapUsedMb,
-			DiskBytes:        r.DiskBytes,
-			ProxyActiveConns: r.ProxyActiveConns,
-			ProxyBytesIn:     r.ProxyBytesIn,
-			ProxyBytesOut:    r.ProxyBytesOut,
-			ProxyLogins:      r.ProxyLogins,
-		}
-		sample.ServerId = r.ServerId
-		sample.Resolution = int32(bucketSeconds)
-		samples = append(samples, sample)
-	}
-	return samples, nil
+		GROUP BY CAST(strftime('%s', timestamp) AS INTEGER) / ?
+		ORDER BY timestamp ASC`
+	err := s.db.WithContext(ctx).Model(&v1.MetricsSample{}).
+		Raw(query, bucketSeconds, bucketSeconds, bucketSeconds, serverID, from.UTC(), to.UTC(), bucketSeconds).
+		Scan(&samples).Error
+	return samples, err
 }
 
 // Folds raw samples older than cutoff into buckets
@@ -558,7 +511,7 @@ func (s *Store) FindAvailableListenerPort(ctx context.Context) (int, error) {
 		}
 
 		// Checks for a non-proxied module already bound to this port
-		conflict, err := s.CheckPortAvailability(ctx, port, "tcp", false, "", "")
+		conflict, err := s.CheckPortAvailability(ctx, port, v1.ModuleProtocol_MODULE_PROTOCOL_TCP, false, "", "")
 		if err != nil {
 			return 0, fmt.Errorf("failed to check port availability: %w", err)
 		}
@@ -614,7 +567,7 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 }
 
 // Assigns a role once, repeat calls are no-ops
-func (s *Store) AssignRole(ctx context.Context, userID, roleName, source string) error {
+func (s *Store) AssignRole(ctx context.Context, userID, roleName string, source v1.RoleSource) error {
 	existing, err := s.GetUserRoleAssignment(ctx, userID, roleName)
 	if err != nil {
 		return err
@@ -719,17 +672,26 @@ func (s *Store) GetModuleByHostPort(ctx context.Context, port int) (*v1.Module, 
 type PortConflict struct {
 	Module   *v1.Module
 	Port     int
-	Protocol string
+	Protocol v1.ModuleProtocol
 	Reason   string
 }
 
+// Wire protocol behind a port protocol, unspecified reads tcp
+func PortTransport(p v1.ModuleProtocol) v1.ModuleProtocol {
+	if p == v1.ModuleProtocol_MODULE_PROTOCOL_UDP {
+		return v1.ModuleProtocol_MODULE_PROTOCOL_UDP
+	}
+	return v1.ModuleProtocol_MODULE_PROTOCOL_TCP
+}
+
 // Checks port availability across proxied and non-proxied modules
-func (s *Store) CheckPortAvailability(ctx context.Context, hostPort int, protocol string, proxyEnabled bool, hostname string, excludeModuleID string) (*PortConflict, error) {
+func (s *Store) CheckPortAvailability(ctx context.Context, hostPort int, protocol v1.ModuleProtocol, proxyEnabled bool, hostname string, excludeModuleID string) (*PortConflict, error) {
 	modules, err := s.ListModules(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	transport := PortTransport(protocol)
 	for _, module := range modules {
 		if module.Id == excludeModuleID {
 			continue
@@ -740,13 +702,8 @@ func (s *Store) CheckPortAvailability(ctx context.Context, hostPort int, protoco
 				continue
 			}
 
-			existingProtocol := p.Protocol
-			if existingProtocol == "" {
-				existingProtocol = "tcp"
-			}
-
 			// TCP and UDP use separate port spaces
-			if existingProtocol != protocol {
+			if PortTransport(p.Protocol) != transport {
 				continue
 			}
 
@@ -761,7 +718,7 @@ func (s *Store) CheckPortAvailability(ctx context.Context, hostPort int, protoco
 			}
 
 			// Proxied UDP is exclusive, no hostname routing
-			if protocol == "udp" {
+			if transport == v1.ModuleProtocol_MODULE_PROTOCOL_UDP {
 				return &PortConflict{
 					Module:   module,
 					Port:     hostPort,

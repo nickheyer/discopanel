@@ -208,17 +208,17 @@ func (d *doctor) checkCrash(srv *serverInfo) []*v1.PerformanceFinding {
 		f.Detail += " " + cause
 	}
 
-	resolvedCovers := j.Resolved != nil && !j.Resolved.ClosedAt.IsZero() && j.Resolved.ClosedAt.UnixMilli() >= exit.ExitedAtUnixMs
+	resolvedCovers := j.Resolved != nil && j.Resolved.ClosedAt != nil && j.Resolved.ClosedAt.AsTime().UnixMilli() >= exit.ExitedAtUnixMs
 	switch {
 	case j.Incident != nil && len(j.Incident.Actions) > 0:
 		f.Action = fmt.Sprintf("The doctor is repairing this now (attempt %d): %s.", j.Incident.Passes, j.Incident.Summary)
-		f.ActionLogStartMs = j.Incident.OpenedAt.UnixMilli()
-	case resolvedCovers && j.Resolved.Outcome == "gave_up":
+		f.ActionLogStartMs = j.Incident.OpenedAt.AsTime().UnixMilli()
+	case resolvedCovers && j.Resolved.Outcome == v1.DoctorOutcome_DOCTOR_OUTCOME_GAVE_UP:
 		f.Action = "The doctor tried to repair this, undid its changes, and stopped the server: " + j.Resolved.Summary + "."
-		f.ActionLogStartMs = j.Resolved.OpenedAt.UnixMilli()
+		f.ActionLogStartMs = j.Resolved.OpenedAt.AsTime().UnixMilli()
 	case resolvedCovers:
 		f.Action = "The doctor automatically " + j.Resolved.Summary + " and restarted the server."
-		f.ActionLogStartMs = j.Resolved.OpenedAt.UnixMilli()
+		f.ActionLogStartMs = j.Resolved.OpenedAt.AsTime().UnixMilli()
 		if srv.Running {
 			f.Id = "repaired_crash"
 			f.Severity = v1.PerformanceSeverity_PERFORMANCE_SEVERITY_INFO
@@ -229,11 +229,11 @@ func (d *doctor) checkCrash(srv *serverInfo) []*v1.PerformanceFinding {
 }
 
 // Crash classification the doctor recorded while responding
-func journalCause(j *runtimespec.DoctorState, exit *agentv1.Exited) string {
+func journalCause(j *v1.DoctorState, exit *agentv1.Exited) string {
 	if j.Incident != nil {
 		return j.Incident.Cause
 	}
-	if j.Resolved != nil && j.Resolved.ClosedAt.UnixMilli() >= exit.ExitedAtUnixMs {
+	if j.Resolved != nil && j.Resolved.ClosedAt.AsTime().UnixMilli() >= exit.ExitedAtUnixMs {
 		return j.Resolved.Cause
 	}
 	return ""

@@ -40,6 +40,8 @@
 	import { create } from '@bufbuild/protobuf';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import type { User, Role, RegistrationInvite } from '$lib/proto/discopanel/v1/storage_pb';
+	import { AuthProvider, AuthProviderSchema } from '$lib/proto/discopanel/v1/storage_pb';
+	import { enumLabel } from '$lib/proto-meta';
 	import {
 		CreateUserRequestSchema,
 		UpdateUserRequestSchema,
@@ -399,9 +401,9 @@
 											{#if isSelf}
 												<span class="text-[10px] font-normal text-muted-foreground">(you)</span>
 											{/if}
-											{#if user.authProvider && user.authProvider !== 'local'}
-												<Badge variant="outline" class="text-[10px] capitalize">
-													{user.authProvider}
+											{#if user.authProvider && user.authProvider !== AuthProvider.LOCAL}
+												<Badge variant="outline" class="text-[10px]">
+													{enumLabel(AuthProviderSchema, user.authProvider)}
 												</Badge>
 											{/if}
 										</p>
@@ -654,8 +656,8 @@
 		<DialogHeader>
 			<DialogTitle>Edit {editingUser?.username ?? 'user'}</DialogTitle>
 			<DialogDescription>
-				{editingUser?.authProvider && editingUser.authProvider !== 'local'
-					? `Managed by ${editingUser.authProvider}. `
+				{editingUser?.authProvider && editingUser.authProvider !== AuthProvider.LOCAL
+					? `Managed by ${enumLabel(AuthProviderSchema, editingUser.authProvider)}. `
 					: ''}Role and status changes take effect immediately.
 			</DialogDescription>
 		</DialogHeader>

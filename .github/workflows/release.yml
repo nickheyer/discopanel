@@ -15,18 +15,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       - name: Generate proto code
-        run: |
-          docker run --rm \
-            --volume "${{ github.workspace }}:/workspace" \
-            --workdir /workspace \
-            bufbuild/buf:latest generate
+        run: make gen
 
       - name: Upload generated Go proto code
         uses: actions/upload-artifact@v4
         with:
           name: proto-go
           path: pkg/proto
+          retention-days: 1
+
+      - name: Upload generated db store code
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-gen
+          path: internal/db/store.gen.go
           retention-days: 1
 
       - name: Upload generated TypeScript proto code
@@ -131,10 +139,16 @@ jobs:
           name: proto-go
           path: pkg/proto
 
+      - name: Download generated db store code
+        uses: actions/download-artifact@v4
+        with:
+          name: store-gen
+          path: internal/db
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.5'
+          go-version-file: go.mod
 
       - name: Install cross-compiler (Linux ARM64)
         if: matrix.goos == 'linux' && matrix.goarch == 'arm64'

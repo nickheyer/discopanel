@@ -16,6 +16,7 @@ import (
 	"connectrpc.com/connect"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1/agentv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/proto"
@@ -170,8 +171,8 @@ const reconnectLogLimit = 3
 // Dials panel and holds telemetry stream open for server lifetime
 func (s *supervisor) runPanelSession() {
 	client := agentv1connect.NewAgentServiceClient(
-		&http.Client{Transport: newPanelTransport(s.agentSpec.PanelURL)},
-		s.agentSpec.PanelURL,
+		&http.Client{Transport: newPanelTransport(s.agentSpec.PanelUrl)},
+		s.agentSpec.PanelUrl,
 	)
 
 	backoff := time.Second
@@ -350,12 +351,12 @@ func (s *supervisor) clearExitReplay(exitedAtUnixMs int64) {
 
 func (s *supervisor) msgHello() *agentv1.AgentMessage {
 	return &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{
-		ServerId:    s.agentSpec.ServerID,
+		ServerId:    s.agentSpec.ServerId,
 		Source:      agentv1.HelloSource_HELLO_SOURCE_RUNTIME,
 		Version:     runtimeVersion,
-		Loader:      s.spec.Loader,
+		Loader:      protometa.Name(s.spec.Loader),
 		McVersion:   s.spec.McVersion,
-		JavaMajor:   int32(s.spec.JavaMajor),
+		JavaMajor:   s.spec.JavaMajor,
 		HostThpMode: readHostTHPMode(),
 	}}}
 }

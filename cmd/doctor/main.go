@@ -18,6 +18,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 )
 
@@ -191,7 +192,7 @@ func (d *doctor) rowFor(srv *serverInfo) statusRow {
 		row.Incident = incidentLine(j.Incident)
 	}
 	if j.Resolved != nil && j.Resolved.Summary != "" {
-		row.Resolved = j.Resolved.Outcome + ": " + j.Resolved.Summary
+		row.Resolved = protometa.Name(j.Resolved.Outcome) + ": " + j.Resolved.Summary
 	}
 	return row
 }

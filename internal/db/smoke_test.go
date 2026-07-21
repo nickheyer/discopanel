@@ -32,7 +32,7 @@ func TestProtoModelSmoke(t *testing.T) {
 		DataPath:       t.TempDir(),
 		AgentTokenHash: "sekrit-hash",
 		AdditionalPorts: []*v1.AdditionalPort{
-			{Name: "map", ContainerPort: 8100, HostPort: 8100, Protocol: "tcp"},
+			{Name: "map", ContainerPort: 8100, HostPort: 8100, Protocol: v1.ModuleProtocol_MODULE_PROTOCOL_TCP},
 		},
 	}
 	if err := store.CreateServer(ctx, server); err != nil {
@@ -78,7 +78,7 @@ func TestProtoModelSmoke(t *testing.T) {
 	}
 
 	// Relation preload via session
-	user := &v1.User{Id: "u1", Username: "nick", AuthProvider: "local", IsActive: true, PasswordHash: "h"}
+	user := &v1.User{Id: "u1", Username: "nick", AuthProvider: v1.AuthProvider_AUTH_PROVIDER_LOCAL, IsActive: true, PasswordHash: "h"}
 	if err := store.CreateUser(ctx, user); err != nil {
 		t.Fatalf("user: %v", err)
 	}
@@ -98,5 +98,34 @@ func TestProtoModelSmoke(t *testing.T) {
 	clone := got.Redact()
 	if clone.AgentTokenHash != "" {
 		t.Fatal("redact failed")
+	}
+
+	// Bucketed history scans raw sql into the proto model
+	base := time.Now().UTC().Truncate(time.Minute)
+	for i := range 4 {
+		sample := &v1.MetricsSample{
+			ServerId:  "srv-1",
+			Timestamp: timestamppb.New(base.Add(time.Duration(i) * 15 * time.Second)),
+			Tps:       20,
+			Players:   int32(i),
+			MemoryMb:  1024,
+		}
+		if err := store.CreateMetricsSample(ctx, sample); err != nil {
+			t.Fatalf("sample: %v", err)
+		}
+	}
+	buckets, err := store.GetMetricsHistory(ctx, "srv-1", base.Add(-time.Minute), base.Add(2*time.Minute), 60)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(buckets) != 1 {
+		t.Fatalf("expected one bucket, got %d", len(buckets))
+	}
+	b := buckets[0]
+	if b.Timestamp == nil || !b.Timestamp.AsTime().Equal(base) {
+		t.Fatalf("bucket timestamp wrong: %v", b.Timestamp)
+	}
+	if b.Tps != 20 || b.Players != 3 || b.Resolution != 60 || b.ServerId != "srv-1" {
+		t.Fatalf("bucket aggregation wrong: %+v", b)
 	}
 }

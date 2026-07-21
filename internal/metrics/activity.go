@@ -81,12 +81,12 @@ func (r *Recorder) SetConsoleSink(sink func(serverID, line string)) {
 }
 
 // Writes one ledger event, survives a cancelled caller context
-func (r *Recorder) Record(ctx context.Context, serverID, name string, attrs Attrs, format string, args ...any) {
-	r.record(ctx, serverID, name, attrs, fmt.Sprintf(format, args...))
+func (r *Recorder) Record(ctx context.Context, serverID string, kind v1.ServerActionKind, attrs Attrs, format string, args ...any) {
+	r.record(ctx, serverID, kind, attrs, fmt.Sprintf(format, args...))
 }
 
 // Records and echoes the line into the server console
-func (r *Recorder) Announce(ctx context.Context, serverID, name string, attrs Attrs, format string, args ...any) {
+func (r *Recorder) Announce(ctx context.Context, serverID string, kind v1.ServerActionKind, attrs Attrs, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	r.mu.RLock()
 	console := r.console
@@ -94,14 +94,14 @@ func (r *Recorder) Announce(ctx context.Context, serverID, name string, attrs At
 	if console != nil {
 		console(serverID, SourceFrom(ctx)+": "+msg)
 	}
-	r.record(ctx, serverID, name, attrs, msg)
+	r.record(ctx, serverID, kind, attrs, msg)
 }
 
-func (r *Recorder) record(ctx context.Context, serverID, name string, attrs Attrs, msg string) {
+func (r *Recorder) record(ctx context.Context, serverID string, kind v1.ServerActionKind, attrs Attrs, msg string) {
 	action := &v1.ServerAction{
 		ServerId: serverID,
 		Source:   SourceFrom(ctx),
-		Name:     name,
+		Kind:     kind,
 		Message:  msg,
 		Attrs:    attrs,
 		TraceId:  TraceFrom(ctx),

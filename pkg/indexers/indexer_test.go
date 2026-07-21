@@ -1,12 +1,16 @@
 package indexers
 
-import "testing"
+import (
+	"testing"
+
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
+)
 
 func TestRegisterIndexerMetadata(t *testing.T) {
 	RegisterIndexer("test-beta",
 		func(_, _ string) ModpackIndexer { return nil },
 		WithCredentialProperty("betaKey"),
-		WithPackSource("betasource"),
+		WithPackSource(optionsv1.PackSource_PACK_SOURCE_MODRINTH),
 		WithForceIncludeProperty("betaForce"),
 	)
 	RegisterIndexer("test-alpha", func(_, _ string) ModpackIndexer { return nil })
@@ -22,11 +26,11 @@ func TestRegisterIndexerMetadata(t *testing.T) {
 	}
 
 	b := byName["test-beta"]
-	if b.CredentialProperty != "betaKey" || b.PackSource != "betasource" || b.ForceIncludeProperty != "betaForce" {
+	if b.CredentialProperty != "betaKey" || b.PackSource != optionsv1.PackSource_PACK_SOURCE_MODRINTH || b.ForceIncludeProperty != "betaForce" {
 		t.Fatalf("metadata lost, got %+v", b)
 	}
 	a := byName["test-alpha"]
-	if a.CredentialProperty != "" || a.PackSource != "" || a.ForceIncludeProperty != "" {
+	if a.CredentialProperty != "" || a.PackSource != optionsv1.PackSource_PACK_SOURCE_UNSPECIFIED || a.ForceIncludeProperty != "" {
 		t.Fatalf("unexpected metadata %+v", a)
 	}
 }

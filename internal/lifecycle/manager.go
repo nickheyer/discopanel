@@ -198,7 +198,7 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 	result, err := m.prov.Ensure(ctx, server, serverCfg)
 	if err != nil {
 		m.setStatus(ctx, server, v1.ServerStatus_SERVER_STATUS_ERROR)
-		m.rec.Announce(ctx, server.Id, "server.start", metrics.Attrs{"error": err.Error()}, "provisioning failed: %v", err)
+		m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_START, metrics.Attrs{"error": err.Error()}, "provisioning failed: %v", err)
 		return fmt.Errorf("provisioning failed: %w", err)
 	}
 
@@ -229,7 +229,7 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 	m.setStatus(ctx, server, v1.ServerStatus_SERVER_STATUS_CREATING)
 	if err := m.ensureContainer(ctx, server, serverCfg); err != nil {
 		m.setStatus(ctx, server, v1.ServerStatus_SERVER_STATUS_ERROR)
-		m.rec.Announce(ctx, server.Id, "server.start", metrics.Attrs{"error": err.Error()}, "container setup failed: %v", err)
+		m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_START, metrics.Attrs{"error": err.Error()}, "container setup failed: %v", err)
 		return err
 	}
 
@@ -249,7 +249,7 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 				}
 			}
 			m.setStatus(ctx, server, v1.ServerStatus_SERVER_STATUS_ERROR)
-			m.rec.Announce(ctx, server.Id, "server.start", metrics.Attrs{"error": rerr.Error()}, "container start failed: %v", rerr)
+			m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_START, metrics.Attrs{"error": rerr.Error()}, "container start failed: %v", rerr)
 			return fmt.Errorf("failed to start server container: %w", rerr)
 		}
 		server.ContainerId = recreated.NewContainerID
@@ -259,7 +259,7 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 		}
 		if err := m.docker.StartContainer(ctx, server.ContainerId); err != nil {
 			m.setStatus(ctx, server, v1.ServerStatus_SERVER_STATUS_ERROR)
-			m.rec.Announce(ctx, server.Id, "server.start", metrics.Attrs{"error": err.Error()}, "container start failed: %v", err)
+			m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_START, metrics.Attrs{"error": err.Error()}, "container start failed: %v", err)
 			return fmt.Errorf("failed to start recreated container: %w", err)
 		}
 	}
@@ -270,7 +270,7 @@ func (m *Manager) Start(ctx context.Context, serverID string) error {
 			m.log.Warn("lifecycle: failed to start log streaming for %s: %v", server.Name, err)
 		}
 	}
-	m.rec.Announce(ctx, server.Id, "server.start", nil, "started the server")
+	m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_START, nil, "started the server")
 
 	now := time.Now()
 	server.Status = v1.ServerStatus_SERVER_STATUS_STARTING
@@ -321,13 +321,13 @@ func (m *Manager) ensureContainer(ctx context.Context, server *v1.Server, server
 				return nil
 			}
 			m.log.Info("lifecycle: %s container configuration drifted, recreating container", server.Name)
-			m.rec.Announce(ctx, server.Id, "container.recreate", metrics.Attrs{"reason": "settings changed"}, "server settings changed, recreating container")
+			m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_CONTAINER_RECREATE, metrics.Attrs{"reason": "settings changed"}, "server settings changed, recreating container")
 		} else if err == nil && current != desired {
 			m.log.Info("lifecycle: %s image changed (%s -> %s), recreating container", server.Name, current, desired)
-			m.rec.Announce(ctx, server.Id, "container.recreate", metrics.Attrs{"reason": "image changed", "from": current, "to": desired}, "runtime image changed (%s -> %s), recreating container", current, desired)
+			m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_CONTAINER_RECREATE, metrics.Attrs{"reason": "image changed", "from": current, "to": desired}, "runtime image changed (%s -> %s), recreating container", current, desired)
 		} else if err == nil {
 			m.log.Info("lifecycle: %s runtime image %s was updated, recreating container", server.Name, desired)
-			m.rec.Announce(ctx, server.Id, "container.recreate", metrics.Attrs{"reason": "image updated"}, "runtime image updated, recreating container")
+			m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_CONTAINER_RECREATE, metrics.Attrs{"reason": "image updated"}, "runtime image updated, recreating container")
 		}
 		result, err := m.docker.RecreateContainer(ctx, server.ContainerId, server, serverCfg, progress)
 		if err != nil {
@@ -356,7 +356,7 @@ func (m *Manager) recordRuntimeDigest(ctx context.Context, server *v1.Server) bo
 	}
 	if server.RuntimeDigest != "" {
 		m.log.Info("lifecycle: %s runtime digest changed (%s -> %s)", server.Name, shortDigest(server.RuntimeDigest), shortDigest(digest))
-		m.rec.Announce(ctx, server.Id, "runtime.update", metrics.Attrs{"from": shortDigest(server.RuntimeDigest), "to": shortDigest(digest)}, "runtime build changed (%s -> %s)", shortDigest(server.RuntimeDigest), shortDigest(digest))
+		m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_RUNTIME_UPDATE, metrics.Attrs{"from": shortDigest(server.RuntimeDigest), "to": shortDigest(digest)}, "runtime build changed (%s -> %s)", shortDigest(server.RuntimeDigest), shortDigest(digest))
 	}
 	server.RuntimeDigest = digest
 	return true
@@ -420,7 +420,7 @@ func (m *Manager) Stop(ctx context.Context, serverID string) error {
 	found, err := m.docker.StopContainer(ctx, server.ContainerId, stopDuration)
 	if err != nil {
 		m.setStatus(ctx, server, v1.ServerStatus_SERVER_STATUS_ERROR)
-		m.rec.Announce(ctx, server.Id, "server.stop", metrics.Attrs{"error": err.Error()}, "stop failed: %v", err)
+		m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_STOP, metrics.Attrs{"error": err.Error()}, "stop failed: %v", err)
 		return fmt.Errorf("failed to stop server: %w", err)
 	}
 
@@ -433,7 +433,7 @@ func (m *Manager) Stop(ctx context.Context, serverID string) error {
 	}
 	// Reconciles proxy route, keeps wake-on-connect servers joinable
 	m.setStatus(ctx, server, v1.ServerStatus_SERVER_STATUS_STOPPED)
-	m.rec.Announce(ctx, server.Id, "server.stop", nil, "stopped the server")
+	m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_STOP, nil, "stopped the server")
 
 	m.setPaused(server.Id, false)
 	m.resetIdle(server.Id)
@@ -480,7 +480,7 @@ func (m *Manager) Recreate(ctx context.Context, serverID string) error {
 	}
 
 	if server.ContainerId != "" {
-		m.rec.Announce(ctx, server.Id, "container.recreate", metrics.Attrs{"reason": "requested"}, "recreating the container from scratch")
+		m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_CONTAINER_RECREATE, metrics.Attrs{"reason": "requested"}, "recreating the container from scratch")
 		if _, err := m.docker.StopContainer(ctx, server.ContainerId, docker.DefaultStopTimeoutSeconds); err != nil {
 			m.log.Warn("lifecycle: failed to stop container during recreate: %v", err)
 		}
@@ -510,7 +510,7 @@ func (m *Manager) Pause(ctx context.Context, serverID string) error {
 	}
 	m.setPaused(server.Id, true)
 	m.setStatus(ctx, server, v1.ServerStatus_SERVER_STATUS_PAUSED)
-	m.rec.Announce(ctx, server.Id, "server.pause", nil, "paused the idle server")
+	m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_PAUSE, nil, "paused the idle server")
 	m.log.Info("lifecycle: paused idle server %s", server.Name)
 	return nil
 }
@@ -538,7 +538,7 @@ func (m *Manager) Wake(ctx context.Context, serverID string) error {
 	m.setPaused(server.Id, false)
 	m.resetIdle(server.Id)
 	m.setStatus(ctx, server, v1.ServerStatus_SERVER_STATUS_RUNNING)
-	m.rec.Announce(ctx, server.Id, "server.wake", nil, "woke the server")
+	m.rec.Announce(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_SERVER_WAKE, nil, "woke the server")
 	m.log.Info("lifecycle: woke server %s", server.Name)
 	return nil
 }
@@ -581,7 +581,7 @@ func (m *Manager) isPausedFast(serverID string) bool {
 func (m *Manager) writeAgentSpec(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties) error {
 	enabled := cfg == nil || cfg.EnableAgent == nil || *cfg.EnableAgent
 	if !enabled {
-		return runtimespec.WriteAgentSpec(server.DataPath, &runtimespec.AgentSpec{Version: 1, Enabled: false})
+		return runtimespec.WriteAgentSpec(server.DataPath, &v1.AgentSpec{Version: 1, Enabled: false})
 	}
 
 	panelURL := m.cfg.Docker.AgentURL
@@ -604,11 +604,11 @@ func (m *Manager) writeAgentSpec(ctx context.Context, server *v1.Server, cfg *v1
 		return fmt.Errorf("failed to persist agent token hash: %w", err)
 	}
 
-	return runtimespec.WriteAgentSpec(server.DataPath, &runtimespec.AgentSpec{
+	return runtimespec.WriteAgentSpec(server.DataPath, &v1.AgentSpec{
 		Version:  1,
 		Enabled:  true,
-		PanelURL: panelURL,
+		PanelUrl: panelURL,
 		Token:    token,
-		ServerID: server.Id,
+		ServerId: server.Id,
 	})
 }

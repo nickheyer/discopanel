@@ -89,7 +89,7 @@ MODULE_NAMES := $(filter-out discopanel runtime,$(patsubst docker/Dockerfile.%,%
 
 # Everything the runtime image bakes in, generated code excluded
 RUNTIME_SRC := docker/Dockerfile.runtime go.mod go.sum \
-	$(shell find cmd/runtime pkg/runtimespec proto -type f 2>/dev/null) \
+	$(shell find cmd/runtime pkg/runtimespec pkg/protometa proto -type f 2>/dev/null) \
 	$(shell find agent -type f -not -path 'agent/build/*' -not -path 'agent/.gradle-home/*' -not -path 'agent/src/generated/*' 2>/dev/null)
 
 # Module images copy the whole Go tree, track it coarsely

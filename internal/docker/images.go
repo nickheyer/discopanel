@@ -104,23 +104,25 @@ func IsValidRuntimeTag(tag string) bool {
 	return false
 }
 
-// Describes one published runtime image variant
-type RuntimeImageInfo struct {
-	Tag       string
-	JavaMajor int
-	Graal     bool
-}
-
 // Lists runtime image variants, newest first, GraalVM last
-func RuntimeImages() []RuntimeImageInfo {
-	images := make([]RuntimeImageInfo, 0, len(SupportedJavaVersions)+len(GraalJavaVersions))
+func RuntimeImages() []*v1.DockerImage {
+	images := make([]*v1.DockerImage, 0, len(SupportedJavaVersions)+len(GraalJavaVersions))
 	for i := len(SupportedJavaVersions) - 1; i >= 0; i-- {
 		v := SupportedJavaVersions[i]
-		images = append(images, RuntimeImageInfo{Tag: RuntimeImageTag(v), JavaMajor: v})
+		images = append(images, &v1.DockerImage{
+			Tag:         RuntimeImageTag(v),
+			DisplayName: fmt.Sprintf("Java %d (discopanel-runtime)", v),
+			Description: fmt.Sprintf("Minimal Temurin %d JRE runtime; server files are provisioned by DiscoPanel", v),
+			Recommended: len(images) == 0,
+		})
 	}
 	for i := len(GraalJavaVersions) - 1; i >= 0; i-- {
 		v := GraalJavaVersions[i]
-		images = append(images, RuntimeImageInfo{Tag: GraalRuntimeImageTag(v), JavaMajor: v, Graal: true})
+		images = append(images, &v1.DockerImage{
+			Tag:         GraalRuntimeImageTag(v),
+			DisplayName: fmt.Sprintf("Java %d GraalVM (discopanel-runtime)", v),
+			Description: fmt.Sprintf("Oracle GraalVM %d JIT runtime; often faster ticks on modded servers, worth benchmarking per pack", v),
+		})
 	}
 	return images
 }

@@ -36,9 +36,16 @@
 	import { create } from '@bufbuild/protobuf';
 	import type { CreateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
-	import { ModLoader, type ProxyListener, type IndexedModpack } from '$lib/proto/discopanel/v1/storage_pb';
+	import {
+		ModLoader,
+		ReleaseType,
+		ReleaseTypeSchema,
+		type ProxyListener,
+		type IndexedModpack
+	} from '$lib/proto/discopanel/v1/storage_pb';
 	import type { ModLoaderInfo, DockerImage } from '$lib/proto/discopanel/v1/minecraft_pb';
 	import type { Version } from '$lib/proto/discopanel/v1/modpack_pb';
+	import { enumLabel } from '$lib/proto-meta';
 	import { loadModLoaders } from '$lib/stores/loaders';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
@@ -291,14 +298,6 @@
 	function clearIcon() {
 		iconFile = null;
 		iconPreview = '';
-	}
-
-	function parseJsonArray(jsonStr: string): string[] {
-		try {
-			return JSON.parse(jsonStr);
-		} catch {
-			return [];
-		}
 	}
 
 	function validatePort(port: number) {
@@ -574,14 +573,14 @@
 											{selectedModpack.summary}
 										</p>
 										<div class="mt-2 flex flex-wrap gap-2">
-											{#if parseJsonArray(selectedModpack.gameVersions).length > 0}
+											{#if selectedModpack.gameVersions.length > 0}
 												<Badge variant="outline" class="text-xs">
-													MC {parseJsonArray(selectedModpack.gameVersions)[0]}
+													MC {selectedModpack.gameVersions[0]}
 												</Badge>
 											{/if}
-											{#if parseJsonArray(selectedModpack.modLoaders).length > 0}
+											{#if selectedModpack.modLoaders.length > 0}
 												<Badge variant="outline" class="text-xs capitalize">
-													{parseJsonArray(selectedModpack.modLoaders)[0]}
+													{selectedModpack.modLoaders[0]}
 												</Badge>
 											{/if}
 										</div>
@@ -610,8 +609,8 @@
 														{#each modpackVersions as version (version.id)}
 															<SelectItem value={version.id}>
 																{version.displayName}
-																{#if version.releaseType && version.releaseType !== 'release'}
-																	({version.releaseType})
+																{#if version.releaseType && version.releaseType !== ReleaseType.RELEASE}
+																	({enumLabel(ReleaseTypeSchema, version.releaseType)})
 																{/if}
 															</SelectItem>
 														{/each}

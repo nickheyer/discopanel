@@ -2,7 +2,6 @@ package docker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
@@ -20,16 +19,9 @@ import (
 	"github.com/nickheyer/discopanel/pkg/config"
 	"github.com/nickheyer/discopanel/pkg/files"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
+	"google.golang.org/protobuf/proto"
 )
-
-// Represents a volume mount from module configuration
-type ModuleVolumeMount struct {
-	Source    string `json:"source"`
-	Target    string `json:"target"`
-	ReadOnly  bool   `json:"read_only,omitempty"`
-	Type      string `json:"type,omitempty"`       // "bind" or "volume"
-	CreateDir bool   `json:"create_dir,omitempty"` // Pre-create source dirs
-}
 
 // Creates a module container, optionally given sibling modules by name
 func (c *Client) CreateModuleContainer(ctx context.Context, module *v1.Module, template *v1.ModuleTemplate, server *v1.Server, serverConfig *v1.ServerProperties, cfg *config.Config, siblingModules ...map[string]*v1.Module) (string, error) {
@@ -69,11 +61,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *v1.Module, t
 			continue
 		}
 
-		dockerProto := "tcp"
-		if port.Protocol == "udp" {
-			dockerProto = "udp"
-		}
-
+		dockerProto := protometa.Name(models.PortTransport(port.Protocol))
 		natPort := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, dockerProto))
 		exposedPorts[natPort] = struct{}{}
 
@@ -89,7 +77,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *v1.Module, t
 	}
 
 	// Build mounts from module configuration only (frontend sends complete config)
-	vols := c.parseModuleVolumes(module.VolumeOverrides, aliasCtx)
+	vols := c.resolveModuleVolumes(module.VolumeOverrides, aliasCtx)
 	if server != nil {
 		resolveWorldSources(vols, server.DataPath)
 	}
@@ -231,21 +219,16 @@ func (c *Client) buildModuleEnv(module *v1.Module, server *v1.Server, aliasCtx *
 	}
 
 	// Adds env vars sorted for a stable config hash
-	if module.EnvOverrides != "" {
-		var envOverrides map[string]string
-		if err := json.Unmarshal([]byte(module.EnvOverrides), &envOverrides); err == nil {
-			for _, key := range slices.Sorted(maps.Keys(envOverrides)) {
-				resolvedValue := alias.Substitute(envOverrides[key], aliasCtx)
-				env = append(env, fmt.Sprintf("%s=%s", key, resolvedValue))
-			}
-		}
+	for _, key := range slices.Sorted(maps.Keys(module.EnvOverrides)) {
+		resolvedValue := alias.Substitute(module.EnvOverrides[key], aliasCtx)
+		env = append(env, fmt.Sprintf("%s=%s", key, resolvedValue))
 	}
 
 	return env
 }
 
 // Repoints default world binds at the server's real world dir
-func resolveWorldSources(vols []ModuleVolumeMount, dataPath string) {
+func resolveWorldSources(vols []*v1.VolumeMount, dataPath string) {
 	worldDir, err := files.FindWorldDir(dataPath)
 	if err != nil || worldDir == "" {
 		return
@@ -267,29 +250,23 @@ func resolveWorldSources(vols []ModuleVolumeMount, dataPath string) {
 	}
 }
 
-// JSON volume configuration and substitutes
-func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) []ModuleVolumeMount {
-	if volumeJSON == "" || volumeJSON == "[]" {
-		return nil
+// Clones volume mounts and substitutes aliases in paths
+func (c *Client) resolveModuleVolumes(vols []*v1.VolumeMount, aliasCtx *alias.Context) []*v1.VolumeMount {
+	resolved := make([]*v1.VolumeMount, 0, len(vols))
+	for _, vol := range vols {
+		if vol == nil {
+			continue
+		}
+		clone := proto.Clone(vol).(*v1.VolumeMount)
+		clone.Source = alias.Substitute(clone.Source, aliasCtx)
+		clone.Target = alias.Substitute(clone.Target, aliasCtx)
+		resolved = append(resolved, clone)
 	}
-
-	var volumes []ModuleVolumeMount
-	if err := json.Unmarshal([]byte(volumeJSON), &volumes); err != nil {
-		c.log.Warn("Failed to parse volume configuration: %v", err)
-		return nil
-	}
-
-	// Sub aliases in paths
-	for i := range volumes {
-		volumes[i].Source = alias.Substitute(volumes[i].Source, aliasCtx)
-		volumes[i].Target = alias.Substitute(volumes[i].Target, aliasCtx)
-	}
-
-	return volumes
+	return resolved
 }
 
 // Module volumes to Docker mount specs
-func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount) []mount.Mount {
+func (c *Client) moduleVolumesToMounts(volumes []*v1.VolumeMount) []mount.Mount {
 	var mounts []mount.Mount
 
 	for _, vol := range volumes {

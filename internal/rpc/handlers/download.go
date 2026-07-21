@@ -10,6 +10,7 @@ import (
 	"github.com/nickheyer/discopanel/internal/auth"
 	"github.com/nickheyer/discopanel/internal/rbac"
 	"github.com/nickheyer/discopanel/pkg/logger"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	"github.com/nickheyer/discopanel/pkg/transfer"
 )
 
@@ -43,7 +44,7 @@ func NewDownloadStreamHandler(downloadManager *transfer.DownloadManager, authMan
 		}
 
 		// Check RBAC files read permission
-		allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceFiles, rbac.ActionRead, "*")
+		allowed, rbacErr := enforcer.Enforce(user.Roles, optionsv1.ResourceType_RESOURCE_TYPE_FILES, optionsv1.ActionType_ACTION_TYPE_READ, "*")
 		if rbacErr != nil || !allowed {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return

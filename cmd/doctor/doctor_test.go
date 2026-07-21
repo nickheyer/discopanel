@@ -11,8 +11,10 @@ import (
 
 	"github.com/nickheyer/discopanel/pkg/indexers"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
+	optionsv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func writeModJar(t *testing.T, dir, name, manifest string) {
@@ -113,11 +115,11 @@ func TestRespondDisablesVerdictMod(t *testing.T) {
 func TestQuietRunningServerResolvesIncident(t *testing.T) {
 	srv := testServer(t)
 	srv.Running = true
-	j := &runtimespec.DoctorState{Version: 1, Incident: &runtimespec.DoctorIncident{
-		OpenedAt: time.Now().Add(-10 * time.Minute),
+	j := &v1.DoctorState{Version: 1, Incident: &v1.DoctorIncident{
+		OpenedAt: timestamppb.New(time.Now().Add(-10 * time.Minute)),
 		Passes:   1,
-		Actions: []runtimespec.DoctorAction{{
-			Kind: runtimespec.ActionDisable, File: "badmod.jar", AppliedAt: time.Now().Add(-5 * time.Minute),
+		Actions: []*v1.DoctorAction{{
+			Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: "badmod.jar", AppliedAt: timestamppb.New(time.Now().Add(-5 * time.Minute)),
 		}},
 	}}
 	if err := runtimespec.SaveDoctor(srv.DataPath, j); err != nil {
@@ -131,7 +133,7 @@ func TestQuietRunningServerResolvesIncident(t *testing.T) {
 	if got.Incident != nil {
 		t.Fatal("incident should be closed after a quiet running window")
 	}
-	if got.Resolved == nil || got.Resolved.Outcome != "repaired" {
+	if got.Resolved == nil || got.Resolved.Outcome != v1.DoctorOutcome_DOCTOR_OUTCOME_REPAIRED {
 		t.Fatalf("expected repaired outcome, got %+v", got.Resolved)
 	}
 	if len(got.Excludes) != 1 || got.Excludes[0] != "badmod.jar" {
@@ -165,8 +167,8 @@ func TestRequestedStopArtifactNeverBreaksLoop(t *testing.T) {
 	runtimespec.AppendExitHistory(srv.DataPath, &agentv1.Exited{
 		ExitCode: 143, StopRequested: true, ExitedAtUnixMs: now,
 	})
-	j := &runtimespec.DoctorState{Version: 1, Incident: &runtimespec.DoctorIncident{
-		OpenedAt: time.Now(), Passes: 2,
+	j := &v1.DoctorState{Version: 1, Incident: &v1.DoctorIncident{
+		OpenedAt: timestamppb.Now(), Passes: 2,
 	}}
 	if err := runtimespec.SaveDoctor(srv.DataPath, j); err != nil {
 		t.Fatal(err)
@@ -204,16 +206,16 @@ func TestExitsWithinSkipsRequestedStops(t *testing.T) {
 func TestOrderSourcersPrefersPackSource(t *testing.T) {
 	infos := []indexers.IndexerInfo{
 		{Name: "aaa"},
-		{Name: "mmm", PackSource: "source-one"},
-		{Name: "zzz", PackSource: "source-two"},
+		{Name: "mmm", PackSource: optionsv1.PackSource_PACK_SOURCE_CURSEFORGE},
+		{Name: "zzz", PackSource: optionsv1.PackSource_PACK_SOURCE_MODRINTH},
 	}
 
-	got := orderSourcers(infos, "source-two")
+	got := orderSourcers(infos, optionsv1.PackSource_PACK_SOURCE_MODRINTH)
 	if len(got) != 3 || got[0].Name != "zzz" || got[1].Name != "aaa" || got[2].Name != "mmm" {
 		t.Fatalf("pack source must lead, got %+v", got)
 	}
 
-	got = orderSourcers(infos, "")
+	got = orderSourcers(infos, optionsv1.PackSource_PACK_SOURCE_UNSPECIFIED)
 	if len(got) != 3 || got[0].Name != "aaa" || got[1].Name != "mmm" || got[2].Name != "zzz" {
 		t.Fatalf("no pack source keeps registry order, got %+v", got)
 	}
@@ -227,9 +229,9 @@ func TestRevertGuessesScopedToSignature(t *testing.T) {
 	}
 	writeModJar(t, modsDir+"_disabled", "m1.jar", `{"id":"m1"}`)
 
-	inc := &runtimespec.DoctorIncident{Actions: []runtimespec.DoctorAction{{
-		Kind: runtimespec.ActionDisable, File: "m1.jar",
-		Evidence: runtimespec.EvidenceFrame, Cause: "java.awt.HeadlessException",
+	inc := &v1.DoctorIncident{Actions: []*v1.DoctorAction{{
+		Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: "m1.jar",
+		Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_FRAME, Cause: "java.awt.HeadlessException",
 	}}}
 	e := &engine{panel: &fakePanel{}, logf: t.Logf}
 
@@ -256,12 +258,12 @@ func TestCrossSignatureCrashKeepsEarlierGuess(t *testing.T) {
 	writeModJar(t, modsDir, "m2.jar", `{"id":"m2"}`)
 	writeModJar(t, modsDir+"_disabled", "m1.jar", `{"id":"m1"}`)
 
-	j := &runtimespec.DoctorState{Version: 1, Incident: &runtimespec.DoctorIncident{
-		OpenedAt: time.Now(), Passes: 1, Budget: 8,
-		Actions: []runtimespec.DoctorAction{{
-			Kind: runtimespec.ActionDisable, File: "m1.jar",
-			Evidence: runtimespec.EvidenceFrame, Cause: "java.awt.HeadlessException",
-			AppliedAt: time.Now(),
+	j := &v1.DoctorState{Version: 1, Incident: &v1.DoctorIncident{
+		OpenedAt: timestamppb.Now(), Passes: 1, Budget: 8,
+		Actions: []*v1.DoctorAction{{
+			Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE, File: "m1.jar",
+			Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_FRAME, Cause: "java.awt.HeadlessException",
+			AppliedAt: timestamppb.Now(),
 		}},
 		Tried: []string{"disable:m1.jar"},
 	}}
@@ -293,10 +295,10 @@ func TestCrossSignatureCrashKeepsEarlierGuess(t *testing.T) {
 		t.Fatalf("expected one verify restart, got %d", panel.restarts)
 	}
 	got := runtimespec.LoadDoctor(srv.DataPath)
-	var m2 *runtimespec.DoctorAction
-	for i := range got.Incident.Actions {
-		if got.Incident.Actions[i].File == "m2.jar" {
-			m2 = &got.Incident.Actions[i]
+	var m2 *v1.DoctorAction
+	for _, a := range got.Incident.Actions {
+		if a.File == "m2.jar" {
+			m2 = a
 		}
 	}
 	if m2 == nil || m2.Cause != "java.net.ConnectException" {
@@ -307,8 +309,8 @@ func TestCrossSignatureCrashKeepsEarlierGuess(t *testing.T) {
 func TestMissingDepFromMessage(t *testing.T) {
 	cases := map[string]string{
 		"Mod connectorextras_architectury_bridge requires connectormod 1.0.0-beta.18 or above\nCurrently, connectormod is not installed": "connectormod",
-		"Mod extra_compat requires temporalapi 1.6.5 or above, and below 1.7.0\nCurrently, temporalapi is not installed":                  "temporalapi",
-		"Attempted to load class net/minecraft/client/Minecraft": "",
+		"Mod extra_compat requires temporalapi 1.6.5 or above, and below 1.7.0\nCurrently, temporalapi is not installed":                 "temporalapi",
+		"Attempted to load class net/minecraft/client/Minecraft":                                                                         "",
 	}
 	for msg, want := range cases {
 		if got := missingDepFromMessage(msg); got != want {

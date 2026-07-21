@@ -163,7 +163,7 @@ func (s *ModpackService) GetModpackConfig(ctx context.Context, req *connect.Requ
 	}
 
 	modLoader := ""
-	if loader, ok := minecraft.ServerLoaderForModpack(modpack.Indexer); ok {
+	if loader, ok := minecraft.LoaderForPackSource(indexers.PackSourceFor(modpack.Indexer)); ok {
 		modLoader = protometa.Name(loader)
 	}
 
@@ -191,7 +191,7 @@ func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Re
 	}
 
 	// Manual modpacks have no remote versions
-	if modpack.Indexer == "manual" {
+	if modpack.Indexer == indexers.ManualIndexer {
 		return connect.NewResponse(&v1.GetModpackVersionsResponse{
 			Versions: []*v1.Version{},
 		}), nil
@@ -252,9 +252,7 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 	synced := 0
 	for _, modpack := range searchResp.Modpacks {
 		// Finds most recent Minecraft version from game versions
-		var gameVersions []string
-		_ = json.Unmarshal([]byte(modpack.GameVersions), &gameVersions)
-		mcVersion := minecraft.FindMostRecentMinecraftVersion(gameVersions)
+		mcVersion := minecraft.FindMostRecentMinecraftVersion(modpack.GameVersions)
 
 		// Computed fields
 		modpack.McVersion = mcVersion
@@ -271,7 +269,7 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 
 	return connect.NewResponse(&v1.SyncModpacksResponse{
 		SyncedCount: int32(synced),
-		Message:     fmt.Sprintf("Synced %d of %d modpacks", synced, searchResp.TotalCount),
+		Message:     fmt.Sprintf("Synced %d of %d modpacks", synced, searchResp.Total),
 	}), nil
 }
 
@@ -389,14 +387,10 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 	javaVersion := docker.RequiredJavaMajor(manifest.Minecraft.Version)
 	dockerImage := docker.OptimalRuntimeTag(manifest.Minecraft.Version)
 
-	// Create database entry
-	gameVersionsJSON, _ := json.Marshal([]string{manifest.Minecraft.Version})
-	modLoadersJSON, _ := json.Marshal([]string{protometa.Name(modLoader)})
-
 	dbModpack := &v1.IndexedModpack{
 		Id:             modpackID,
 		IndexerId:      modpackID,
-		Indexer:        "manual",
+		Indexer:        indexers.ManualIndexer,
 		Name:           manifest.Name,
 		Slug:           strings.ToLower(strings.ReplaceAll(manifest.Name, " ", "-")),
 		Summary:        fmt.Sprintf("Version %s by %s", manifest.Version, manifest.Author),
@@ -404,9 +398,8 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 		LogoUrl:        "", // No logo for manual uploads
 		WebsiteUrl:     "",
 		DownloadCount:  0,
-		Categories:     "[]",
-		GameVersions:   string(gameVersionsJSON),
-		ModLoaders:     string(modLoadersJSON),
+		GameVersions:   []string{manifest.Minecraft.Version},
+		ModLoaders:     []string{protometa.Name(modLoader)},
 		LatestFileId:   modpackID,
 		DateCreated:    timestamppb.Now(),
 		DateModified:   timestamppb.Now(),
@@ -463,9 +456,9 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 		FileName:         originalFilename,
 		FileDate:         timestamppb.Now(),
 		FileLength:       fileSize,
-		ReleaseType:      "1",      // Release
+		ReleaseType:      v1.ReleaseType_RELEASE_TYPE_RELEASE,
 		DownloadUrl:      destPath, // Store local path
-		GameVersions:     string(gameVersionsJSON),
+		GameVersions:     []string{manifest.Minecraft.Version},
 		ModLoader:        protometa.Name(modLoader),
 		ServerPackFileId: nil,
 	}
@@ -495,7 +488,7 @@ func (s *ModpackService) DeleteModpack(ctx context.Context, req *connect.Request
 	}
 
 	// Only allow deletion of manual modpacks
-	if modpack.Indexer != "manual" {
+	if modpack.Indexer != indexers.ManualIndexer {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("only custom uploaded modpacks can be deleted"))
 	}
 
@@ -619,9 +612,9 @@ func (s *ModpackService) GetIndexerStatus(ctx context.Context, req *connect.Requ
 	}
 
 	indexersAvailable := map[string]bool{
-		"fuego":    apiKeyConfigured,
-		"modrinth": true, // Modrinth doesn't require API key
-		"manual":   true, // Manual uploads always available
+		"fuego":                apiKeyConfigured,
+		"modrinth":             true, // Modrinth doesn't require API key
+		indexers.ManualIndexer: true, // Manual uploads always available
 	}
 
 	return connect.NewResponse(&v1.GetIndexerStatusResponse{

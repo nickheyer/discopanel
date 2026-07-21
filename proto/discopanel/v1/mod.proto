@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package discopanel.v1;
 
+import "discopanel/options/v1/options.proto";
 import "discopanel/v1/storage.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
@@ -9,15 +10,45 @@ option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;dis
 // Server mod management
 service ModService {
   // List server mods
-  rpc ListMods(ListModsRequest) returns (ListModsResponse);
+  rpc ListMods(ListModsRequest) returns (ListModsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODS
+      action: ACTION_TYPE_READ
+      object_id_field: "server_id"
+    };
+  }
   // Get mod details
-  rpc GetMod(GetModRequest) returns (GetModResponse);
+  rpc GetMod(GetModRequest) returns (GetModResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODS
+      action: ACTION_TYPE_READ
+      object_id_field: "server_id"
+    };
+  }
   // Import mod from chunked upload session
-  rpc ImportUploadedMod(ImportUploadedModRequest) returns (ImportUploadedModResponse);
+  rpc ImportUploadedMod(ImportUploadedModRequest) returns (ImportUploadedModResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODS
+      action: ACTION_TYPE_CREATE
+      object_id_field: "server_id"
+    };
+  }
   // Update mod metadata
-  rpc UpdateMod(UpdateModRequest) returns (UpdateModResponse);
+  rpc UpdateMod(UpdateModRequest) returns (UpdateModResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODS
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "server_id"
+    };
+  }
   // Delete mod file
-  rpc DeleteMod(DeleteModRequest) returns (DeleteModResponse);
+  rpc DeleteMod(DeleteModRequest) returns (DeleteModResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODS
+      action: ACTION_TYPE_DELETE
+      object_id_field: "server_id"
+    };
+  }
 }
 
 // Server mods request

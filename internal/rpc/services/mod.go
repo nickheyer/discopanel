@@ -380,7 +380,7 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	// Cleanup the upload session
 	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
-	s.rec.Record(ctx, server.Id, "mod.install", metrics.Attrs{"file": originalFilename}, "installed mod %s", originalFilename)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_MOD_INSTALL, metrics.Attrs{"file": originalFilename}, "installed mod %s", originalFilename)
 
 	// Get file info for the response
 	info, err := os.Stat(modPath)
@@ -477,7 +477,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to enable mod"))
 			}
 			finalEnabled = true
-			s.rec.Record(ctx, server.Id, "mod.enable", metrics.Attrs{"file": modFileName}, "enabled mod %s", modFileName)
+			s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_MOD_ENABLE, metrics.Attrs{"file": modFileName}, "enabled mod %s", modFileName)
 		} else {
 			// Move from mods to disabled directory
 			os.MkdirAll(disabledDir, 0755)
@@ -488,7 +488,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to disable mod"))
 			}
 			finalEnabled = false
-			s.rec.Record(ctx, server.Id, "mod.disable", metrics.Attrs{"file": modFileName}, "disabled mod %s", modFileName)
+			s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_MOD_DISABLE, metrics.Attrs{"file": modFileName}, "disabled mod %s", modFileName)
 		}
 	}
 
@@ -572,7 +572,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 	if deletedName == "" {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("mod not found"))
 	}
-	s.rec.Record(ctx, server.Id, "mod.delete", metrics.Attrs{"file": deletedName}, "deleted mod %s", deletedName)
+	s.rec.Record(ctx, server.Id, v1.ServerActionKind_SERVER_ACTION_KIND_MOD_DELETE, metrics.Attrs{"file": deletedName}, "deleted mod %s", deletedName)
 
 	return connect.NewResponse(&v1.DeleteModResponse{
 		Message: "Mod deleted successfully",

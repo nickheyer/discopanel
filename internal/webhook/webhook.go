@@ -17,7 +17,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/nickheyer/discopanel/internal/alias"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Builds, signs, and delivers HTTP webhooks for server events
@@ -35,12 +38,24 @@ type Result struct {
 
 // Canonical event data fed into payload templates
 type Payload struct {
-	Event     string         `json:"event"`
-	Timestamp time.Time      `json:"timestamp"`
-	Server    *v1.Server     `json:"server,omitempty"`
-	Data      map[string]any `json:"data,omitempty"`
-
+	Msg  *v1.WebhookPayload
 	vars map[string]any
+}
+
+// Canonical event name, manual when no event fired
+func eventName(t v1.TriggeredEventType) string {
+	if t == v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED {
+		return "manual"
+	}
+	return protometa.Name(t)
+}
+
+// Readable event title for templates
+func eventTitle(t v1.TriggeredEventType) string {
+	if t == v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED {
+		return "Manual"
+	}
+	return protometa.Label(t)
 }
 
 // Renders, signs, POSTs, and retries one delivery
@@ -108,7 +123,7 @@ func deliverOnce(ctx context.Context, cfg *v1.WebhookTaskConfig, payload *Payloa
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "DiscoPanel-Webhook/1.0")
-	req.Header.Set("X-DiscoPanel-Event", payload.Event)
+	req.Header.Set("X-DiscoPanel-Event", eventName(payload.Msg.Event))
 	req.Header.Set("X-DiscoPanel-Delivery", uuid.New().String())
 
 	if cfg.Secret != "" {
@@ -141,7 +156,7 @@ func renderBody(cfg *v1.WebhookTaskConfig, payload *Payload) ([]byte, error) {
 	if cfg.PayloadTemplate != "" {
 		return renderTemplate(cfg.PayloadTemplate, payload)
 	}
-	return json.Marshal(payload)
+	return protojson.Marshal(payload.Msg)
 }
 
 func sign(body []byte, secret string) string {
@@ -151,13 +166,14 @@ func sign(body []byte, secret string) string {
 }
 
 // Flattens alias paths into template vars, one shared vocabulary
-func templateVars(event string, timestamp time.Time, server *v1.Server, data map[string]any) map[string]any {
+func templateVars(event v1.TriggeredEventType, timestamp time.Time, server *v1.Server, data map[string]string) map[string]any {
+	name := eventName(event)
 	vars := map[string]any{
-		"event":       event,
-		"is_" + event: true,
-		"timestamp":   timestamp.Format(time.RFC3339),
-		"title":       humanizeEvent(event),
-		"player":      "",
+		"event":      name,
+		"is_" + name: true,
+		"timestamp":  timestamp.Format(time.RFC3339),
+		"title":      eventTitle(event),
+		"player":     "",
 	}
 	rctx := alias.NewContext()
 	rctx.Server = server
@@ -174,17 +190,6 @@ func templateVars(event string, timestamp time.Time, server *v1.Server, data map
 		vars[k] = v
 	}
 	return vars
-}
-
-// Turns event keys into readable titles
-func humanizeEvent(event string) string {
-	words := strings.Split(event, "_")
-	for i, w := range words {
-		if w != "" {
-			words[i] = strings.ToUpper(w[:1]) + w[1:]
-		}
-	}
-	return strings.Join(words, " ")
 }
 
 func renderTemplate(tmplStr string, p *Payload) ([]byte, error) {
@@ -208,7 +213,7 @@ func ValidateTemplate(tmplStr string) error {
 	if strings.TrimSpace(tmplStr) == "" {
 		return nil
 	}
-	sample := BuildPayload("test", &v1.Server{
+	sample := BuildPayload(v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START, &v1.Server{
 		Id: "test-id", Name: "Test Server", Status: v1.ServerStatus_SERVER_STATUS_RUNNING,
 		McVersion: "1.21", ModLoader: v1.ModLoader_MOD_LOADER_VANILLA,
 		MaxPlayers: 20, Port: 25565,
@@ -218,17 +223,20 @@ func ValidateTemplate(tmplStr string) error {
 }
 
 // Assembles a Payload for the given event and server
-func BuildPayload(event string, server *v1.Server, data map[string]any) *Payload {
+func BuildPayload(event v1.TriggeredEventType, server *v1.Server, data map[string]string) *Payload {
 	var redacted *v1.Server
 	if server != nil {
 		redacted = proto.Clone(server).(*v1.Server).Redact()
 	}
+	now := time.Now().UTC()
 	p := &Payload{
-		Event:     event,
-		Timestamp: time.Now().UTC(),
-		Server:    redacted,
-		Data:      data,
+		Msg: &v1.WebhookPayload{
+			Event:     event,
+			Timestamp: timestamppb.New(now),
+			Server:    redacted,
+			Data:      data,
+		},
 	}
-	p.vars = templateVars(event, p.Timestamp, redacted, data)
+	p.vars = templateVars(event, now, redacted, data)
 	return p
 }

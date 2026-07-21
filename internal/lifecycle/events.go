@@ -46,13 +46,7 @@ func (m *Manager) HandleServerEvent(ctx context.Context, event events.Event) {
 }
 
 func eventPlayer(event events.Event) string {
-	if event.Data == nil {
-		return ""
-	}
-	if name, ok := event.Data["player"].(string); ok {
-		return name
-	}
-	return ""
+	return event.Data["player"]
 }
 
 // Executes newline-delimited commands via RCON

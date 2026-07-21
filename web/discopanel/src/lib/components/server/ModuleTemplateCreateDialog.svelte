@@ -14,10 +14,11 @@
 	import { toast } from 'svelte-sonner';
 	import {
 		ModuleEventAction,
+		ModuleEventActionSchema,
 		TriggeredEventType,
 		type ModuleTemplate
 	} from '$lib/proto/discopanel/v1/storage_pb';
-	import { ModuleEventActionLabel, ModuleEventActionDesc } from '$lib/proto/enums.gen';
+	import { enumDesc, enumLabel } from '$lib/proto-meta';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import {
 		Loader2,
@@ -266,7 +267,10 @@
 	];
 
 	function getEventActionLabel(action: ModuleEventAction): string {
-		return ModuleEventActionLabel[action] ?? ModuleEventActionLabel[ModuleEventAction.UNSPECIFIED];
+		return (
+			enumLabel(ModuleEventActionSchema, action) ||
+			enumLabel(ModuleEventActionSchema, ModuleEventAction.UNSPECIFIED)
+		);
 	}
 
 	// Snapshots template once so reloads keep edits
@@ -979,8 +983,8 @@
 																	<SelectItem value={String(a)}>
 																		<div class="flex flex-col">
 																			<span>{getEventActionLabel(a)}</span>
-																			{#if ModuleEventActionDesc[a]}
-																				<span class="text-xs text-muted-foreground">{ModuleEventActionDesc[a]}</span>
+																			{#if enumDesc(ModuleEventActionSchema, a)}
+																				<span class="text-xs text-muted-foreground">{enumDesc(ModuleEventActionSchema, a)}</span>
 																			{/if}
 																		</div>
 																	</SelectItem>

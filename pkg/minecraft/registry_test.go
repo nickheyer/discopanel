@@ -3,6 +3,7 @@ package minecraft
 import (
 	"testing"
 
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
@@ -44,7 +45,7 @@ func TestRegistryRowsConsistent(t *testing.T) {
 		if len(row.Dialects) > 0 && row.Info.ModsDirectory == "" {
 			t.Errorf("loader %s reads mods but stores none", l)
 		}
-		defining := len(row.Dialects) > 0 && row.Dialects[0] == l.Name()
+		defining := len(row.Dialects) > 0 && row.Dialects[0] == protometa.Name(l)
 		if !defining && (len(row.Builtins) > 0 || len(row.Facets) > 0 || len(row.Markers) > 0 || row.MavenRanges) {
 			t.Errorf("loader %s carries format facts without defining one", l)
 		}
@@ -57,12 +58,12 @@ func TestRegistryRowsConsistent(t *testing.T) {
 // Names must parse back to their own enum value
 func TestLoaderNameRoundTrip(t *testing.T) {
 	for _, row := range registry {
-		back, ok := v1.ModLoaderFromName(row.Loader().Name())
+		back, ok := protometa.FromName[v1.ModLoader](protometa.Name(row.Loader()))
 		if !ok || back != row.Loader() {
 			t.Errorf("round trip broke for %s", row.Loader())
 		}
 	}
-	if _, ok := v1.ModLoaderFromName("nonsense"); ok {
+	if _, ok := protometa.FromName[v1.ModLoader]("nonsense"); ok {
 		t.Error("unknown name parsed to a loader")
 	}
 }

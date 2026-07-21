@@ -1,12 +1,13 @@
 syntax = "proto3";
 
 // Every persisted data model lives in this file.
-// Table messages carry db_model, their column enums and nested msgs sit beside them,
+// Table messages carry protogorm model options, their column enums and nested msgs sit beside them,
 // so the whole database schema reads top to bottom... lets try to keep it that way.
 package discopanel.v1;
 
 import "discopanel/options/v1/options.proto";
 import "google/protobuf/timestamp.proto";
+import "protogorm/v1/options.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1;discopanelv1";
 
@@ -480,7 +481,7 @@ message WebhookTaskConfig {
 
 // System user account
 message User {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "users"
     order_by: "created_at DESC"
     cascades: [
@@ -515,23 +516,23 @@ message User {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string username = 2 [(discopanel.options.v1.db) = {tag: "not null;uniqueIndex:idx_user_provider"}];
-  optional string email = 3 [(discopanel.options.v1.db) = {tag: "index"}];
-  string auth_provider = 4 [(discopanel.options.v1.db) = {tag: "not null;default:'local';uniqueIndex:idx_user_provider"}];
-  bool is_active = 5 [(discopanel.options.v1.db) = {tag: "not null;default:true"}];
-  repeated string roles = 6 [(discopanel.options.v1.db) = {skip: true}];
-  google.protobuf.Timestamp created_at = 7 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  google.protobuf.Timestamp updated_at = 8 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string username = 2 [(protogorm.v1.db) = {tag: "not null;uniqueIndex:idx_user_provider"}];
+  optional string email = 3 [(protogorm.v1.db) = {tag: "index"}];
+  string auth_provider = 4 [(protogorm.v1.db) = {tag: "not null;default:'local';uniqueIndex:idx_user_provider"}];
+  bool is_active = 5 [(protogorm.v1.db) = {tag: "not null;default:true"}];
+  repeated string roles = 6 [(protogorm.v1.db) = {skip: true}];
+  google.protobuf.Timestamp created_at = 7 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  google.protobuf.Timestamp updated_at = 8 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
   optional google.protobuf.Timestamp last_login = 9;
-  string password_hash = 10 [(discopanel.options.v1.db) = {redact: true}];
-  string oidc_subject = 11 [(discopanel.options.v1.db) = {tag: "uniqueIndex:idx_oidc_identity,where:oidc_subject != ''"}];
-  string oidc_issuer = 12 [(discopanel.options.v1.db) = {tag: "uniqueIndex:idx_oidc_identity,where:oidc_subject != ''"}];
+  string password_hash = 10 [(protogorm.v1.db) = {redact: true}];
+  string oidc_subject = 11 [(protogorm.v1.db) = {tag: "uniqueIndex:idx_oidc_identity,where:oidc_subject != ''"}];
+  string oidc_issuer = 12 [(protogorm.v1.db) = {tag: "uniqueIndex:idx_oidc_identity,where:oidc_subject != ''"}];
 }
 
 // Minecraft server instance
 message Server {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "servers"
     order_by: "created_at DESC"
     skip: [
@@ -555,80 +556,80 @@ message Server {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string name = 2 [(discopanel.options.v1.db) = {tag: "not null"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null"}];
   string description = 3;
-  ModLoader mod_loader = 4 [(discopanel.options.v1.db) = {tag: "not null"}];
-  string mc_version = 5 [(discopanel.options.v1.db) = {tag: "not null"}];
-  ServerStatus status = 6 [(discopanel.options.v1.db) = {tag: "not null"}];
+  ModLoader mod_loader = 4 [(protogorm.v1.db) = {tag: "not null"}];
+  string mc_version = 5 [(protogorm.v1.db) = {tag: "not null"}];
+  ServerStatus status = 6 [(protogorm.v1.db) = {tag: "not null"}];
   int32 port = 7;
-  string proxy_hostname = 8 [(discopanel.options.v1.db) = {tag: "uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"}];
-  string proxy_listener_id = 9 [(discopanel.options.v1.db) = {tag: "uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"}];
+  string proxy_hostname = 8 [(protogorm.v1.db) = {tag: "uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"}];
+  string proxy_listener_id = 9 [(protogorm.v1.db) = {tag: "uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"}];
   int32 proxy_port = 10;
-  int32 max_players = 11 [(discopanel.options.v1.db) = {tag: "default:20"}];
-  int32 memory = 12 [(discopanel.options.v1.db) = {tag: "default:4096"}]; // Container memory limit in MB
-  int32 memory_min = 49 [(discopanel.options.v1.db) = {tag: "default:0"}]; // JVM initial heap (Xms) in MB
-  int32 memory_max = 50 [(discopanel.options.v1.db) = {tag: "default:0"}]; // JVM max heap (Xmx) in MB
-  string data_path = 13 [(discopanel.options.v1.db) = {tag: "not null"}];
+  int32 max_players = 11 [(protogorm.v1.db) = {tag: "default:20"}];
+  int32 memory = 12 [(protogorm.v1.db) = {tag: "default:4096"}]; // Container memory limit in MB
+  int32 memory_min = 49 [(protogorm.v1.db) = {tag: "default:0"}]; // JVM initial heap (Xms) in MB
+  int32 memory_max = 50 [(protogorm.v1.db) = {tag: "default:0"}]; // JVM max heap (Xmx) in MB
+  string data_path = 13 [(protogorm.v1.db) = {tag: "not null"}];
   string container_id = 14;
   optional google.protobuf.Timestamp last_started = 15;
   int32 java_version = 16;
   string docker_image = 17;
-  bool auto_start = 18 [(discopanel.options.v1.db) = {tag: "default:false"}];
-  bool detached = 19 [(discopanel.options.v1.db) = {tag: "default:false"}];
+  bool auto_start = 18 [(protogorm.v1.db) = {tag: "default:false"}];
+  bool detached = 19 [(protogorm.v1.db) = {tag: "default:false"}];
 
   // Runtime stats
 
-  int32 cpu_cores = 20 [(discopanel.options.v1.db) = {skip: true}];
-  int64 memory_usage = 21 [(discopanel.options.v1.db) = {skip: true}];
-  double cpu_percent = 22 [(discopanel.options.v1.db) = {skip: true}];
-  int64 disk_usage = 23 [(discopanel.options.v1.db) = {skip: true}]; // Bytes this server's data dir occupies
-  int64 disk_total = 24 [(discopanel.options.v1.db) = {skip: true}]; // Bytes the volume holds in total
-  int64 disk_used = 47 [(discopanel.options.v1.db) = {skip: true}]; // Bytes used on the volume by everything
-  int32 players_online = 25 [(discopanel.options.v1.db) = {skip: true}];
-  int64 world_size = 39 [(discopanel.options.v1.db) = {skip: true}]; // Bytes of the world directories alone
-  double tps = 26 [(discopanel.options.v1.db) = {skip: true}];
+  int32 cpu_cores = 20 [(protogorm.v1.db) = {skip: true}];
+  int64 memory_usage = 21 [(protogorm.v1.db) = {skip: true}];
+  double cpu_percent = 22 [(protogorm.v1.db) = {skip: true}];
+  int64 disk_usage = 23 [(protogorm.v1.db) = {skip: true}]; // Bytes this server's data dir occupies
+  int64 disk_total = 24 [(protogorm.v1.db) = {skip: true}]; // Bytes the volume holds in total
+  int64 disk_used = 47 [(protogorm.v1.db) = {skip: true}]; // Bytes used on the volume by everything
+  int32 players_online = 25 [(protogorm.v1.db) = {skip: true}];
+  int64 world_size = 39 [(protogorm.v1.db) = {skip: true}]; // Bytes of the world directories alone
+  double tps = 26 [(protogorm.v1.db) = {skip: true}];
 
   // Additional container settings
   repeated AdditionalPort additional_ports = 27;
-  DockerOverrides docker_overrides = 28 [(discopanel.options.v1.db) = {tag: "type:text"}];
+  DockerOverrides docker_overrides = 28 [(protogorm.v1.db) = {tag: "type:text"}];
 
-  google.protobuf.Timestamp created_at = 29 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  google.protobuf.Timestamp updated_at = 30 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
+  google.protobuf.Timestamp created_at = 29 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  google.protobuf.Timestamp updated_at = 30 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
 
   // SLP
-  bool slp_available = 31 [(discopanel.options.v1.db) = {skip: true}];
-  int64 slp_latency_ms = 32 [(discopanel.options.v1.db) = {skip: true}];
-  string motd = 33 [(discopanel.options.v1.db) = {skip: true}];
-  string server_version = 34 [(discopanel.options.v1.db) = {skip: true}];
-  int32 protocol_version = 35 [(discopanel.options.v1.db) = {skip: true}];
-  repeated string player_sample = 36 [(discopanel.options.v1.db) = {skip: true}];
-  int32 max_players_slp = 37 [(discopanel.options.v1.db) = {skip: true}];
-  string favicon = 38 [(discopanel.options.v1.db) = {skip: true}]; // Base64 PNG
+  bool slp_available = 31 [(protogorm.v1.db) = {skip: true}];
+  int64 slp_latency_ms = 32 [(protogorm.v1.db) = {skip: true}];
+  string motd = 33 [(protogorm.v1.db) = {skip: true}];
+  string server_version = 34 [(protogorm.v1.db) = {skip: true}];
+  int32 protocol_version = 35 [(protogorm.v1.db) = {skip: true}];
+  repeated string player_sample = 36 [(protogorm.v1.db) = {skip: true}];
+  int32 max_players_slp = 37 [(protogorm.v1.db) = {skip: true}];
+  string favicon = 38 [(protogorm.v1.db) = {skip: true}]; // Base64 PNG
 
   // Agent-sourced runtime stats (present when the disco-agent channel is live)
-  bool agent_connected = 41 [(discopanel.options.v1.db) = {skip: true}];
-  double mspt = 42 [(discopanel.options.v1.db) = {skip: true}]; // Mean milliseconds per tick (agent-sourced)
-  double heap_used_mb = 43 [(discopanel.options.v1.db) = {skip: true}];
-  double heap_max_mb = 44 [(discopanel.options.v1.db) = {skip: true}];
-  double cpu_throttle_percent = 45 [(discopanel.options.v1.db) = {skip: true}]; // Share of CFS periods throttled (0-100)
-  int32 class_count = 46 [(discopanel.options.v1.db) = {skip: true}]; // Loaded JVM classes (agent-sourced)
+  bool agent_connected = 41 [(protogorm.v1.db) = {skip: true}];
+  double mspt = 42 [(protogorm.v1.db) = {skip: true}]; // Mean milliseconds per tick (agent-sourced)
+  double heap_used_mb = 43 [(protogorm.v1.db) = {skip: true}];
+  double heap_max_mb = 44 [(protogorm.v1.db) = {skip: true}];
+  double cpu_throttle_percent = 45 [(protogorm.v1.db) = {skip: true}]; // Share of CFS periods throttled (0-100)
+  int32 class_count = 46 [(protogorm.v1.db) = {skip: true}]; // Loaded JVM classes (agent-sourced)
 
   // Runtime image digest recorded at container create
   string runtime_digest = 48;
 
   // In-container listen port, computed at read time
-  int32 container_port = 51 [(discopanel.options.v1.db) = {skip: true}];
+  int32 container_port = 51 [(protogorm.v1.db) = {skip: true}];
 
   // SHA-256 of the runtime agent's bearer token
-  string agent_token_hash = 52 [(discopanel.options.v1.db) = {redact: true}];
+  string agent_token_hash = 52 [(protogorm.v1.db) = {redact: true}];
   // Who wrote server-icon.png, upload or modpack
   string icon_source = 53;
 }
 
 // TCP proxy listener endpoint
 message ProxyListener {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "proxy_listeners"
     order_by: "is_default DESC, port ASC"
     guards: [
@@ -646,19 +647,19 @@ message ProxyListener {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
   string name = 2;
   string description = 3;
-  int32 port = 4 [(discopanel.options.v1.db) = {tag: "not null;uniqueIndex"}];
-  bool enabled = 5 [(discopanel.options.v1.db) = {tag: "not null;default:true"}];
-  bool is_default = 6 [(discopanel.options.v1.db) = {tag: "not null;default:false"}];
-  google.protobuf.Timestamp created_at = 7 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  google.protobuf.Timestamp updated_at = 8 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
+  int32 port = 4 [(protogorm.v1.db) = {tag: "not null;uniqueIndex"}];
+  bool enabled = 5 [(protogorm.v1.db) = {tag: "not null;default:true"}];
+  bool is_default = 6 [(protogorm.v1.db) = {tag: "not null;default:false"}];
+  google.protobuf.Timestamp created_at = 7 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  google.protobuf.Timestamp updated_at = 8 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
 }
 
 // A set of permissions and metadata
 message Role {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "roles"
     order_by: "is_system DESC, name ASC"
     skip: ["delete"]
@@ -676,19 +677,19 @@ message Role {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string name = 2 [(discopanel.options.v1.db) = {tag: "not null;uniqueIndex"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null;uniqueIndex"}];
   string description = 3;
-  bool is_system = 4 [(discopanel.options.v1.db) = {tag: "not null;default:false"}];
-  bool is_default = 5 [(discopanel.options.v1.db) = {tag: "not null;default:false"}];
-  repeated Permission permissions = 6 [(discopanel.options.v1.db) = {skip: true}];
-  google.protobuf.Timestamp created_at = 7 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  google.protobuf.Timestamp updated_at = 8 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
+  bool is_system = 4 [(protogorm.v1.db) = {tag: "not null;default:false"}];
+  bool is_default = 5 [(protogorm.v1.db) = {tag: "not null;default:false"}];
+  repeated Permission permissions = 6 [(protogorm.v1.db) = {skip: true}];
+  google.protobuf.Timestamp created_at = 7 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  google.protobuf.Timestamp updated_at = 8 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
 }
 
 // One role assignment row
 message UserRole {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "user_roles"
     queries: [
       {
@@ -718,16 +719,16 @@ message UserRole {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string user_id = 2 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  string role_name = 3 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  string source = 4 [(discopanel.options.v1.db) = {tag: "not null;default:'local'"}];
-  google.protobuf.Timestamp created_at = 5 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string user_id = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string role_name = 3 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string source = 4 [(protogorm.v1.db) = {tag: "not null;default:'local'"}];
+  google.protobuf.Timestamp created_at = 5 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
 }
 
 // One login session row
 message Session {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "sessions"
     skip: [
       "get",
@@ -763,20 +764,20 @@ message Session {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string user_id = 2 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  string token = 3 [(discopanel.options.v1.db) = {
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string user_id = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string token = 3 [(protogorm.v1.db) = {
     tag: "not null;uniqueIndex"
     redact: true
   }];
-  google.protobuf.Timestamp expires_at = 4 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  google.protobuf.Timestamp created_at = 5 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  User user = 6 [(discopanel.options.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
+  google.protobuf.Timestamp expires_at = 4 [(protogorm.v1.db) = {tag: "not null;index"}];
+  google.protobuf.Timestamp created_at = 5 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  User user = 6 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
 }
 
 // API Token metadata (never includes the token value)
 message ApiToken {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "api_tokens"
     order_by: "created_at DESC"
     queries: [
@@ -814,23 +815,23 @@ message ApiToken {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string name = 2 [(discopanel.options.v1.db) = {tag: "not null"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null"}];
   google.protobuf.Timestamp expires_at = 3;
   google.protobuf.Timestamp last_used_at = 4;
-  google.protobuf.Timestamp created_at = 5 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  string user_id = 6 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  string token_hash = 7 [(discopanel.options.v1.db) = {
+  google.protobuf.Timestamp created_at = 5 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  string user_id = 6 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string token_hash = 7 [(protogorm.v1.db) = {
     tag: "not null;uniqueIndex"
     redact: true
   }];
-  bool is_module_token = 8 [(discopanel.options.v1.db) = {tag: "default:false"}];
-  string module_role = 9 [(discopanel.options.v1.db) = {tag: "default:''"}];
+  bool is_module_token = 8 [(protogorm.v1.db) = {tag: "default:false"}];
+  string module_role = 9 [(protogorm.v1.db) = {tag: "default:''"}];
 }
 
 // Registration invite link
 message RegistrationInvite {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "registration_invites"
     order_by: "created_at DESC"
     queries: [
@@ -849,29 +850,29 @@ message RegistrationInvite {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string code = 2 [(discopanel.options.v1.db) = {tag: "not null;uniqueIndex"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string code = 2 [(protogorm.v1.db) = {tag: "not null;uniqueIndex"}];
   string description = 3;
   repeated string roles = 4;
-  bool has_pin = 5 [(discopanel.options.v1.db) = {skip: true}];
-  int32 max_uses = 6 [(discopanel.options.v1.db) = {tag: "default:0"}];
-  int32 use_count = 7 [(discopanel.options.v1.db) = {tag: "default:0"}];
+  bool has_pin = 5 [(protogorm.v1.db) = {skip: true}];
+  int32 max_uses = 6 [(protogorm.v1.db) = {tag: "default:0"}];
+  int32 use_count = 7 [(protogorm.v1.db) = {tag: "default:0"}];
   google.protobuf.Timestamp expires_at = 8;
-  string created_by = 9 [(discopanel.options.v1.db) = {tag: "not null"}];
-  google.protobuf.Timestamp created_at = 10 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  string pin_hash = 11 [(discopanel.options.v1.db) = {redact: true}];
+  string created_by = 9 [(protogorm.v1.db) = {tag: "not null"}];
+  google.protobuf.Timestamp created_at = 10 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  string pin_hash = 11 [(protogorm.v1.db) = {redact: true}];
 }
 
 // One key value settings row
 message SystemSetting {
-  option (discopanel.options.v1.db_model) = {table: "system_settings"};
-  string key = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string value = 2 [(discopanel.options.v1.db) = {tag: "not null"}];
+  option (protogorm.v1.model) = {table: "system_settings"};
+  string key = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string value = 2 [(protogorm.v1.db) = {tag: "not null"}];
 }
 
 // Server mod metadata
 message Mod {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "mods"
     order_by: "name"
     queries: [
@@ -883,22 +884,22 @@ message Mod {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string server_id = 2 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  string file_name = 3 [(discopanel.options.v1.db) = {tag: "not null"}];
-  string display_name = 4 [(discopanel.options.v1.db) = {tag: "column:name;not null"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string server_id = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string file_name = 3 [(protogorm.v1.db) = {tag: "not null"}];
+  string display_name = 4 [(protogorm.v1.db) = {tag: "column:name;not null"}];
   string version = 6; // From jar metadata when the jar declares it
   string mod_id = 7; // Declared mod id from jar metadata
   int64 file_size = 10;
-  google.protobuf.Timestamp uploaded_at = 11 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  google.protobuf.Timestamp updated_at = 12 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
-  bool enabled = 13 [(discopanel.options.v1.db) = {tag: "default:true"}];
-  Server server = 14 [(discopanel.options.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
+  google.protobuf.Timestamp uploaded_at = 11 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  google.protobuf.Timestamp updated_at = 12 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
+  bool enabled = 13 [(protogorm.v1.db) = {tag: "default:true"}];
+  Server server = 14 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
 }
 
 // Scheduled task definition
 message ScheduledTask {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "scheduled_tasks"
     order_by: "datetime(next_run) ASC NULLS LAST"
     cascades: [
@@ -937,43 +938,43 @@ message ScheduledTask {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string server_id = 2 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  string name = 3 [(discopanel.options.v1.db) = {tag: "not null"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string server_id = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string name = 3 [(protogorm.v1.db) = {tag: "not null"}];
   string description = 4;
-  TaskType task_type = 5 [(discopanel.options.v1.db) = {tag: "not null"}];
-  TaskStatus status = 6 [(discopanel.options.v1.db) = {tag: "not null;default:1"}];
-  ScheduleType schedule = 7 [(discopanel.options.v1.db) = {tag: "not null"}];
+  TaskType task_type = 5 [(protogorm.v1.db) = {tag: "not null"}];
+  TaskStatus status = 6 [(protogorm.v1.db) = {tag: "not null;default:1"}];
+  ScheduleType schedule = 7 [(protogorm.v1.db) = {tag: "not null"}];
 
   // Schedule configuration
   string cron_expr = 8;
   int32 interval_secs = 9;
   google.protobuf.Timestamp run_at = 10;
-  google.protobuf.Timestamp next_run = 11 [(discopanel.options.v1.db) = {tag: "index"}];
+  google.protobuf.Timestamp next_run = 11 [(protogorm.v1.db) = {tag: "index"}];
   google.protobuf.Timestamp last_run = 12;
-  string timezone = 13 [(discopanel.options.v1.db) = {tag: "default:UTC"}];
+  string timezone = 13 [(protogorm.v1.db) = {tag: "default:UTC"}];
 
   // Task configuration (JSON string based on task type)
-  string config = 14 [(discopanel.options.v1.db) = {tag: "type:text"}];
+  string config = 14 [(protogorm.v1.db) = {tag: "type:text"}];
 
   // Execution settings
-  int32 timeout = 15 [(discopanel.options.v1.db) = {tag: "default:300"}];
-  int32 retry_count = 16 [(discopanel.options.v1.db) = {tag: "default:0"}];
-  int32 retry_delay = 17 [(discopanel.options.v1.db) = {tag: "default:60"}];
-  bool require_online = 18 [(discopanel.options.v1.db) = {tag: "default:true"}];
-  bool failure_notify = 19 [(discopanel.options.v1.db) = {tag: "default:false"}];
+  int32 timeout = 15 [(protogorm.v1.db) = {tag: "default:300"}];
+  int32 retry_count = 16 [(protogorm.v1.db) = {tag: "default:0"}];
+  int32 retry_delay = 17 [(protogorm.v1.db) = {tag: "default:60"}];
+  bool require_online = 18 [(protogorm.v1.db) = {tag: "default:true"}];
+  bool failure_notify = 19 [(protogorm.v1.db) = {tag: "default:false"}];
 
-  google.protobuf.Timestamp created_at = 20 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  google.protobuf.Timestamp updated_at = 21 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
+  google.protobuf.Timestamp created_at = 20 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  google.protobuf.Timestamp updated_at = 21 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
 
   // Events that trigger this task. Only used when schedule == SCHEDULE_TYPE_EVENT.
   repeated TriggeredEventType event_triggers = 22;
-  Server server = 23 [(discopanel.options.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
+  Server server = 23 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
 }
 
 // Task execution record
 message TaskExecution {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "task_executions"
     order_by: "started_at DESC"
     skip: ["list"]
@@ -1000,40 +1001,40 @@ message TaskExecution {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string task_id = 2 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  string server_id = 3 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  ExecutionStatus status = 4 [(discopanel.options.v1.db) = {tag: "not null"}];
-  google.protobuf.Timestamp started_at = 5 [(discopanel.options.v1.db) = {tag: "not null"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string task_id = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string server_id = 3 [(protogorm.v1.db) = {tag: "not null;index"}];
+  ExecutionStatus status = 4 [(protogorm.v1.db) = {tag: "not null"}];
+  google.protobuf.Timestamp started_at = 5 [(protogorm.v1.db) = {tag: "not null"}];
   google.protobuf.Timestamp ended_at = 6;
-  int64 duration = 7 [(discopanel.options.v1.db) = {tag: "default:0"}]; // Duration in milliseconds
-  string output = 8 [(discopanel.options.v1.db) = {tag: "type:text"}];
-  string error = 9 [(discopanel.options.v1.db) = {tag: "type:text"}];
-  int32 retry_num = 10 [(discopanel.options.v1.db) = {tag: "default:0"}];
-  string trigger = 11 [(discopanel.options.v1.db) = {tag: "default:scheduled"}]; // "scheduled", "manual", "startup"
-  ScheduledTask task = 12 [(discopanel.options.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
-  Server server = 13 [(discopanel.options.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
+  int64 duration = 7 [(protogorm.v1.db) = {tag: "default:0"}]; // Duration in milliseconds
+  string output = 8 [(protogorm.v1.db) = {tag: "type:text"}];
+  string error = 9 [(protogorm.v1.db) = {tag: "type:text"}];
+  int32 retry_num = 10 [(protogorm.v1.db) = {tag: "default:0"}];
+  string trigger = 11 [(protogorm.v1.db) = {tag: "default:scheduled"}]; // "scheduled", "manual", "startup"
+  ScheduledTask task = 12 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
+  Server server = 13 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
 }
 
 // One recorded action DiscoPanel took on the server
 message ServerAction {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "server_actions"
     skip: ["list"]
   };
-  int64 id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey;autoIncrement"}];
-  google.protobuf.Timestamp timestamp = 2 [(discopanel.options.v1.db) = {tag: "not null"}];
-  string source = 3 [(discopanel.options.v1.db) = {tag: "not null;default:''"}]; // Username or subsystem like crash doctor, scheduler, runtime
-  string message = 4 [(discopanel.options.v1.db) = {tag: "not null"}];
+  int64 id = 1 [(protogorm.v1.db) = {tag: "primaryKey;autoIncrement"}];
+  google.protobuf.Timestamp timestamp = 2 [(protogorm.v1.db) = {tag: "not null"}];
+  string source = 3 [(protogorm.v1.db) = {tag: "not null;default:''"}]; // Username or subsystem like crash doctor, scheduler, runtime
+  string message = 4 [(protogorm.v1.db) = {tag: "not null"}];
   string name = 5; // Dotted action key like server.start or mod.disable
   map<string, string> attrs = 6; // Structured details for drill-down
   string trace_id = 7; // Shared by every action of one operation
-  string server_id = 8 [(discopanel.options.v1.db) = {tag: "not null;index"}];
+  string server_id = 8 [(protogorm.v1.db) = {tag: "not null;index"}];
 }
 
 // One telemetry point for charts
 message MetricsSample {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "metrics_samples"
     skip: [
       "list",
@@ -1052,7 +1053,7 @@ message MetricsSample {
       }
     ]
   };
-  google.protobuf.Timestamp timestamp = 1 [(discopanel.options.v1.db) = {tag: "not null;index:idx_metrics_lookup,priority:3"}];
+  google.protobuf.Timestamp timestamp = 1 [(protogorm.v1.db) = {tag: "not null;index:idx_metrics_lookup,priority:3"}];
   double tps = 2;
   double mspt = 3;
   int32 players = 4;
@@ -1064,14 +1065,14 @@ message MetricsSample {
   int64 proxy_bytes_in = 10; // Client to backend bytes this window
   int64 proxy_bytes_out = 11; // Backend to client bytes this window
   int64 proxy_logins = 12; // Login handshakes this window
-  int64 id = 13 [(discopanel.options.v1.db) = {tag: "primaryKey;autoIncrement"}];
-  string server_id = 14 [(discopanel.options.v1.db) = {tag: "not null;index:idx_metrics_lookup,priority:1"}];
-  int32 resolution = 15 [(discopanel.options.v1.db) = {tag: "not null;default:0;index:idx_metrics_lookup,priority:2"}];
+  int64 id = 13 [(protogorm.v1.db) = {tag: "primaryKey;autoIncrement"}];
+  string server_id = 14 [(protogorm.v1.db) = {tag: "not null;index:idx_metrics_lookup,priority:1"}];
+  int32 resolution = 15 [(protogorm.v1.db) = {tag: "not null;default:0;index:idx_metrics_lookup,priority:2"}];
 }
 
 // ModuleTemplate defines a reusable blueprint for creating module instances.
 message ModuleTemplate {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "module_templates"
     order_by: "type ASC, name ASC"
     guards: [
@@ -1097,29 +1098,29 @@ message ModuleTemplate {
     ]
   };
   // Unique identifier.
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
   // Display name.
-  string name = 2 [(discopanel.options.v1.db) = {tag: "not null;uniqueIndex"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null;uniqueIndex"}];
   // Human-readable description.
   string description = 3;
   // Whether this is a built-in or custom template.
-  ModuleTemplateType type = 4 [(discopanel.options.v1.db) = {tag: "not null;default:2"}];
+  ModuleTemplateType type = 4 [(protogorm.v1.db) = {tag: "not null;default:2"}];
   // Docker image to use (e.g., "nginx:latest").
-  string docker_image = 5 [(discopanel.options.v1.db) = {tag: "not null"}];
+  string docker_image = 5 [(protogorm.v1.db) = {tag: "not null"}];
   // JSON Schema for dynamic UI form generation.
-  string config_schema = 6 [(discopanel.options.v1.db) = {tag: "type:text"}];
+  string config_schema = 6 [(protogorm.v1.db) = {tag: "type:text"}];
   // JSON object of default environment variables.
-  string default_env = 7 [(discopanel.options.v1.db) = {tag: "type:text"}];
+  string default_env = 7 [(protogorm.v1.db) = {tag: "type:text"}];
   // JSON array of default volume mounts.
-  string default_volumes = 8 [(discopanel.options.v1.db) = {tag: "type:text"}];
+  string default_volumes = 8 [(protogorm.v1.db) = {tag: "type:text"}];
   // HTTP path for health checks (e.g., "/health").
   string health_check_path = 9;
   // Port to use for health checks. 0 uses the first configured port.
   int32 health_check_port = 10;
   // Whether instances must be attached to a server.
-  bool requires_server = 11 [(discopanel.options.v1.db) = {tag: "default:true"}];
+  bool requires_server = 11 [(protogorm.v1.db) = {tag: "default:true"}];
   // Whether instances can be proxied through the server's hostname.
-  bool supports_proxy = 12 [(discopanel.options.v1.db) = {tag: "default:true"}];
+  bool supports_proxy = 12 [(protogorm.v1.db) = {tag: "default:true"}];
   // Lucide icon name for UI display.
   string icon = 13;
   // Category for grouping templates (e.g., "monitoring", "maps").
@@ -1127,9 +1128,9 @@ message ModuleTemplate {
   // Usage instructions and notes.
   string documentation = 15;
   // When this template was created.
-  google.protobuf.Timestamp created_at = 16 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
+  google.protobuf.Timestamp created_at = 16 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
   // When this template was last updated.
-  google.protobuf.Timestamp updated_at = 17 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
+  google.protobuf.Timestamp updated_at = 17 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
   // Default port configurations.
   repeated ModulePort ports = 18;
   // Template IDs this module commonly depends on.
@@ -1143,22 +1144,22 @@ message ModuleTemplate {
   // Default access URL templates
   repeated string default_access_urls = 23;
   // Default memory allocation in MB
-  int32 default_memory = 24 [(discopanel.options.v1.db) = {tag: "default:512"}];
+  int32 default_memory = 24 [(protogorm.v1.db) = {tag: "default:512"}];
   // Default UID to run the container
-  string default_uid = 25 [(discopanel.options.v1.db) = {tag: "default:''"}];
+  string default_uid = 25 [(protogorm.v1.db) = {tag: "default:''"}];
   // Default GID to run the container
-  string default_gid = 26 [(discopanel.options.v1.db) = {tag: "default:''"}];
+  string default_gid = 26 [(protogorm.v1.db) = {tag: "default:''"}];
   // Command to exec inside the container after start (e.g., sed to patch config files)
-  string default_init_command = 27 [(discopanel.options.v1.db) = {tag: "default:''"}];
+  string default_init_command = 27 [(protogorm.v1.db) = {tag: "default:''"}];
   // Seconds to wait after container is healthy before running init command
-  int32 default_init_command_delay = 28 [(discopanel.options.v1.db) = {tag: "default:0"}];
+  int32 default_init_command_delay = 28 [(protogorm.v1.db) = {tag: "default:0"}];
   // Whether to restart the container after init command completes
-  bool default_restart_after_init = 29 [(discopanel.options.v1.db) = {tag: "default:false"}];
+  bool default_restart_after_init = 29 [(protogorm.v1.db) = {tag: "default:false"}];
 }
 
 // Module represents a running module instance attached to a server.
 message Module {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "modules"
     order_by: "created_at DESC"
     queries: [
@@ -1196,61 +1197,61 @@ message Module {
     ]
   };
   // Unique identifier.
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
   // Display name.
-  string name = 2 [(discopanel.options.v1.db) = {tag: "not null"}];
+  string name = 2 [(protogorm.v1.db) = {tag: "not null"}];
   // ID of the server this module is attached to.
-  string server_id = 3 [(discopanel.options.v1.db) = {tag: "not null;index"}];
+  string server_id = 3 [(protogorm.v1.db) = {tag: "not null;index"}];
   // ID of the template this module was created from.
-  string template_id = 4 [(discopanel.options.v1.db) = {tag: "not null;index"}];
+  string template_id = 4 [(protogorm.v1.db) = {tag: "not null;index"}];
   // Docker container ID when running.
   string container_id = 5;
   // Current runtime status.
-  ModuleStatus status = 6 [(discopanel.options.v1.db) = {tag: "not null;default:1"}];
+  ModuleStatus status = 6 [(protogorm.v1.db) = {tag: "not null;default:1"}];
   // JSON module configuration.
-  string config = 7 [(discopanel.options.v1.db) = {tag: "type:text"}];
+  string config = 7 [(protogorm.v1.db) = {tag: "type:text"}];
   // JSON object of environment variable overrides.
-  string env_overrides = 8 [(discopanel.options.v1.db) = {tag: "type:text"}];
+  string env_overrides = 8 [(protogorm.v1.db) = {tag: "type:text"}];
   // JSON array of volume mount overrides.
-  string volume_overrides = 9 [(discopanel.options.v1.db) = {tag: "type:text"}];
+  string volume_overrides = 9 [(protogorm.v1.db) = {tag: "type:text"}];
   // Memory limit in MB.
-  int32 memory = 10 [(discopanel.options.v1.db) = {tag: "default:512"}];
+  int32 memory = 10 [(protogorm.v1.db) = {tag: "default:512"}];
   // CPU limit as a fraction (e.g., 0.5 = 50%).
   double cpu_limit = 11;
   // Start automatically when the parent server starts.
-  bool auto_start = 12 [(discopanel.options.v1.db) = {tag: "default:false"}];
+  bool auto_start = 12 [(protogorm.v1.db) = {tag: "default:false"}];
   // Stop when the parent server stops.
-  bool follow_server_lifecycle = 13 [(discopanel.options.v1.db) = {tag: "default:true"}];
+  bool follow_server_lifecycle = 13 [(protogorm.v1.db) = {tag: "default:true"}];
   // Run independently of server lifecycle.
-  bool detached = 14 [(discopanel.options.v1.db) = {tag: "default:false"}];
+  bool detached = 14 [(protogorm.v1.db) = {tag: "default:false"}];
   // Path to module's persistent data directory.
   string data_path = 15;
   // When this module was created.
-  google.protobuf.Timestamp created_at = 16 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
+  google.protobuf.Timestamp created_at = 16 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
   // When this module was last updated.
-  google.protobuf.Timestamp updated_at = 17 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
+  google.protobuf.Timestamp updated_at = 17 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
   // When this module was last started.
   optional google.protobuf.Timestamp last_started = 18;
   // Current memory usage in MB.
-  double memory_usage = 19 [(discopanel.options.v1.db) = {skip: true}];
+  double memory_usage = 19 [(protogorm.v1.db) = {skip: true}];
   // Current CPU usage as a percentage.
-  double cpu_percent = 20 [(discopanel.options.v1.db) = {skip: true}];
+  double cpu_percent = 20 [(protogorm.v1.db) = {skip: true}];
   // Name of the parent server (for display).
-  string server_name = 21 [(discopanel.options.v1.db) = {skip: true}];
+  string server_name = 21 [(protogorm.v1.db) = {skip: true}];
   // Name of the source template (for display).
-  string template_name = 22 [(discopanel.options.v1.db) = {skip: true}];
+  string template_name = 22 [(protogorm.v1.db) = {skip: true}];
   // Parent server's proxy hostname (for building access URLs).
-  string server_proxy_hostname = 23 [(discopanel.options.v1.db) = {skip: true}];
+  string server_proxy_hostname = 23 [(protogorm.v1.db) = {skip: true}];
   // Port configurations.
   repeated ModulePort ports = 24;
   // Module dependencies.
   repeated ModuleDependency dependencies = 25;
   // Seconds between health checks.
-  int32 health_check_interval = 26 [(discopanel.options.v1.db) = {tag: "default:30"}];
+  int32 health_check_interval = 26 [(protogorm.v1.db) = {tag: "default:30"}];
   // Seconds to wait for health check response.
-  int32 health_check_timeout = 27 [(discopanel.options.v1.db) = {tag: "default:5"}];
+  int32 health_check_timeout = 27 [(protogorm.v1.db) = {tag: "default:5"}];
   // Failed checks before marking unhealthy.
-  int32 health_check_retries = 28 [(discopanel.options.v1.db) = {tag: "default:3"}];
+  int32 health_check_retries = 28 [(protogorm.v1.db) = {tag: "default:3"}];
   // Event hooks for server lifecycle integration.
   repeated ModuleEventHook event_hooks = 29;
   // Custom key-value metadata. Values support alias substitution.
@@ -1260,32 +1261,32 @@ message Module {
   // Access URL templates
   repeated string access_urls = 32;
   // User ID of the user who created this module.
-  string created_by_user_id = 33 [(discopanel.options.v1.db) = {tag: "column:created_by"}];
+  string created_by_user_id = 33 [(protogorm.v1.db) = {tag: "column:created_by"}];
   // Username of the user who created this module (for display).
-  string created_by_username = 34 [(discopanel.options.v1.db) = {skip: true}];
+  string created_by_username = 34 [(protogorm.v1.db) = {skip: true}];
   // UID to run the container
-  string uid = 35 [(discopanel.options.v1.db) = {tag: "default:''"}];
+  string uid = 35 [(protogorm.v1.db) = {tag: "default:''"}];
   // GID to run the container
-  string gid = 36 [(discopanel.options.v1.db) = {tag: "default:''"}];
+  string gid = 36 [(protogorm.v1.db) = {tag: "default:''"}];
   // Command to exec inside the container after start
-  string init_command = 37 [(discopanel.options.v1.db) = {tag: "default:''"}];
+  string init_command = 37 [(protogorm.v1.db) = {tag: "default:''"}];
   // Seconds to wait after container is healthy before running init command
-  int32 init_command_delay = 38 [(discopanel.options.v1.db) = {tag: "default:0"}];
+  int32 init_command_delay = 38 [(protogorm.v1.db) = {tag: "default:0"}];
   // Whether to restart the container after init command completes
-  bool restart_after_init = 39 [(discopanel.options.v1.db) = {tag: "default:false"}];
+  bool restart_after_init = 39 [(protogorm.v1.db) = {tag: "default:false"}];
   // Api token minted for this module's container
   string token_id = 40;
   // Fresh plaintext token, only set on the create response
-  string token_plaintext = 41 [(discopanel.options.v1.db) = {
+  string token_plaintext = 41 [(protogorm.v1.db) = {
     skip: true
     redact: true
   }];
-  ModuleTemplate template = 43 [(discopanel.options.v1.db) = {tag: "constraint:OnDelete:RESTRICT"}];
+  ModuleTemplate template = 43 [(protogorm.v1.db) = {tag: "constraint:OnDelete:RESTRICT"}];
 }
 
 // Indexed modpack metadata
 message IndexedModpack {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "indexed_modpacks"
     order_by: "download_count DESC"
     upsert: true
@@ -1322,13 +1323,13 @@ message IndexedModpack {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string indexer_id = 2 [(discopanel.options.v1.db) = {tag: "index"}];
-  string indexer = 3 [(discopanel.options.v1.db) = {tag: "index"}];
-  string name = 4 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  string slug = 5 [(discopanel.options.v1.db) = {tag: "index"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string indexer_id = 2 [(protogorm.v1.db) = {tag: "index"}];
+  string indexer = 3 [(protogorm.v1.db) = {tag: "index"}];
+  string name = 4 [(protogorm.v1.db) = {tag: "not null;index"}];
+  string slug = 5 [(protogorm.v1.db) = {tag: "index"}];
   string summary = 6;
-  string description = 7 [(discopanel.options.v1.db) = {tag: "type:text"}];
+  string description = 7 [(protogorm.v1.db) = {tag: "type:text"}];
   string logo_url = 8;
   string website_url = 9;
   int32 download_count = 10;
@@ -1343,14 +1344,14 @@ message IndexedModpack {
   int32 java_version = 19;
   string docker_image = 20;
   int32 recommended_ram = 21;
-  bool is_favorited = 22 [(discopanel.options.v1.db) = {skip: true}];
-  google.protobuf.Timestamp updated_at = 23 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
-  google.protobuf.Timestamp indexed_at = 24 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
+  bool is_favorited = 22 [(protogorm.v1.db) = {skip: true}];
+  google.protobuf.Timestamp updated_at = 23 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
+  google.protobuf.Timestamp indexed_at = 24 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
 }
 
 // One downloadable modpack file row
 message IndexedModpackFile {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "indexed_modpack_files"
     upsert: true
     queries: [
@@ -1363,8 +1364,8 @@ message IndexedModpackFile {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string modpack_id = 2 [(discopanel.options.v1.db) = {tag: "index"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string modpack_id = 2 [(protogorm.v1.db) = {tag: "index"}];
   string display_name = 3;
   string file_name = 4;
   google.protobuf.Timestamp file_date = 5;
@@ -1374,12 +1375,12 @@ message IndexedModpackFile {
   string game_versions = 9;
   string mod_loader = 10;
   optional string server_pack_file_id = 11;
-  IndexedModpack modpack = 12 [(discopanel.options.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
+  IndexedModpack modpack = 12 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
 }
 
 // One favorited modpack row
 message ModpackFavorite {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "modpack_favorites"
     order_by: "created_at DESC"
     queries: [
@@ -1402,15 +1403,15 @@ message ModpackFavorite {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string modpack_id = 2 [(discopanel.options.v1.db) = {tag: "index"}];
-  google.protobuf.Timestamp created_at = 3 [(discopanel.options.v1.db) = {tag: "autoCreateTime"}];
-  IndexedModpack modpack = 4 [(discopanel.options.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string modpack_id = 2 [(protogorm.v1.db) = {tag: "index"}];
+  google.protobuf.Timestamp created_at = 3 [(protogorm.v1.db) = {tag: "autoCreateTime"}];
+  IndexedModpack modpack = 4 [(protogorm.v1.db) = {tag: "constraint:OnDelete:CASCADE"}];
 }
 
 // One dismissed performance finding row
 message FindingDismissal {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "finding_dismissals"
     upsert: true
     queries: [
@@ -1422,29 +1423,29 @@ message FindingDismissal {
       }
     ]
   };
-  string server_id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string finding_id = 2 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string content_hash = 3 [(discopanel.options.v1.db) = {tag: "not null"}];
-  google.protobuf.Timestamp dismissed_at = 4 [(discopanel.options.v1.db) = {tag: "not null"}];
+  string server_id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string finding_id = 2 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string content_hash = 3 [(protogorm.v1.db) = {tag: "not null"}];
+  google.protobuf.Timestamp dismissed_at = 4 [(protogorm.v1.db) = {tag: "not null"}];
 }
 
 // Proxy settings row
 message ProxyConfig {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "proxy_configs"
     skip: ["get"]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  bool enabled = 2 [(discopanel.options.v1.db) = {tag: "not null;default:false"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  bool enabled = 2 [(protogorm.v1.db) = {tag: "not null;default:false"}];
   string base_url = 3;
-  google.protobuf.Timestamp updated_at = 4 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
+  google.protobuf.Timestamp updated_at = 4 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
 }
 
 // All tunable server properties, global defaults reuse the
 // table under a pseudo server id. Field metadata drives the
 // settings UI, env generation, and server.properties writing.
 message ServerProperties {
-  option (discopanel.options.v1.db_model) = {
+  option (protogorm.v1.model) = {
     table: "server_properties"
     skip: ["get"]
     queries: [
@@ -1456,9 +1457,9 @@ message ServerProperties {
       }
     ]
   };
-  string id = 1 [(discopanel.options.v1.db) = {tag: "primaryKey"}];
-  string server_id = 2 [(discopanel.options.v1.db) = {tag: "not null;index"}];
-  google.protobuf.Timestamp updated_at = 3 [(discopanel.options.v1.db) = {tag: "autoUpdateTime"}];
+  string id = 1 [(protogorm.v1.db) = {tag: "primaryKey"}];
+  string server_id = 2 [(protogorm.v1.db) = {tag: "not null;index"}];
+  google.protobuf.Timestamp updated_at = 3 [(protogorm.v1.db) = {tag: "autoUpdateTime"}];
   optional int32 uid = 4 [(discopanel.options.v1.prop) = {
     env: "UID"
     default_value: "1000"
@@ -1468,7 +1469,7 @@ message ServerProperties {
     category: "jvm"
   }];
   optional int32 gid = 5 [
-    (discopanel.options.v1.db) = {tag: "column:g_id"},
+    (protogorm.v1.db) = {tag: "column:g_id"},
     (discopanel.options.v1.prop) = {
       env: "GID"
       default_value: "1000"
@@ -1568,7 +1569,7 @@ message ServerProperties {
     category: "jvm"
   }];
   optional string jvm_opts = 17 [
-    (discopanel.options.v1.db) = {tag: "column:j_vm_opts"},
+    (protogorm.v1.db) = {tag: "column:j_vm_opts"},
     (discopanel.options.v1.prop) = {
       env: "JVM_OPTS"
       default_value: ""
@@ -1579,7 +1580,7 @@ message ServerProperties {
     }
   ];
   optional string jvm_xx_opts = 18 [
-    (discopanel.options.v1.db) = {tag: "column:j_vm_xx_opts"},
+    (protogorm.v1.db) = {tag: "column:j_vm_xx_opts"},
     (discopanel.options.v1.prop) = {
       env: "JVM_XX_OPTS"
       default_value: ""
@@ -1590,7 +1591,7 @@ message ServerProperties {
     }
   ];
   optional string jvm_dd_opts = 19 [
-    (discopanel.options.v1.db) = {tag: "column:j_vm_dd_opts"},
+    (protogorm.v1.db) = {tag: "column:j_vm_dd_opts"},
     (discopanel.options.v1.prop) = {
       env: "JVM_DD_OPTS"
       default_value: ""
@@ -1767,7 +1768,7 @@ message ServerProperties {
     category: "game"
   }];
   optional bool spawn_npcs = 41 [
-    (discopanel.options.v1.db) = {tag: "column:spawn_np_cs"},
+    (protogorm.v1.db) = {tag: "column:spawn_np_cs"},
     (discopanel.options.v1.prop) = {
       prop: "spawn-npcs"
       default_value: "true"

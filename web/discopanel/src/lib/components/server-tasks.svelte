@@ -47,16 +47,15 @@
 	} from '$lib/proto/discopanel/v1/task_pb';
 	import {
 		TaskType,
+		TaskTypeSchema,
 		TaskStatus,
 		ScheduleType,
+		ScheduleTypeSchema,
 		ExecutionStatus,
+		ExecutionStatusSchema,
 		TriggeredEventType
 	} from '$lib/proto/discopanel/v1/storage_pb';
-	import {
-		TaskTypeLabel,
-		ScheduleTypeLabel,
-		ExecutionStatusLabel
-	} from '$lib/proto/enums.gen';
+	import { enumLabel } from '$lib/proto-meta';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import { create } from '@bufbuild/protobuf';
 	import { timestampFromDate } from '@bufbuild/protobuf/wkt';
@@ -756,7 +755,7 @@
 	];
 
 	function getTaskTypeLabel(type: TaskType): string {
-		return TaskTypeLabel[type] ?? TaskTypeLabel[TaskType.UNSPECIFIED];
+		return enumLabel(TaskTypeSchema, type) || enumLabel(TaskTypeSchema, TaskType.UNSPECIFIED);
 	}
 
 	function getTaskTypeIcon(type: TaskType) {
@@ -781,7 +780,7 @@
 	}
 
 	function getScheduleTypeLabel(s: ScheduleType): string {
-		return ScheduleTypeLabel[s] ?? ScheduleTypeLabel[ScheduleType.UNSPECIFIED];
+		return enumLabel(ScheduleTypeSchema, s) || enumLabel(ScheduleTypeSchema, ScheduleType.UNSPECIFIED);
 	}
 
 	function getScheduleLabel(task: ScheduledTask): string {
@@ -838,7 +837,10 @@
 	}
 
 	function getExecutionStatusLabel(status: ExecutionStatus): string {
-		return ExecutionStatusLabel[status] ?? ExecutionStatusLabel[ExecutionStatus.UNSPECIFIED];
+		return (
+			enumLabel(ExecutionStatusSchema, status) ||
+			enumLabel(ExecutionStatusSchema, ExecutionStatus.UNSPECIFIED)
+		);
 	}
 
 	function formatDuration(ms: bigint): string {

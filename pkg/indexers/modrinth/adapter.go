@@ -10,6 +10,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/indexers"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -62,7 +63,7 @@ func (m *ModrinthIndexer) SearchModpacks(ctx context.Context, query string, game
 		modLoaders := []string{}
 		for _, cat := range project.Categories {
 			if loader, ok := minecraft.DetectModpackLoader(cat); ok {
-				modLoaders = append(modLoaders, loader.Name())
+				modLoaders = append(modLoaders, protometa.Name(loader))
 			}
 		}
 

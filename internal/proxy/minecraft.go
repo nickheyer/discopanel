@@ -15,6 +15,7 @@ import (
 
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 )
 
 // Routes Minecraft connections to backends by hostname
@@ -148,7 +149,7 @@ func (p *MinecraftProxy) UpsertServerRoute(route Route) {
 
 	if changed {
 		p.logger.Info("Route %s is %s (backend=%s:%d wakeable=%v)",
-			route.Hostname, route.State.Name(), route.BackendHost, route.BackendPort, route.Wakeable)
+			route.Hostname, protometa.Name(route.State), route.BackendHost, route.BackendPort, route.Wakeable)
 	}
 }
 

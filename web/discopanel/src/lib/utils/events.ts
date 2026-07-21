@@ -1,5 +1,5 @@
-import { TriggeredEventType } from '$lib/proto/discopanel/v1/storage_pb';
-import { TriggeredEventTypeLabel, TriggeredEventTypeDesc } from '$lib/proto/enums.gen';
+import { TriggeredEventType, TriggeredEventTypeSchema } from '$lib/proto/discopanel/v1/storage_pb';
+import { enumDesc, enumLabel } from '$lib/proto-meta';
 
 export interface EventTypeMeta {
 	type: TriggeredEventType;
@@ -23,11 +23,14 @@ const EVENT_TYPE_ORDER: TriggeredEventType[] = [
 // Ordered catalog of user selectable server event types
 export const SERVER_EVENT_TYPES: EventTypeMeta[] = EVENT_TYPE_ORDER.map((type) => ({
 	type,
-	label: TriggeredEventTypeLabel[type],
-	description: TriggeredEventTypeDesc[type] ?? ''
+	label: enumLabel(TriggeredEventTypeSchema, type),
+	description: enumDesc(TriggeredEventTypeSchema, type)
 }));
 
 // Resolves display label for an event type
 export function getEventTypeLabel(type: TriggeredEventType): string {
-	return TriggeredEventTypeLabel[type] ?? TriggeredEventTypeLabel[TriggeredEventType.UNSPECIFIED];
+	return (
+		enumLabel(TriggeredEventTypeSchema, type) ||
+		enumLabel(TriggeredEventTypeSchema, TriggeredEventType.UNSPECIFIED)
+	);
 }

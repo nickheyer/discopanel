@@ -18,6 +18,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"google.golang.org/protobuf/proto"
 )
@@ -137,7 +138,7 @@ func (p *Provisioner) Ensure(ctx context.Context, server *v1.Server, cfg *v1.Ser
 		}
 		if err := runtimespec.WriteManifest(server.DataPath, &runtimespec.Manifest{
 			Version:       1,
-			Loader:        server.ModLoader.Name(),
+			Loader:        protometa.Name(server.ModLoader),
 			LoaderVersion: result.LoaderVersion,
 			McVersion:     result.McVersion,
 			JavaMajor:     result.JavaMajor,
@@ -147,11 +148,11 @@ func (p *Provisioner) Ensure(ctx context.Context, server *v1.Server, cfg *v1.Ser
 			return nil, fmt.Errorf("failed to write provision manifest: %w", err)
 		}
 		p.action(ctx, server, "provisioner", "provision.install",
-			metrics.Attrs{"loader": result.Loader.Name(), "loader_version": result.LoaderVersion, "mc_version": result.McVersion},
+			metrics.Attrs{"loader": protometa.Name(result.Loader), "loader_version": result.LoaderVersion, "mc_version": result.McVersion},
 			"installed server files (%s %s, MC %s, Java %d)",
-			result.Loader.Name(), result.LoaderVersion, result.McVersion, result.JavaMajor)
+			protometa.Name(result.Loader), result.LoaderVersion, result.McVersion, result.JavaMajor)
 	} else {
-		manifestLoader, _ := v1.ModLoaderFromName(manifest.Loader)
+		manifestLoader, _ := protometa.FromName[v1.ModLoader](manifest.Loader)
 		result = &Result{
 			Loader:        manifestLoader,
 			LoaderVersion: manifest.LoaderVersion,
@@ -159,7 +160,7 @@ func (p *Provisioner) Ensure(ctx context.Context, server *v1.Server, cfg *v1.Ser
 			JavaMajor:     manifest.JavaMajor,
 		}
 		p.progress(server, "server files verified (%s %s, MC %s, Java %d)",
-			result.Loader.Name(), result.LoaderVersion, result.McVersion, result.JavaMajor)
+			protometa.Name(result.Loader), result.LoaderVersion, result.McVersion, result.JavaMajor)
 	}
 
 	// Pack-managed mods get the client-only sweep every pass
@@ -179,7 +180,7 @@ func (p *Provisioner) needsInstall(server *v1.Server, manifest *runtimespec.Mani
 	if force || manifest == nil {
 		return true
 	}
-	if manifest.Loader != server.ModLoader.Name() {
+	if manifest.Loader != protometa.Name(server.ModLoader) {
 		return true
 	}
 	// Modpack servers derive MC version from the pack
@@ -326,7 +327,7 @@ var packLoaderInstallers = map[v1.ModLoader]func(p *Provisioner, ctx context.Con
 func (p *Provisioner) installLoaderForPack(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, loader v1.ModLoader, version, mcVersion string) (*Result, error) {
 	fn, ok := packLoaderInstallers[loader]
 	if !ok {
-		return nil, fmt.Errorf("packs cannot install loader %q", loader.Name())
+		return nil, fmt.Errorf("packs cannot install loader %q", protometa.Name(loader))
 	}
 	packServer, _ := proto.Clone(server).(*v1.Server)
 	if mcVersion != "" {
@@ -343,7 +344,7 @@ func (p *Provisioner) installLoaderForPack(ctx context.Context, server *v1.Serve
 
 // Performs the actual installation for the server's loader
 func (p *Provisioner) install(ctx context.Context, server *v1.Server, cfg *v1.ServerProperties, desired *desiredModpack, force bool) (*Result, error) {
-	p.progress(server, "provisioning %s server (MC %s)...", server.ModLoader.Name(), server.McVersion)
+	p.progress(server, "provisioning %s server (MC %s)...", protometa.Name(server.ModLoader), server.McVersion)
 	p.pruneCaches()
 
 	if fn, ok := loaderInstallers[server.ModLoader]; ok {
@@ -355,14 +356,14 @@ func (p *Provisioner) install(ctx context.Context, server *v1.Server, cfg *v1.Se
 	}
 	return nil, fmt.Errorf(
 		"mod loader %q has no native DiscoPanel installer: upload your server files to the data directory and set the Custom Server JAR or Custom JAR Execution fields",
-		server.ModLoader.Name())
+		protometa.Name(server.ModLoader))
 }
 
 // Computes java requirement, writes launch spec, builds Result
 func (p *Provisioner) finishLaunch(server *v1.Server, spec *runtimespec.LaunchSpec, loader v1.ModLoader, loaderVersion, mcVersion string) (*Result, error) {
 	javaMajor := docker.RequiredJavaMajor(mcVersion)
 	spec.Version = 1
-	spec.Loader = loader.Name()
+	spec.Loader = protometa.Name(loader)
 	spec.McVersion = mcVersion
 	spec.JavaMajor = javaMajor
 

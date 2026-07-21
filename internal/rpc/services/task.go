@@ -14,6 +14,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -161,7 +162,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 	}
 
 	s.log.Info("Created scheduled task: %s for server %s", task.Name, task.ServerId)
-	s.rec.Record(ctx, task.ServerId, "task.create", metrics.Attrs{"task": task.Name, "type": task.TaskType.Name()}, "created task %q", task.Name)
+	s.rec.Record(ctx, task.ServerId, "task.create", metrics.Attrs{"task": task.Name, "type": protometa.Name(task.TaskType)}, "created task %q", task.Name)
 
 	task.Server = nil
 	return connect.NewResponse(&v1.CreateTaskResponse{
@@ -301,7 +302,7 @@ func (s *TaskService) ToggleTask(ctx context.Context, req *connect.Request[v1.To
 	}
 
 	s.log.Info("Toggled task %s to status %s", task.Name, task.Status)
-	s.rec.Record(ctx, task.ServerId, "task.toggle", metrics.Attrs{"task": task.Name, "status": task.Status.Name()}, "set task %q to %s", task.Name, task.Status.Name())
+	s.rec.Record(ctx, task.ServerId, "task.toggle", metrics.Attrs{"task": task.Name, "status": protometa.Name(task.Status)}, "set task %q to %s", task.Name, protometa.Name(task.Status))
 
 	task.Server = nil
 	return connect.NewResponse(&v1.ToggleTaskResponse{

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	utils "github.com/nickheyer/discopanel/pkg/utils"
 )
 
@@ -186,14 +187,14 @@ func init() {
 	for i := range registry {
 		row := &registry[i]
 		l := row.Info.Loader
-		row.Info.Name = l.Name()
-		row.Info.DisplayName = l.Label()
-		row.Info.Description = l.Desc()
+		row.Info.Name = protometa.Name(l)
+		row.Info.DisplayName = protometa.Label(l)
+		row.Info.Description = protometa.Desc(l)
 		row.Info.SupportsMods = row.Info.ModsDirectory != ""
 		row.Info.SupportsPlugins = row.Info.ModsDirectory == "plugins"
 		loaderIndex[l] = row
-		nameIndex[l.Name()] = row
-		if len(row.Dialects) > 0 && row.Dialects[0] == l.Name() {
+		nameIndex[protometa.Name(l)] = row
+		if len(row.Dialects) > 0 && row.Dialects[0] == protometa.Name(l) {
 			dialectIndex[row.Dialects[0]] = row
 		}
 	}
@@ -216,8 +217,8 @@ func LoaderFor(loader v1.ModLoader) LoaderInfo {
 	}
 	return LoaderInfo{Info: &v1.ModLoaderInfo{
 		Loader:      loader,
-		Name:        loader.Name(),
-		DisplayName: loader.Label(),
+		Name:        protometa.Name(loader),
+		DisplayName: protometa.Label(loader),
 		Description: "Unknown mod loader",
 		Category:    "Other",
 	}}
@@ -248,7 +249,7 @@ func CutPackLoaderID(loaderID string) (v1.ModLoader, string, bool) {
 func PackLoaderNames() []string {
 	var out []string
 	for i := range registry {
-		name := registry[i].Loader().Name()
+		name := protometa.Name(registry[i].Loader())
 		if len(registry[i].Dialects) > 0 && registry[i].Dialects[0] == name {
 			out = append(out, name)
 		}
@@ -281,7 +282,7 @@ const (
 
 func MatchModLoader(input string) (v1.ModLoader, bool) {
 	row, score, ok := utils.BestFunc(input, registry, func(r LoaderInfo) string {
-		return r.Loader().Name()
+		return protometa.Name(r.Loader())
 	})
 	if !ok || score < modLoaderMatchThreshold {
 		return v1.ModLoader_MOD_LOADER_UNSPECIFIED, false

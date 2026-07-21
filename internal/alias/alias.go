@@ -11,6 +11,8 @@ import (
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/config"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // Host system info for alias resolution
@@ -241,6 +243,9 @@ func getFieldValueByJSONName(val reflect.Value, jsonName string) string {
 // Converts reflect value to string representation
 func formatValue(v reflect.Value) string {
 	if v.IsValid() && v.CanInterface() {
+		if e, ok := v.Interface().(protoreflect.Enum); ok {
+			return protometa.Name(e)
+		}
 		if named, ok := v.Interface().(interface{ Name() string }); ok {
 			return named.Name()
 		}

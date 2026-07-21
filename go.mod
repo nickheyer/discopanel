@@ -2,6 +2,11 @@ module github.com/nickheyer/discopanel
 
 go 1.25.0
 
+tool github.com/nickheyer/protogorm/cmd/protogorm
+
+// Drop once protogorm is tagged upstream
+replace github.com/nickheyer/protogorm => ../protogorm
+
 require (
 	connectrpc.com/connect v1.19.1
 	connectrpc.com/grpcreflect v1.3.0
@@ -17,6 +22,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/mholt/archives v0.1.5
+	github.com/nickheyer/protogorm v0.0.0-00010101000000-000000000000
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.20.1
 	github.com/tidwall/gjson v1.18.0

@@ -32,10 +32,11 @@
 	import { ServerStatus, type Server } from '$lib/proto/discopanel/v1/storage_pb';
 	import {
 		FindingSource,
+		FindingSourceSchema,
 		PerformanceSeverity,
 		type PerformanceFinding
 	} from '$lib/proto/discopanel/v1/server_pb';
-	import { FindingSourceLabel } from '$lib/proto/enums.gen';
+	import { enumLabel } from '$lib/proto-meta';
 	import { statusMeta } from '$lib/server-status';
 
 	let { server }: { server: Server } = $props();
@@ -280,7 +281,7 @@
 										variant="outline"
 										class="px-1.5 py-0 text-[10px] tracking-wide text-muted-foreground uppercase"
 									>
-										{FindingSourceLabel[finding.source]}
+										{enumLabel(FindingSourceSchema, finding.source)}
 									</Badge>
 								{/if}
 								{#if finding.severity === PerformanceSeverity.CRITICAL}

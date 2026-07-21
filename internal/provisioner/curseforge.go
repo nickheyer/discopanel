@@ -18,6 +18,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/indexers/fuego"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"golang.org/x/sync/errgroup"
 )
@@ -550,7 +551,7 @@ func (p *Provisioner) completeServerPack(ctx context.Context, server *v1.Server,
 
 	// Some packs install the loader at first run
 	if loader, version := detectServerPackLoader(dataPath, server.McVersion); loader != v1.ModLoader_MOD_LOADER_UNSPECIFIED {
-		p.progress(server, "server pack ships no loader, installing %s %s", loader.Name(), version)
+		p.progress(server, "server pack ships no loader, installing %s %s", protometa.Name(loader), version)
 		return p.installLoaderForPack(ctx, server, cfg, loader, version, server.McVersion)
 	}
 

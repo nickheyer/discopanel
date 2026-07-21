@@ -21,6 +21,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/events"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -131,7 +132,7 @@ func (m *Manager) IsStarting(serverID string) bool {
 func (m *Manager) setStatus(ctx context.Context, server *v1.Server, status v1.ServerStatus) {
 	server.Status = status
 	if err := m.store.UpdateServerFields(ctx, server.Id, map[string]any{"status": status}); err != nil {
-		m.log.Error("lifecycle: failed to persist status %s for %s: %v", status.Name(), server.Name, err)
+		m.log.Error("lifecycle: failed to persist status %s for %s: %v", protometa.Name(status), server.Name, err)
 	}
 	m.syncRoute(server)
 }

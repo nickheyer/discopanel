@@ -1,5 +1,5 @@
-import { ModuleStatus } from '$lib/proto/discopanel/v1/storage_pb';
-import { ModuleStatusLabel } from '$lib/proto/enums.gen';
+import { ModuleStatus, ModuleStatusSchema } from '$lib/proto/discopanel/v1/storage_pb';
+import { enumLabel } from '$lib/proto-meta';
 import type { StatusTone } from '$lib/server-status';
 
 export interface ModuleStatusMeta {
@@ -22,7 +22,7 @@ const STATUS_UI: Record<ModuleStatus, { tone: StatusTone; transitional: boolean 
 export function moduleStatusMeta(status: ModuleStatus): ModuleStatusMeta {
 	const ui = STATUS_UI[status] ?? STATUS_UI[ModuleStatus.UNSPECIFIED];
 	return {
-		label: ModuleStatusLabel[status] ?? ModuleStatusLabel[ModuleStatus.UNSPECIFIED],
+		label: enumLabel(ModuleStatusSchema, status) || enumLabel(ModuleStatusSchema, ModuleStatus.UNSPECIFIED),
 		tone: ui.tone,
 		transitional: ui.transitional
 	};

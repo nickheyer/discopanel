@@ -25,8 +25,8 @@
 		ModuleDependency,
 		ModuleEventHook
 	} from '$lib/proto/discopanel/v1/storage_pb';
-	import { ModuleEventAction, TriggeredEventType } from '$lib/proto/discopanel/v1/storage_pb';
-	import { ModuleEventActionLabel } from '$lib/proto/enums.gen';
+	import { ModuleEventAction, ModuleEventActionSchema, TriggeredEventType } from '$lib/proto/discopanel/v1/storage_pb';
+	import { enumLabel } from '$lib/proto-meta';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import {
 		AlertTriangle,
@@ -311,7 +311,7 @@
 	];
 
 	function getEventActionLabel(a: ModuleEventAction): string {
-		return ModuleEventActionLabel[a] ?? ModuleEventActionLabel[ModuleEventAction.UNSPECIFIED];
+		return enumLabel(ModuleEventActionSchema, a) || enumLabel(ModuleEventActionSchema, ModuleEventAction.UNSPECIFIED);
 	}
 
 	async function loadServerModules() {

@@ -9,7 +9,6 @@ discopanel
 !proto/discopanel
 !docs/discopanel
 !**/app/discopanel
-web/discopanel/src/lib/proto/gnostic/
 !cmd/discopanel
 !web/discopanel
 data/
@@ -440,4 +439,11 @@ TODO.md
 agent/.gradle-home/
 agent/.gradle/
 agent/src/generated/
-.buf-image.binpb
+
+# Outputs of make gen, never committed
+proto/protogorm/
+pkg/proto/
+web/discopanel/src/lib/proto/
+internal/db/store.gen.go
+web/discopanel/static/schemav1.yaml
+docs/discopanel/public/schemav1.yaml

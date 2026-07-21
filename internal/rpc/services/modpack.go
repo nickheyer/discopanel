@@ -23,6 +23,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/transfer"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -163,7 +164,7 @@ func (s *ModpackService) GetModpackConfig(ctx context.Context, req *connect.Requ
 
 	modLoader := ""
 	if loader, ok := minecraft.ServerLoaderForModpack(modpack.Indexer); ok {
-		modLoader = loader.Name()
+		modLoader = protometa.Name(loader)
 	}
 
 	config := map[string]string{
@@ -390,7 +391,7 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 
 	// Create database entry
 	gameVersionsJSON, _ := json.Marshal([]string{manifest.Minecraft.Version})
-	modLoadersJSON, _ := json.Marshal([]string{modLoader.Name()})
+	modLoadersJSON, _ := json.Marshal([]string{protometa.Name(modLoader)})
 
 	dbModpack := &v1.IndexedModpack{
 		Id:             modpackID,
@@ -465,7 +466,7 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 		ReleaseType:      "1",      // Release
 		DownloadUrl:      destPath, // Store local path
 		GameVersions:     string(gameVersionsJSON),
-		ModLoader:        modLoader.Name(),
+		ModLoader:        protometa.Name(modLoader),
 		ServerPackFileId: nil,
 	}
 

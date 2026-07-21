@@ -233,14 +233,14 @@ check:
 	cd $(FRONTEND_DIR) && npm run check
 
 proto:
+	@echo "Materializing protogorm annotation schema..."
+	go tool protogorm -options proto
 	@echo "Generating protocol buffer code (using Docker)..."
-	$(BUF_RUN) generate
+	$(BUF_RUN) generate --exclude-path proto/protogorm
 	@echo "Generating disco-agent Java code (using Docker)..."
 	$(BUF_RUN) generate --template buf.gen.agent.yaml --path proto/discopanel/agent
 	@echo "Injecting gorm tags and generating db wrappers..."
-	$(BUF_RUN) build -o .buf-image.binpb
-	go run ./tools/gormgen -image .buf-image.binpb
-	rm -f .buf-image.binpb
+	$(BUF_RUN) build -o - | go tool protogorm -support pkg/proto -store internal/db/store.gen.go:db -inject pkg/proto
 	@echo "Proto generation complete!"
 
 proto-clean:
@@ -248,6 +248,7 @@ proto-clean:
 	rm -rf pkg/proto
 	rm -rf web/discopanel/src/lib/proto
 	rm -rf agent/src/generated/java
+	rm -rf proto/protogorm
 	@echo "Proto files cleaned!"
 
 proto-lint:

@@ -9,7 +9,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -26,6 +25,8 @@ import (
 	models "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 const (
@@ -945,48 +946,23 @@ func (c *Client) attachSelfToNetwork(ctx context.Context) {
 	c.log.Info("Attached DiscoPanel container to network %s as %s", c.config.NetworkName, PanelNetworkAlias)
 }
 
-// Builds Docker environment variables from ServerProperties struct
+// Builds Docker environment variables from ServerProperties annotations
 func buildEnvFromConfig(config *v1.ServerProperties) []string {
 	var env []string
-
-	configValue := reflect.ValueOf(config).Elem()
-	configType := configValue.Type()
-
-	for i := 0; i < configType.NumField(); i++ {
-		field := configType.Field(i)
-		envTag := field.Tag.Get("env")
-
-		// Skip fields without env tags
-		if envTag == "" || envTag == "-" {
+	m := config.ProtoReflect()
+	for _, p := range protometa.Props(m.Descriptor()) {
+		if p.Meta.Env == "" || p.Meta.Env == "-" {
 			continue
 		}
-
-		fieldValue := configValue.Field(i)
-
-		// Handle pointer types
-		if fieldValue.Kind() == reflect.Pointer {
-			// Skip if nil
-			if fieldValue.IsNil() {
-				continue
-			}
-			// Dereference the pointer
-			fieldValue = fieldValue.Elem()
+		value, set := protometa.ScalarString(m, p.Field)
+		if !set {
+			continue
 		}
-
-		// Handle different field types
-		switch fieldValue.Kind() {
-		case reflect.String:
-			if str := fieldValue.String(); str != "" {
-				env = append(env, fmt.Sprintf("%s=%s", envTag, str))
-			}
-		case reflect.Int, reflect.Int32, reflect.Int64:
-			// Include int values even when zero
-			env = append(env, fmt.Sprintf("%s=%d", envTag, fieldValue.Int()))
-		case reflect.Bool:
-			// Always include bool values when the field is explicitly set
-			env = append(env, fmt.Sprintf("%s=%v", envTag, fieldValue.Bool()))
+		// Empty strings stay out, zero numbers and bools go in
+		if value == "" && p.Field.Kind() == protoreflect.StringKind {
+			continue
 		}
+		env = append(env, fmt.Sprintf("%s=%s", p.Meta.Env, value))
 	}
-
 	return env
 }

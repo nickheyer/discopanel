@@ -25,6 +25,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/logger"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -785,9 +786,9 @@ func (s *SupportService) addSystemInfoToBundle(ctx context.Context, tarWriter *t
 		serverSummaries = append(serverSummaries, &v1.ServerSummary{
 			Id:          server.Id,
 			Name:        server.Name,
-			ModLoader:   server.ModLoader.Name(),
+			ModLoader:   protometa.Name(server.ModLoader),
 			McVersion:   server.McVersion,
-			Status:      server.Status.Name(),
+			Status:      protometa.Name(server.Status),
 			Port:        int32(server.Port),
 			Memory:      int32(server.Memory),
 			AutoStart:   server.AutoStart,

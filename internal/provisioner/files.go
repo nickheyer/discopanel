@@ -16,7 +16,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/indexers"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 )
 
 // Writes panel-managed config files and installs configured Modrinth mods
@@ -51,31 +51,17 @@ func (p *Provisioner) applyConfigFiles(ctx context.Context, server *v1.Server, c
 	return nil
 }
 
-// Merges tagged fields and custom pairs into server.properties
+// Merges annotated fields and custom pairs into server.properties
 func (p *Provisioner) writeServerProperties(server *v1.Server, cfg *v1.ServerProperties, mcVersion string) error {
 	props := minecraft.ServerProperties{}
 
-	value := reflect.ValueOf(cfg).Elem()
-	typ := value.Type()
-	for i := 0; i < typ.NumField(); i++ {
-		key := typ.Field(i).Tag.Get("prop")
-		if key == "" {
+	m := cfg.ProtoReflect()
+	for _, pr := range protometa.Props(m.Descriptor()) {
+		if pr.Meta.Prop == "" {
 			continue
 		}
-		field := value.Field(i)
-		if field.Kind() == reflect.Pointer {
-			if field.IsNil() {
-				continue
-			}
-			field = field.Elem()
-		}
-		switch field.Kind() {
-		case reflect.String:
-			props[key] = field.String()
-		case reflect.Int, reflect.Int32, reflect.Int64:
-			props[key] = fmt.Sprintf("%d", field.Int())
-		case reflect.Bool:
-			props[key] = fmt.Sprintf("%v", field.Bool())
+		if value, set := protometa.ScalarString(m, pr.Field); set {
+			props[pr.Meta.Prop] = value
 		}
 	}
 

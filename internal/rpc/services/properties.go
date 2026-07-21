@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -19,6 +17,8 @@ import (
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
+	"github.com/nickheyer/discopanel/pkg/protometa"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
 
@@ -199,101 +199,23 @@ func (s *PropertiesService) applyPropertiesToRunningServer(reqCtx context.Contex
 	}
 }
 
-// Maps updates w/ reflection
-func applyPropertyUpdates(config any, updates map[string]string) error {
-	configValue := reflect.ValueOf(config).Elem()
-	configType := configValue.Type()
-
+// Maps updates onto fields by json name
+func applyPropertyUpdates(config proto.Message, updates map[string]string) error {
+	m := config.ProtoReflect()
+	fields := m.Descriptor().Fields()
 	for key, strValue := range updates {
-		// Find the field by json tag
-		fieldIndex := -1
-		for i := 0; i < configType.NumField(); i++ {
-			field := configType.Field(i)
-			jsonTag := strings.Split(field.Tag.Get("json"), ",")[0]
-			if jsonTag == key {
-				fieldIndex = i
-				break
-			}
-		}
-
-		if fieldIndex == -1 {
-			continue // Skip unknown fields
-		}
-
-		fieldValue := configValue.Field(fieldIndex)
-		if !fieldValue.CanSet() {
+		fd := fields.ByJSONName(key)
+		if fd == nil {
 			continue
 		}
-
-		// Unset
-		if strValue == "" {
-			if fieldValue.Kind() == reflect.Pointer {
-				fieldValue.Set(reflect.Zero(fieldValue.Type()))
-				continue
-			}
-			fieldValue.Set(reflect.Zero(fieldValue.Type()))
-			continue
-		}
-
-		targetType := fieldValue.Type()
-		isPtr := targetType.Kind() == reflect.Pointer
-		if isPtr {
-			targetType = targetType.Elem()
-		}
-
-		var val reflect.Value
-
-		switch targetType.Kind() {
-		case reflect.String:
-			val = reflect.ValueOf(strValue)
-		case reflect.Bool:
-			b, err := strconv.ParseBool(strValue)
-			if err != nil {
-				return fmt.Errorf("invalid boolean for key %s: %v", key, err)
-			}
-			val = reflect.ValueOf(b)
-		case reflect.Int, reflect.Int32, reflect.Int64:
-			i, err := strconv.ParseInt(strValue, 10, 64)
-			if err != nil {
-				return fmt.Errorf("invalid integer for key %s: %v", key, err)
-			}
-			// Convert to specific int type
-			if targetType.Kind() == reflect.Int {
-				val = reflect.ValueOf(int(i))
-			} else if targetType.Kind() == reflect.Int32 {
-				val = reflect.ValueOf(int32(i))
-			} else {
-				val = reflect.ValueOf(i)
-			}
-		case reflect.Float32, reflect.Float64:
-			f, err := strconv.ParseFloat(strValue, 64)
-			if err != nil {
-				return fmt.Errorf("invalid float for key %s: %v", key, err)
-			}
-			if targetType.Kind() == reflect.Float32 {
-				val = reflect.ValueOf(float32(f))
-			} else {
-				val = reflect.ValueOf(f)
-			}
-		default:
-			// Skip complex types we don't support updating this way
-			continue
-		}
-
-		if isPtr {
-			// New pointer and set value
-			ptr := reflect.New(targetType)
-			ptr.Elem().Set(val)
-			fieldValue.Set(ptr)
-		} else {
-			fieldValue.Set(val)
+		if err := protometa.SetScalarString(m, fd, strValue); err != nil {
+			return fmt.Errorf("invalid value for key %s: %v", key, err)
 		}
 	}
-
 	return nil
 }
 
-// Category slugs on struct tags mapped to display order
+// Category slugs on prop annotations mapped to display order
 var propertyCategorySlugs = []struct {
 	Slug string
 	Name string
@@ -324,100 +246,65 @@ func propertyCategoryIndex(slug string) int {
 }
 
 // Reads one settings field by its property key
-func propertyValueByKey(config any, key string) string {
-	configValue := reflect.ValueOf(config).Elem()
-	configType := configValue.Type()
-	for i := 0; i < configType.NumField(); i++ {
-		if strings.Split(configType.Field(i).Tag.Get("json"), ",")[0] != key {
-			continue
-		}
-		fieldValue := configValue.Field(i)
-		if fieldValue.Kind() == reflect.Pointer {
-			if fieldValue.IsNil() {
-				return ""
-			}
-			fieldValue = fieldValue.Elem()
-		}
-		return fmt.Sprintf("%v", fieldValue.Interface())
+func propertyValueByKey(config proto.Message, key string) string {
+	m := config.ProtoReflect()
+	fd := m.Descriptor().Fields().ByJSONName(key)
+	if fd == nil {
+		return ""
 	}
-	return ""
+	value, _ := protometa.ScalarString(m, fd)
+	return value
 }
 
-func buildPropertyCategories(config any) ([]*v1.PropertyCategory, error) {
+func buildPropertyCategories(config proto.Message) ([]*v1.PropertyCategory, error) {
 	categories := make([]*v1.PropertyCategory, 0, len(propertyCategorySlugs))
 	for _, c := range propertyCategorySlugs {
 		categories = append(categories, &v1.PropertyCategory{Name: c.Name, Properties: []*v1.ServerProperty{}})
 	}
 
-	configValue := reflect.ValueOf(config).Elem()
-	configType := configValue.Type()
-
-	for i := 0; i < configType.NumField(); i++ {
-		field := configType.Field(i)
-		jsonTag := strings.Split(field.Tag.Get("json"), ",")[0]
-		if jsonTag == "" || jsonTag == "-" || jsonTag == "id" || jsonTag == "server_id" || jsonTag == "updated_at" {
+	m := config.ProtoReflect()
+	for _, p := range protometa.Props(m.Descriptor()) {
+		categoryIndex := propertyCategoryIndex(p.Meta.Category)
+		if categoryIndex < 0 {
 			continue
 		}
 
-		// Metadata tags
-		envTag := field.Tag.Get("env")
-		if envTag == "" {
-			// Falls back to prop tag for display
-			envTag = field.Tag.Get("prop")
-		}
-		defaultTag := field.Tag.Get("default")
-		descTag := field.Tag.Get("desc")
-		inputTag := field.Tag.Get("input")
-		requiredTag := field.Tag.Get("required")
-		labelTag := field.Tag.Get("label")
-		systemTag := field.Tag.Get("system")
-		ephemeralTag := field.Tag.Get("ephemeral")
+		key := p.Field.JSONName()
+		value, _ := protometa.ScalarString(m, p.Field)
 
-		fieldValue := configValue.Field(i)
-		var strValue string
-		if fieldValue.Kind() == reflect.Pointer {
-			if fieldValue.IsNil() {
-				// Explicitly nil/unset
-				strValue = ""
-			} else {
-				// Dereference and stringify
-				strValue = fmt.Sprintf("%v", fieldValue.Elem().Interface())
-			}
-		} else {
-			// Stringify direct value
-			strValue = fmt.Sprintf("%v", fieldValue.Interface())
+		env := p.Meta.Env
+		if env == "" {
+			// Falls back to prop key for display
+			env = p.Meta.Prop
 		}
-
-		label := labelTag
+		label := p.Meta.Label
 		if label == "" {
-			label = jsonTag
+			label = key
 		}
 
 		prop := &v1.ServerProperty{
-			Key:         jsonTag,
+			Key:         key,
 			Label:       label,
-			Value:       strValue,
-			Type:        inputTag,
-			Description: descTag,
-			Required:    requiredTag == "true",
-			System:      systemTag == "true",
-			Ephemeral:   ephemeralTag == "true",
-			EnvVar:      envTag,
+			Value:       value,
+			Type:        p.Meta.Input,
+			Description: p.Meta.Desc,
+			Required:    p.Meta.Required,
+			System:      p.Meta.System,
+			Ephemeral:   p.Meta.Ephemeral,
+			EnvVar:      env,
 		}
 
-		// Only set default when tag specifies one
-		if defaultTag != "" {
-			prop.DefaultValue = &defaultTag
+		// Only set default when annotation specifies one
+		if p.Meta.DefaultValue != "" {
+			def := p.Meta.DefaultValue
+			prop.DefaultValue = &def
 		}
 
-		if inputTag == "select" {
-			prop.Options = getSelectOptions(jsonTag)
+		if p.Meta.Input == "select" {
+			prop.Options = getSelectOptions(key)
 		}
 
-		categoryIndex := propertyCategoryIndex(field.Tag.Get("category"))
-		if categoryIndex >= 0 {
-			categories[categoryIndex].Properties = append(categories[categoryIndex].Properties, prop)
-		}
+		categories[categoryIndex].Properties = append(categories[categoryIndex].Properties, prop)
 	}
 
 	// Filter empty

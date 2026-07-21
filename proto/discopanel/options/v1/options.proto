@@ -6,66 +6,6 @@ import "google/protobuf/descriptor.proto";
 
 option go_package = "github.com/nickheyer/discopanel/pkg/proto/discopanel/options/v1;optionsv1";
 
-// Marks a message as backed by a database table
-message DbModel {
-  string table = 1; // Table name
-  string order_by = 2; // Default list ordering
-  repeated string skip = 3; // Suppressed default methods
-  repeated DbQuery queries = 4; // Extra generated queries
-  repeated DbCascade cascades = 5; // Children removed inside delete
-  repeated DbGuard guards = 6; // References blocking delete
-  bool upsert = 7; // Emit conflict safe upsert method
-}
-
-// One generated query beyond the defaults
-message DbQuery {
-  string name = 1; // Method suffix appended to model name
-  QueryKind kind = 2;
-  string where = 3; // Sql predicate with placeholders
-  repeated string params = 4; // Go params as name space type
-  string order_by = 5;
-  bool not_found_nil = 6; // Missing row returns nil without error
-  bool paginate = 7; // Adds offset limit and count
-  repeated string preload = 8; // Relations loaded with rows
-  int32 limit = 9; // Fixed row cap when positive
-  string set = 10; // Sql set fragment for update kind
-  bool require_row = 11; // Error when nothing matched
-  bool limit_arg = 12; // Method takes a row cap, zero means all
-}
-
-// Query result shapes
-enum QueryKind {
-  QUERY_KIND_UNSPECIFIED = 0;
-  QUERY_KIND_GET = 1;
-  QUERY_KIND_LIST = 2;
-  QUERY_KIND_DELETE = 3;
-  QUERY_KIND_EXISTS = 4;
-  QUERY_KIND_COUNT = 5;
-  QUERY_KIND_UPDATE = 6;
-}
-
-// One child table cleared when a row dies
-message DbCascade {
-  string model = 1; // Child message name
-  string fk = 2; // Child column referencing this row
-  string key = 3; // Parent column supplying the value, default pk
-}
-
-// One reference that blocks deletion
-message DbGuard {
-  string model = 1; // Referencing message name
-  string fk = 2; // Column pointing at this row
-}
-
-// Column settings for one persisted field
-// Fields typed as another table's message become relations,
-// the foreign key defaults to the field name plus id
-message DbField {
-  string tag = 1; // Gorm tag fragments appended to the computed column
-  bool skip = 2; // Runtime only field, never a column
-  bool redact = 3; // Secret value, json dash and cleared by Redact
-}
-
 // Display metadata for one enum
 message EnumType {
   string label = 1; // Human name for the enum itself
@@ -92,10 +32,6 @@ message PropField {
   bool ephemeral = 10; // Cleared after server start
 }
 
-extend google.protobuf.MessageOptions {
-  DbModel db_model = 58101;
-}
-
 extend google.protobuf.EnumOptions {
   EnumType enum_type = 58101;
 }
@@ -105,6 +41,5 @@ extend google.protobuf.EnumValueOptions {
 }
 
 extend google.protobuf.FieldOptions {
-  DbField db = 58101;
   PropField prop = 58102;
 }

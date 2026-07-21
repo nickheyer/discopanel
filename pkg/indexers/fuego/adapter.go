@@ -10,6 +10,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/indexers"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/utils"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -253,7 +254,7 @@ func (f *FuegoIndexer) GetModpackFiles(ctx context.Context, modpackID string, ga
 		// Extract primary mod loader w/ best effort score matching
 		fileLoader := ""
 		if loader, ok := minecraft.DetectModpackLoader(file.GameVersions...); ok {
-			fileLoader = loader.Name()
+			fileLoader = protometa.Name(loader)
 		}
 
 		serverPackID := ""

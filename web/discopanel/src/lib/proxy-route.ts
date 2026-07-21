@@ -1,16 +1,16 @@
-import { ProxyRouteState, type ProxyRoute } from '$lib/proto/discopanel/v1/proxy_pb';
-import { ProxyRouteStateLabel } from '$lib/proto/enums.gen';
+import { ProxyRouteState, ProxyRouteStateSchema, type ProxyRoute } from '$lib/proto/discopanel/v1/proxy_pb';
+import { enumLabel } from '$lib/proto-meta';
 import { formatBytes } from '$lib/utils';
 
 // Human label for a route's serving state
 export function routeStateLabel(route: ProxyRoute): string {
 	switch (route.state) {
 		case ProxyRouteState.STARTING:
-			return ProxyRouteStateLabel[ProxyRouteState.STARTING];
+			return enumLabel(ProxyRouteStateSchema, ProxyRouteState.STARTING);
 		case ProxyRouteState.OFFLINE:
-			return route.wakeable ? 'Wakes on join' : ProxyRouteStateLabel[ProxyRouteState.OFFLINE];
+			return route.wakeable ? 'Wakes on join' : enumLabel(ProxyRouteStateSchema, ProxyRouteState.OFFLINE);
 		default:
-			return route.active ? ProxyRouteStateLabel[ProxyRouteState.ONLINE] : 'Inactive';
+			return route.active ? enumLabel(ProxyRouteStateSchema, ProxyRouteState.ONLINE) : 'Inactive';
 	}
 }
 

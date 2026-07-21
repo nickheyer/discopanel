@@ -4,48 +4,383 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="15">
-<title>DiscoPanel Doctor</title>
+<title>DiscoPanel-Doctor</title>
 <style>
-  :root { color-scheme: dark; }
-  body { margin: 0; font-family: ui-monospace, monospace; background: #0d1117; color: #e6edf3; }
-  header { padding: 16px 24px; border-bottom: 1px solid #21262d; display: flex; align-items: baseline; gap: 12px; }
-  h1 { font-size: 18px; margin: 0; }
-  .ver { color: #7d8590; font-size: 12px; }
-  main { padding: 24px; max-width: 960px; margin: 0 auto; }
-  .err { background: #3d1d1f; border: 1px solid #f85149; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #21262d; vertical-align: top; }
-  th { color: #7d8590; font-weight: 600; font-size: 12px; text-transform: uppercase; }
-  .up { color: #3fb950; }
-  .down { color: #f85149; }
-  .muted { color: #7d8590; }
-  .pill { display: inline-block; background: #21262d; border-radius: 10px; padding: 1px 8px; margin: 1px 2px; font-size: 12px; }
-  .log { background: #010409; border: 1px solid #21262d; border-radius: 6px; padding: 12px 14px; font-size: 12px; line-height: 1.6; max-height: 320px; overflow-y: auto; white-space: pre-wrap; }
+  :root {
+    color-scheme: light dark;
+    --bg: oklch(0.89 0.006 106);
+    --fg: oklch(0.2 0.012 106);
+    --card: oklch(0.86 0.006 106);
+    --muted: oklch(0.82 0.008 106);
+    --muted-fg: oklch(0.4 0.012 106);
+    --border: oklch(0.76 0.008 106);
+    --primary: oklch(0.5 0.21 293);
+    --ok: oklch(0.55 0.17 150);
+    --busy: oklch(0.62 0.14 80);
+    --warn: oklch(0.6 0.18 45);
+    --danger: oklch(0.55 0.21 25);
+    --sleep: oklch(0.53 0.16 275);
+    --idle: oklch(0.55 0.015 286);
+    --terminal: oklch(0.8 0.005 106);
+    --terminal-fg: oklch(0.26 0.012 106);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: oklch(0.155 0.014 285);
+      --fg: oklch(0.965 0.005 286);
+      --card: oklch(0.19 0.016 286);
+      --muted: oklch(0.245 0.018 287);
+      --muted-fg: oklch(0.71 0.018 286);
+      --border: oklch(1 0 0 / 9%);
+      --primary: oklch(0.65 0.19 293);
+      --ok: oklch(0.74 0.17 155);
+      --busy: oklch(0.8 0.14 80);
+      --warn: oklch(0.73 0.16 50);
+      --danger: oklch(0.66 0.2 25);
+      --sleep: oklch(0.7 0.13 275);
+      --idle: oklch(0.62 0.015 286);
+      --terminal: oklch(0.125 0.01 285);
+      --terminal-fg: oklch(0.87 0.005 286);
+    }
+  }
+
+  @font-face {
+    font-family: 'Inter Variable';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url('/assets/inter.woff2') format('woff2-variations');
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    background-color: var(--bg);
+    background-image: radial-gradient(70rem 32rem at 50% -8rem, color-mix(in oklab, var(--primary) 9%, transparent), transparent 70%);
+    background-repeat: no-repeat;
+    color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Menlo, monospace; }
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    backdrop-filter: blur(8px);
+  }
+  .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .logo { width: 24px; height: 24px; flex-shrink: 0; }
+  .logo .pins { opacity: 0.45; }
+  .logo .chip { fill: oklch(0.22 0.03 291); }
+  @media (prefers-color-scheme: dark) {
+    .logo .chip { stroke: oklch(1 0 0 / 0.22); stroke-width: 0.75; }
+  }
+  .brand h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.025em; white-space: nowrap; }
+  .ver {
+    font-size: 11px;
+    color: var(--muted-fg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 1px 8px;
+  }
+  .head-meta { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-fg); }
+
+  main { max-width: 1080px; margin: 0 auto; padding: 20px 20px 40px; }
+
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid color-mix(in oklab, var(--danger) 35%, transparent);
+    background: color-mix(in oklab, var(--danger) 10%, transparent);
+    color: var(--danger);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat {
+    border: 1px solid var(--border);
+    background: var(--card);
+    border-radius: 12px;
+    padding: 12px 16px;
+  }
+  .stat .label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted-fg);
+  }
+  .stat .value { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+  .stat .value.accent-warn { color: var(--warn); }
+  .stat .value.accent-ok { color: var(--ok); }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted-fg);
+    margin: 20px 2px 10px;
+  }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+  .card {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    background: var(--card);
+    border-radius: 12px;
+    padding: 14px 16px;
+    min-width: 0;
+  }
+  .card.parked { opacity: 0.6; }
+  .card-head { display: flex; align-items: center; gap: 8px; }
+  .card-head .name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .dot { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; background: var(--idle); }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 6px color-mix(in oklab, var(--ok) 55%, transparent); }
+  .dot.danger { background: var(--danger); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    color: var(--muted-fg);
+    white-space: nowrap;
+  }
+  .pill.t-primary { border-color: color-mix(in oklab, var(--primary) 25%, transparent); background: color-mix(in oklab, var(--primary) 10%, transparent); color: var(--primary); }
+  .pill.t-ok { border-color: color-mix(in oklab, var(--ok) 25%, transparent); background: color-mix(in oklab, var(--ok) 10%, transparent); color: var(--ok); }
+  .pill.t-busy { border-color: color-mix(in oklab, var(--busy) 30%, transparent); background: color-mix(in oklab, var(--busy) 12%, transparent); color: var(--busy); }
+  .pill.t-warn { border-color: color-mix(in oklab, var(--warn) 25%, transparent); background: color-mix(in oklab, var(--warn) 10%, transparent); color: var(--warn); }
+  .pill.t-danger { border-color: color-mix(in oklab, var(--danger) 25%, transparent); background: color-mix(in oklab, var(--danger) 10%, transparent); color: var(--danger); }
+
+  .incident {
+    margin-top: 12px;
+    border: 1px solid color-mix(in oklab, var(--busy) 25%, transparent);
+    background: color-mix(in oklab, var(--busy) 6%, transparent);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .incident.closed-ok { border-color: color-mix(in oklab, var(--ok) 25%, transparent); background: color-mix(in oklab, var(--ok) 6%, transparent); }
+  .incident.closed-bad { border-color: color-mix(in oklab, var(--danger) 25%, transparent); background: color-mix(in oklab, var(--danger) 6%, transparent); }
+  .incident-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+  .incident-head .age { margin-left: auto; font-weight: 400; color: var(--muted-fg); }
+  .track { height: 5px; border-radius: 999px; background: color-mix(in oklab, var(--fg) 10%, transparent); margin: 8px 0 6px; overflow: hidden; }
+  .track .fill { height: 100%; border-radius: 999px; background: var(--busy); }
+  .cause { font-size: 12px; color: var(--muted-fg); margin-top: 4px; }
+
+  .actions { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .actions li { display: flex; align-items: baseline; gap: 6px; font-size: 12px; min-width: 0; flex-wrap: wrap; }
+  .actions .verb { font-weight: 600; white-space: nowrap; }
+  .actions .file { font-size: 11.5px; overflow-wrap: anywhere; }
+  .actions .why { color: var(--muted-fg); }
+  .actions .ev {
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted-fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+  .actions li.reverted { opacity: 0.55; }
+  .actions li.reverted .file { text-decoration: line-through; }
+
+  .findings { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+  .finding { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+  .finding .fdot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; }
+  .finding.f-ok .fdot { background: var(--ok); }
+  .finding.f-info .fdot { background: var(--sleep); }
+  .finding.f-warning .fdot { background: var(--warn); }
+  .finding.f-critical .fdot { background: var(--danger); }
+  .finding .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .finding.f-ok .title { color: var(--muted-fg); }
+
+  .held { margin-top: 12px; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+  .held .label { font-size: 11px; color: var(--muted-fg); }
+  .held .file {
+    font-size: 11px;
+    background: color-mix(in oklab, var(--fg) 7%, transparent);
+    border-radius: 6px;
+    padding: 1px 6px;
+    overflow-wrap: anywhere;
+  }
+
+  .card-foot { margin-top: auto; padding-top: 12px; font-size: 11.5px; color: var(--muted-fg); display: flex; gap: 8px; align-items: center; }
+  .card-foot .exits { color: var(--warn); }
+
+  .empty {
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: 36px 20px;
+    text-align: center;
+    color: var(--muted-fg);
+    font-size: 13px;
+  }
+
+  .log {
+    background: var(--terminal);
+    color: var(--terminal-fg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 12px;
+    line-height: 1.7;
+    max-height: 320px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  footer { max-width: 1080px; margin: 0 auto; padding: 0 20px 24px; font-size: 11.5px; color: var(--muted-fg); }
 </style>
 </head>
 <body>
 <header>
-  <h1>DiscoPanel Doctor</h1>
-  <span class="ver">{{.Version}}</span>
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" class="logo" aria-hidden="true">
+      <defs>
+        <pattern id="disco-grass" x="8" y="8" width="4" height="4" patternUnits="userSpaceOnUse">
+          <path fill="#5a5" d="M0 0h4v4H0z" />
+          <path fill="#3c7f3c" d="M0 0h2v2H0z" />
+          <path fill="#8b5e3c" d="M2 2h2v2H2z" />
+        </pattern>
+      </defs>
+      <path class="pins" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="m 12,20 v 2 M 12,2 v 2 m 5,16 v 2 M 17,2 V 4 M 2,12 H 4 M 2,17 H 4 M 2,7 h 2 m 16,5 h 2 m -2,5 h 2 M 20,7 h 2 M 7,20 v 2 M 7,2 v 2" />
+      <rect class="chip" x="4" y="4" width="16" height="16" rx="3" />
+      <rect x="8" y="8" width="8" height="8" rx="1" fill="url(#disco-grass)" />
+    </svg>
+    <h1>DiscoPanel-Doctor</h1>
+    <span class="ver mono">{{.Version}}</span>
+  </div>
+  <div class="head-meta">
+    <span class="pill {{if eq .Mode "observe"}}t-busy{{else}}t-primary{{end}}">{{.Mode}}</span>
+    <span class="pill mono">every {{.Poll}}</span>
+    {{if .Sweep}}<span>swept {{.Sweep}}</span>{{end}}
+  </div>
 </header>
 <main>
-  {{if .Error}}<div class="err">panel unreachable: {{.Error}}</div>{{end}}
-  <table>
-    <tr><th>Server</th><th>State</th><th>Incident</th><th>Last outcome</th><th>Held out</th></tr>
+  {{if .Error}}
+  <div class="banner">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+    Panel unreachable: {{.Error}}
+  </div>
+  {{end}}
+
+  <div class="stats">
+    <div class="stat"><div class="label">Watching</div><div class="value tabular">{{.Watching}}</div></div>
+    <div class="stat"><div class="label">Running</div><div class="value tabular {{if .Running}}accent-ok{{end}}">{{.Running}}</div></div>
+    <div class="stat"><div class="label">Open incidents</div><div class="value tabular {{if .Incidents}}accent-warn{{end}}">{{.Incidents}}</div></div>
+    <div class="stat"><div class="label">Held out</div><div class="value tabular">{{.Held}}</div></div>
+  </div>
+
+  <div class="section-label">Servers</div>
+  {{if .Rows}}
+  <div class="grid">
     {{range .Rows}}
-    <tr>
-      <td>{{.Name}}</td>
-      <td>{{if .Running}}<span class="up">running</span>{{else}}<span class="down">down</span>{{end}}{{if .Exits}} <span class="muted">({{.Exits}} recent exits)</span>{{end}}</td>
-      <td>{{if .Incident}}{{.Incident}}{{else}}<span class="muted">none</span>{{end}}</td>
-      <td>{{if .Resolved}}{{.Resolved}}{{else}}<span class="muted">-</span>{{end}}</td>
-      <td>{{range .Excludes}}<span class="pill">{{.}}</span>{{else}}<span class="muted">-</span>{{end}}</td>
-    </tr>
-    {{else}}
-    <tr><td colspan="5" class="muted">no servers discovered yet</td></tr>
+    <div class="card{{if not .Enabled}} parked{{end}}">
+      <div class="card-head">
+        <span class="dot {{if .Running}}ok{{else if .Incident}}danger{{end}}"></span>
+        <span class="name">{{.Name}}</span>
+        <span style="margin-left:auto"></span>
+        {{if not .Enabled}}
+        <span class="pill">off</span>
+        {{else if eq .Mode "observe"}}
+        <span class="pill t-busy">observe</span>
+        {{else}}
+        <span class="pill t-primary">repair</span>
+        {{end}}
+      </div>
+
+      {{with .Incident}}
+      <div class="incident">
+        <div class="incident-head">
+          Repairing · pass {{.Passes}} of {{.Max}}
+          {{if .Age}}<span class="age">{{.Age}}</span>{{end}}
+        </div>
+        <div class="track"><div class="fill" style="width: {{.PassPct}}%"></div></div>
+        {{if .Cause}}<div class="cause">{{.Cause}}</div>{{end}}
+        {{if .Actions}}
+        <ul class="actions">
+          {{range .Actions}}
+          <li{{if .Reverted}} class="reverted"{{end}}>
+            <span class="verb">{{.Kind}}</span>
+            <span class="file mono">{{.File}}</span>
+            {{if .Reason}}<span class="why">{{.Reason}}</span>{{end}}
+            {{if .Evidence}}<span class="ev">{{.Evidence}}</span>{{end}}
+            {{if .Reverted}}<span class="ev">reverted</span>{{end}}
+          </li>
+          {{end}}
+        </ul>
+        {{end}}
+      </div>
+      {{end}}
+
+      {{with .Resolved}}
+      <div class="incident {{if eq .Outcome "repaired"}}closed-ok{{else}}closed-bad{{end}}">
+        <div class="incident-head">
+          {{if eq .Outcome "repaired"}}
+          <span class="pill t-ok">repaired</span>
+          {{else}}
+          <span class="pill t-danger">gave up</span>
+          {{end}}
+          {{if .Age}}<span class="age">{{.Age}}</span>{{end}}
+        </div>
+        {{if .Summary}}<div class="cause">{{.Summary}}</div>{{end}}
+      </div>
+      {{end}}
+
+      {{if .Findings}}
+      <div class="findings">
+        {{range .Findings}}
+        <div class="finding f-{{.Severity}}"><span class="fdot"></span><span class="title">{{.Title}}</span></div>
+        {{end}}
+      </div>
+      {{end}}
+
+      {{if .Excludes}}
+      <div class="held">
+        <span class="label">Held out</span>
+        {{range .Excludes}}<span class="file mono">{{.}}</span>{{end}}
+      </div>
+      {{end}}
+
+      <div class="card-foot">
+        {{if .Running}}<span>running</span>{{else}}<span>down</span>{{end}}
+        {{if .Exits}}<span class="exits tabular">{{.Exits}} recent exits</span>{{end}}
+      </div>
+    </div>
     {{end}}
-  </table>
-  <div class="log">{{range .Logs}}{{.}}
-{{else}}quiet so far{{end}}</div>
+  </div>
+  {{else}}
+  <div class="empty">No servers discovered yet. The doctor sweeps the panel every {{.Poll}}.</div>
+  {{end}}
+
+  <div class="section-label">Activity</div>
+  <div class="log mono">{{range .Logs}}{{.}}
+{{else}}Quiet so far.{{end}}</div>
 </main>
+<footer>DiscoPanel-Doctor {{.Version}} · this page refreshes automatically</footer>
 </body>
 </html>

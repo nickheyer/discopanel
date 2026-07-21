@@ -114,7 +114,7 @@ func (e *engine) planVerdicts(srv *serverInfo, failed []*agentv1.FailedMod, meta
 					}
 					break
 				}
-				if !resolved && e.installer != nil {
+				if !resolved && e.installer != nil && srv.InstallDeps {
 					a := &v1.DoctorAction{Kind: v1.DoctorActionKind_DOCTOR_ACTION_KIND_INSTALL, ModId: dep.DepID, Range: dep.Range, Dialect: depDialect(metas, dep), Evidence: v1.DoctorEvidence_DOCTOR_EVIDENCE_SOLVER}
 					if !runtimespec.HasTried(inc, runtimespec.ActionKey(a)) {
 						add(a)

@@ -26,9 +26,7 @@ func reserveMB(containerMB int) int {
 const maxPreflightEvidence = 8
 
 // Computes and publishes this server's findings for the panel
-func (d *doctor) publishFindings(ctx context.Context, srv *serverInfo, server *v1.Server) {
-	props := d.panel.serverProperties(ctx, srv.ID)
-
+func (d *doctor) publishFindings(ctx context.Context, srv *serverInfo, server *v1.Server, props map[string]string) {
 	var findings []*v1.PerformanceFinding
 	findings = append(findings, checkHeapVsLimit(server, props)...)
 	findings = append(findings, checkFlagConflict(props)...)
@@ -45,7 +43,21 @@ func (d *doctor) publishFindings(ctx context.Context, srv *serverInfo, server *v
 		})
 	}
 
-	// Unchanged findings skip the write, mtime stays honest
+	d.writeFindings(srv, findings)
+}
+
+// Tells the panel the doctor is off for this server
+func (d *doctor) publishParked(srv *serverInfo) {
+	d.writeFindings(srv, []*v1.PerformanceFinding{{
+		Id:       "doctor_off",
+		Severity: v1.PerformanceSeverity_PERFORMANCE_SEVERITY_INFO,
+		Title:    "Doctor is off for this server",
+		Detail:   "Doctor Enabled is unchecked in this server's properties, so crashes here are neither watched nor repaired.",
+	}})
+}
+
+// Unchanged findings skip the write, mtime stays honest
+func (d *doctor) writeFindings(srv *serverInfo, findings []*v1.PerformanceFinding) {
 	prev := runtimespec.ReadFindings(srv.DataPath)
 	if slices.EqualFunc(findings, prev, func(a, b *v1.PerformanceFinding) bool { return proto.Equal(a, b) }) {
 		return

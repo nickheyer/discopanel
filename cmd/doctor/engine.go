@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -35,13 +33,14 @@ func disableBudget(installed int) int {
 
 // One server the doctor watches, facts from the panel API
 type serverInfo struct {
-	ID        string
-	Name      string
-	DataPath  string // Local path inside this container
-	ModLoader v1.ModLoader
-	McVersion string
-	Running   bool
-	Stopped   bool // Panel intent, wanted stops stay stopped
+	ID          string
+	Name        string
+	DataPath    string // Local path inside this container
+	ModLoader   v1.ModLoader
+	McVersion   string
+	Running     bool
+	Stopped     bool // Panel intent, wanted stops stay stopped
+	InstallDeps bool // Settings allow dependency downloads here
 }
 
 // Acts on servers through the panel API
@@ -316,7 +315,7 @@ func (e *engine) apply(ctx context.Context, srv *serverInfo, modsDir string, a *
 		}
 		e.logf("%s: disabled data pack %s (%s)", srv.Name, a.File, a.Reason)
 	case v1.DoctorActionKind_DOCTOR_ACTION_KIND_INSTALL:
-		if e.installer == nil {
+		if e.installer == nil || !srv.InstallDeps {
 			return false
 		}
 		file, err := e.installer.Install(ctx, srv, modsDir, a.ModId, a.Range, a.Dialect)
@@ -455,10 +454,3 @@ func classifyFailedMod(fm *agentv1.FailedMod) v1.FailedModClass {
 	return v1.FailedModClass_FAILED_MOD_CLASS_MOD_ERROR
 }
 
-// Human summary of the incident for the status page
-func incidentLine(inc *v1.DoctorIncident) string {
-	if inc == nil {
-		return ""
-	}
-	return fmt.Sprintf("pass %s of %s, %s", strconv.Itoa(int(inc.Passes)), strconv.Itoa(maxDoctorPasses), summarizeIncident(inc))
-}

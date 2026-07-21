@@ -1852,6 +1852,10 @@ message ServerProperties {
         label: "Auto-Stop"
       },
       {
+        slug: "doctor"
+        label: "Doctor"
+      },
+      {
         slug: "curseforge"
         label: "CurseForge"
       },
@@ -2926,5 +2930,30 @@ message ServerProperties {
       "beta",
       "alpha"
     ]
+  }];
+  optional bool doctor_enabled = 136 [(discopanel.options.v1.prop) = {
+    default_value: "true"
+    desc: "Let the doctor watch this server and publish health findings"
+    input: "checkbox"
+    label: "Doctor Enabled"
+    category: "doctor"
+  }];
+  optional string doctor_mode = 137 [(discopanel.options.v1.prop) = {
+    default_value: "repair"
+    desc: "Repair crashes with reversible mod changes, or observe and report only"
+    input: "select"
+    label: "Doctor Mode"
+    category: "doctor"
+    options: [
+      "repair",
+      "observe"
+    ]
+  }];
+  optional bool doctor_install_deps = 138 [(discopanel.options.v1.prop) = {
+    default_value: "true"
+    desc: "Allow the doctor to download missing mod dependencies from indexers"
+    input: "checkbox"
+    label: "Install Missing Dependencies"
+    category: "doctor"
   }];
 }

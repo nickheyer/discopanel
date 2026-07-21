@@ -21,7 +21,8 @@
 		Cpu,
 		Server,
 		Package,
-		ExternalLink
+		ExternalLink,
+		ShieldCheck
 	} from '@lucide/svelte';
 	import ModuleDialog from '$lib/components/server/ModuleDialog.svelte';
 	import ModuleLogsDialog from '$lib/components/server/ModuleLogsDialog.svelte';
@@ -49,6 +50,11 @@
 	// Feeds the logs dialog fresh status from polling
 	let liveSelectedModule = $derived(
 		modules.find((m) => m.id === selectedModule?.id) ?? selectedModule
+	);
+
+	// Panel-owned globals lead the grid
+	let sortedModules = $derived(
+		[...modules].sort((a, b) => Number(Boolean(a.serverId)) - Number(Boolean(b.serverId)))
 	);
 
 	let hasLoaded = $state(false);
@@ -220,16 +226,29 @@
 		</div>
 	{:else}
 		<div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-			{#each modules as module (module.id)}
+			{#each sortedModules as module (module.id)}
 				{@const busy = actionLoading === module.id}
 				{@const meta = moduleStatusMeta(module.status)}
+				{@const isSystem = !module.serverId}
 				<div
-					class="group flex flex-col rounded-lg border bg-card p-4 transition-colors hover:border-primary/20"
+					class={cn(
+						'group flex flex-col rounded-lg border bg-card p-4 transition-colors hover:border-primary/20',
+						isSystem && 'border-primary/25 bg-primary/[0.03]'
+					)}
 				>
 					<div class="flex items-start justify-between gap-2">
 						<div class="min-w-0 flex-1">
 							<div class="flex items-center gap-2">
 								<h3 class="truncate text-sm font-medium">{module.name}</h3>
+								{#if isSystem}
+									<span
+										class="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+										title="Managed by DiscoPanel, runs for the whole panel"
+									>
+										<ShieldCheck class="size-3" />
+										System
+									</span>
+								{/if}
 								<span
 									class={cn(
 										'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium',
@@ -248,8 +267,13 @@
 							</div>
 							<div class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
 								<span class="flex min-w-0 items-center gap-1">
-									<Server class="size-3 shrink-0" />
-									<span class="truncate">{module.serverName || module.serverId || 'Global'}</span>
+									{#if isSystem}
+										<ShieldCheck class="size-3 shrink-0" />
+										<span class="truncate">All servers</span>
+									{:else}
+										<Server class="size-3 shrink-0" />
+										<span class="truncate">{module.serverName || module.serverId}</span>
+									{/if}
 								</span>
 								<span>·</span>
 								<span class="truncate">{module.templateName}</span>

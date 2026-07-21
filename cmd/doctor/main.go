@@ -32,8 +32,8 @@ func main() {
 	mountDir := env("DOCTOR_DATA_MOUNT", "/data")
 	poll := envDuration("POLL_INTERVAL", 15*time.Second)
 	port := envInt("PORT", 8190)
-	repair := env("DOCTOR_MODE", "repair") == "repair"
-	installDeps := env("DOCTOR_INSTALL_DEPS", "on") != "off"
+	defMode := env("DOCTOR_MODE", "repair")
+	defInstall := env("DOCTOR_INSTALL_DEPS", "on") != "off"
 
 	if apiToken == "" {
 		fmt.Fprintln(os.Stderr, "DISCOPANEL_API_TOKEN required")
@@ -45,7 +45,7 @@ func main() {
 	}
 
 	fmt.Printf("DiscoPanel Doctor %s: api=%s data=%s poll=%s mode=%s\n",
-		doctorVersion, apiURL, hostDataDir, poll, env("DOCTOR_MODE", "repair"))
+		doctorVersion, apiURL, hostDataDir, poll, defMode)
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	opts := []connect.ClientOption{connect.WithInterceptors(authInterceptor(apiToken))}
@@ -59,16 +59,16 @@ func main() {
 		hostDataDir: filepath.Clean(hostDataDir),
 		mountDir:    filepath.Clean(mountDir),
 		poll:        poll,
-		repair:      repair,
+		defMode:     defMode,
+		defInstall:  defInstall,
 	}
-	d.engine = &engine{panel: panel, logf: d.logf}
-	if repair && installDeps {
-		d.engine.installer = newDepInstaller("discopanel-doctor/"+doctorVersion, panel)
-	}
+	// Settings gate installs per server, installer stays ready
+	d.engine = &engine{panel: panel, logf: d.logf, installer: newDepInstaller("discopanel-doctor/"+doctorVersion, panel)}
 
 	go d.loop()
 
 	http.HandleFunc("/", d.handleIndex)
+	http.HandleFunc("/assets/inter.woff2", handleFont)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, `{"status":"ok"}`)
@@ -88,12 +88,47 @@ type doctor struct {
 	hostDataDir string
 	mountDir    string
 	poll        time.Duration
-	repair      bool
+	defMode     string
+	defInstall  bool
 
-	mu      sync.RWMutex
-	rows    []statusRow
-	lastErr error
-	logs    []string
+	mu        sync.RWMutex
+	rows      []statusRow
+	lastErr   error
+	lastSweep time.Time
+	logs      []string
+}
+
+// Doctor behavior for one server, settings win over env
+type doctorPrefs struct {
+	Enabled     bool
+	Repair      bool
+	InstallDeps bool
+	Mode        string
+}
+
+// Resolves prefs from server props, global settings, env
+func (d *doctor) resolvePrefs(props, global map[string]string) doctorPrefs {
+	mode := firstNonEmpty(props["doctorMode"], global["doctorMode"], d.defMode)
+	enabled := firstNonEmpty(props["doctorEnabled"], global["doctorEnabled"]) != "false"
+	install := d.defInstall
+	if v := firstNonEmpty(props["doctorInstallDeps"], global["doctorInstallDeps"]); v != "" {
+		install = v == "true"
+	}
+	return doctorPrefs{
+		Enabled:     enabled,
+		Repair:      mode != "observe",
+		InstallDeps: install,
+		Mode:        mode,
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (d *doctor) logf(format string, args ...any) {
@@ -127,22 +162,31 @@ func (d *doctor) cycle() {
 		return
 	}
 
+	global := d.panel.globalProperties(ctx)
 	var rows []statusRow
 	for _, s := range resp.Msg.GetServers() {
 		srv := d.toInfo(s)
 		if srv == nil {
 			continue
 		}
-		if d.repair {
-			d.engine.checkServer(ctx, srv)
+		props := d.panel.serverProperties(ctx, srv.ID)
+		prefs := d.resolvePrefs(props, global)
+		srv.InstallDeps = prefs.InstallDeps
+		if prefs.Enabled {
+			if prefs.Repair {
+				d.engine.checkServer(ctx, srv)
+			}
+			d.publishFindings(ctx, srv, s, props)
+		} else {
+			d.publishParked(srv)
 		}
-		d.publishFindings(ctx, srv, s)
-		rows = append(rows, d.rowFor(srv))
+		rows = append(rows, d.rowFor(srv, prefs))
 	}
 
 	d.mu.Lock()
 	d.rows = rows
 	d.lastErr = nil
+	d.lastSweep = time.Now()
 	d.mu.Unlock()
 }
 
@@ -174,27 +218,130 @@ func (d *doctor) toInfo(s *v1.Server) *serverInfo {
 type statusRow struct {
 	Name     string
 	Running  bool
-	Incident string
-	Resolved string
-	Excludes []string
+	Enabled  bool
+	Mode     string
 	Exits    int
+	Excludes []string
+	Incident *incidentView
+	Resolved *incidentView
+	Findings []findingView
 }
 
-func (d *doctor) rowFor(srv *serverInfo) statusRow {
+// Incident details rendered on the status page
+type incidentView struct {
+	Open    bool
+	Passes  int
+	Max     int
+	PassPct int
+	Budget  int
+	Used    int
+	Cause   string
+	Summary string
+	Outcome string
+	Age     string
+	Actions []actionView
+}
+
+// One journal action rendered on the status page
+type actionView struct {
+	Kind     string
+	File     string
+	Reason   string
+	Evidence string
+	Reverted bool
+}
+
+// One published finding rendered on the status page
+type findingView struct {
+	Severity string
+	Title    string
+}
+
+func (d *doctor) rowFor(srv *serverInfo, prefs doctorPrefs) statusRow {
 	j := runtimespec.LoadDoctor(srv.DataPath)
 	row := statusRow{
 		Name:     srv.Name,
 		Running:  srv.Running,
+		Enabled:  prefs.Enabled,
+		Mode:     prefs.Mode,
 		Excludes: j.Excludes,
 		Exits:    exitsWithin(runtimespec.ReadExitHistory(srv.DataPath), crashLoopWindow),
 	}
 	if j.Incident != nil {
-		row.Incident = incidentLine(j.Incident)
+		row.Incident = incidentViewOf(j.Incident, true)
 	}
 	if j.Resolved != nil && j.Resolved.Summary != "" {
-		row.Resolved = protometa.Name(j.Resolved.Outcome) + ": " + j.Resolved.Summary
+		row.Resolved = incidentViewOf(j.Resolved, false)
+	}
+	for _, f := range runtimespec.ReadFindings(srv.DataPath) {
+		row.Findings = append(row.Findings, findingView{
+			Severity: protometa.Name(f.Severity),
+			Title:    f.Title,
+		})
 	}
 	return row
+}
+
+func incidentViewOf(inc *v1.DoctorIncident, open bool) *incidentView {
+	view := &incidentView{
+		Open:    open,
+		Passes:  int(inc.Passes),
+		Max:     maxDoctorPasses,
+		Budget:  int(inc.Budget),
+		Used:    runtimespec.DisabledCount(inc),
+		Cause:   inc.Cause,
+		Summary: inc.Summary,
+		Age:     ago(runtimespec.LastActivity(inc).AsTime()),
+	}
+	if view.Max > 0 {
+		view.PassPct = min(view.Passes*100/view.Max, 100)
+	}
+	if !open {
+		view.Outcome = protometa.Name(inc.Outcome)
+	}
+	for _, a := range inc.Actions {
+		view.Actions = append(view.Actions, actionView{
+			Kind:     actionVerb(a.Kind),
+			File:     firstNonEmpty(a.File, a.ModId),
+			Reason:   a.Reason,
+			Evidence: protometa.Name(a.Evidence),
+			Reverted: a.Reverted,
+		})
+	}
+	return view
+}
+
+// Past tense verb for one journal action kind
+func actionVerb(kind v1.DoctorActionKind) string {
+	switch kind {
+	case v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE:
+		return "disabled"
+	case v1.DoctorActionKind_DOCTOR_ACTION_KIND_ENABLE:
+		return "re-enabled"
+	case v1.DoctorActionKind_DOCTOR_ACTION_KIND_INSTALL:
+		return "installed"
+	case v1.DoctorActionKind_DOCTOR_ACTION_KIND_DISABLE_PACK:
+		return "pack disabled"
+	}
+	return protometa.Name(kind)
+}
+
+// Short relative time for the status page
+func ago(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	since := time.Since(t)
+	switch {
+	case since < time.Minute:
+		return "just now"
+	case since < time.Hour:
+		return fmt.Sprintf("%dm ago", int(since.Minutes()))
+	case since < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(since.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(since.Hours()/24))
+	}
 }
 
 // Panel API actor shared by the engine
@@ -234,11 +381,7 @@ func (p *panelClient) PropertyValue(ctx context.Context, serverID, key string) s
 	if v := p.serverProperties(ctx, serverID)[key]; v != "" {
 		return v
 	}
-	resp, err := p.properties.GetGlobalSettings(ctx, connect.NewRequest(&v1.GetGlobalSettingsRequest{}))
-	if err != nil {
-		return ""
-	}
-	return categoriesValue(resp.Msg.GetCategories(), key)
+	return p.globalProperties(ctx)[key]
 }
 
 // Flattens one server's property categories into a map
@@ -247,24 +390,26 @@ func (p *panelClient) serverProperties(ctx context.Context, serverID string) map
 	if err != nil {
 		return nil
 	}
+	return flattenCategories(resp.Msg.GetCategories())
+}
+
+// Flattens the panel-wide global settings into a map
+func (p *panelClient) globalProperties(ctx context.Context) map[string]string {
+	resp, err := p.properties.GetGlobalSettings(ctx, connect.NewRequest(&v1.GetGlobalSettingsRequest{}))
+	if err != nil {
+		return nil
+	}
+	return flattenCategories(resp.Msg.GetCategories())
+}
+
+func flattenCategories(cats []*v1.PropertyCategory) map[string]string {
 	props := map[string]string{}
-	for _, cat := range resp.Msg.GetCategories() {
+	for _, cat := range cats {
 		for _, prop := range cat.GetProperties() {
 			props[prop.GetKey()] = prop.GetValue()
 		}
 	}
 	return props
-}
-
-func categoriesValue(cats []*v1.PropertyCategory, key string) string {
-	for _, cat := range cats {
-		for _, prop := range cat.GetProperties() {
-			if prop.GetKey() == key {
-				return prop.GetValue()
-			}
-		}
-	}
-	return ""
 }
 
 func env(k, d string) string {

@@ -31,6 +31,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import { get } from 'svelte/store';
 	import { serversStore, activitySortedServers } from '$lib/stores/servers';
+	import { systemModules } from '$lib/stores/system-modules.svelte';
 	import { runPageRefreshers } from '$lib/stores/refresh';
 	import { authStore, currentUser, canAccessSettings, authEnabled } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
@@ -71,11 +72,17 @@
 		refreshing = true;
 		const spin = new Promise((r) => setTimeout(r, 600));
 		try {
+			systemModules.refresh();
 			await Promise.all([serversStore.fetchServers(true, true), runPageRefreshers(), spin]);
 		} finally {
 			refreshing = false;
 		}
 	}
+
+	let systemRunning = $derived(systemModules.running);
+	let systemTitle = $derived(
+		`System modules running: ${systemRunning.map((m) => m.name).join(', ')}`
+	);
 
 	let currentServerName = $derived.by(() => {
 		const match = page.url.pathname.match(/^\/servers\/([^/]+)/);
@@ -170,6 +177,16 @@
 		}, 10000);
 	});
 
+	// System module indicator polls only for privileged sessions
+	$effect(() => {
+		if (sessionKey === null || !showSettingsNav) {
+			systemModules.stop();
+			return;
+		}
+		systemModules.start();
+		return () => systemModules.stop();
+	});
+
 	onMount(() => {
 		bootstrap();
 		return () => stopPolling();
@@ -257,6 +274,17 @@
 											<a href={resolvePath('/modules')} {...props}>
 												<Puzzle class="size-4" />
 												<span class="group-data-[collapsible=icon]:hidden">Modules</span>
+												{#if systemRunning.length > 0}
+													<span
+														class="ml-auto flex items-center gap-1.5 group-data-[collapsible=icon]:hidden"
+														title={systemTitle}
+													>
+														<span class="tabular text-xs text-muted-foreground"
+															>{systemRunning.length}</span
+														>
+														<span class="glow-ok size-2 rounded-full bg-status-ok"></span>
+													</span>
+												{/if}
 											</a>
 										{/snippet}
 									</SidebarMenuButton>
@@ -427,6 +455,20 @@
 					{/if}
 				</div>
 				<div class="ml-auto flex flex-1 items-center justify-end gap-2">
+					{#if systemRunning.length > 0}
+						<Button
+							variant="ghost"
+							size="sm"
+							class="h-8 shrink-0 gap-1.5 px-2 text-muted-foreground"
+							onclick={() => goto(resolvePath('/modules') + '?tab=active')}
+							title={systemTitle}
+						>
+							<span class="glow-ok size-2 rounded-full bg-status-ok"></span>
+							<span class="hidden text-xs font-medium md:inline">
+								{systemRunning.map((m) => m.name).join(' · ')}
+							</span>
+						</Button>
+					{/if}
 					<Button
 						variant="outline"
 						size="sm"

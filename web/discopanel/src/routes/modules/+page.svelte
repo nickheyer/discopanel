@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { PageHeader, TabRail } from '$lib/components/app';
 	import { Plus } from '@lucide/svelte';
 	import TemplateManagement from './TemplateManagement.svelte';
@@ -9,7 +10,11 @@
 		{ key: 'active', label: 'Active instances', desc: 'Every module running across the panel' }
 	] as const;
 
-	let activeTab = $state<string>('templates');
+	// Deep links pick the starting tab via query param
+	const requestedTab = page.url.searchParams.get('tab');
+	let activeTab = $state<string>(
+		TABS.some((t) => t.key === requestedTab) ? (requestedTab as string) : 'templates'
+	);
 	let createOpen = $state(false);
 	let templateCategory = $state<string | null>(null);
 	let templateCategories = $state<string[]>([]);

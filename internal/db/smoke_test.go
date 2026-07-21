@@ -94,10 +94,13 @@ func TestProtoModelSmoke(t *testing.T) {
 		t.Fatalf("preload failed: %+v", loaded.User)
 	}
 
-	// Redact clears secrets for the wire
+	// Redact clones so the loaded row keeps its secret
 	clone := got.Redact()
 	if clone.AgentTokenHash != "" {
 		t.Fatal("redact failed")
+	}
+	if got.AgentTokenHash != "sekrit-hash" {
+		t.Fatal("redact mutated the source row")
 	}
 
 	// Bucketed history scans raw sql into the proto model

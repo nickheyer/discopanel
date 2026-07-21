@@ -31,6 +31,7 @@ import (
 	"github.com/nickheyer/discopanel/pkg/protometa"
 	"github.com/nickheyer/discopanel/pkg/transfer"
 	web "github.com/nickheyer/discopanel/web/discopanel"
+	"github.com/nickheyer/protogorm"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/proto"
@@ -139,6 +140,7 @@ func (s *Server) setupHandler() {
 	interceptors := []connect.Interceptor{
 		s.loggingInterceptor(),
 		s.authInterceptor(),
+		s.redactInterceptor(),
 	}
 
 	opts := []connect.HandlerOption{
@@ -442,6 +444,24 @@ func isConnectPath(path string) bool {
 }
 
 // Resolves scoped ids to the owning server id
+// Backstop clearing secrets a handler forgot to redact
+func (s *Server) redactInterceptor() connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			resp, err := next(ctx, req)
+			if err != nil || resp == nil {
+				return resp, err
+			}
+			if msg, ok := resp.Any().(proto.Message); ok {
+				if n := protogorm.Scrub(msg); n > 0 {
+					s.log.Error("Redact backstop cleared %d secret fields on %s", n, req.Spec().Procedure)
+				}
+			}
+			return resp, nil
+		}
+	}
+}
+
 func (s *Server) resolveScopeObject(ctx context.Context, scope optionsv1.ObjectScope, objectID string) (string, error) {
 	switch scope {
 	case optionsv1.ObjectScope_OBJECT_SCOPE_TASK:

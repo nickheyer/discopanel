@@ -19,7 +19,6 @@ import (
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/protometa"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -224,10 +223,7 @@ func ValidateTemplate(tmplStr string) error {
 
 // Assembles a Payload for the given event and server
 func BuildPayload(event v1.TriggeredEventType, server *v1.Server, data map[string]string) *Payload {
-	var redacted *v1.Server
-	if server != nil {
-		redacted = proto.Clone(server).(*v1.Server).Redact()
-	}
+	redacted := server.Redact()
 	now := time.Now().UTC()
 	p := &Payload{
 		Msg: &v1.WebhookPayload{

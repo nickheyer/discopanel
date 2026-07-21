@@ -11,10 +11,12 @@ plugins:
       - path=schemav1.yaml
 
   # Generate Go code with protoc-gen-go
+  # Open api pinned because gorm needs exported struct fields
   - remote: buf.build/protocolbuffers/go
     out: pkg/proto
     opt:
       - paths=source_relative
+      - default_api_level=API_OPEN
 
   # Generate Connect-Go
   - remote: buf.build/connectrpc/go

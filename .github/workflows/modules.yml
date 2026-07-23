@@ -80,7 +80,7 @@ jobs:
           RUNTIME_VERSION=$(git rev-parse --short HEAD)
 
           # docker.SupportedJavaVersions (internal/docker/images.go) is the source.
-          for java in $(go run ./cmd/javamajors); do
+          for java in $(go run ./cmd/runtime -versions); do
             echo "Building nickheyer/discopanel-runtime:java$java (linux/amd64,linux/arm64)..."
             docker buildx build \
               --platform linux/amd64,linux/arm64 \
@@ -95,7 +95,7 @@ jobs:
           done
 
           # docker.GraalJavaVersions (internal/docker/images.go) is the source.
-          for java in $(go run ./cmd/javamajors -graal); do
+          for java in $(go run ./cmd/runtime -versions -graal | tr ' ' '\n' | sed -n 's/^graal-//p'); do
             echo "Building nickheyer/discopanel-runtime:java$java-graal (linux/amd64,linux/arm64)..."
             docker buildx build \
               --platform linux/amd64,linux/arm64 \

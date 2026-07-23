@@ -391,16 +391,14 @@ func main() {
 		if server.Status != v1.ServerStatus_SERVER_STATUS_RUNNING {
 			continue
 		}
-		stopWG.Add(1)
-		go func() {
-			defer stopWG.Done()
+		stopWG.Go(func() {
 			log.Info("Stopping managed server: %s", server.Name)
 			stopCtx, stopCancel := context.WithTimeout(metrics.WithTrace(metrics.WithSource(ctx, "system")), 25*time.Second)
 			defer stopCancel()
 			if err := lifecycleManager.Stop(stopCtx, server.Id); err != nil {
 				log.Error("Failed to stop server %s: %v", server.Name, err)
 			}
-		}()
+		})
 	}
 	stopWG.Wait()
 

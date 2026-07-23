@@ -11,10 +11,10 @@ import (
 // Default discopanel-runtime repo, overridable via docker.runtime_image
 const DefaultRuntimeImage = "nickheyer/discopanel-runtime"
 
-// Java majors the runtime image publishes, cmd/javamajors feeds consumers
+// Java majors the runtime image publishes, runtime -versions feeds consumers
 var SupportedJavaVersions = []int{8, 11, 17, 21, 25}
 
-// Majors with a published GraalVM variant, cmd/javamajors feeds consumers
+// Majors with a published GraalVM variant, runtime -graal feeds consumers
 var GraalJavaVersions = []int{21, 25}
 
 // Resolves needed Java major, rounded up to nearest published image

@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nickheyer/discopanel/internal/docker"
 	agentv1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/agent/v1"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/runtimespec"
@@ -35,6 +37,14 @@ var readyPattern = regexp.MustCompile(`Done \([0-9.,]+ ?n?s(?:econds)?\)`)
 const maxExcerpt = 4096
 
 func main() {
+	printVersions := flag.Bool("versions", false, "print supported java versions")
+	withGraal := flag.Bool("graal", false, "include graal majors as graal-N")
+	flag.Parse()
+	if *printVersions {
+		printJavaVersions(*withGraal)
+		return
+	}
+
 	spec, err := runtimespec.ReadLaunchSpec(dataDir)
 	if err != nil {
 		fatal("no launch spec at %s (%v) - this container must be provisioned and started by DiscoPanel", runtimespec.LaunchPath(dataDir), err)
@@ -182,6 +192,20 @@ func main() {
 		fmt.Printf("[discopanel-runtime] server process exited with code %d\n", exitCode)
 	}
 	os.Exit(exitCode)
+}
+
+// Prints published java majors for image build tooling
+func printJavaVersions(withGraal bool) {
+	out := make([]string, 0, len(docker.SupportedJavaVersions)+len(docker.GraalJavaVersions))
+	for _, v := range docker.SupportedJavaVersions {
+		out = append(out, strconv.Itoa(v))
+	}
+	if withGraal {
+		for _, v := range docker.GraalJavaVersions {
+			out = append(out, fmt.Sprintf("graal-%d", v))
+		}
+	}
+	fmt.Println(strings.Join(out, " "))
 }
 
 // Holds the shared state of a running server process

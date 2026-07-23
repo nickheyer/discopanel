@@ -73,11 +73,14 @@ image:
 	@echo "Building and pushing Docker image..."
 	@bash scripts/build.sh
 
+# Every published java major, graal entries carry a graal- prefix
+RUNTIME_ALL_JAVA := $(shell go run ./cmd/runtime -versions -graal)
+
 # Published Java majors, docker.SupportedJavaVersions is the source
-RUNTIME_JAVA_VERSIONS := $(shell go run ./cmd/javamajors)
+RUNTIME_JAVA_VERSIONS := $(filter-out graal-%,$(RUNTIME_ALL_JAVA))
 
 # Published Graal majors, docker.GraalJavaVersions is the source
-RUNTIME_GRAAL_VERSIONS := $(shell go run ./cmd/javamajors -graal)
+RUNTIME_GRAAL_VERSIONS := $(patsubst graal-%,%,$(filter graal-%,$(RUNTIME_ALL_JAVA)))
 
 # Git identity stamped into runtime images
 RUNTIME_VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev)
@@ -93,10 +96,10 @@ RUNTIME_SRC := docker/Dockerfile.runtime go.mod go.sum \
 # Image goals refuse to run on an empty version list
 ifneq ($(filter images runtime,$(MAKECMDGOALS)),)
 ifeq ($(strip $(RUNTIME_JAVA_VERSIONS)),)
-$(error go run ./cmd/javamajors produced no versions, runtime targets would silently no-op)
+$(error go run ./cmd/runtime -versions produced no versions, runtime targets would silently no-op)
 endif
 ifeq ($(strip $(RUNTIME_GRAAL_VERSIONS)),)
-$(error go run ./cmd/javamajors -graal produced no versions, runtime targets would silently no-op)
+$(error go run ./cmd/runtime -versions -graal produced no graal versions, runtime targets would silently no-op)
 endif
 endif
 

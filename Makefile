@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image images dev-docker dev-auth modules runtime agent proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image images dev-docker dev-auth runtime agent proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
 
 DATA_DIR := ./data
 DOCKER_DATA_DIR := /tmp/discopanel
@@ -85,16 +85,10 @@ RUNTIME_VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev
 # Pushes happen only in CI, local builds stay local
 STAMP_DIR := build/.stamps
 
-MODULE_NAMES := $(filter-out discopanel runtime,$(patsubst docker/Dockerfile.%,%,$(wildcard docker/Dockerfile.*)))
-
 # Everything the runtime image bakes in, generated code excluded
 RUNTIME_SRC := docker/Dockerfile.runtime go.mod go.sum \
 	$(shell find cmd/runtime pkg/runtimespec pkg/protometa proto -type f 2>/dev/null) \
 	$(shell find agent -type f -not -path 'agent/build/*' -not -path 'agent/.gradle-home/*' -not -path 'agent/src/generated/*' 2>/dev/null)
-
-# Module images copy the whole Go tree, track it coarsely
-MODULE_SRC := go.mod go.sum \
-	$(shell find cmd internal pkg proto -type f 2>/dev/null | grep -v '_test.go')
 
 # Image goals refuse to run on an empty version list
 ifneq ($(filter images runtime,$(MAKECMDGOALS)),)
@@ -107,12 +101,11 @@ endif
 endif
 
 # Stamps die at parse when their tag is missing or replaced
-ifneq ($(filter images runtime modules module-%,$(MAKECMDGOALS)),)
+ifneq ($(filter images runtime,$(MAKECMDGOALS)),)
 _STAMP_SYNC := $(shell mkdir -p $(STAMP_DIR); \
 	sync() { id=$$(docker image inspect -f '{{.Id}}' "$$1" 2>/dev/null); [ -n "$$id" ] && [ "$$id" = "$$(cat "$$2" 2>/dev/null)" ] || rm -f "$$2"; }; \
 	for v in $(RUNTIME_JAVA_VERSIONS); do sync "nickheyer/discopanel-runtime:java$$v" $(STAMP_DIR)/runtime-java$$v; done; \
-	for v in $(RUNTIME_GRAAL_VERSIONS); do sync "nickheyer/discopanel-runtime:java$$v-graal" $(STAMP_DIR)/runtime-graal-java$$v; done; \
-	for m in $(MODULE_NAMES); do sync "nickheyer/discopanel-$$m:latest" $(STAMP_DIR)/module-$$m; done)
+	for v in $(RUNTIME_GRAAL_VERSIONS); do sync "nickheyer/discopanel-runtime:java$$v-graal" $(STAMP_DIR)/runtime-graal-java$$v; done)
 endif
 
 # Rebuilds a local tag and deletes the image it displaced
@@ -128,7 +121,8 @@ define build_image
 endef
 
 # Everything discopanel needs at runtime, built locally when stale
-images: agent runtime modules
+# Module images build from the discomodule repo now
+images: agent runtime
 	@echo "All local images up to date!"
 
 # Builds every runtime image variant locally when inputs changed
@@ -147,20 +141,6 @@ $(STAMP_DIR)/runtime-graal-java%: $(RUNTIME_SRC)
 	@echo "Building nickheyer/discopanel-runtime:java$*-graal..."
 	$(call build_image,nickheyer/discopanel-runtime:java$*-graal,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_FLAVOR=graal --build-arg RUNTIME_VERSION=$(RUNTIME_VERSION),docker/Dockerfile.runtime)
 	@docker image inspect -f '{{.Id}}' "nickheyer/discopanel-runtime:java$*-graal" > $@
-
-# Builds all module images locally when inputs changed
-modules: $(addprefix $(STAMP_DIR)/module-,$(MODULE_NAMES))
-	@echo "Module images up to date!"
-
-$(STAMP_DIR)/module-%: docker/Dockerfile.% $(MODULE_SRC)
-	@mkdir -p $(STAMP_DIR)
-	@echo "Building nickheyer/discopanel-$*:latest..."
-	$(call build_image,nickheyer/discopanel-$*:latest,,docker/Dockerfile.$*)
-	@docker image inspect -f '{{.Id}}' "nickheyer/discopanel-$*:latest" > $@
-
-# Builds one module image locally (e.g., make module-status)
-module-%: $(STAMP_DIR)/module-%
-	@echo "Module $* image up to date!"
 
 # Builds disco-agent jar via containerized Gradle
 agent:
@@ -280,9 +260,8 @@ help:
 	@echo "  make image          - Build and push Docker image to :dev tag"
 	@echo "  make dev-docker     - Build and run Docker container locally (no cache)"
 	@echo "  make dev-auth       - Build and run with OIDC provider (Keycloak)"
-	@echo "  make images         - Build runtime + module images locally when stale"
+	@echo "  make images         - Build agent + runtime images locally when stale"
 	@echo "  make runtime        - Build all runtime image variants locally"
-	@echo "  make modules        - Build all module images locally"
 	@echo "  make clean          - Remove data directory and build artifacts"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"
 	@echo "  make deps           - Install all dependencies"

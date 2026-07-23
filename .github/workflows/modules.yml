@@ -1,4 +1,4 @@
-name: Module Builder
+name: Runtime Builder
 
 on:
   push:
@@ -37,8 +37,8 @@ jobs:
           path: internal/db/store.gen.go
           retention-days: 1
 
-  build-modules:
-    name: Build Module Images
+  build-runtime:
+    name: Build Runtime Images
     needs: generate-proto
     runs-on: ubuntu-latest
 
@@ -69,36 +69,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD }}
-
-      - name: Build and push all modules
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#mod-}"
-          else
-            VERSION=""
-          fi
-
-          for dockerfile in docker/Dockerfile.*; do
-            name=$(basename "$dockerfile" | sed 's/Dockerfile\.//')
-            if [ "$name" != "discopanel" ] && [ "$name" != "runtime" ]; then
-              echo "Building nickheyer/discopanel-$name (linux/amd64,linux/arm64)..."
-              TAGS="--tag nickheyer/discopanel-$name:latest"
-              if [ -n "$VERSION" ]; then
-                TAGS="$TAGS --tag nickheyer/discopanel-$name:$VERSION"
-              fi
-
-              docker buildx build \
-                --platform linux/amd64,linux/arm64 \
-                --file "$dockerfile" \
-                $TAGS \
-                --push \
-                .
-
-              echo "Pushed nickheyer/discopanel-$name"
-            fi
-          done
-
-          echo "Module builds complete!"
 
       - name: Set up Go
         uses: actions/setup-go@v5

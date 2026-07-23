@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image images dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image images dev-docker dev-auth modules runtime agent proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
 
 DATA_DIR := ./data
 DOCKER_DATA_DIR := /tmp/discopanel
@@ -73,19 +73,45 @@ image:
 	@echo "Building and pushing Docker image..."
 	@bash scripts/build.sh
 
+# Published Java majors, docker.SupportedJavaVersions is the source
+RUNTIME_JAVA_VERSIONS := $(shell go run ./cmd/javamajors)
+
+# Published Graal majors, docker.GraalJavaVersions is the source
+RUNTIME_GRAAL_VERSIONS := $(shell go run ./cmd/javamajors -graal)
+
+# Git identity stamped into runtime images
+RUNTIME_VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev)
+
 # Pushes happen only in CI, local builds stay local
 STAMP_DIR := build/.stamps
 
-MODULE_NAMES := $(filter-out discopanel,$(patsubst docker/Dockerfile.%,%,$(wildcard docker/Dockerfile.*)))
+MODULE_NAMES := $(filter-out discopanel runtime,$(patsubst docker/Dockerfile.%,%,$(wildcard docker/Dockerfile.*)))
+
+# Everything the runtime image bakes in, generated code excluded
+RUNTIME_SRC := docker/Dockerfile.runtime go.mod go.sum \
+	$(shell find cmd/runtime pkg/runtimespec pkg/protometa proto -type f 2>/dev/null) \
+	$(shell find agent -type f -not -path 'agent/build/*' -not -path 'agent/.gradle-home/*' -not -path 'agent/src/generated/*' 2>/dev/null)
 
 # Module images copy the whole Go tree, track it coarsely
 MODULE_SRC := go.mod go.sum \
 	$(shell find cmd internal pkg proto -type f 2>/dev/null | grep -v '_test.go')
 
+# Image goals refuse to run on an empty version list
+ifneq ($(filter images runtime,$(MAKECMDGOALS)),)
+ifeq ($(strip $(RUNTIME_JAVA_VERSIONS)),)
+$(error go run ./cmd/javamajors produced no versions, runtime targets would silently no-op)
+endif
+ifeq ($(strip $(RUNTIME_GRAAL_VERSIONS)),)
+$(error go run ./cmd/javamajors -graal produced no versions, runtime targets would silently no-op)
+endif
+endif
+
 # Stamps die at parse when their tag is missing or replaced
-ifneq ($(filter images modules module-%,$(MAKECMDGOALS)),)
+ifneq ($(filter images runtime modules module-%,$(MAKECMDGOALS)),)
 _STAMP_SYNC := $(shell mkdir -p $(STAMP_DIR); \
 	sync() { id=$$(docker image inspect -f '{{.Id}}' "$$1" 2>/dev/null); [ -n "$$id" ] && [ "$$id" = "$$(cat "$$2" 2>/dev/null)" ] || rm -f "$$2"; }; \
+	for v in $(RUNTIME_JAVA_VERSIONS); do sync "nickheyer/discopanel-runtime:java$$v" $(STAMP_DIR)/runtime-java$$v; done; \
+	for v in $(RUNTIME_GRAAL_VERSIONS); do sync "nickheyer/discopanel-runtime:java$$v-graal" $(STAMP_DIR)/runtime-graal-java$$v; done; \
 	for m in $(MODULE_NAMES); do sync "nickheyer/discopanel-$$m:latest" $(STAMP_DIR)/module-$$m; done)
 endif
 
@@ -102,9 +128,25 @@ define build_image
 endef
 
 # Everything discopanel needs at runtime, built locally when stale
-# Runtime and agent images build from the discomodule repo now
-images: modules
+images: agent runtime modules
 	@echo "All local images up to date!"
+
+# Builds every runtime image variant locally when inputs changed
+runtime: $(addprefix $(STAMP_DIR)/runtime-java,$(RUNTIME_JAVA_VERSIONS)) \
+	$(addprefix $(STAMP_DIR)/runtime-graal-java,$(RUNTIME_GRAAL_VERSIONS))
+	@echo "Runtime images up to date!"
+
+$(STAMP_DIR)/runtime-java%: $(RUNTIME_SRC)
+	@mkdir -p $(STAMP_DIR)
+	@echo "Building nickheyer/discopanel-runtime:java$*..."
+	$(call build_image,nickheyer/discopanel-runtime:java$*,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_VERSION=$(RUNTIME_VERSION),docker/Dockerfile.runtime)
+	@docker image inspect -f '{{.Id}}' "nickheyer/discopanel-runtime:java$*" > $@
+
+$(STAMP_DIR)/runtime-graal-java%: $(RUNTIME_SRC)
+	@mkdir -p $(STAMP_DIR)
+	@echo "Building nickheyer/discopanel-runtime:java$*-graal..."
+	$(call build_image,nickheyer/discopanel-runtime:java$*-graal,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_FLAVOR=graal --build-arg RUNTIME_VERSION=$(RUNTIME_VERSION),docker/Dockerfile.runtime)
+	@docker image inspect -f '{{.Id}}' "nickheyer/discopanel-runtime:java$*-graal" > $@
 
 # Builds all module images locally when inputs changed
 modules: $(addprefix $(STAMP_DIR)/module-,$(MODULE_NAMES))
@@ -119,6 +161,15 @@ $(STAMP_DIR)/module-%: docker/Dockerfile.% $(MODULE_SRC)
 # Builds one module image locally (e.g., make module-status)
 module-%: $(STAMP_DIR)/module-%
 	@echo "Module $* image up to date!"
+
+# Builds disco-agent jar via containerized Gradle
+agent:
+	docker run --rm \
+		--volume "$(shell pwd)/agent:/agent" \
+		--workdir /agent \
+		--user "$(shell id -u):$(shell id -g)" \
+		--env GRADLE_USER_HOME=/agent/.gradle-home \
+		gradle:9-jdk21 gradle --no-daemon build
 
 # Clean development data
 clean:
@@ -186,6 +237,8 @@ proto:
 	go tool protogorm -options proto
 	@echo "Generating protocol buffer code (using Docker)..."
 	$(BUF_RUN) generate --exclude-path proto/protogorm
+	@echo "Generating disco-agent Java code (using Docker)..."
+	$(BUF_RUN) generate --template buf.gen.agent.yaml --path proto/discopanel/agent
 	@echo "Injecting gorm tags and generating db wrappers..."
 	$(BUF_RUN) build -o - | go tool protogorm -support pkg/proto -store internal/db/store.gen.go:db -inject pkg/proto
 	@echo "Proto generation complete!"
@@ -194,6 +247,7 @@ proto-clean:
 	@echo "Cleaning generated proto files..."
 	rm -rf pkg/proto
 	rm -rf web/discopanel/src/lib/proto
+	rm -rf agent/src/generated/java
 	rm -rf proto/protogorm
 	@echo "Proto files cleaned!"
 
@@ -226,7 +280,8 @@ help:
 	@echo "  make image          - Build and push Docker image to :dev tag"
 	@echo "  make dev-docker     - Build and run Docker container locally (no cache)"
 	@echo "  make dev-auth       - Build and run with OIDC provider (Keycloak)"
-	@echo "  make images         - Build module images locally when stale"
+	@echo "  make images         - Build runtime + module images locally when stale"
+	@echo "  make runtime        - Build all runtime image variants locally"
 	@echo "  make modules        - Build all module images locally"
 	@echo "  make clean          - Remove data directory and build artifacts"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"

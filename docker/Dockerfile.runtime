@@ -1,0 +1,82 @@
+# Minimal runtime image holding only JRE and supervisor
+#
+# Built per Java major version
+#   docker build -f docker/Dockerfile.runtime --build-arg JAVA_VERSION=21 \
+#     -t nickheyer/discopanel-runtime:java21 .
+#
+# Graal JIT flavor under GFTC license
+#   docker build -f docker/Dockerfile.runtime --build-arg JAVA_VERSION=21 \
+#     --build-arg RUNTIME_FLAVOR=graal \
+#     -t nickheyer/discopanel-runtime:java21-graal .
+ARG JAVA_VERSION=21
+ARG RUNTIME_FLAVOR=temurin
+
+# Pins build stages to native platform so multi-arch skips QEMU
+ARG BUILDPLATFORM=linux/amd64
+
+# Generates proto code in-image so clean checkouts build
+FROM --platform=$BUILDPLATFORM golang:alpine AS proto-builder
+
+COPY --from=bufbuild/buf:latest /usr/local/bin/buf /usr/local/bin/buf
+
+WORKDIR /app
+COPY go.mod go.sum buf.yaml buf.gen.yaml buf.gen.agent.yaml buf.lock ./
+COPY proto/ ./proto/
+
+# Materializes protogorm schema then generates like make proto
+RUN go tool protogorm -options proto \
+    && buf generate --exclude-path proto/protogorm \
+    && buf generate --template buf.gen.agent.yaml --path proto/discopanel/agent
+
+FROM --platform=$BUILDPLATFORM golang:alpine AS builder
+
+# Set by BuildKit, empty under legacy builder
+ARG TARGETOS TARGETARCH
+
+# Stamped into the runtime hello for build identification
+ARG RUNTIME_VERSION=dev
+
+WORKDIR /build
+COPY go.mod go.sum ./
+COPY pkg/runtimespec ./pkg/runtimespec
+COPY pkg/protometa ./pkg/protometa
+COPY --from=proto-builder /app/pkg/proto ./pkg/proto
+COPY cmd/runtime ./cmd/runtime
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w -X main.runtimeVersion=${RUNTIME_VERSION}" -o /runtime-entrypoint ./cmd/runtime
+
+# Builds one disco-agent jar shared by every loader
+FROM --platform=$BUILDPLATFORM gradle:9-jdk21 AS agent-builder
+
+WORKDIR /agent
+COPY agent/ ./
+COPY --from=proto-builder /app/agent/src/generated ./src/generated
+RUN gradle --no-daemon build
+
+# Flavor bases diverge here, shared tail picks one
+FROM eclipse-temurin:${JAVA_VERSION}-jre AS base-temurin
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Oracle Linux base ships ca-certificates and tzdata already
+FROM container-registry.oracle.com/graalvm/jdk:${JAVA_VERSION} AS base-graal
+
+# Lets the entrypoint adapt flags to the Graal JIT
+ENV DISCO_JVM_VARIANT=graal
+
+FROM base-${RUNTIME_FLAVOR}
+
+COPY --from=builder /runtime-entrypoint /usr/local/bin/discopanel-runtime
+
+COPY --from=agent-builder /agent/build/libs/disco-agent.jar /opt/discopanel/agent/
+
+RUN mkdir -p /data && chmod 755 /data
+
+WORKDIR /data
+
+EXPOSE 25565/tcp 25575/tcp
+
+VOLUME /data
+
+ENTRYPOINT ["/usr/local/bin/discopanel-runtime"]

@@ -1,0 +1,51 @@
+// Builds telemetry javaagent jar shared by every loader
+plugins {
+    id 'java'
+    id 'com.gradleup.shadow' version '9.4.3'
+}
+
+group = 'app.discopanel'
+version = property('agentVersion')
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+// Emits Java 8 bytecode for oldest supported servers
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 8
+}
+
+repositories {
+    mavenCentral()
+}
+
+sourceSets {
+    main {
+        java {
+            // Includes buf generated javalite messages
+            srcDir 'src/generated/java'
+        }
+    }
+}
+
+dependencies {
+    implementation "com.google.protobuf:protobuf-javalite:${property('protobufJavaliteVersion')}"
+}
+
+shadowJar {
+    archiveFileName = 'disco-agent.jar'
+    archiveClassifier = ''
+    relocate 'com.google.protobuf', 'app.discopanel.agent.libs.protobuf'
+    manifest {
+        attributes(
+                'Premain-Class': 'app.discopanel.agent.DiscoAgent',
+                'Implementation-Version': project.version,
+        )
+    }
+}
+
+assemble.dependsOn shadowJar

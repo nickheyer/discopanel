@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/nickheyer/discopanel/pkg/javaversions"
 	"github.com/nickheyer/discopanel/pkg/minecraft"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
@@ -12,11 +11,11 @@ import (
 // Default discopanel-runtime repo, overridable via docker.runtime_image
 const DefaultRuntimeImage = "nickheyer/discopanel-runtime"
 
-// Java majors the runtime image publishes, pkg/javaversions is the source
-var SupportedJavaVersions = javaversions.Supported
+// Java majors the runtime image publishes, cmd/javamajors feeds consumers
+var SupportedJavaVersions = []int{8, 11, 17, 21, 25}
 
-// Majors with a published GraalVM variant, pkg/javaversions is the source
-var GraalJavaVersions = javaversions.Graal
+// Majors with a published GraalVM variant, cmd/javamajors feeds consumers
+var GraalJavaVersions = []int{21, 25}
 
 // Resolves needed Java major, rounded up to nearest published image
 func RequiredJavaMajor(mcVersion string) int {

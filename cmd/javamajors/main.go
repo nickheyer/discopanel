@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nickheyer/discopanel/pkg/javaversions"
+	"github.com/nickheyer/discopanel/internal/docker"
 )
 
 // Prints published Java majors, the single list consumers share
 func main() {
 	graal := flag.Bool("graal", false, "print graal majors")
 	flag.Parse()
-	versions := javaversions.Supported
+	versions := docker.SupportedJavaVersions
 	if *graal {
-		versions = javaversions.Graal
+		versions = docker.GraalJavaVersions
 	}
 	out := make([]string, len(versions))
 	for i, v := range versions {

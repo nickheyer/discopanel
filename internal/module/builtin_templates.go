@@ -55,7 +55,7 @@ func doctorVolumes() []*v1.VolumeMount {
 	}
 }
 
-// Seeds missing built-in templates, never touches existing rows
+// Seeds built-in templates and reseeds existing code owned rows
 func InitBuiltinTemplates(store *storage.Store) error {
 	ctx := context.Background()
 
@@ -287,8 +287,8 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			// Steam runtime sandbox requires user namespaces
 			DefaultSecurityOpt: []string{"seccomp=unconfined", "apparmor=unconfined"},
 			// Login raises a runtime prompt for the guard code
-			Metadata:      map[string]string{"supports_prompts": "true"},
-			Documentation: "Runs a headless Steam client plus a gateway that terminates Steam Networking Sockets connections and relays them into the DiscoPanel hostname proxy, so wake-on-connect and sleeping-server behavior keep working. Requires a dedicated Steam account (never your personal one). Set STEAM_USERNAME and STEAM_PASSWORD, then start the module. https://store.steampowered.com/account/authorizeddevices -> Disable Guard Code... OR When Steam asks for a Steam Guard code the panel shows an input prompt in the module dialog, enter the current code from the account email or authenticator and login retries automatically. The login session persists in the module data volume. Players connect with the DiscoPanel Bridge app from https://github.com/nickheyer/discomodule-releases/releases (no mods needed, works with any Minecraft version) by running it, entering this module's SteamID64 (shown in logs and on the /status endpoint), and joining localhost in Minecraft. The open source Steam Bridge client mod also works as an alternative. ACCESS_POLICY everyone, friends, or allowlist controls who may connect, with friends meaning friends of the module's Steam account. Voice traffic from Simple Voice Chat and Plasmo Voice tunnels automatically when VOICE_FORWARD is on. Uses Steam AppID 480 (Spacewar), so keep the account disposable.",
+			Metadata:      map[string]string{"supports_prompts": "true", "status_path": "/status"},
+			Documentation: "Runs a headless Steam client plus a gateway that terminates Steam Networking Sockets connections and relays them into the DiscoPanel hostname proxy, so wake-on-connect and sleeping-server behavior keep working. Requires a dedicated Steam account (never your personal one). Set STEAM_USERNAME and STEAM_PASSWORD, then start the module. https://store.steampowered.com/account/authorizeddevices -> Disable Guard Code... OR When Steam asks for a Steam Guard code the panel shows an input prompt in the module dialog, enter the current code from the account email or authenticator and login retries automatically. The login session persists in the module data volume. Players connect with the DiscoPanel Bridge app from https://github.com/nickheyer/discomodule-releases/releases (no mods needed, works with any Minecraft version) by running it, entering this module's SteamID64 (shown on the module card while running), and joining localhost in Minecraft. The open source Steam Bridge client mod also works as an alternative. ACCESS_POLICY everyone, friends, or allowlist controls who may connect, with friends meaning friends of the module's Steam account. Voice traffic from Simple Voice Chat and Plasmo Voice tunnels automatically when VOICE_FORWARD is on. Uses Steam AppID 480 (Spacewar), so keep the account disposable.",
 			DefaultMemory: 2048,
 		},
 		{
@@ -353,6 +353,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			},
 			HealthCheckPath: "/health",
 			HealthCheckPort: 8201,
+			Metadata:        map[string]string{"status_path": "/status"},
 			Documentation:   "Runs the official playit.gg agent next to a gateway that rewrites incoming Minecraft handshakes onto this server's proxy hostname and relays them into the DiscoPanel proxy, keeping wake-on-connect working. Generate an agent secret key on playit.gg, set it as SECRET_KEY, then create a Minecraft Java tunnel whose local address is 127.0.0.1 on LISTEN_PORT. The provisioned secret persists in the module data volume. UDP tunnels for voice mods forward straight to the server container when UDP_FORWARD is on.",
 			DefaultMemory:   256,
 		},

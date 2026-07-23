@@ -186,6 +186,16 @@ service ModuleService {
       action: ACTION_TYPE_READ
     };
   }
+
+  // Reads the status snapshot a running module serves
+  rpc GetModuleStatusSnapshot(GetModuleStatusSnapshotRequest) returns (GetModuleStatusSnapshotResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
 }
 
 // ListModuleTemplatesRequest filters the template list.
@@ -640,4 +650,18 @@ message PendingModulePrompt {
 // ListModulePromptsResponse lists modules awaiting user input.
 message ListModulePromptsResponse {
   repeated PendingModulePrompt prompts = 1;
+}
+
+// GetModuleStatusSnapshotRequest specifies which module to read.
+message GetModuleStatusSnapshotRequest {
+  // Module ID to read.
+  string id = 1;
+}
+
+// GetModuleStatusSnapshotResponse carries module reported status fields.
+message GetModuleStatusSnapshotResponse {
+  // True when the module served a snapshot.
+  bool available = 1;
+  // Snapshot fields as display strings.
+  map<string, string> fields = 2;
 }

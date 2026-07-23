@@ -17,6 +17,7 @@
 	import { TONE_BADGE, TONE_BG } from '$lib/server-status';
 	import { moduleStatusMeta } from '$lib/module-status';
 	import { getEventTypeLabel } from '$lib/utils/events';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { cn } from '$lib/utils';
 	import {
 		Loader2,
@@ -34,7 +35,7 @@
 		Puzzle,
 		Link,
 		Zap,
-		Info
+		Copy
 	} from '@lucide/svelte';
 	import ModuleDialog from './ModuleDialog.svelte';
 	import ModuleLogsDialog from './ModuleLogsDialog.svelte';
@@ -63,6 +64,7 @@
 	let actionLoading = $state<string | null>(null);
 	let aliasValues = $state<Record<string, Record<string, string>>>({});
 	let aliasKey = '';
+	let snapshots = $state<Record<string, Record<string, string>>>({});
 
 	let createDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
@@ -111,6 +113,7 @@
 			templates = [];
 			aliasValues = {};
 			aliasKey = '';
+			snapshots = {};
 			loading = true;
 			hasLoaded = false;
 		}
@@ -152,6 +155,8 @@
 				aliasKey = key;
 				modules.forEach((m) => loadAliases(m.id));
 			}
+			// Snapshots refresh every poll, values change while running
+			modules.filter((m) => m.status === ModuleStatus.RUNNING).forEach((m) => loadSnapshot(m.id));
 		} catch {
 			if (!silent) toast.error('Failed to load modules');
 		} finally {
@@ -183,6 +188,31 @@
 	function resolve(input: string, moduleId: string): string {
 		const vals = aliasValues[moduleId] ?? {};
 		return input.replace(/\{\{[^}]+\}\}/g, (match) => vals[match] ?? match);
+	}
+
+	async function loadSnapshot(moduleId: string) {
+		try {
+			const response = await rpcClient.module.getModuleStatusSnapshot(
+				{ id: moduleId },
+				silentCallOptions
+			);
+			if (response.available) {
+				snapshots = { ...snapshots, [moduleId]: response.fields };
+			}
+		} catch {
+			/* Ignore snapshot fetch errors */
+		}
+	}
+
+	function snapshotLabel(key: string): string {
+		const label = key.replace(/_/g, ' ');
+		return label.charAt(0).toUpperCase() + label.slice(1);
+	}
+
+	async function copySnapshotValue(value: string) {
+		if (await copyToClipboard(value)) {
+			toast.success('Copied to clipboard');
+		}
 	}
 
 	async function handleStartModule(module: Module) {
@@ -268,11 +298,7 @@
 	}
 
 	function hasAdvancedConfig(module: Module): boolean {
-		return (
-			(module.dependencies?.length ?? 0) > 0 ||
-			(module.eventHooks?.length ?? 0) > 0 ||
-			Object.keys(module.metadata ?? {}).length > 0
-		);
+		return (module.dependencies?.length ?? 0) > 0 || (module.eventHooks?.length ?? 0) > 0;
 	}
 
 	function handleModuleCreated() {
@@ -449,6 +475,27 @@
 							{/if}
 						</div>
 
+						{#if module.status === ModuleStatus.RUNNING && snapshots[module.id]}
+							{@const snapshot = snapshots[module.id]}
+							<div class="mt-3 space-y-0.5 rounded-md bg-muted/40 px-2.5 py-2 text-xs">
+								{#each Object.keys(snapshot).sort() as key (key)}
+									<div class="flex items-center gap-1.5">
+										<span class="shrink-0 text-muted-foreground">{snapshotLabel(key)}:</span>
+										<button
+											class="group/copy flex min-w-0 items-center gap-1 font-mono text-foreground transition-colors hover:text-primary"
+											onclick={() => copySnapshotValue(snapshot[key])}
+											title="Copy value"
+										>
+											<span class="truncate">{snapshot[key]}</span>
+											<Copy
+												class="size-3 shrink-0 opacity-0 transition-opacity group-hover/copy:opacity-100"
+											/>
+										</button>
+									</div>
+								{/each}
+							</div>
+						{/if}
+
 						{#if module.accessUrls?.length}
 							<div class="mt-3 space-y-1">
 								{#each module.accessUrls as url, i (i)}
@@ -492,17 +539,6 @@
 										<span class="truncate text-muted-foreground/70">
 											({module.eventHooks.map((h) => getEventTypeLabel(h.event)).join(', ')})
 										</span>
-									</div>
-								{/if}
-								{#if module.metadata && Object.keys(module.metadata).length > 0}
-									<div class="space-y-0.5">
-										{#each Object.entries(module.metadata) as [key, value] (key)}
-											<div class="flex items-center gap-1.5 text-muted-foreground">
-												<Info class="size-3 shrink-0" />
-												<span class="font-medium">{key}:</span>
-												<span class="truncate text-foreground">{resolve(value, module.id)}</span>
-											</div>
-										{/each}
 									</div>
 								{/if}
 							</div>

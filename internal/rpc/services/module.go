@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -1126,6 +1127,76 @@ func (s *ModuleService) ListModulePrompts(ctx context.Context, req *connect.Requ
 	// Stable order keeps the UI from reshuffling between polls
 	sort.Slice(pending, func(i, j int) bool { return pending[i].ModuleId < pending[j].ModuleId })
 	return connect.NewResponse(&v1.ListModulePromptsResponse{Prompts: pending}), nil
+}
+
+// Renders one decoded snapshot value as a display string
+func snapshotValue(v any) string {
+	switch val := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return val
+	case bool:
+		return strconv.FormatBool(val)
+	case json.Number:
+		return val.String()
+	default:
+		raw, err := json.Marshal(val)
+		if err != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return string(raw)
+	}
+}
+
+func (s *ModuleService) GetModuleStatusSnapshot(ctx context.Context, req *connect.Request[v1.GetModuleStatusSnapshotRequest]) (*connect.Response[v1.GetModuleStatusSnapshotResponse], error) {
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
+	}
+	module, err := s.store.GetModule(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
+	}
+
+	unavailable := connect.NewResponse(&v1.GetModuleStatusSnapshotResponse{Available: false})
+
+	// Only templates declaring a status path get probed
+	template, err := s.store.GetModuleTemplate(ctx, module.TemplateId)
+	if err != nil || template.Metadata["status_path"] == "" {
+		return unavailable, nil
+	}
+	base, err := s.moduleHTTPBase(ctx, module)
+	if err != nil {
+		return unavailable, nil
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+template.Metadata["status_path"], nil)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return unavailable, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return unavailable, nil
+	}
+
+	// UseNumber keeps SteamID64 sized values exact
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	var wire map[string]any
+	if err := decoder.Decode(&wire); err != nil {
+		return unavailable, nil
+	}
+
+	fields := make(map[string]string, len(wire))
+	for key, value := range wire {
+		fields[key] = snapshotValue(value)
+	}
+	return connect.NewResponse(&v1.GetModuleStatusSnapshotResponse{Available: true, Fields: fields}), nil
 }
 
 func (s *ModuleService) AnswerModulePrompt(ctx context.Context, req *connect.Request[v1.AnswerModulePromptRequest]) (*connect.Response[v1.AnswerModulePromptResponse], error) {

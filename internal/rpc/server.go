@@ -361,6 +361,7 @@ var pollingProcedures = []string{
 	discopanelv1connect.ModuleServiceGetModuleLogsProcedure,
 	discopanelv1connect.ModuleServiceListModulesProcedure,
 	discopanelv1connect.ModuleServiceListModulePromptsProcedure,
+	discopanelv1connect.ModuleServiceGetModuleStatusSnapshotProcedure,
 }
 
 // Reports whether a procedure is a polling endpoint

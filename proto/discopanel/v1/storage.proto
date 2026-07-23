@@ -657,6 +657,28 @@ enum ModuleProtocol {
   MODULE_PROTOCOL_HTTP = 4 [(discopanel.options.v1.value) = {label: "HTTP"}];
 }
 
+// How a failed config field check is treated
+enum ModuleConfigSeverity {
+  option (discopanel.options.v1.enum_type) = {label: "Severity"};
+  MODULE_CONFIG_SEVERITY_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
+  // Prompt the user but allow proceeding
+  MODULE_CONFIG_SEVERITY_WARN = 1 [(discopanel.options.v1.value) = {label: "Warning"}];
+  // Block create and update until fixed
+  MODULE_CONFIG_SEVERITY_DENY = 2 [(discopanel.options.v1.value) = {label: "Deny"}];
+}
+
+// Input widget and value kind for a config field
+enum ModuleConfigFieldType {
+  option (discopanel.options.v1.enum_type) = {label: "Field Type"};
+  MODULE_CONFIG_FIELD_TYPE_UNSPECIFIED = 0 [(discopanel.options.v1.value) = {label: "Unknown"}];
+  MODULE_CONFIG_FIELD_TYPE_STRING = 1 [(discopanel.options.v1.value) = {label: "Text"}];
+  MODULE_CONFIG_FIELD_TYPE_PASSWORD = 2 [(discopanel.options.v1.value) = {label: "Password"}];
+  MODULE_CONFIG_FIELD_TYPE_INT = 3 [(discopanel.options.v1.value) = {label: "Number"}];
+  MODULE_CONFIG_FIELD_TYPE_BOOL = 4 [(discopanel.options.v1.value) = {label: "Toggle"}];
+  MODULE_CONFIG_FIELD_TYPE_SELECT = 5 [(discopanel.options.v1.value) = {label: "Select"}];
+  MODULE_CONFIG_FIELD_TYPE_MULTILINE = 6 [(discopanel.options.v1.value) = {label: "Multiline"}];
+}
+
 // Every action the activity ledger records
 enum ServerActionKind {
   option (discopanel.options.v1.enum_type) = {label: "Server Action"};
@@ -766,6 +788,48 @@ message ModulePort {
   ModuleProtocol protocol = 4;
   // Whether to route traffic through the DiscoPanel proxy.
   bool proxy_enabled = 5;
+}
+
+// ModuleConfigOption is one choice for a select config field.
+message ModuleConfigOption {
+  // Stored env value.
+  string value = 1;
+  // Display label. Falls back to value when empty.
+  string label = 2;
+}
+
+// ModuleConfigField is a typed config input declared by a template.
+message ModuleConfigField {
+  // Env variable name. Also the field identity.
+  string env = 1;
+  // Display label. Falls back to env when empty.
+  string label = 2;
+  // Help text shown under the input.
+  string description = 3;
+  // Input widget and value kind.
+  ModuleConfigFieldType type = 4;
+  // Value must be non-empty.
+  bool required = 5;
+  // Requirement waived while this env key is truthy.
+  string required_unless = 6;
+  // Initial value. Supports alias substitution.
+  string default_value = 7;
+  // RE2 pattern the value must match.
+  string regex = 8;
+  // Message shown when the regex fails.
+  string regex_message = 9;
+  // Minimum numeric value for number fields.
+  optional int32 min = 10;
+  // Maximum numeric value for number fields.
+  optional int32 max = 11;
+  // Choices for select fields.
+  repeated ModuleConfigOption options = 12;
+  // Input placeholder hint.
+  string placeholder = 13;
+  // Optional subsection heading in the form.
+  string group = 14;
+  // Violation handling. Defaults to warn when unspecified.
+  ModuleConfigSeverity severity = 15;
 }
 
 // ModuleDependency declares a dependency on another module.
@@ -1455,8 +1519,8 @@ message ModuleTemplate {
   ModuleTemplateType type = 4 [(protogorm.v1.db) = {tag: "not null;default:2"}];
   // Docker image to use (e.g., "nginx:latest").
   string docker_image = 5 [(protogorm.v1.db) = {tag: "not null"}];
-  // JSON Schema for dynamic UI form generation.
-  string config_schema = 6 [(protogorm.v1.db) = {tag: "type:text"}];
+  // Typed config inputs shown when creating instances.
+  repeated ModuleConfigField config_fields = 6;
   // Default environment variables.
   map<string, string> default_env = 7;
   // Default volume mounts.
@@ -1503,6 +1567,8 @@ message ModuleTemplate {
   int32 default_init_command_delay = 28 [(protogorm.v1.db) = {tag: "default:0"}];
   // Whether to restart the container after init command completes
   bool default_restart_after_init = 29 [(protogorm.v1.db) = {tag: "default:false"}];
+  // Container security options (e.g., "seccomp=unconfined")
+  repeated string default_security_opt = 30;
 }
 
 // Module represents a running module instance attached to a server.
@@ -1556,8 +1622,6 @@ message Module {
   string container_id = 5;
   // Current runtime status.
   ModuleStatus status = 6 [(protogorm.v1.db) = {tag: "not null;default:1"}];
-  // JSON module configuration.
-  string config = 7 [(protogorm.v1.db) = {tag: "type:text"}];
   // Environment variable overrides.
   map<string, string> env_overrides = 8;
   // Volume mount overrides.

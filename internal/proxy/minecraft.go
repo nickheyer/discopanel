@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nickheyer/discopanel/pkg/logger"
+	"github.com/nickheyer/discopanel/pkg/mcproto"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/protometa"
 )
@@ -267,12 +268,12 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 	defer clientConn.Close()
 
 	clientConn.SetReadDeadline(time.Now().Add(handshakeTimeout))
-	br := bufio.NewReaderSize(clientConn, maxHandshakeLength)
+	br := bufio.NewReaderSize(clientConn, mcproto.MaxHandshakeLength)
 
 	// Checks third byte to tell legacy ping from big handshake
 	if first, err := br.Peek(1); err != nil {
 		return
-	} else if first[0] == legacyPingByte {
+	} else if first[0] == mcproto.LegacyPingByte {
 		raw, _ := br.Peek(br.Buffered())
 		if len(raw) < 3 || raw[2] != 0x00 {
 			p.serveLegacyPing(clientConn, raw)
@@ -280,7 +281,7 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 		}
 	}
 
-	handshake, err := ReadHandshakePacket(br)
+	handshake, err := mcproto.ReadHandshakePacket(br)
 	if err != nil {
 		p.logger.Debug("Failed to read handshake from %s: %v", clientConn.RemoteAddr(), err)
 		return
@@ -290,20 +291,20 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 	route, ok := p.lookupRoute(hostname)
 	if !ok {
 		p.logger.Debug("No active route for hostname %q from %s", hostname, clientConn.RemoteAddr())
-		if handshake.NextState == NextStateStatus {
+		if handshake.NextState == mcproto.NextStateStatus {
 			p.serveSyntheticStatus(clientConn, br, handshake,
 				fmt.Sprintf("Powered by DiscoPanel - nothing is running at %s", hostname), 0, "DiscoPanel")
 			return
 		}
 		clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		WriteLoginDisconnect(clientConn, fmt.Sprintf("No server is available at %s", hostname))
+		mcproto.WriteLoginDisconnect(clientConn, fmt.Sprintf("No server is available at %s", hostname))
 		return
 	}
 
 	stats := p.statsFor(route.ServerID)
 	stats.TotalConns.Add(1)
 	stats.LastProtocol.Store(int32(handshake.ProtocolVersion))
-	if handshake.NextState == NextStateStatus {
+	if handshake.NextState == mcproto.NextStateStatus {
 		stats.StatusPings.Add(1)
 	} else {
 		stats.Logins.Add(1)
@@ -312,7 +313,7 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 	// Paused servers answer status pings without waking, wake on login
 	if gate := p.getGate(); gate != nil {
 		if info, sleeping := gate.SleepingInfo(route.ServerID); sleeping {
-			if handshake.NextState == NextStateStatus {
+			if handshake.NextState == mcproto.NextStateStatus {
 				p.serveSyntheticStatus(clientConn, br, handshake, info.Motd, info.MaxPlayers, "Sleeping")
 				return
 			}
@@ -324,7 +325,7 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 			if err != nil {
 				p.logger.Error("Failed to wake server %s: %v", route.ServerID, err)
 				clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-				WriteLoginDisconnect(clientConn, "The server is waking up, try again in a moment")
+				mcproto.WriteLoginDisconnect(clientConn, "The server is waking up, try again in a moment")
 				return
 			}
 		}
@@ -333,39 +334,39 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 	// Stopped and booting servers answer synthetically instead of dialing
 	switch route.State {
 	case v1.ProxyRouteState_PROXY_ROUTE_STATE_OFFLINE:
-		if handshake.NextState == NextStateStatus {
+		if handshake.NextState == mcproto.NextStateStatus {
 			p.serveSyntheticStatus(clientConn, br, handshake, route.Motd, route.MaxPlayers, "Offline")
 			return
 		}
 		clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		if !route.Wakeable {
-			WriteLoginDisconnect(clientConn, "The server is offline")
+			mcproto.WriteLoginDisconnect(clientConn, "The server is offline")
 			return
 		}
 		gate := p.getGate()
 		if gate == nil {
-			WriteLoginDisconnect(clientConn, "The server is offline")
+			mcproto.WriteLoginDisconnect(clientConn, "The server is offline")
 			return
 		}
 		p.logger.Info("Starting stopped server %s for incoming login", route.ServerID)
 		stats.Wakes.Add(1)
 		if err := gate.StartServer(route.ServerID); err != nil {
 			p.logger.Error("Failed to start server %s for login: %v", route.ServerID, err)
-			WriteLoginDisconnect(clientConn, "The server could not be started, check the panel")
+			mcproto.WriteLoginDisconnect(clientConn, "The server could not be started, check the panel")
 			return
 		}
-		WriteLoginDisconnect(clientConn, "The server is starting up, join again in a minute")
+		mcproto.WriteLoginDisconnect(clientConn, "The server is starting up, join again in a minute")
 		return
 
 	case v1.ProxyRouteState_PROXY_ROUTE_STATE_STARTING:
-		if handshake.NextState == NextStateStatus {
+		if handshake.NextState == mcproto.NextStateStatus {
 			p.serveSyntheticStatus(clientConn, br, handshake, route.Motd, route.MaxPlayers, "Starting")
 			return
 		}
 		// No backend yet, container isn't up, tell client
 		if route.BackendHost == "" {
 			clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			WriteLoginDisconnect(clientConn, "The server is still starting, join again in a moment")
+			mcproto.WriteLoginDisconnect(clientConn, "The server is still starting, join again in a moment")
 			return
 		}
 		// Backend exists, let dial retry ride out the boot
@@ -373,9 +374,9 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 
 	if route.BackendHost == "" {
 		p.logger.Error("Route %s has no backend address", hostname)
-		if handshake.NextState == NextStateLogin {
+		if handshake.NextState == mcproto.NextStateLogin {
 			clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			WriteLoginDisconnect(clientConn, "The server is not reachable right now")
+			mcproto.WriteLoginDisconnect(clientConn, "The server is not reachable right now")
 		}
 		return
 	}
@@ -384,9 +385,9 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 	backendConn, err := dialBackendWithRetry(p.ctx, backendAddr, 10*time.Second)
 	if err != nil {
 		p.logger.Error("Failed to connect to backend %s for %s: %v", backendAddr, hostname, err)
-		if handshake.NextState == NextStateLogin {
+		if handshake.NextState == mcproto.NextStateLogin {
 			clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			WriteLoginDisconnect(clientConn, "The server is not accepting connections yet, try again in a moment")
+			mcproto.WriteLoginDisconnect(clientConn, "The server is not accepting connections yet, try again in a moment")
 		}
 		return
 	}
@@ -404,7 +405,7 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 
 	rewriteHandshakeAddress(handshake, route.BackendPort, route.PreserveHost)
 
-	if err := WriteHandshakePacket(backendConn, handshake); err != nil {
+	if err := mcproto.WriteHandshakePacket(backendConn, handshake); err != nil {
 		p.logger.Error("Failed to write handshake to backend %s: %v", backendAddr, err)
 		return
 	}
@@ -430,7 +431,7 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 }
 
 // Points handshake at backend, optionally preserving client hostname
-func rewriteHandshakeAddress(handshake *HandshakePacket, backendPort int, preserveHost bool) {
+func rewriteHandshakeAddress(handshake *mcproto.HandshakePacket, backendPort int, preserveHost bool) {
 	if !preserveHost {
 		addressParts := strings.Split(handshake.ServerAddress, "\x00")
 		addressParts[0] = "localhost"
@@ -440,7 +441,7 @@ func rewriteHandshakeAddress(handshake *HandshakePacket, backendPort int, preser
 }
 
 // Synthesizes a status reply so server lists never wake backends
-func (p *MinecraftProxy) serveSyntheticStatus(conn net.Conn, r io.Reader, handshake *HandshakePacket, motd string, maxPlayers int, versionName string) {
+func (p *MinecraftProxy) serveSyntheticStatus(conn net.Conn, r io.Reader, handshake *mcproto.HandshakePacket, motd string, maxPlayers int, versionName string) {
 	conn.SetDeadline(time.Now().Add(handshakeTimeout))
 
 	statusJSON, err := json.Marshal(map[string]any{
@@ -463,7 +464,7 @@ func (p *MinecraftProxy) serveSyntheticStatus(conn net.Conn, r io.Reader, handsh
 
 	for {
 		// Reads next packet, status request or ping
-		length, err := ReadVarInt(r)
+		length, err := mcproto.ReadVarInt(r)
 		if err != nil || length < 1 || length > 1024 {
 			return
 		}
@@ -472,7 +473,7 @@ func (p *MinecraftProxy) serveSyntheticStatus(conn net.Conn, r io.Reader, handsh
 			return
 		}
 		reader := bytes.NewReader(data)
-		packetID, err := ReadVarInt(reader)
+		packetID, err := mcproto.ReadVarInt(reader)
 		if err != nil {
 			return
 		}
@@ -480,21 +481,21 @@ func (p *MinecraftProxy) serveSyntheticStatus(conn net.Conn, r io.Reader, handsh
 		switch packetID {
 		case 0x00: // Status request -> status response
 			var payload bytes.Buffer
-			WriteVarInt(&payload, 0x00)
-			WriteVarInt(&payload, VarInt(len(statusJSON)))
+			mcproto.WriteVarInt(&payload, 0x00)
+			mcproto.WriteVarInt(&payload, mcproto.VarInt(len(statusJSON)))
 			payload.Write(statusJSON)
-			if err := writeFramed(conn, payload.Bytes()); err != nil {
+			if err := mcproto.WriteFramed(conn, payload.Bytes()); err != nil {
 				return
 			}
 		case 0x01: // Ping -> pong, echoes the 8-byte payload
 			var payload bytes.Buffer
-			WriteVarInt(&payload, 0x01)
+			mcproto.WriteVarInt(&payload, 0x01)
 			pingData := make([]byte, 8)
 			if _, err := io.ReadFull(reader, pingData); err != nil {
 				return
 			}
 			payload.Write(pingData)
-			writeFramed(conn, payload.Bytes())
+			mcproto.WriteFramed(conn, payload.Bytes())
 			return
 		default:
 			return
@@ -506,7 +507,7 @@ func (p *MinecraftProxy) serveSyntheticStatus(conn net.Conn, r io.Reader, handsh
 func (p *MinecraftProxy) serveLegacyPing(conn net.Conn, raw []byte) {
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	motd, version, maxPlayers := p.legacyStatus(raw)
-	WriteLegacyKick(conn, len(raw) > 1, motd, version, maxPlayers)
+	mcproto.WriteLegacyKick(conn, len(raw) > 1, motd, version, maxPlayers)
 }
 
 // Derives legacy status fields from the routed server
@@ -542,7 +543,7 @@ func (p *MinecraftProxy) legacyStatus(raw []byte) (string, string, int) {
 
 // Resolves the route a legacy ping is asking about
 func (p *MinecraftProxy) legacyPingRoute(raw []byte) (Route, bool) {
-	if hostname, ok := legacyPingHostname(raw); ok {
+	if hostname, ok := mcproto.LegacyPingHostname(raw); ok {
 		return p.lookupRoute(normalizeHostname(hostname))
 	}
 

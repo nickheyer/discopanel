@@ -6,6 +6,7 @@ import (
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/pkg/config"
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // Template id of the global crash doctor module
@@ -171,6 +172,191 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultMemory:   512,
 		},
 		{
+			Id:             "builtin-steambridge",
+			Name:           "Steam Bridge",
+			Description:    "Expose this server over Steam networking (Valve SDR relay / direct P2P). Players join through the DiscoPanel Bridge app or a compatible client mod using this module's SteamID64. No port forwarding or public IP needed.",
+			Type:           v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN,
+			DockerImage:    "nickheyer/discopanel-steambridge:latest",
+			Category:       "proxy",
+			SupportsProxy:  false,
+			RequiresServer: true,
+			Icon:           "gamepad-2",
+			Ports: []*v1.ModulePort{
+				{Name: "Status", ContainerPort: 8200, HostPort: 0, Protocol: v1.ModuleProtocol_MODULE_PROTOCOL_HTTP, ProxyEnabled: false},
+			},
+			DefaultEnv: map[string]string{
+				"TARGET_HOSTNAME":    "{{server.proxy_hostname}}",
+				"PROXY_PORT":         "{{server.proxy_port}}",
+				"PROXY_PORT_DEFAULT": "{{config.proxy.listen_port}}",
+				"VIRTUAL_PORT":       "0",
+				"ALLOW_WITHOUT_AUTH": "true",
+			},
+			ConfigFields: []*v1.ModuleConfigField{
+				{
+					Env:          "STEAM_EXTERNAL",
+					Label:        "Use external Steam session",
+					Description:  "Skip credentials and reuse a Steam login already in the data volume",
+					Group:        "Steam account",
+					Type:         v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_BOOL,
+					DefaultValue: "false",
+				},
+				{
+					Env:            "STEAM_USERNAME",
+					Label:          "Steam username",
+					Description:    "Dedicated throwaway account, never your personal one",
+					Group:          "Steam account",
+					Type:           v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_STRING,
+					Required:       true,
+					RequiredUnless: "STEAM_EXTERNAL",
+					Severity:       v1.ModuleConfigSeverity_MODULE_CONFIG_SEVERITY_DENY,
+				},
+				{
+					Env:            "STEAM_PASSWORD",
+					Label:          "Steam password",
+					Description:    "Approve the first login via the Steam mobile app while watching logs",
+					Group:          "Steam account",
+					Type:           v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_PASSWORD,
+					Required:       true,
+					RequiredUnless: "STEAM_EXTERNAL",
+					Severity:       v1.ModuleConfigSeverity_MODULE_CONFIG_SEVERITY_DENY,
+				},
+				{
+					Env:          "TRANSPORT_MODE",
+					Label:        "Transport mode",
+					Description:  "Auto picks between Valve relay and direct P2P",
+					Group:        "Access",
+					Type:         v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_SELECT,
+					DefaultValue: "auto",
+					Severity:     v1.ModuleConfigSeverity_MODULE_CONFIG_SEVERITY_DENY,
+					Options: []*v1.ModuleConfigOption{
+						{Value: "auto", Label: "Auto"},
+						{Value: "p2p", Label: "Direct P2P"},
+						{Value: "relay", Label: "Valve relay"},
+					},
+				},
+				{
+					Env:          "ACCESS_POLICY",
+					Label:        "Access policy",
+					Description:  "Friends means friends of this module's Steam account",
+					Group:        "Access",
+					Type:         v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_SELECT,
+					DefaultValue: "everyone",
+					Severity:     v1.ModuleConfigSeverity_MODULE_CONFIG_SEVERITY_DENY,
+					Options: []*v1.ModuleConfigOption{
+						{Value: "everyone", Label: "Everyone"},
+						{Value: "friends", Label: "Friends"},
+						{Value: "allowlist", Label: "Allowlist"},
+					},
+				},
+				{
+					Env:          "ALLOWED_STEAM_IDS",
+					Label:        "Allowed SteamID64s",
+					Description:  "Comma or newline separated, used with the allowlist policy",
+					Group:        "Access",
+					Type:         v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_MULTILINE,
+					Regex:        `^[0-9,\s]*$`,
+					RegexMessage: "ALLOWED_STEAM_IDS must be numeric SteamID64s separated by commas",
+				},
+				{
+					Env:          "VOICE_FORWARD",
+					Label:        "Forward voice traffic",
+					Description:  "Relay Simple Voice Chat and Plasmo Voice UDP",
+					Group:        "Voice",
+					Type:         v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_BOOL,
+					DefaultValue: "true",
+				},
+				{
+					Env:          "VOICE_PORT",
+					Label:        "Voice port",
+					Description:  "UDP port voice mods listen on",
+					Group:        "Voice",
+					Type:         v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_INT,
+					DefaultValue: "24454",
+					Min:          proto.Int32(1),
+					Max:          proto.Int32(65535),
+					Severity:     v1.ModuleConfigSeverity_MODULE_CONFIG_SEVERITY_DENY,
+				},
+			},
+			DefaultVolumes: []*v1.VolumeMount{
+				{Source: "{{server.data_path}}/modules/steambridge", Target: "/data", CreateDir: true},
+			},
+			HealthCheckPath: "/health",
+			HealthCheckPort: 8200,
+			DefaultUid:      "{{host.uid}}",
+			DefaultGid:      "{{host.gid}}",
+			// Steam runtime sandbox requires user namespaces
+			DefaultSecurityOpt: []string{"seccomp=unconfined", "apparmor=unconfined"},
+			// Login raises a runtime prompt for the guard code
+			Metadata:      map[string]string{"supports_prompts": "true"},
+			Documentation: "Runs a headless Steam client plus a gateway that terminates Steam Networking Sockets connections and relays them into the DiscoPanel hostname proxy, so wake-on-connect and sleeping-server behavior keep working. Requires a dedicated Steam account (never your personal one). Set STEAM_USERNAME and STEAM_PASSWORD, then start the module. https://store.steampowered.com/account/authorizeddevices -> Disable Guard Code... OR When Steam asks for a Steam Guard code the panel shows an input prompt in the module dialog, enter the current code from the account email or authenticator and login retries automatically. The login session persists in the module data volume. Players connect with the DiscoPanel Bridge app from https://github.com/nickheyer/discomodule-releases/releases (no mods needed, works with any Minecraft version) by running it, entering this module's SteamID64 (shown in logs and on the /status endpoint), and joining localhost in Minecraft. The open source Steam Bridge client mod also works as an alternative. ACCESS_POLICY everyone, friends, or allowlist controls who may connect, with friends meaning friends of the module's Steam account. Voice traffic from Simple Voice Chat and Plasmo Voice tunnels automatically when VOICE_FORWARD is on. Uses Steam AppID 480 (Spacewar), so keep the account disposable.",
+			DefaultMemory: 2048,
+		},
+		{
+			Id:             "builtin-playit",
+			Name:           "Playit.gg",
+			Description:    "Publish this server through a free playit.gg tunnel. Players join via your tunnel's public address, no port forwarding or public IP needed.",
+			Type:           v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_BUILTIN,
+			DockerImage:    "nickheyer/discopanel-playit:latest",
+			Category:       "proxy",
+			SupportsProxy:  false,
+			RequiresServer: true,
+			Icon:           "globe",
+			Ports: []*v1.ModulePort{
+				{Name: "Status", ContainerPort: 8201, HostPort: 0, Protocol: v1.ModuleProtocol_MODULE_PROTOCOL_HTTP, ProxyEnabled: false},
+			},
+			DefaultAccessUrls: []string{"https://playit.gg/account/tunnels"},
+			DefaultEnv: map[string]string{
+				"TARGET_HOSTNAME":    "{{server.proxy_hostname}}",
+				"PROXY_PORT":         "{{server.proxy_port}}",
+				"PROXY_PORT_DEFAULT": "{{config.proxy.listen_port}}",
+			},
+			ConfigFields: []*v1.ModuleConfigField{
+				{
+					Env:         "SECRET_KEY",
+					Label:       "Agent secret key",
+					Description: "Generate under Agents on playit.gg, persists in the data volume",
+					Type:        v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_PASSWORD,
+					Required:    true,
+					Placeholder: "playit.gg agent secret",
+					Severity:    v1.ModuleConfigSeverity_MODULE_CONFIG_SEVERITY_DENY,
+				},
+				{
+					Env:          "LISTEN_PORT",
+					Label:        "Tunnel listen port",
+					Description:  "Local port your playit tunnel targets",
+					Type:         v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_INT,
+					DefaultValue: "25565",
+					Min:          proto.Int32(1),
+					Max:          proto.Int32(65535),
+					Severity:     v1.ModuleConfigSeverity_MODULE_CONFIG_SEVERITY_DENY,
+				},
+				{
+					Env:          "UDP_FORWARD",
+					Label:        "Forward UDP",
+					Description:  "Relay UDP tunnels for voice mods",
+					Type:         v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_BOOL,
+					DefaultValue: "true",
+				},
+				{
+					Env:          "VOICE_PORT",
+					Label:        "Voice port",
+					Description:  "UDP port voice mods listen on",
+					Type:         v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_INT,
+					DefaultValue: "24454",
+					Min:          proto.Int32(1),
+					Max:          proto.Int32(65535),
+					Severity:     v1.ModuleConfigSeverity_MODULE_CONFIG_SEVERITY_DENY,
+				},
+			},
+			DefaultVolumes: []*v1.VolumeMount{
+				{Source: "{{server.data_path}}/modules/playit", Target: "/data", CreateDir: true},
+			},
+			HealthCheckPath: "/health",
+			HealthCheckPort: 8201,
+			Documentation:   "Runs the official playit.gg agent next to a gateway that rewrites incoming Minecraft handshakes onto this server's proxy hostname and relays them into the DiscoPanel proxy, keeping wake-on-connect working. Generate an agent secret key on playit.gg, set it as SECRET_KEY, then create a Minecraft Java tunnel whose local address is 127.0.0.1 on LISTEN_PORT. The provisioned secret persists in the module data volume. UDP tunnels for voice mods forward straight to the server container when UDP_FORWARD is on.",
+			DefaultMemory:   256,
+		},
+		{
 			Id:             doctorTemplateID,
 			Name:           "Doctor",
 			Description:    "Global crash doctor. Watches every DiscoPanel server, diagnoses crashes from structured exit reports, disables or sources mods with a full revert trail, and verifies repairs by restarting through the panel.",
@@ -196,12 +382,17 @@ func InitBuiltinTemplates(store *storage.Store) error {
 		},
 	}
 
-	// Insert only when missing so user edits survive restarts
+	// Builtins are code owned so reseed overwrites them
 	for _, template := range templates {
-		if _, err := store.GetModuleTemplate(ctx, template.Id); err == nil {
+		existing, err := store.GetModuleTemplate(ctx, template.Id)
+		if err != nil {
+			if err := store.CreateModuleTemplate(ctx, template); err != nil {
+				return err
+			}
 			continue
 		}
-		if err := store.CreateModuleTemplate(ctx, template); err != nil {
+		template.CreatedAt = existing.CreatedAt
+		if err := store.UpdateModuleTemplate(ctx, template); err != nil {
 			return err
 		}
 	}

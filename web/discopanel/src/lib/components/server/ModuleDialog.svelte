@@ -8,6 +8,7 @@
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { Textarea } from '$lib/components/ui/textarea';
 	import { ConfirmDialog, CopyButton, EmptyState } from '$lib/components/app';
 	import AliasHelper from '$lib/components/ui/AliasHelper.svelte';
 	import DynamicIcon from '$lib/components/ui/DynamicIcon.svelte';
@@ -21,12 +22,17 @@
 	import type {
 		ModuleTemplate,
 		Module,
+		ModuleConfigField,
 		ModulePort,
 		ModuleDependency,
 		ModuleEventHook,
 		VolumeMount
 	} from '$lib/proto/discopanel/v1/storage_pb';
+	import type { ModulePrompt } from '$lib/proto/discopanel/v1/module_pb';
 	import {
+		ModuleStatus,
+		ModuleConfigFieldType,
+		ModuleConfigSeverity,
 		ModuleEventAction,
 		ModuleEventActionSchema,
 		TriggeredEventType,
@@ -39,6 +45,8 @@
 	} from '$lib/proto/discopanel/v1/storage_pb';
 	import { create, clone } from '@bufbuild/protobuf';
 	import { enumLabel } from '$lib/proto-meta';
+	import { evaluateConfigField, groupedConfigFields } from '$lib/module-config';
+	import type { ConfigFieldIssue } from '$lib/module-config';
 	import { SERVER_EVENT_TYPES, getEventTypeLabel } from '$lib/utils/events';
 	import {
 		AlertTriangle,
@@ -47,12 +55,14 @@
 		HardDrive,
 		Heart,
 		Info,
+		KeyRound,
 		Loader2,
 		Network,
 		Play,
 		Plus,
 		Save,
 		Settings,
+		SlidersHorizontal,
 		Trash2,
 		Variable,
 		Wrench,
@@ -78,7 +88,7 @@
 		value: string;
 	}
 
-	type ConfigSection = 'general' | 'ports' | 'environment' | 'volumes' | 'advanced';
+	type ConfigSection = 'general' | 'configuration' | 'ports' | 'environment' | 'volumes' | 'advanced';
 
 	let {
 		open = $bindable(),
@@ -92,8 +102,10 @@
 
 	let step = $state<'select' | 'configure'>('select');
 	let selectedTemplate = $state<ModuleTemplate | null>(null);
+	let editTemplate = $state<ModuleTemplate | null>(null);
 	let submitting = $state(false);
 	let activeSection = $state<ConfigSection>('general');
+	let configValues = $state<Record<string, string>>({});
 
 	// Form state
 	let name = $state('');
@@ -119,23 +131,54 @@
 	let metadata = $state<MetadataEntry[]>([]);
 	let serverModules = $state<Module[]>([]);
 
+	// Runtime input the module is waiting on
+	let pendingPrompt = $state<ModulePrompt | null>(null);
+	let promptValue = $state('');
+	let promptSubmitting = $state(false);
+
 	let serverId = $derived(mode === 'create' ? server?.id : module?.serverId);
 	let hasProxy = $derived(
 		mode === 'create' ? !!server?.proxyHostname : !!module?.serverProxyHostname
 	);
+	let activeTemplate = $derived(mode === 'create' ? selectedTemplate : editTemplate);
+	let configFields = $derived(activeTemplate?.configFields ?? []);
 
-	const navItems: { id: ConfigSection; label: string; icon: typeof Settings }[] = [
-		{ id: 'general', label: 'General', icon: Settings },
-		{ id: 'ports', label: 'Ports', icon: Network },
-		{ id: 'environment', label: 'Environment', icon: Variable },
-		{ id: 'volumes', label: 'Volumes', icon: HardDrive },
-		{ id: 'advanced', label: 'Advanced', icon: Wrench }
-	];
+	let configIssues = $derived.by(() => {
+		const issues: Record<string, ConfigFieldIssue | null> = {};
+		for (const field of configFields) {
+			if (!field.env) continue;
+			issues[field.env] = evaluateConfigField(field, configValues);
+		}
+		return issues;
+	});
+	let configDenyCount = $derived(
+		Object.values(configIssues).filter((i) => i?.severity === ModuleConfigSeverity.DENY).length
+	);
+
+	let navItems = $derived.by(() => {
+		const items: { id: ConfigSection; label: string; icon: typeof Settings }[] = [
+			{ id: 'general', label: 'General', icon: Settings }
+		];
+		if (configFields.length > 0) {
+			items.push({ id: 'configuration', label: 'Configuration', icon: SlidersHorizontal });
+		}
+		items.push(
+			{ id: 'ports', label: 'Ports', icon: Network },
+			{ id: 'environment', label: 'Environment', icon: Variable },
+			{ id: 'volumes', label: 'Volumes', icon: HardDrive },
+			{ id: 'advanced', label: 'Advanced', icon: Wrench }
+		);
+		return items;
+	});
 
 	const sectionHeaders: Record<ConfigSection, { title: string; desc: string }> = {
 		general: {
 			title: 'General settings',
 			desc: 'Configure basic module settings and lifecycle behavior'
+		},
+		configuration: {
+			title: 'Configuration',
+			desc: 'Settings this module needs to run'
 		},
 		ports: {
 			title: 'Port configuration',
@@ -161,6 +204,27 @@
 			if (env.key.trim()) map[env.key.trim()] = env.value;
 		}
 		return map;
+	}
+
+	// Config fields win over hand added env rows
+	function envPayload(): { [key: string]: string } {
+		const map = envVarsToMap();
+		for (const field of configFields) {
+			if (field.env) map[field.env] = configValues[field.env] ?? '';
+		}
+		return map;
+	}
+
+	function selectOptionLabel(field: ModuleConfigField, value: string | undefined): string {
+		const opt = field.options.find((o) => o.value === (value ?? ''));
+		if (opt) return opt.label || opt.value;
+		return value || 'Select...';
+	}
+
+	function seedConfigValues(fields: ModuleConfigField[], overrides: { [key: string]: string }) {
+		configValues = Object.fromEntries(
+			fields.filter((f) => f.env).map((f) => [f.env, overrides[f.env] ?? f.defaultValue])
+		);
 	}
 
 	function parseEnvVars(m: { [key: string]: string } | undefined): EnvVar[] {
@@ -289,6 +353,8 @@
 		eventHooks = [];
 		metadata = [];
 		serverModules = [];
+		configValues = {};
+		editTemplate = null;
 	}
 
 	function backToTemplates() {
@@ -305,7 +371,9 @@
 				.catch(() => ({ port: 8100 })),
 			loadServerModules()
 		]);
-		envVars = parseEnvVars(template.defaultEnv);
+		const fieldKeys = new Set(template.configFields.map((f) => f.env));
+		envVars = parseEnvVars(template.defaultEnv).filter((e) => !fieldKeys.has(e.key));
+		seedConfigValues(template.configFields, {});
 		volumes = template.defaultVolumes.map((v) => clone(VolumeMountSchema, v));
 		ports = template.ports.map((p) => clone(ModulePortSchema, p));
 		memory = template.defaultMemory;
@@ -372,6 +440,13 @@
 			);
 		}
 
+		for (const field of configFields) {
+			const issue = configIssues[field.env];
+			if (issue && issue.severity === ModuleConfigSeverity.WARN) {
+				w.push(issue.message);
+			}
+		}
+
 		if (w.length === 0) return Promise.resolve(true);
 
 		warnings = w;
@@ -418,9 +493,29 @@
 				eventHooks = module.eventHooks.map((h) => clone(ModuleEventHookSchema, h));
 				metadata = parseMetadata(module.metadata);
 				loadServerModules();
+				loadEditTemplate(module);
 			});
 		}
 	});
+
+	// Splits env rows into config fields once the template arrives
+	async function loadEditTemplate(mod: Module) {
+		editTemplate = null;
+		try {
+			const response = await rpcClient.module.getModuleTemplate(
+				{ id: mod.templateId },
+				silentCallOptions
+			);
+			const template = response.template ?? null;
+			editTemplate = template;
+			if (!template || template.configFields.length === 0) return;
+			const fieldKeys = new Set(template.configFields.map((f) => f.env));
+			seedConfigValues(template.configFields, mod.envOverrides);
+			envVars = envVars.filter((e) => !fieldKeys.has(e.key));
+		} catch {
+			editTemplate = null;
+		}
+	}
 
 	$effect(() => {
 		if (!open) {
@@ -428,11 +523,73 @@
 			selectedTemplate = null;
 			deleteTemplateOpen = false;
 			templateToDelete = null;
+			pendingPrompt = null;
+			promptValue = '';
 			resetForm();
 		}
 	});
 
+	// True when this module can raise runtime input prompts
+	let promptCapable = $derived(
+		mode === 'edit' &&
+			!!module &&
+			module.status === ModuleStatus.RUNNING &&
+			activeTemplate?.metadata?.supports_prompts === 'true'
+	);
+
+	async function pollPrompt() {
+		if (!module?.id) return;
+		try {
+			const res = await rpcClient.module.getModulePrompt({ id: module.id }, silentCallOptions);
+			const next = res.pending ? (res.prompt ?? null) : null;
+			// Reset the input only when a different prompt arrives
+			if (next?.id !== pendingPrompt?.id) {
+				promptValue = '';
+			}
+			pendingPrompt = next;
+		} catch {
+			pendingPrompt = null;
+		}
+	}
+
+	// Polls the module for pending input while it is running
+	$effect(() => {
+		if (!open || !promptCapable) {
+			pendingPrompt = null;
+			return;
+		}
+		pollPrompt();
+		const timer = setInterval(pollPrompt, 4000);
+		return () => clearInterval(timer);
+	});
+
+	async function submitPrompt() {
+		if (!module?.id || !pendingPrompt) return;
+		promptSubmitting = true;
+		try {
+			await rpcClient.module.answerModulePrompt({
+				id: module.id,
+				promptId: pendingPrompt.id,
+				value: promptValue
+			});
+			toast.success('Sent to module');
+			pendingPrompt = null;
+			promptValue = '';
+			// Give the module a moment then re-check
+			setTimeout(pollPrompt, 1500);
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Failed to send input');
+		} finally {
+			promptSubmitting = false;
+		}
+	}
+
 	async function handleSubmit() {
+		if (configDenyCount > 0) {
+			activeSection = 'configuration';
+			toast.error('Fix the highlighted configuration fields first');
+			return;
+		}
 		const proceed = await showWarnings();
 		if (!proceed) return;
 
@@ -457,8 +614,7 @@
 					name,
 					serverId: serverId || '',
 					templateId: selectedTemplate.id,
-					config: '{}',
-					envOverrides: envVarsToMap(),
+					envOverrides: envPayload(),
 					volumeOverrides: volumesPayload,
 					memory,
 					cpuLimit,
@@ -484,7 +640,7 @@
 				await rpcClient.module.updateModule({
 					id: module.id,
 					name,
-					envOverrides: envVarsToMap(),
+					envOverrides: envPayload(),
 					volumeOverrides: volumesPayload,
 					memory,
 					cpuLimit,
@@ -602,6 +758,13 @@
 							>
 								<Icon class="size-4" />
 								{item.label}
+								{#if item.id === 'configuration' && configDenyCount > 0}
+									<span
+										class="ml-auto rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] font-semibold text-destructive"
+									>
+										{configDenyCount}
+									</span>
+								{/if}
 							</button>
 						{/each}
 					</nav>
@@ -645,6 +808,58 @@
 							<span class="sr-only">Close</span>
 						</Button>
 					</div>
+
+					{#if pendingPrompt}
+						<div class="border-b border-amber-500/30 bg-amber-500/10 px-6 py-4">
+							<div class="flex items-start gap-3">
+								<KeyRound class="mt-0.5 size-5 shrink-0 text-amber-500" />
+								<div class="min-w-0 flex-1">
+									<p class="text-sm font-semibold">{pendingPrompt.title || 'Input needed'}</p>
+									{#if pendingPrompt.message}
+										<p class="mt-0.5 text-sm text-muted-foreground">{pendingPrompt.message}</p>
+									{/if}
+									<div class="mt-3 flex items-center gap-2">
+										{#if pendingPrompt.kind === ModuleConfigFieldType.SELECT}
+											<Select
+												type="single"
+												value={promptValue}
+												onValueChange={(v) => (promptValue = v ?? '')}
+											>
+												<SelectTrigger class="w-64">
+													{promptValue || 'Select...'}
+												</SelectTrigger>
+												<SelectContent>
+													{#each pendingPrompt.options as opt (opt.value)}
+														<SelectItem value={opt.value}>{opt.label || opt.value}</SelectItem>
+													{/each}
+												</SelectContent>
+											</Select>
+										{:else}
+											<Input
+												class="w-64"
+												type={pendingPrompt.kind === ModuleConfigFieldType.PASSWORD
+													? 'password'
+													: 'text'}
+												placeholder={pendingPrompt.placeholder}
+												bind:value={promptValue}
+												onkeydown={(e) => {
+													if (e.key === 'Enter') submitPrompt();
+												}}
+											/>
+										{/if}
+										<Button size="sm" disabled={promptSubmitting || !promptValue} onclick={submitPrompt}>
+											{#if promptSubmitting}
+												<Loader2 class="size-4 animate-spin" />
+											{:else}
+												<Check class="size-4" />
+											{/if}
+											Submit
+										</Button>
+									</div>
+								</div>
+							</div>
+						</div>
+					{/if}
 
 					<div class="flex-1 overflow-y-auto p-6">
 						{#if activeSection === 'general'}
@@ -774,6 +989,103 @@
 										</div>
 									</div>
 								{/if}
+							</div>
+						{:else if activeSection === 'configuration'}
+							<div class="space-y-6">
+								{#each groupedConfigFields(configFields) as [group, fields] (group)}
+									<div class="space-y-4">
+										{#if group}
+											<h3 class="text-sm font-semibold">{group}</h3>
+										{/if}
+										{#each fields as field (field.env)}
+											{@const issue = configIssues[field.env]}
+											{@const issueBorder =
+												issue?.severity === ModuleConfigSeverity.DENY
+													? 'border-destructive'
+													: issue
+														? 'border-status-warn'
+														: ''}
+											<div class="space-y-1.5">
+												{#if field.type === ModuleConfigFieldType.BOOL}
+													<label
+														class="flex cursor-pointer items-center justify-between gap-4 rounded-lg border bg-card p-3"
+													>
+														<div>
+															<span class="text-sm font-medium">{field.label || field.env}</span>
+															{#if field.description}
+																<p class="text-xs text-muted-foreground">{field.description}</p>
+															{/if}
+														</div>
+														<Switch
+															checked={configValues[field.env] === 'true'}
+															onCheckedChange={(v) => (configValues[field.env] = v ? 'true' : 'false')}
+														/>
+													</label>
+												{:else}
+													<Label for={`cfg-${field.env}`}>
+														{field.label || field.env}
+														{#if field.required}
+															<span class="text-destructive">*</span>
+														{/if}
+													</Label>
+													{#if field.type === ModuleConfigFieldType.SELECT}
+														<Select
+															type="single"
+															value={configValues[field.env]}
+															onValueChange={(v) => {
+																if (v) configValues[field.env] = v;
+															}}
+														>
+															<SelectTrigger class={cn('w-full', issueBorder)}>
+																<span class="truncate">
+																	{selectOptionLabel(field, configValues[field.env])}
+																</span>
+															</SelectTrigger>
+															<SelectContent>
+																{#each field.options as opt (opt.value)}
+																	<SelectItem value={opt.value}>{opt.label || opt.value}</SelectItem>
+																{/each}
+															</SelectContent>
+														</Select>
+													{:else if field.type === ModuleConfigFieldType.MULTILINE}
+														<Textarea
+															id={`cfg-${field.env}`}
+															bind:value={configValues[field.env]}
+															placeholder={field.placeholder}
+															class={cn('font-mono', issueBorder)}
+														/>
+													{:else}
+														<Input
+															id={`cfg-${field.env}`}
+															type={field.type === ModuleConfigFieldType.PASSWORD
+																? 'password'
+																: field.type === ModuleConfigFieldType.INT
+																	? 'number'
+																	: 'text'}
+															bind:value={configValues[field.env]}
+															placeholder={field.placeholder}
+															class={cn('font-mono', issueBorder)}
+														/>
+													{/if}
+												{/if}
+												{#if issue}
+													<p
+														class={cn(
+															'text-xs',
+															issue.severity === ModuleConfigSeverity.DENY
+																? 'text-destructive'
+																: 'text-status-warn'
+														)}
+													>
+														{issue.message}
+													</p>
+												{:else if field.description && field.type !== ModuleConfigFieldType.BOOL}
+													<p class="text-xs text-muted-foreground">{field.description}</p>
+												{/if}
+											</div>
+										{/each}
+									</div>
+								{/each}
 							</div>
 						{:else if activeSection === 'ports'}
 							<div class="space-y-4">
@@ -1361,7 +1673,10 @@
 						{:else}
 							<Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
 						{/if}
-						<Button onclick={handleSubmit} disabled={submitting || !name.trim()}>
+						<Button
+							onclick={handleSubmit}
+							disabled={submitting || !name.trim() || configDenyCount > 0}
+						>
 							{#if submitting}
 								<Loader2 class="size-4 animate-spin" />
 								{mode === 'create' ? 'Creating...' : 'Saving...'}

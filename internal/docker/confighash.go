@@ -110,6 +110,9 @@ func (c *Client) DesiredModuleConfigHash(module *v1.Module, template *v1.ModuleT
 	w("memory", strconv.Itoa(int(module.Memory)))
 	w("cpu", strconv.FormatFloat(module.CpuLimit, 'f', -1, 64))
 	w("network", c.config.NetworkName)
+	for _, s := range template.DefaultSecurityOpt {
+		w("secopt", s)
+	}
 
 	return hex.EncodeToString(h.Sum(nil))[:32]
 }

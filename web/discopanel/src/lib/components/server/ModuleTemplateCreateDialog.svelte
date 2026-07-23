@@ -13,6 +13,12 @@
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import {
+		ModuleConfigFieldSchema,
+		ModuleConfigFieldType,
+		ModuleConfigFieldTypeSchema,
+		ModuleConfigOptionSchema,
+		ModuleConfigSeverity,
+		ModuleConfigSeveritySchema,
 		ModuleEventAction,
 		ModuleEventActionSchema,
 		ModuleEventHookSchema,
@@ -21,6 +27,7 @@
 		ModuleProtocolSchema,
 		TriggeredEventType,
 		VolumeMountSchema,
+		type ModuleConfigField,
 		type ModuleEventHook,
 		type ModulePort,
 		type ModuleTemplate,
@@ -32,6 +39,7 @@
 	import {
 		Loader2,
 		Plus,
+		SlidersHorizontal,
 		Trash2,
 		X,
 		FileText,
@@ -59,7 +67,7 @@
 		value: string;
 	}
 
-	type ConfigSection = 'basic' | 'docker' | 'ports' | 'environment' | 'volumes' | 'advanced';
+	type ConfigSection = 'basic' | 'docker' | 'fields' | 'ports' | 'environment' | 'volumes' | 'advanced';
 
 	let { open = $bindable(), mode = 'create', template, onSuccess }: Props = $props();
 
@@ -79,6 +87,7 @@
 	let documentation = $state('');
 	let defaultUid = $state('');
 	let defaultGid = $state('');
+	let defaultSecurityOpt = $state('');
 	let defaultInitCommand = $state('');
 	let defaultInitCommandDelay = $state(0);
 	let defaultRestartAfterInit = $state(false);
@@ -88,6 +97,7 @@
 	let suggestedDependencies = $state('');
 	let defaultHooks = $state<ModuleEventHook[]>([]);
 	let metadata = $state<MetadataEntry[]>([]);
+	let configFields = $state<ModuleConfigField[]>([]);
 
 	const navItems: {
 		id: ConfigSection;
@@ -109,6 +119,13 @@
 			title: 'Docker configuration',
 			desc: 'Container image, health check, and behavior',
 			icon: Container
+		},
+		{
+			id: 'fields',
+			label: 'Config fields',
+			title: 'Config fields',
+			desc: 'Typed inputs shown when creating instances',
+			icon: SlidersHorizontal
 		},
 		{
 			id: 'ports',
@@ -221,6 +238,52 @@
 		return map;
 	}
 
+	function addConfigField() {
+		configFields = [
+			...configFields,
+			create(ModuleConfigFieldSchema, {
+				type: ModuleConfigFieldType.STRING,
+				severity: ModuleConfigSeverity.WARN
+			})
+		];
+	}
+
+	function removeConfigField(index: number) {
+		configFields = configFields.filter((_, i) => i !== index);
+	}
+
+	function addFieldOption(field: ModuleConfigField) {
+		field.options = [...field.options, create(ModuleConfigOptionSchema, {})];
+	}
+
+	function removeFieldOption(field: ModuleConfigField, index: number) {
+		field.options = field.options.filter((_, i) => i !== index);
+	}
+
+	// Display order for field type choices
+	const FIELD_TYPE_OPTIONS: ModuleConfigFieldType[] = [
+		ModuleConfigFieldType.STRING,
+		ModuleConfigFieldType.PASSWORD,
+		ModuleConfigFieldType.INT,
+		ModuleConfigFieldType.BOOL,
+		ModuleConfigFieldType.SELECT,
+		ModuleConfigFieldType.MULTILINE
+	];
+
+	const FIELD_SEVERITY_OPTIONS: ModuleConfigSeverity[] = [
+		ModuleConfigSeverity.WARN,
+		ModuleConfigSeverity.DENY
+	];
+
+	// Regex only makes sense for free text kinds
+	function fieldSupportsRegex(type: ModuleConfigFieldType): boolean {
+		return (
+			type === ModuleConfigFieldType.STRING ||
+			type === ModuleConfigFieldType.PASSWORD ||
+			type === ModuleConfigFieldType.MULTILINE
+		);
+	}
+
 	// Display order for event action choices
 	const EVENT_ACTION_OPTIONS: ModuleEventAction[] = [
 		ModuleEventAction.START,
@@ -265,6 +328,7 @@
 		documentation = t.documentation;
 		defaultUid = t.defaultUid;
 		defaultGid = t.defaultGid;
+		defaultSecurityOpt = t.defaultSecurityOpt.join(', ');
 		defaultInitCommand = t.defaultInitCommand;
 		defaultInitCommandDelay = t.defaultInitCommandDelay;
 		defaultRestartAfterInit = t.defaultRestartAfterInit;
@@ -272,6 +336,7 @@
 		envVars = Object.entries(t.defaultEnv).map(([key, value]) => ({ key, value }));
 		volumes = t.defaultVolumes.map((v) => clone(VolumeMountSchema, v));
 		ports = t.ports.map((p) => clone(ModulePortSchema, p));
+		configFields = t.configFields.map((f) => clone(ModuleConfigFieldSchema, f));
 		suggestedDependencies = t.suggestedDependencies.join(', ');
 		defaultHooks = t.defaultHooks.map((h) => clone(ModuleEventHookSchema, h));
 
@@ -292,6 +357,7 @@
 		documentation = '';
 		defaultUid = '';
 		defaultGid = '';
+		defaultSecurityOpt = '';
 		defaultInitCommand = '';
 		defaultInitCommandDelay = 0;
 		defaultRestartAfterInit = false;
@@ -301,6 +367,7 @@
 		suggestedDependencies = '';
 		defaultHooks = [];
 		metadata = [];
+		configFields = [];
 		activeSection = 'basic';
 	}
 
@@ -316,6 +383,17 @@
 					`Ignored ${droppedPorts} port row${droppedPorts === 1 ? '' : 's'} without a container port`
 				);
 			}
+			const validFields = configFields.filter((f) => f.env.trim());
+			const droppedFields = configFields.length - validFields.length;
+			if (droppedFields > 0) {
+				toast.warning(
+					`Ignored ${droppedFields} config field${droppedFields === 1 ? '' : 's'} without an env name`
+				);
+			}
+			for (const f of validFields) {
+				f.env = f.env.trim();
+				f.options = f.options.filter((o) => o.value.trim());
+			}
 			for (const v of volumes) {
 				v.source = v.source.trim();
 				v.target = v.target.trim();
@@ -324,6 +402,7 @@
 				name: name.trim(),
 				description: description.trim(),
 				dockerImage: dockerImage.trim(),
+				configFields: validFields,
 				defaultEnv: envVarsToMap(),
 				defaultVolumes: volumes.filter((v) => v.source && v.target),
 				healthCheckPath: healthCheckPath.trim(),
@@ -344,6 +423,12 @@
 				metadata: metadataToMap(),
 				defaultUid,
 				defaultGid,
+				defaultSecurityOpt: defaultSecurityOpt.trim()
+					? defaultSecurityOpt
+							.split(',')
+							.map((s) => s.trim())
+							.filter((s) => s)
+					: [],
 				defaultInitCommand,
 				defaultInitCommandDelay,
 				defaultRestartAfterInit
@@ -555,6 +640,27 @@
 								</div>
 							</div>
 
+							<div class="rounded-lg border bg-card">
+								<div class="border-b px-4 py-3">
+									<span class="stat-label">Security options</span>
+									<p class="mt-1 text-xs text-muted-foreground">
+										Docker security options applied to the container
+									</p>
+								</div>
+								<div class="space-y-2 p-4">
+									<Label for="tpl-secopt">Security options</Label>
+									<Input
+										id="tpl-secopt"
+										bind:value={defaultSecurityOpt}
+										placeholder="seccomp=unconfined, apparmor=unconfined"
+										class="font-mono"
+									/>
+									<p class="text-xs text-muted-foreground">
+										Comma-separated, e.g. for containers that need user namespaces
+									</p>
+								</div>
+							</div>
+
 							<div class="space-y-3">
 								<span class="stat-label">Behavior flags</span>
 								<label
@@ -580,6 +686,258 @@
 									<Switch bind:checked={supportsProxy} />
 								</label>
 							</div>
+						</div>
+					{:else if activeSection === 'fields'}
+						<div class="space-y-4">
+							<div class="flex items-start justify-between gap-4">
+								<div>
+									<p class="text-sm font-medium">
+										{configFields.length} field{configFields.length !== 1 ? 's' : ''} defined
+									</p>
+									<p class="mt-0.5 text-xs text-muted-foreground">
+										Fields render as a form and validate instance config
+									</p>
+								</div>
+								<Button size="sm" onclick={addConfigField}>
+									<Plus class="size-4" />
+									Add field
+								</Button>
+							</div>
+
+							{#if configFields.length > 0}
+								<div class="space-y-3">
+									{#each configFields as field, i (i)}
+										<div class="space-y-4 rounded-lg border bg-card p-4">
+											<div class="flex items-center justify-between">
+												<span class="stat-label">Field {i + 1}</span>
+												<Button
+													variant="ghost"
+													size="icon"
+													onclick={() => removeConfigField(i)}
+													class="size-7 text-muted-foreground hover:text-destructive"
+												>
+													<Trash2 class="size-4" />
+												</Button>
+											</div>
+
+											<div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+												<div class="space-y-2">
+													<Label>Env variable *</Label>
+													<Input bind:value={field.env} placeholder="SECRET_KEY" class="font-mono" />
+												</div>
+												<div class="space-y-2">
+													<Label>Label</Label>
+													<Input bind:value={field.label} placeholder="Agent secret key" />
+												</div>
+												<div class="space-y-2">
+													<Label>Type</Label>
+													<Select
+														type="single"
+														value={String(field.type)}
+														onValueChange={(v) => {
+															if (v) field.type = Number(v);
+														}}
+													>
+														<SelectTrigger class="w-full">
+															<span class="truncate">
+																{enumLabel(
+																	ModuleConfigFieldTypeSchema,
+																	field.type || ModuleConfigFieldType.STRING
+																)}
+															</span>
+														</SelectTrigger>
+														<SelectContent>
+															{#each FIELD_TYPE_OPTIONS as t (t)}
+																<SelectItem value={String(t)}>
+																	{enumLabel(ModuleConfigFieldTypeSchema, t)}
+																</SelectItem>
+															{/each}
+														</SelectContent>
+													</Select>
+												</div>
+											</div>
+
+											<div class="space-y-2">
+												<Label>Description</Label>
+												<Input
+													bind:value={field.description}
+													placeholder="Help text shown under the input"
+												/>
+											</div>
+
+											<div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+												<div class="space-y-2">
+													<Label>Default value</Label>
+													<Input
+														bind:value={field.defaultValue}
+														placeholder="value or {'{{alias}}'}"
+														class="font-mono"
+													/>
+												</div>
+												<div class="space-y-2">
+													<Label>Placeholder</Label>
+													<Input bind:value={field.placeholder} placeholder="Input hint" />
+												</div>
+												<div class="space-y-2">
+													<Label>Group</Label>
+													<Input bind:value={field.group} placeholder="Optional section heading" />
+												</div>
+											</div>
+
+											<div class="flex flex-wrap items-end gap-4">
+												<label class="flex cursor-pointer items-center gap-2 pb-2">
+													<Checkbox bind:checked={field.required} />
+													<span class="text-sm">Required</span>
+												</label>
+												{#if field.required}
+													<div class="space-y-2">
+														<Label>Required unless</Label>
+														<Input
+															bind:value={field.requiredUnless}
+															placeholder="OTHER_ENV_KEY"
+															class="w-48 font-mono"
+														/>
+													</div>
+												{/if}
+												<div class="space-y-2">
+													<Label>On violation</Label>
+													<Select
+														type="single"
+														value={String(field.severity)}
+														onValueChange={(v) => {
+															if (v) field.severity = Number(v);
+														}}
+													>
+														<SelectTrigger class="w-40">
+															<span class="truncate">
+																{enumLabel(
+																	ModuleConfigSeveritySchema,
+																	field.severity || ModuleConfigSeverity.WARN
+																)}
+															</span>
+														</SelectTrigger>
+														<SelectContent>
+															{#each FIELD_SEVERITY_OPTIONS as s (s)}
+																<SelectItem value={String(s)}>
+																	{enumLabel(ModuleConfigSeveritySchema, s)}
+																</SelectItem>
+															{/each}
+														</SelectContent>
+													</Select>
+												</div>
+											</div>
+
+											{#if field.type === ModuleConfigFieldType.INT}
+												<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+													<div class="space-y-2">
+														<Label>Minimum</Label>
+														<Input
+															type="number"
+															value={field.min ?? ''}
+															oninput={(e) => {
+																const v = e.currentTarget.value;
+																field.min = v === '' ? undefined : Number(v);
+															}}
+															placeholder="No minimum"
+														/>
+													</div>
+													<div class="space-y-2">
+														<Label>Maximum</Label>
+														<Input
+															type="number"
+															value={field.max ?? ''}
+															oninput={(e) => {
+																const v = e.currentTarget.value;
+																field.max = v === '' ? undefined : Number(v);
+															}}
+															placeholder="No maximum"
+														/>
+													</div>
+												</div>
+											{/if}
+
+											{#if fieldSupportsRegex(field.type)}
+												<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+													<div class="space-y-2">
+														<Label>Pattern (RE2)</Label>
+														<Input
+															bind:value={field.regex}
+															placeholder="^[0-9]+$"
+															class="font-mono"
+														/>
+													</div>
+													<div class="space-y-2">
+														<Label>Pattern message</Label>
+														<Input
+															bind:value={field.regexMessage}
+															placeholder="Shown when the pattern fails"
+														/>
+													</div>
+												</div>
+											{/if}
+
+											{#if field.type === ModuleConfigFieldType.SELECT}
+												<div class="space-y-2">
+													<div class="flex items-center justify-between">
+														<Label>Options</Label>
+														<Button
+															variant="outline"
+															size="sm"
+															onclick={() => addFieldOption(field)}
+														>
+															<Plus class="size-4" />
+															Add option
+														</Button>
+													</div>
+													{#if field.options.length > 0}
+														<div class="space-y-2">
+															{#each field.options as opt, oi (oi)}
+																<div class="flex items-center gap-2">
+																	<Input
+																		bind:value={opt.value}
+																		placeholder="stored value"
+																		class="w-48 font-mono"
+																	/>
+																	<Input
+																		bind:value={opt.label}
+																		placeholder="display label"
+																		class="flex-1"
+																	/>
+																	<Button
+																		variant="ghost"
+																		size="icon"
+																		onclick={() => removeFieldOption(field, oi)}
+																		class="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+																	>
+																		<Trash2 class="size-4" />
+																	</Button>
+																</div>
+															{/each}
+														</div>
+													{:else}
+														<p class="text-xs text-muted-foreground">
+															Select fields need at least one option
+														</p>
+													{/if}
+												</div>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							{:else}
+								<div class="rounded-xl border border-dashed">
+									<EmptyState
+										icon={SlidersHorizontal}
+										title="No config fields defined"
+										description="Add typed inputs so instances get a real form"
+									>
+										<Button variant="outline" size="sm" onclick={addConfigField}>
+											<Plus class="size-4" />
+											Add field
+										</Button>
+									</EmptyState>
+								</div>
+							{/if}
 						</div>
 					{:else if activeSection === 'ports'}
 						<div class="space-y-4">

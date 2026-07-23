@@ -1,9 +1,14 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"sort"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -20,6 +25,7 @@ import (
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 	"github.com/nickheyer/discopanel/pkg/proto/discopanel/v1/discopanelv1connect"
 	"github.com/nickheyer/discopanel/pkg/protometa"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Compile-time check that ModuleService implements the interface
@@ -145,12 +151,17 @@ func (s *ModuleService) CreateModuleTemplate(ctx context.Context, req *connect.R
 		return nil, connect.NewError(connect.CodeAlreadyExists, errors.New("template with this name already exists"))
 	}
 
+	if err := module.ValidateConfigFieldDefs(msg.ConfigFields); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	template := &v1.ModuleTemplate{
 		Id:                      uuid.New().String(),
 		Name:                    msg.Name,
 		Description:             msg.Description,
 		Type:                    v1.ModuleTemplateType_MODULE_TEMPLATE_TYPE_CUSTOM, // User-created templates are always custom
 		DockerImage:             msg.DockerImage,
+		ConfigFields:            msg.ConfigFields,
 		DefaultEnv:              msg.DefaultEnv,
 		DefaultVolumes:          msg.DefaultVolumes,
 		HealthCheckPath:         msg.HealthCheckPath,
@@ -171,6 +182,7 @@ func (s *ModuleService) CreateModuleTemplate(ctx context.Context, req *connect.R
 		DefaultInitCommand:      msg.DefaultInitCommand,
 		DefaultInitCommandDelay: msg.DefaultInitCommandDelay,
 		DefaultRestartAfterInit: msg.DefaultRestartAfterInit,
+		DefaultSecurityOpt:      msg.DefaultSecurityOpt,
 	}
 
 	if err := s.store.CreateModuleTemplate(ctx, template); err != nil {
@@ -207,6 +219,12 @@ func (s *ModuleService) UpdateModuleTemplate(ctx context.Context, req *connect.R
 	}
 	if msg.DockerImage != nil {
 		template.DockerImage = *msg.DockerImage
+	}
+	if len(msg.ConfigFields) > 0 {
+		if err := module.ValidateConfigFieldDefs(msg.ConfigFields); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		template.ConfigFields = msg.ConfigFields
 	}
 	if msg.DefaultEnv != nil {
 		template.DefaultEnv = msg.DefaultEnv
@@ -267,6 +285,9 @@ func (s *ModuleService) UpdateModuleTemplate(ctx context.Context, req *connect.R
 	}
 	if msg.DefaultRestartAfterInit != nil {
 		template.DefaultRestartAfterInit = *msg.DefaultRestartAfterInit
+	}
+	if len(msg.DefaultSecurityOpt) > 0 {
+		template.DefaultSecurityOpt = msg.DefaultSecurityOpt
 	}
 
 	if err := s.store.UpdateModuleTemplate(ctx, template); err != nil {
@@ -483,7 +504,6 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		ServerId:              msg.ServerId,
 		TemplateId:            msg.TemplateId,
 		Status:                v1.ModuleStatus_MODULE_STATUS_STOPPED,
-		Config:                msg.Config,
 		EnvOverrides:          msg.EnvOverrides,
 		VolumeOverrides:       msg.VolumeOverrides,
 		Memory:                msg.Memory,
@@ -541,6 +561,24 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		module.RestartAfterInit = template.DefaultRestartAfterInit
 	}
 
+	// Fill missing env from config field defaults
+	for _, field := range template.ConfigFields {
+		if field == nil || field.Env == "" || field.DefaultValue == "" {
+			continue
+		}
+		if module.EnvOverrides == nil {
+			module.EnvOverrides = make(map[string]string)
+		}
+		if _, ok := module.EnvOverrides[field.Env]; !ok {
+			module.EnvOverrides[field.Env] = field.DefaultValue
+		}
+	}
+
+	// Deny gate runs before anything persists
+	if err := s.moduleManager.GateModuleConfig(ctx, module, template); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	if err := s.store.CreateModule(ctx, module); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create module: %w", err))
 	}
@@ -578,9 +616,6 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 	// Update fields if provided
 	if msg.Name != nil {
 		module.Name = *msg.Name
-	}
-	if msg.Config != nil {
-		module.Config = *msg.Config
 	}
 	if msg.EnvOverrides != nil {
 		module.EnvOverrides = msg.EnvOverrides
@@ -667,6 +702,16 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		module.RestartAfterInit = *msg.RestartAfterInit
 	}
 
+	template, err := s.store.GetModuleTemplate(ctx, module.TemplateId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("template not found"))
+	}
+
+	// Deny gate runs on the fully merged state
+	if err := s.moduleManager.GateModuleConfig(ctx, module, template); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	if err := s.store.UpdateModule(ctx, module); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update module: %w", err))
 	}
@@ -686,9 +731,7 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		module.ServerName = server.Name
 		module.ServerProxyHostname = server.ProxyHostname
 	}
-	if template, err := s.store.GetModuleTemplate(ctx, module.TemplateId); err == nil {
-		module.TemplateName = template.Name
-	}
+	module.TemplateName = template.Name
 	module.CreatedByUsername = s.resolveCreatedByUsername(ctx, module.CreatedByUserId)
 	return connect.NewResponse(&v1.UpdateModuleResponse{
 		Module: module.Redact(),
@@ -921,4 +964,206 @@ func (s *ModuleService) GetResolvedAliases(ctx context.Context, req *connect.Req
 
 	resolved := alias.GetResolvedAliases(aliasCtx)
 	return connect.NewResponse(&v1.GetResolvedAliasesResponse{Aliases: resolved}), nil
+}
+
+// Runtime input prompts
+
+// Wire shape of a prompt served on the module health port
+type modulePromptWire struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Message     string `json:"message"`
+	Kind        string `json:"kind"`
+	Placeholder string `json:"placeholder"`
+	Options     []struct {
+		Value string `json:"value"`
+		Label string `json:"label"`
+	} `json:"options"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Maps the sidecar prompt kind string onto a config field type
+func promptKind(kind string) v1.ModuleConfigFieldType {
+	switch kind {
+	case "password":
+		return v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_PASSWORD
+	case "select":
+		return v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_SELECT
+	default:
+		return v1.ModuleConfigFieldType_MODULE_CONFIG_FIELD_TYPE_STRING
+	}
+}
+
+// Resolves the base URL of a running module's health port
+func (s *ModuleService) moduleHTTPBase(ctx context.Context, module *v1.Module) (string, error) {
+	if module.ContainerId == "" {
+		return "", errors.New("module is not running")
+	}
+	template, err := s.store.GetModuleTemplate(ctx, module.TemplateId)
+	if err != nil {
+		return "", errors.New("template not found")
+	}
+	port := template.HealthCheckPort
+	if port == 0 && len(module.Ports) > 0 {
+		port = module.Ports[0].ContainerPort
+	}
+	if port == 0 {
+		return "", errors.New("module has no health port")
+	}
+	ip, err := s.docker.GetModuleContainerIP(ctx, module.ContainerId)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("http://%s:%d", ip, port), nil
+}
+
+// Fetches the pending prompt from one module, nil when idle
+func (s *ModuleService) fetchModulePrompt(ctx context.Context, module *v1.Module) (*v1.ModulePrompt, error) {
+	base, err := s.moduleHTTPBase(ctx, module)
+	if err != nil {
+		// Not running or no endpoint means nothing pending
+		return nil, nil
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/prompt", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		// Module may not implement prompts, treat as nothing pending
+		return nil, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil
+	}
+
+	var wire modulePromptWire
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return nil, fmt.Errorf("decode prompt: %w", err)
+	}
+
+	prompt := &v1.ModulePrompt{
+		Id:          wire.ID,
+		Title:       wire.Title,
+		Message:     wire.Message,
+		Kind:        promptKind(wire.Kind),
+		Placeholder: wire.Placeholder,
+		CreatedAt:   timestamppb.New(wire.CreatedAt),
+	}
+	for _, o := range wire.Options {
+		prompt.Options = append(prompt.Options, &v1.ModuleConfigOption{Value: o.Value, Label: o.Label})
+	}
+	return prompt, nil
+}
+
+func (s *ModuleService) GetModulePrompt(ctx context.Context, req *connect.Request[v1.GetModulePromptRequest]) (*connect.Response[v1.GetModulePromptResponse], error) {
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
+	}
+	module, err := s.store.GetModule(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
+	}
+
+	prompt, err := s.fetchModulePrompt(ctx, module)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if prompt == nil {
+		return connect.NewResponse(&v1.GetModulePromptResponse{Pending: false}), nil
+	}
+	return connect.NewResponse(&v1.GetModulePromptResponse{Pending: true, Prompt: prompt}), nil
+}
+
+func (s *ModuleService) ListModulePrompts(ctx context.Context, req *connect.Request[v1.ListModulePromptsRequest]) (*connect.Response[v1.ListModulePromptsResponse], error) {
+	msg := req.Msg
+
+	var modules []*v1.Module
+	var err error
+	if msg.ServerId != nil && *msg.ServerId != "" {
+		modules, err = s.store.ListServerModules(ctx, *msg.ServerId)
+	} else {
+		modules, err = s.store.ListModules(ctx)
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list modules: %w", err))
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	pending := []*v1.PendingModulePrompt{}
+	for _, mod := range modules {
+		if mod.ContainerId == "" {
+			continue
+		}
+		// Only prompt capable templates get probed
+		template, terr := s.store.GetModuleTemplate(ctx, mod.TemplateId)
+		if terr != nil || template.Metadata["supports_prompts"] != "true" {
+			continue
+		}
+		wg.Add(1)
+		go func(m *v1.Module) {
+			defer wg.Done()
+			prompt, perr := s.fetchModulePrompt(ctx, m)
+			if perr != nil || prompt == nil {
+				return
+			}
+			mu.Lock()
+			pending = append(pending, &v1.PendingModulePrompt{
+				ModuleId:   m.Id,
+				ModuleName: m.Name,
+				Prompt:     prompt,
+			})
+			mu.Unlock()
+		}(mod)
+	}
+	wg.Wait()
+
+	// Stable order keeps the UI from reshuffling between polls
+	sort.Slice(pending, func(i, j int) bool { return pending[i].ModuleId < pending[j].ModuleId })
+	return connect.NewResponse(&v1.ListModulePromptsResponse{Prompts: pending}), nil
+}
+
+func (s *ModuleService) AnswerModulePrompt(ctx context.Context, req *connect.Request[v1.AnswerModulePromptRequest]) (*connect.Response[v1.AnswerModulePromptResponse], error) {
+	msg := req.Msg
+	if msg.Id == "" || msg.PromptId == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID and prompt ID are required"))
+	}
+	module, err := s.store.GetModule(ctx, msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
+	}
+
+	base, err := s.moduleHTTPBase(ctx, module)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+
+	body, err := json.Marshal(map[string]string{"id": msg.PromptId, "value": msg.Value})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/prompt", bytes.NewReader(body))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("module unreachable: %w", err))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusConflict {
+		return nil, connect.NewError(connect.CodeAborted, errors.New("prompt is no longer waiting for this answer"))
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("module rejected answer: %d", resp.StatusCode))
+	}
+	return connect.NewResponse(&v1.AnswerModulePromptResponse{Accepted: true}), nil
 }

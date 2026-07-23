@@ -1,4 +1,5 @@
-package proxy
+// Package mcproto implements the Minecraft handshake wire codec
+package mcproto
 
 import (
 	"bytes"
@@ -12,10 +13,10 @@ import (
 )
 
 // Bounds handshake size, generous for modded Forge FML data
-const maxHandshakeLength = 2048
+const MaxHandshakeLength = 2048
 
 // First byte of a legacy pre-1.7 server list ping
-const legacyPingByte = 0xFE
+const LegacyPingByte = 0xFE
 
 // Reads and writes Minecraft's variable-length integers
 type VarInt int32
@@ -110,7 +111,7 @@ func ReadHandshakePacket(r io.Reader) (*HandshakePacket, error) {
 		return nil, fmt.Errorf("failed to read packet length: %w", err)
 	}
 
-	if length < 1 || length > maxHandshakeLength {
+	if length < 1 || length > MaxHandshakeLength {
 		return nil, fmt.Errorf("invalid handshake length: %d", length)
 	}
 
@@ -187,11 +188,11 @@ func WriteHandshakePacket(w io.Writer, packet *HandshakePacket) error {
 		return err
 	}
 
-	return writeFramed(w, buf.Bytes())
+	return WriteFramed(w, buf.Bytes())
 }
 
 // Writes a length-prefixed Minecraft packet
-func writeFramed(w io.Writer, data []byte) error {
+func WriteFramed(w io.Writer, data []byte) error {
 	var buf bytes.Buffer
 	if err := WriteVarInt(&buf, VarInt(len(data))); err != nil {
 		return err
@@ -202,8 +203,8 @@ func writeFramed(w io.Writer, data []byte) error {
 }
 
 // Pulls the hostname out of a 1.6 ping payload
-func legacyPingHostname(raw []byte) (string, bool) {
-	if len(raw) < 3 || raw[0] != legacyPingByte || raw[1] != 0x01 || raw[2] != 0xFA {
+func LegacyPingHostname(raw []byte) (string, bool) {
+	if len(raw) < 3 || raw[0] != LegacyPingByte || raw[1] != 0x01 || raw[2] != 0xFA {
 		return "", false
 	}
 	buf := raw[3:]
@@ -270,5 +271,5 @@ func WriteLoginDisconnect(w io.Writer, message string) error {
 		return err
 	}
 	payload.Write(reason)
-	return writeFramed(w, payload.Bytes())
+	return WriteFramed(w, payload.Bytes())
 }

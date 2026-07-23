@@ -165,6 +165,11 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *v1.Module, t
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 
+	// Sandboxed clients like Steam need user namespaces
+	if len(template.DefaultSecurityOpt) > 0 {
+		hostConfig.SecurityOpt = template.DefaultSecurityOpt
+	}
+
 	// Apply CPU limit if specified
 	if module.CpuLimit > 0 {
 		hostConfig.Resources.NanoCPUs = int64(module.CpuLimit * 1e9)

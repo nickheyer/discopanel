@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nickheyer/discopanel/internal/alias"
 	"github.com/nickheyer/discopanel/internal/command"
 	storage "github.com/nickheyer/discopanel/internal/db"
 	"github.com/nickheyer/discopanel/internal/docker"
@@ -287,6 +288,26 @@ func (m *Manager) siblingModules(ctx context.Context, module *v1.Module) map[str
 		}
 	}
 	return siblings
+}
+
+// Blocks persist when deny severity config checks fail
+func (m *Manager) GateModuleConfig(ctx context.Context, module *v1.Module, template *v1.ModuleTemplate) error {
+	if len(template.ConfigFields) == 0 {
+		return nil
+	}
+	aliasCtx := alias.NewContext()
+	aliasCtx.Config = m.config
+	aliasCtx.Module = module
+	if module.ServerId != "" {
+		if server, err := m.store.GetServer(ctx, module.ServerId); err == nil {
+			aliasCtx.Server = server
+			if props, err := m.store.GetServerProperties(ctx, module.ServerId); err == nil {
+				aliasCtx.ServerProperties = props
+			}
+		}
+	}
+	aliasCtx.Modules = m.siblingModules(ctx, module)
+	return DenyError(ValidateConfigFields(template.ConfigFields, module.EnvOverrides, aliasCtx))
 }
 
 // True when the container's create-time hash drifted from config

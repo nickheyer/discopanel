@@ -160,6 +160,32 @@ service ModuleService {
       action: ACTION_TYPE_READ
     };
   }
+
+  // Reads any input a running module is waiting on
+  rpc GetModulePrompt(GetModulePromptRequest) returns (GetModulePromptResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_READ
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
+  // Delivers a user's answer to a waiting module
+  rpc AnswerModulePrompt(AnswerModulePromptRequest) returns (AnswerModulePromptResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_UPDATE
+      object_id_field: "id"
+      scope: OBJECT_SCOPE_MODULE
+    };
+  }
+  // Lists pending input prompts across modules
+  rpc ListModulePrompts(ListModulePromptsRequest) returns (ListModulePromptsResponse) {
+    option (discopanel.options.v1.perm) = {
+      resource: RESOURCE_TYPE_MODULES
+      action: ACTION_TYPE_READ
+    };
+  }
 }
 
 // ListModuleTemplatesRequest filters the template list.
@@ -194,8 +220,8 @@ message CreateModuleTemplateRequest {
   string description = 2;
   // Docker image to use.
   string docker_image = 3;
-  // JSON Schema for dynamic UI form generation.
-  string config_schema = 4;
+  // Typed config inputs shown when creating instances.
+  repeated ModuleConfigField config_fields = 4;
   // Default environment variables.
   map<string, string> default_env = 5;
   // Default volume mounts.
@@ -236,6 +262,8 @@ message CreateModuleTemplateRequest {
   int32 default_init_command_delay = 23;
   // Default restart after init
   bool default_restart_after_init = 24;
+  // Container security options
+  repeated string default_security_opt = 25;
 }
 
 // CreateModuleTemplateResponse contains the created template.
@@ -250,7 +278,7 @@ message UpdateModuleTemplateRequest {
   optional string name = 2;
   optional string description = 3;
   optional string docker_image = 4;
-  optional string config_schema = 5;
+  repeated ModuleConfigField config_fields = 5;
   map<string, string> default_env = 6;
   repeated VolumeMount default_volumes = 7;
   optional string health_check_path = 8;
@@ -271,6 +299,7 @@ message UpdateModuleTemplateRequest {
   optional string default_init_command = 23;
   optional int32 default_init_command_delay = 24;
   optional bool default_restart_after_init = 25;
+  repeated string default_security_opt = 26;
 }
 
 // UpdateModuleTemplateResponse contains the updated template.
@@ -321,8 +350,6 @@ message CreateModuleRequest {
   string server_id = 2;
   // ID of the template to create this module from.
   string template_id = 3;
-  // JSON module configuration.
-  string config = 4;
   // Environment variable overrides.
   map<string, string> env_overrides = 5;
   // Volume mount overrides.
@@ -379,7 +406,6 @@ message UpdateModuleRequest {
   // Module ID to update.
   string id = 1;
   optional string name = 2;
-  optional string config = 3;
   map<string, string> env_overrides = 4;
   repeated VolumeMount volume_overrides = 5;
   optional int32 memory = 6;
@@ -545,4 +571,73 @@ message GetResolvedAliasesRequest {
 message GetResolvedAliasesResponse {
   // Map of alias (ie "{{server.id}}") to resolved value.
   map<string, string> aliases = 1;
+}
+
+// ModulePrompt is one piece of input a running module is waiting on.
+message ModulePrompt {
+  // Stable id for this prompt within the module.
+  string id = 1;
+  // Short heading shown to the user.
+  string title = 2;
+  // Longer explanation of what is needed.
+  string message = 3;
+  // Input widget kind, reuses the config field types.
+  ModuleConfigFieldType kind = 4;
+  // Choices when kind is select.
+  repeated ModuleConfigOption options = 5;
+  // Placeholder hint for the input.
+  string placeholder = 6;
+  // When the module raised this prompt.
+  google.protobuf.Timestamp created_at = 7;
+}
+
+// GetModulePromptRequest specifies which module to poll.
+message GetModulePromptRequest {
+  // Module ID to poll.
+  string id = 1;
+}
+
+// GetModulePromptResponse carries any pending prompt.
+message GetModulePromptResponse {
+  // True when the module is waiting on input.
+  bool pending = 1;
+  // The pending prompt, set only when pending.
+  ModulePrompt prompt = 2;
+}
+
+// AnswerModulePromptRequest delivers a user answer.
+message AnswerModulePromptRequest {
+  // Module ID to answer.
+  string id = 1;
+  // Prompt id the answer belongs to.
+  string prompt_id = 2;
+  // The user provided value.
+  string value = 3;
+}
+
+// AnswerModulePromptResponse reports whether the module took the answer.
+message AnswerModulePromptResponse {
+  // True when the module accepted the value.
+  bool accepted = 1;
+}
+
+// ListModulePromptsRequest scopes the prompt scan.
+message ListModulePromptsRequest {
+  // Filter by parent server ID.
+  optional string server_id = 1;
+}
+
+// PendingModulePrompt pairs a waiting module with its prompt.
+message PendingModulePrompt {
+  // Module that raised the prompt.
+  string module_id = 1;
+  // Module display name.
+  string module_name = 2;
+  // The input being waited on.
+  ModulePrompt prompt = 3;
+}
+
+// ListModulePromptsResponse lists modules awaiting user input.
+message ListModulePromptsResponse {
+  repeated PendingModulePrompt prompts = 1;
 }

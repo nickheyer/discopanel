@@ -7,6 +7,7 @@
 	import { registerRefresh } from '$lib/stores/refresh';
 	import { toast } from 'svelte-sonner';
 	import type { Server, Module, ModuleTemplate } from '$lib/proto/discopanel/v1/storage_pb';
+	import type { PendingModulePrompt } from '$lib/proto/discopanel/v1/module_pb';
 	import {
 		ModuleStatus,
 		ModuleProtocol,
@@ -28,6 +29,7 @@
 		Terminal,
 		Cpu,
 		ExternalLink,
+		KeyRound,
 		Package,
 		Puzzle,
 		Link,
@@ -36,14 +38,24 @@
 	} from '@lucide/svelte';
 	import ModuleDialog from './ModuleDialog.svelte';
 	import ModuleLogsDialog from './ModuleLogsDialog.svelte';
+	import ModulePromptDialog from './ModulePromptDialog.svelte';
 	import ModuleTemplateCreateDialog from './ModuleTemplateCreateDialog.svelte';
 
 	interface Props {
 		server: Server;
 		active?: boolean;
+		prompts?: PendingModulePrompt[];
+		onPromptAnswered?: () => void;
+		onModuleCount?: (count: number) => void;
 	}
 
-	let { server, active = false }: Props = $props();
+	let {
+		server,
+		active = false,
+		prompts = [],
+		onPromptAnswered,
+		onModuleCount
+	}: Props = $props();
 
 	let modules = $state<Module[]>([]);
 	let templates = $state<ModuleTemplate[]>([]);
@@ -59,6 +71,28 @@
 	let selectedModule = $state<Module | null>(null);
 	let deleteTarget = $state<Module | null>(null);
 	let deleteOpen = $state(false);
+	let promptDialogOpen = $state(false);
+	let seenPromptKey = $state('');
+
+	// Auto opens the prompt dialog when new input is awaited
+	$effect(() => {
+		const key = prompts
+			.map((p) => `${p.moduleId}:${p.prompt?.id}`)
+			.sort()
+			.join('|');
+		if (!key) {
+			seenPromptKey = '';
+			return;
+		}
+		if (active && key !== seenPromptKey) {
+			seenPromptKey = key;
+			promptDialogOpen = true;
+		}
+	});
+
+	function modulePrompt(moduleId: string): PendingModulePrompt | undefined {
+		return prompts.find((p) => p.moduleId === moduleId);
+	}
 
 	// Feeds the logs dialog fresh status from polling
 	let liveSelectedModule = $derived(
@@ -111,6 +145,7 @@
 				silent ? silentCallOptions : undefined
 			);
 			modules = response.modules;
+			onModuleCount?.(modules.length);
 			// Refetches aliases when ids or statuses change
 			const key = modules.map((m) => `${m.id}:${m.status}`).join(',');
 			if (key !== aliasKey) {
@@ -375,6 +410,19 @@
 							</div>
 						</div>
 
+						{#if modulePrompt(module.id)}
+							<button
+								class="mt-3 flex w-full items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-left text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/20 dark:text-amber-400"
+								onclick={() => (promptDialogOpen = true)}
+							>
+								<KeyRound class="size-3.5 shrink-0" />
+								<span class="truncate">
+									{modulePrompt(module.id)?.prompt?.title || 'Input needed'}
+								</span>
+								<span class="ml-auto shrink-0 underline-offset-2 hover:underline">Respond</span>
+							</button>
+						{/if}
+
 						<div class="mt-3 space-y-2 text-xs">
 							{#if module.ports?.length}
 								<div class="flex flex-wrap gap-1.5">
@@ -545,3 +593,5 @@
 	bind:open={templateCreateDialogOpen}
 	onSuccess={handleTemplateCreated}
 />
+
+<ModulePromptDialog bind:open={promptDialogOpen} {prompts} onAnswered={onPromptAnswered} />

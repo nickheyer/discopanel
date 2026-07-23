@@ -29,6 +29,7 @@
 	import { create } from '@bufbuild/protobuf';
 	import type { Server } from '$lib/proto/discopanel/v1/storage_pb';
 	import { ServerStatus } from '$lib/proto/discopanel/v1/storage_pb';
+	import type { PendingModulePrompt } from '$lib/proto/discopanel/v1/module_pb';
 	import {
 		GetServerRequestSchema,
 		DeleteServerRequestSchema
@@ -75,6 +76,9 @@
 	let loading = $state(true);
 	let actionLoading = $state(false);
 	let deleteOpen = $state(false);
+	let modulePrompts = $state<PendingModulePrompt[]>([]);
+	// Null means module presence is still unknown
+	let hasModules = $state<boolean | null>(null);
 	let serverId = $derived(page.params.id);
 	let prevServerId = $state<string | undefined>(undefined);
 	let now = $state(new Date());
@@ -112,7 +116,10 @@
 
 	$effect(() => {
 		if (!serverId) return;
-		return registerRefresh(() => loadServer(true));
+		return registerRefresh(() => {
+			hasModules = null;
+			return loadServer(true);
+		});
 	});
 
 	$effect(() => {
@@ -123,6 +130,8 @@
 				untrack(() => {
 					loading = true;
 					prevServerId = serverId;
+					modulePrompts = [];
+					hasModules = null;
 				});
 			}
 			loadServer(true);
@@ -141,12 +150,41 @@
 				server = response.server;
 				serversStore.updateServer(server);
 				loading = false;
+				loadModulePrompts();
 			}
 		} catch {
 			if (serverId === requestedId && !server) {
 				toast.error('Failed to load server');
 				loading = false;
 			}
+		}
+	}
+
+	// Keeps the modules tab badge live from any tab
+	async function loadModulePrompts() {
+		if (!serverId) return;
+		const requestedId = serverId;
+		try {
+			// Servers without modules never get polled for prompts
+			if (hasModules === null) {
+				const res = await rpcClient.module.listModules(
+					{ serverId: requestedId },
+					silentCallOptions
+				);
+				if (serverId !== requestedId) return;
+				hasModules = res.modules.length > 0;
+			}
+			if (!hasModules) {
+				modulePrompts = [];
+				return;
+			}
+			const response = await rpcClient.module.listModulePrompts(
+				{ serverId: requestedId },
+				silentCallOptions
+			);
+			if (serverId === requestedId) modulePrompts = response.prompts;
+		} catch {
+			/* Keep last known prompts on transient errors */
 		}
 	}
 
@@ -196,6 +234,12 @@
 	{@const fillTab = FILL_TABS.includes(activeTab)}
 	<div class="flex min-h-0 flex-1 flex-col">
 		<TabRail tabs={TABS} value={activeTab} onValueChange={setTab}>
+			{#snippet tab(t)}
+				{t.label}
+				{#if t.key === 'modules' && modulePrompts.length > 0}
+					<span class="ml-1 font-semibold text-amber-500">({modulePrompts.length})</span>
+				{/if}
+			{/snippet}
 			{#snippet header()}
 				<div class="flex items-start justify-between gap-4 pt-5 pb-4">
 					<div class="flex min-w-0 items-center gap-3.5">
@@ -348,7 +392,13 @@
 							<ServerMetricsCharts {server} />
 						</div>
 					{:else if activeTab === 'modules'}
-						<ServerModules {server} active={true} />
+						<ServerModules
+							{server}
+							active={true}
+							prompts={modulePrompts}
+							onPromptAnswered={loadModulePrompts}
+							onModuleCount={(count) => (hasModules = count > 0)}
+						/>
 					{:else if activeTab === 'tasks'}
 						<ServerTasks {server} active={true} />
 					{:else if activeTab === 'network'}

@@ -32,6 +32,9 @@ var templateFuncs = template.FuncMap{
 //go:embed templates/*
 var templateFS embed.FS
 
+//go:embed static/*
+var staticFiles embed.FS
+
 func main() {
 	serverID := os.Getenv("DISCOPANEL_SERVER_ID")
 	if serverID == "" {
@@ -79,6 +82,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
+	http.Handle("/static/", http.FileServer(http.FS(staticFiles)))
 
 	fmt.Printf("Listening :%d\n", port)
 	http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
@@ -258,6 +262,7 @@ func (p *panel) handleIndex(w http.ResponseWriter, r *http.Request) {
 		"MemoryPercent":     fmt.Sprintf("%.0f", memoryPercent),
 		"DiskUsedFormatted": diskUsedFormatted,
 		"DiskPercent":       fmt.Sprintf("%.0f", diskPercent),
+		"FaviconURL":        template.URL(server.Favicon),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

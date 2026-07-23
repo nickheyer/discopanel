@@ -436,9 +436,6 @@ dev/bug-analysis/
 .direnv/
 result
 TODO.md
-agent/.gradle-home/
-agent/.gradle/
-agent/src/generated/
 
 # Outputs of make gen, never committed
 proto/protogorm/
@@ -447,3 +444,5 @@ web/discopanel/src/lib/proto/
 internal/db/store.gen.go
 web/discopanel/static/schemav1.yaml
 docs/discopanel/public/schemav1.yaml
+
+env/

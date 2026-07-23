@@ -10,10 +10,6 @@ discopanel
 web/discopanel/build/
 web/discopanel/node_modules/
 web/discopanel/.svelte-kit/
-agent/.gradle-home/
-agent/.gradle/
-agent/build/
-agent/src/generated/
 data/
 tmp/
 sandbox/

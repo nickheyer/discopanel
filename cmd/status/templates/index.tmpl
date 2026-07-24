@@ -288,6 +288,7 @@
             <div class="p-4">
                 <div class="grid grid-cols-2 gap-3">
                     <!-- TPS -->
+                    {{if .Server.TPSEnabled}}
                     <div class="group bg-muted/50 hover:bg-muted border border-border hover:border-white/10 rounded-xl p-3.5 transition-all duration-200">
                         <div class="flex items-center justify-between mb-2">
                             <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">TPS</span>
@@ -301,6 +302,7 @@
                             </div>
                         </div>
                     </div>
+                    {{end}}
 
                     <!-- CPU -->
                     <div class="group bg-muted/50 hover:bg-muted border border-border hover:border-white/10 rounded-xl p-3.5 transition-all duration-200">

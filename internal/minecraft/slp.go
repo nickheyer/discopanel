@@ -256,36 +256,52 @@ func (c *SLPClient) sendPacket(conn net.Conn, data []byte) error {
 	return err
 }
 
-// Extract plain text MOTD from description field
+type ChatComponent struct {
+	Text  string          `json:"text"`
+	Extra []ChatComponent `json:"extra"`
+}
+
+// UnmarshalJSON implements custom parsing to handle both strings and objects in 'extra'
+func (c *ChatComponent) UnmarshalJSON(data []byte) error {
+	// Case 1: The element itself is a plain string
+	var plainString string
+	if err := json.Unmarshal(data, &plainString); err == nil {
+		c.Text = plainString
+		return nil
+	}
+
+	// Case 2: The element is an object with text/extra fields
+	type Alias ChatComponent // Avoid infinite unmarshaling recursion
+	var obj Alias
+	if err := json.Unmarshal(data, &obj); err == nil {
+		*c = ChatComponent(obj)
+		return nil
+	}
+
+	return fmt.Errorf("unable to parse chat component: %s", string(data))
+}
+
 func parseDescription(desc json.RawMessage) string {
 	if len(desc) == 0 {
 		return ""
 	}
 
-	// Try parsing as plain string first
-	var plainStr string
-	if err := json.Unmarshal(desc, &plainStr); err == nil {
-		return strings.TrimSpace(plainStr)
+	var comp ChatComponent
+	if err := json.Unmarshal(desc, &comp); err == nil {
+		var builder strings.Builder
+		extractText(comp, &builder)
+		return strings.TrimSpace(builder.String())
 	}
 
-	// Try parsing as chat component object
-	var component struct {
-		Text  string `json:"text"`
-		Extra []struct {
-			Text string `json:"text"`
-		} `json:"extra"`
-	}
-	if err := json.Unmarshal(desc, &component); err == nil {
-		var result strings.Builder
-		result.WriteString(component.Text)
-		for _, extra := range component.Extra {
-			result.WriteString(extra.Text)
-		}
-		return strings.TrimSpace(result.String())
-	}
-
-	// Fallback: strip any JSON formatting and return raw
+	// Fallback to raw string cleanup if unmarshaling completely fails
 	return strings.TrimSpace(string(desc))
+}
+
+func extractText(comp ChatComponent, builder *strings.Builder) {
+	builder.WriteString(comp.Text)
+	for _, extra := range comp.Extra {
+		extractText(extra, builder)
+	}
 }
 
 func writeVarInt(w io.Writer, value int32) error {

@@ -313,23 +313,64 @@ func (c *Collector) collectRCONData() {
 		}
 
 		// Get TPS if configured
-		if server.TPSCommand != "" {
-			for _, cmd := range strings.Split(server.TPSCommand, " ?? ") {
-				cmd = strings.TrimSpace(cmd)
-				if cmd == "" {
-					continue
-				}
-				output, err := c.sender.SendCommand(ctx, server.ID, cmd)
-				if err == nil && output != "" {
-					tps := minecraft.ParseTPSFromOutput(output)
-					if tps > 0 {
-						c.updateMetrics(server.ID, func(m *ServerMetrics) {
-							m.TPS = tps
-							m.LastUpdated = time.Now()
-						})
-						break
-					}
-				}
+		if server.TPSEnabled && server.TPSCommand != "" {
+			if server.TPSExtractionMode == storage.TPSExtractionModeLegacy {
+				c.legacyTpsExtraction(ctx, server)
+			} else {
+				c.tpsExtraction(ctx, server)
+			}
+
+		}
+	}
+}
+
+func (c *Collector) tpsExtraction(ctx context.Context, server *storage.Server) {
+	command, _, _ := strings.Cut(server.TPSCommand, " ?? ")
+	if command == "" {
+		return
+	}
+
+	output, err := c.sender.SendCommand(ctx, server.ID, command)
+	if err != nil {
+		return
+	}
+
+	var tps float64
+	switch server.TPSExtractionMode {
+	case storage.TPSExtractionModeVanilla:
+		tps = minecraft.ParseTPSVanilla(output)
+	case storage.TPSExtractionModeForge:
+		tps = minecraft.ParseTPSForge(output)
+	case storage.TPSExtractionModeSpigot:
+		tps = minecraft.ParseTPSSpigot(output)
+	case storage.TPSExtractionModeCustom:
+		tps = minecraft.ParseTPSCustom(output, server.TPSCustomRegex)
+	}
+
+	if tps > 0 {
+		c.updateMetrics(server.ID, func(m *ServerMetrics) {
+			m.TPS = tps
+			m.LastUpdated = time.Now()
+		})
+	}
+
+}
+
+func (c *Collector) legacyTpsExtraction(ctx context.Context, server *storage.Server) {
+	for cmd := range strings.SplitSeq(server.TPSCommand, " ?? ") {
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" {
+			continue
+		}
+		output, err := c.sender.SendCommand(ctx, server.ID, cmd)
+		if err == nil && output != "" {
+			tps := minecraft.ParseTPSFromOutput(output)
+			if tps > 0 {
+				c.updateMetrics(server.ID, func(m *ServerMetrics) {
+					m.TPS = tps
+					m.LastUpdated = time.Now()
+				})
+				break
 			}
 		}
 	}

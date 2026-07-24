@@ -139,3 +139,12 @@ func (s *MinecraftService) GetDockerImages(ctx context.Context, req *connect.Req
 		Images: protoImages,
 	}), nil
 }
+
+func (s *MinecraftService) GetTestTPSRegex(ctx context.Context, req *connect.Request[v1.GetTestTPSRegexRequest]) (*connect.Response[v1.GetTestTPSRegexResponse], error) {
+	msg := req.Msg
+	tps := minecraft.ParseTPSCustom(msg.Input, msg.Regex)
+
+	return connect.NewResponse(&v1.GetTestTPSRegexResponse{
+		Tps: tps,
+	}), nil
+}

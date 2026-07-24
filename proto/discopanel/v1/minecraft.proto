@@ -12,6 +12,8 @@ service MinecraftService {
   rpc GetModLoaders(GetModLoadersRequest) returns (GetModLoadersResponse);
   // List available Docker images
   rpc GetDockerImages(GetDockerImagesRequest) returns (GetDockerImagesResponse);
+  // Test Custom TPS Regex
+  rpc GetTestTPSRegex(GetTestTPSRegexRequest) returns (GetTestTPSRegexResponse);
 }
 
 // Minecraft version metadata
@@ -119,4 +121,13 @@ message SLPPlayers {
 message SLPPlayerSample {
   string name = 1;
   string id = 2; // UUID
+}
+
+message GetTestTPSRegexRequest {
+  string input = 1;
+  string regex = 2;
+}
+
+message GetTestTPSRegexResponse {
+  double tps = 1;
 }

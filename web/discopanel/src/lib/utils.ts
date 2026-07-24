@@ -63,3 +63,83 @@ export function enumToString(map: Record<string, unknown>, val: unknown): string
 	}
 	return enumKey.toLowerCase();
 }
+
+// Priority weighting for pre-releases: Higher = Newer
+const TAG_PRIORITY: Record<string, number> = {
+  snapshot: 1,
+  pre: 2,
+  rc: 3,
+  "": 4, // Regular release (no suffix) is the newest
+};
+
+interface ParsedVersion {
+  base: number[];  // e.g., [26, 2]
+  tag: string;     // e.g., "rc", "pre", "snapshot", or ""
+  build: number;   // e.g., 2 in "rc-2"
+}
+
+function parseVersion(v: string): ParsedVersion {
+  // Remove "(Latest)" or similar text from the string
+  const cleanV = v.split("(")[0].trim();
+
+  const pv: ParsedVersion = {
+    base: [],
+    tag: "",
+    build: 0,
+  };
+
+  // Check if a tag (e.g., "-rc-2") is present
+  const [basePart, tagPart] = cleanV.split(/-(.+)/);
+
+  // Parse base version ("26.2" -> [26, 2])
+  pv.base = basePart.split(".").map((p) => parseInt(p, 10) || 0);
+
+  // If tag exists ("rc-2" or "snapshot-1")
+  if (tagPart) {
+    const tagParts = tagPart.split("-");
+    pv.tag = tagParts[0]; // e.g., "rc"
+
+    if (tagParts.length > 1) {
+      pv.build = parseInt(tagParts[1], 10) || 0; // e.g., 2
+    }
+  }
+
+  return pv;
+}
+
+/**
+ * Compares two Minecraft versions.
+ * 
+ * Returns:
+ *  -1 : v1 < v2
+ *   0 : v1 == v2
+ *   1 : v1 > v2
+ */
+export function compareMinecraftVersion(v1: string, v2: string): number {
+  const pv1 = parseVersion(v1);
+  const pv2 = parseVersion(v2);
+
+  // 1. Compare base versions (e.g., 26.3 vs 26.2)
+  const maxLen = Math.max(pv1.base.length, pv2.base.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    const n1 = pv1.base[i] ?? 0;
+    const n2 = pv2.base[i] ?? 0;
+
+    if (n1 < n2) return -1;
+    if (n1 > n2) return 1;
+  }
+
+  // 2. Compare pre-release tag hierarchy (Release > rc > pre > snapshot)
+  const prio1 = TAG_PRIORITY[pv1.tag] ?? 0;
+  const prio2 = TAG_PRIORITY[pv2.tag] ?? 0;
+
+  if (prio1 < prio2) return -1;
+  if (prio1 > prio2) return 1;
+
+  // 3. If tag is identical (e.g., rc-1 vs rc-2), compare build number
+  if (pv1.build < pv2.build) return -1;
+  if (pv1.build > pv2.build) return 1;
+
+  return 0;
+}

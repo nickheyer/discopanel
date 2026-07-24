@@ -521,7 +521,7 @@
 														<Users class="h-3 w-3" />
 														{server.playersOnline || 0}/{server.maxPlayers}
 													</span>
-													{#if server.tps}
+													{#if server.tps && server.tpsEnabled}
 														<span class="flex items-center gap-1 text-xs {getTpsColor(server.tps)}">
 															<Zap class="h-3 w-3" />
 															{server.tps.toFixed(1)} TPS

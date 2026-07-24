@@ -145,6 +145,9 @@ message UpdateServerRequest {
   optional bool auto_start = 10;
   optional bool detached = 11;
   optional string tps_command = 12;
+  bool tps_enabled = 17;
+  TPSExtractionMode tps_extraction_mode = 18;
+  optional string tps_custom_regex = 19;
   string modpack_id = 13;
   string modpack_version_id = 14;
   repeated AdditionalPort additional_ports = 15;

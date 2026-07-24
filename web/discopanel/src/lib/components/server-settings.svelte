@@ -8,12 +8,12 @@
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
-	import { Loader2, Save, AlertCircle } from '@lucide/svelte';
+	import { Loader2, Save, AlertCircle, WandSparkles } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/discopanel/v1/common_pb';
 	import * as _ from 'lodash-es';
-	import { ServerStatus, ModLoader } from '$lib/proto/discopanel/v1/common_pb';
+	import { ServerStatus, ModLoader, TPSExtractionMode } from '$lib/proto/discopanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/discopanel/v1/server_pb';
-	import { UpdateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
+	import { SendCommandRequestSchema, UpdateServerRequestSchema } from '$lib/proto/discopanel/v1/server_pb';
 	import type {
 		GetMinecraftVersionsResponse,
 		GetModLoadersResponse,
@@ -22,13 +22,18 @@
 	import {
 		GetMinecraftVersionsRequestSchema,
 		GetModLoadersRequestSchema,
-		GetDockerImagesRequestSchema
+		GetDockerImagesRequestSchema,
+
+		GetTestTPSRegexRequestSchema
+
 	} from '$lib/proto/discopanel/v1/minecraft_pb';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
-	import { getUniqueDockerImages } from '$lib/utils';
+	import { compareMinecraftVersion, getUniqueDockerImages } from '$lib/utils';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { enumToString } from '$lib/utils';
+	import { Textarea } from './ui/textarea';
+	import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 
 	interface Props {
 		server: Server;
@@ -64,7 +69,10 @@
 			dockerImage: server.dockerImage,
 			detached: server.detached,
 			autoStart: server.autoStart,
+			tpsEnabled: server.tpsEnabled,
 			tpsCommand: server.tpsCommand || '',
+			tpsExtractionMode: server.tpsExtractionMode,
+			tpsCustomRegex: server.tpsCustomRegex || '',
 			modpackId: '', // Not used in this context
 			modpackVersionId: '', // Not used in this context
 			additionalPorts: server.additionalPorts || [],
@@ -83,7 +91,15 @@
 			formData.dockerImage !== server.dockerImage ||
 			formData.detached !== server.detached ||
 			formData.autoStart !== server.autoStart ||
-			formData.tpsCommand !== (server.tpsCommand || '') ||
+
+			formData.tpsEnabled !== server.tpsEnabled ||
+        	(formData.tpsEnabled && (
+			    formData.tpsCommand !== (server.tpsCommand || '') ||
+			    formData.tpsExtractionMode !== server.tpsExtractionMode ||
+			    formData.tpsCustomRegex !== (server.tpsCustomRegex || '')
+			)) ||
+
+
 			safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
 			safeToString($state.snapshot(formData.dockerOverrides)) !==
 				safeToString(server.dockerOverrides)
@@ -114,7 +130,10 @@
 				dockerImage: server.dockerImage,
 				detached: server.detached,
 				autoStart: server.autoStart,
+				tpsEnabled: server.tpsEnabled,
 				tpsCommand: server.tpsCommand || '',
+				tpsExtractionMode: server.tpsExtractionMode,
+				tpsCustomRegex: server.tpsCustomRegex || '',
 				modpackId: '', // Not used in this context
 				modpackVersionId: '', // Not used in this context
 				additionalPorts: server.additionalPorts || [],
@@ -192,6 +211,89 @@
 		// The proto doesn't include version compatibility info, so all loaders are shown
 		// Backend has SupportedVersions field but it's not populated or sent via proto
 		return modLoaders?.modloaders || [];
+	}
+
+	function getRecommendedTpsSettings(modLoader: string) {
+        switch (modLoader?.toLowerCase()) {
+			case 'fabric':
+            case 'vanilla':
+				if (compareMinecraftVersion("1.20.3", server.mcVersion) > 0) {console.log("return"); return;}
+                return {
+                    command: 'tick query',
+                    mode: TPSExtractionMode.TPSExtractionModeVanilla
+                };
+            case 'paper':
+            case 'spigot':
+            case 'purpur':
+                return {
+                    command: 'tps',
+                    mode: TPSExtractionMode.TPSExtractionModeSpigot
+                };
+            case 'forge':
+				return {
+                    command: 'forge tps',
+                    mode: TPSExtractionMode.TPSExtractionModeForge
+                };
+            case 'neoforge':
+                return {
+                    command: 'neoforge tps',
+                    mode: TPSExtractionMode.TPSExtractionModeForge
+                };
+            default:
+                return {
+                    command: 'tps',
+                    mode: TPSExtractionMode.TPSExtractionModeLegacy
+                };
+        }
+    }
+
+    let recommended = $derived(getRecommendedTpsSettings(formData.modLoader));
+    let isNotRecommended = $derived(
+        formData.tpsEnabled && recommended != undefined && (
+            formData.tpsCommand !== recommended.command || 
+            formData.tpsExtractionMode !== recommended.mode
+        )
+    );
+
+    function applyRecommendedSettings() {
+		if (recommended == undefined) return;
+        formData.tpsCommand = recommended.command;
+        formData.tpsExtractionMode = recommended.mode;
+    }
+
+	let showRegexModal = $state(false);
+	let testInputText = $state("")
+	let testRegex = $state(formData.tpsCustomRegex || "")
+	let regexResult = $state<number|undefined>(undefined);
+
+	async function openRegexModal() {
+		showRegexModal = true;
+		testRegex = formData.tpsCustomRegex || "";
+		regexResult = undefined;
+		if (server.status === ServerStatus.RUNNING) {
+			const currentTPSCommand = formData.tpsCommand;
+			if(!currentTPSCommand || currentTPSCommand == "") return;
+			const request = create(SendCommandRequestSchema, {
+				id: server.id,
+				command: currentTPSCommand
+			});
+			const response = await rpcClient.server.sendCommand(request)
+			testInputText = response.output;
+		}
+	}
+
+	async function testTPSRegex(){
+		const request = create(GetTestTPSRegexRequestSchema, {
+			input: testInputText,
+			regex: testRegex
+		});
+		const response = await rpcClient.minecraft.getTestTPSRegex(request)
+		regexResult = response.tps;
+	}
+
+	function applyRegex(){
+		showRegexModal = false;
+		formData.tpsCustomRegex = testRegex;
 	}
 </script>
 
@@ -338,20 +440,122 @@
 			</Select>
 		</div>
 
-		<div class="space-y-2">
-			<Label for="tps_command" class="text-sm font-medium"
-				>TPS Command <span class="text-xs text-muted-foreground">(Optional)</span></Label
-			>
-			<Input
-				id="tps_command"
-				placeholder="Polling TPS command"
-				bind:value={formData.tpsCommand}
-				class="h-10"
-			/>
-			<p class="text-xs text-muted-foreground">
-				Override the TPS monitoring command (empty to disable). Use " ?? " to specify fallback
-				commands (e.g., "forge tps ?? neoforge tps ?? tps")
-			</p>
+		<div class="space-y-4 rounded-lg border bg-muted/30 p-4">
+		    <div class="flex items-center justify-between">
+		        <div class="space-y-0.5">
+		            <Label for="tps_enabled" class="cursor-pointer text-sm font-medium">
+		                TPS Monitoring <span class="text-xs text-muted-foreground">(Optional)</span>
+		            </Label>
+		            <p class="text-xs text-muted-foreground">
+		                Automated polling and parsing of server TPS metrics.
+		            </p>
+		        </div>
+		        <div class="flex items-center gap-3">
+		            <!-- Apply Recommended Button -->
+		            {#if isNotRecommended && recommended != undefined}
+		                <Button 
+		                    type="button" 
+		                    variant="outline" 
+		                    size="sm" 
+		                    class="h-7 px-2 text-xs gap-1 border-primary/30 hover:border-primary text-primary transition-all"
+		                    onclick={applyRecommendedSettings}
+		                >
+		                    <WandSparkles class="h-3 w-3" />
+		                    Apply Recommended
+		                </Button>
+		            {/if}
+					
+		            <Switch
+		                id="tps_enabled"
+		                checked={formData.tpsEnabled}
+		                onCheckedChange={(checked) => (formData.tpsEnabled = checked)}
+		            />
+		        </div>
+		    </div>
+		
+		    {#if formData.tpsEnabled}
+		        <Separator />
+		
+		        <div class="space-y-4 pt-1">
+		            <!-- Command Input -->
+		            <div class="space-y-1.5">
+		                <Label for="tps_command" class="text-xs font-medium">Command</Label>
+		                <Input
+		                    id="tps_command"
+		                    placeholder="e.g. tick query"
+		                    bind:value={formData.tpsCommand}
+		                    class="h-9 text-sm"
+		                />
+		                <p class="text-[11px] text-muted-foreground">
+		                    Command sent to console. Use <code class="rounded bg-muted px-1">??</code> for fallbacks (e.g. <code class="rounded bg-muted px-1">forge tps ?? tps</code>).
+		                </p>
+		            </div>
+				
+		            <!-- Extraction Mode Select -->
+		            <div class="space-y-1.5">
+		                <Label for="tps_mode" class="text-xs font-medium">Extraction Strategy</Label>
+		                <Select
+		                    type="single"
+		                    value={String(formData.tpsExtractionMode)}
+		                    onValueChange={(value: string) => {
+		                        formData.tpsExtractionMode = value ? (Number(value) as TPSExtractionMode) : TPSExtractionMode.TPSExtractionModeLegacy;
+		                    }}
+		                >
+		                    <SelectTrigger id="tps_mode" class="h-9 text-sm">
+		                        <span>{TPSExtractionMode[formData.tpsExtractionMode] || 'Select extraction strategy'}</span>
+		                    </SelectTrigger>
+		                    <SelectContent>
+		                        {#each Object.keys(TPSExtractionMode).filter(key => isNaN(Number(key))) as mode (mode)}
+		                            <SelectItem value={String(TPSExtractionMode[mode as keyof typeof TPSExtractionMode])}>
+		                                {mode}
+		                            </SelectItem>
+		                        {/each}
+		                    </SelectContent>
+		                </Select>
+					
+		                <!-- Info Help Texts based on selected Mode -->
+		                <p class="text-[11px] text-muted-foreground">
+		                    {#if formData.tpsExtractionMode === TPSExtractionMode.TPSExtractionModeVanilla}
+		                        Parses TPS from standard Minecraft Vanilla command <code class="rounded bg-muted px-1">/tick query</code> outputs (Version 1.20.3 and newer).
+		                    {:else if formData.tpsExtractionMode === TPSExtractionMode.TPSExtractionModeSpigot}
+		                        Parses TPS from Paper/Spigot command <code class="rounded bg-muted px-1">/tps</code> outputs.
+		                    {:else if formData.tpsExtractionMode === TPSExtractionMode.TPSExtractionModeForge}
+		                        Parses TPS from Forge/NeoForge commands <code class="rounded bg-muted px-1">/forge tps</code> or <code class="rounded bg-muted px-1">/neoforge tps</code> outputs.
+		                    {:else if formData.tpsExtractionMode === TPSExtractionMode.TPSExtractionModeCustom}
+		                        Use a custom Regex to extract the TPS value from your command output.
+		                    {:else if formData.tpsExtractionMode === TPSExtractionMode.TPSExtractionModeLegacy}
+		                        Extract TPS based on Discopanels old extraction logic.
+		                    {/if}
+		                </p>
+		            </div>
+				
+		            <!-- Custom Regex Input (Conditionally Rendered) -->
+		            {#if formData.tpsExtractionMode === TPSExtractionMode.TPSExtractionModeCustom}
+		                <div class="space-y-1.5 rounded-md border border-dashed p-3 bg-background/50">
+							<div class="flex items-center justify-between">
+								<Label for="tps_custom_regex" class="text-xs font-medium">Custom Regex Pattern</Label>
+								<!-- Test Button -->
+								<button
+									type="button"
+									onclick={openRegexModal}
+									class="text-[11px] font-medium text-primary hover:underline flex items-center gap-1"
+								>
+									Test Your Regex
+								</button>
+							</div>
+		                    <Input
+		                        id="tps_custom_regex"
+		                        placeholder="e.g. TPS:\s*([0-9.]+)"
+		                        bind:value={formData.tpsCustomRegex}
+		                        class="h-9 font-mono text-xs"
+		                    />
+		                    <p class="text-[11px] text-muted-foreground">
+		                        Must contain a capture group <code class="rounded bg-muted px-1">(...)</code> pointing to the numerical TPS value. If you don't know what this means, don't use it.
+		                    </p>
+		                </div>
+		            {/if}
+		        </div>
+		    {/if}
 		</div>
 
 		<div class="space-y-4">
@@ -438,3 +642,80 @@
 		</Button>
 	</div>
 </div>
+
+
+<Dialog bind:open={showRegexModal}>
+	<DialogContent class="sm:max-w-2xl w-full p-6">
+		<DialogHeader class="border-b pb-2">
+			<DialogTitle class="text-sm font-semibold">Regex Tester</DialogTitle>
+		</DialogHeader>
+
+		<div class="space-y-4 py-2">
+			<!-- Regex Input -->
+			<div class="space-y-1">
+				<Label class="text-xs">Regex Pattern</Label>
+				<Input 
+					bind:value={testRegex} 
+					class="h-8 font-mono text-xs" 
+					placeholder="z. B. TPS:\s*([0-9.]+)" 
+				/>
+			</div>
+
+			<!-- Test Input Text -->
+			<div class="space-y-1">
+				<Label class="text-xs">Example Text (Start your server and run your TPS command, paste the output here)</Label>
+				<Textarea
+					bind:value={testInputText}
+					rows={6}
+					class="font-mono text-xs"
+					placeholder="Insert TPS Command output here..."
+				/>
+			</div>
+
+			<!-- Test Button -->
+			<Button 
+				type="button" 
+				variant="outline" 
+				size="sm" 
+				onclick={testTPSRegex}
+			>
+				Test
+			</Button>
+
+			<!-- Result Box -->
+			<div class="space-y-1">
+				<Label class="text-xs">Output / Extraction</Label>
+				<div class="rounded-md border bg-muted/30 p-3 font-mono text-xs">
+					{#if regexResult == undefined}
+						<span class="font-medium text-white">Run test to show extracted TPS.</span>
+					{:else if regexResult == 0.0}
+						<span class="font-medium text-destructive">Could not extract TPS</span>
+					{:else}
+						<div class="space-y-1.5 text-green-500">
+								{regexResult}
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+
+		<!-- Actions -->
+		<DialogFooter class="border-t pt-3 gap-2 sm:justify-end">
+			<Button
+				type="button"
+				variant="outline"
+				size="sm"
+				onclick={() => (showRegexModal = false)}
+			>
+				Cancel
+			</Button>
+			<Button
+				type="button"
+				size="sm"
+				onclick={applyRegex}
+			>
+				Apply pattern
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>

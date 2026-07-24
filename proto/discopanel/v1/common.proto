@@ -41,6 +41,14 @@ enum ModLoader {
   MOD_LOADER_FOLIA = 17;
 }
 
+enum TPSExtractionMode {
+  TPSExtractionModeVanilla = 0;
+	TPSExtractionModeForge = 1;
+	TPSExtractionModeSpigot = 2;
+	TPSExtractionModeCustom = 3;
+	TPSExtractionModeLegacy = 4;
+}
+
 // System user account
 message User {
   string id = 1;
@@ -76,6 +84,9 @@ message Server {
   bool auto_start = 18;
   bool detached = 19;
   string tps_command = 20;
+  bool tps_enabled = 40;
+  TPSExtractionMode tps_extraction_mode = 41;
+  optional string tps_custom_regex = 42;
 
   // Runtime stats
   int64 memory_usage = 21;

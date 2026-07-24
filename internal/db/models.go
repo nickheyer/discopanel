@@ -69,31 +69,44 @@ const (
 	ModLoaderModrinth       ModLoader = "modrinth"
 )
 
+type TPSExtractionMode string
+
+const (
+	TPSExtractionModeVanilla TPSExtractionMode = "vanilla"
+	TPSExtractionModeForge   TPSExtractionMode = "forge"
+	TPSExtractionModeSpigot  TPSExtractionMode = "spigot"
+	TPSExtractionModeCustom  TPSExtractionMode = "custom"
+	TPSExtractionModeLegacy  TPSExtractionMode = "legacy"
+)
+
 type Server struct {
-	ID              string               `json:"id" gorm:"primaryKey"`
-	Name            string               `json:"name" gorm:"not null"`
-	Description     string               `json:"description"`
-	ModLoader       ModLoader            `json:"mod_loader" gorm:"not null"`
-	MCVersion       string               `json:"mc_version" gorm:"not null;column:mc_version"`
-	ContainerID     string               `json:"container_id" gorm:"column:container_id"`
-	Status          ServerStatus         `json:"status" gorm:"not null"`
-	Port            int                  `json:"port"`
-	ProxyPort       int                  `json:"proxy_port" gorm:"column:proxy_port"`
-	ProxyHostname   string               `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
-	ProxyListenerID string               `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
-	MaxPlayers      int                  `json:"max_players" gorm:"default:20;column:max_players"`
-	Memory          int                  `json:"memory" gorm:"default:4096"` // in MB (allocated) - IMPORTANT: This applies to the container's memory allocation first, then used to calc the JVM min/max for mc server proc inside w/ overhead
-	CreatedAt       time.Time            `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt       time.Time            `json:"updated_at" gorm:"autoUpdateTime"`
-	LastStarted     *time.Time           `json:"last_started" gorm:"column:last_started"`
-	JavaVersion     string               `json:"java_version" gorm:"column:java_version"`
-	DockerImage     string               `json:"docker_image" gorm:"column:docker_image"`
-	DataPath        string               `json:"data_path" gorm:"not null;column:data_path"`
-	Detached        bool                 `json:"detached" gorm:"default:false;column:detached"`                             // Detach server container from DiscoPanel lifecycle (default: false)
-	AutoStart       bool                 `json:"auto_start" gorm:"default:false;column:auto_start"`                         // Start server when DiscoPanel starts (default: false)
-	TPSCommand      string               `json:"tps_command" gorm:"column:tps_command"`                                     // The TPS command for this server (empty if not supported)
-	AdditionalPorts []*v1.AdditionalPort `json:"additional_ports" gorm:"column:additional_ports;serializer:json"`           // Additional port configurations
-	DockerOverrides *v1.DockerOverrides  `json:"docker_overrides" gorm:"column:docker_overrides;type:text;serializer:json"` // Docker container overrides
+	ID                string               `json:"id" gorm:"primaryKey"`
+	Name              string               `json:"name" gorm:"not null"`
+	Description       string               `json:"description"`
+	ModLoader         ModLoader            `json:"mod_loader" gorm:"not null"`
+	MCVersion         string               `json:"mc_version" gorm:"not null;column:mc_version"`
+	ContainerID       string               `json:"container_id" gorm:"column:container_id"`
+	Status            ServerStatus         `json:"status" gorm:"not null"`
+	Port              int                  `json:"port"`
+	ProxyPort         int                  `json:"proxy_port" gorm:"column:proxy_port"`
+	ProxyHostname     string               `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
+	ProxyListenerID   string               `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
+	MaxPlayers        int                  `json:"max_players" gorm:"default:20;column:max_players"`
+	Memory            int                  `json:"memory" gorm:"default:4096"` // in MB (allocated) - IMPORTANT: This applies to the container's memory allocation first, then used to calc the JVM min/max for mc server proc inside w/ overhead
+	CreatedAt         time.Time            `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt         time.Time            `json:"updated_at" gorm:"autoUpdateTime"`
+	LastStarted       *time.Time           `json:"last_started" gorm:"column:last_started"`
+	JavaVersion       string               `json:"java_version" gorm:"column:java_version"`
+	DockerImage       string               `json:"docker_image" gorm:"column:docker_image"`
+	DataPath          string               `json:"data_path" gorm:"not null;column:data_path"`
+	Detached          bool                 `json:"detached" gorm:"default:false;column:detached"`     // Detach server container from DiscoPanel lifecycle (default: false)
+	AutoStart         bool                 `json:"auto_start" gorm:"default:false;column:auto_start"` // Start server when DiscoPanel starts (default: false)
+	TPSEnabled        bool                 `json:"tps_enabled" gorm:"default:true;column:tps_enabled"`
+	TPSCommand        string               `json:"tps_command" gorm:"column:tps_command"` // The TPS command for this server (empty if not supported)
+	TPSExtractionMode TPSExtractionMode    `json:"tps_extraction_mode" gorm:"column:tps_extraction_mode;default:'legacy';not null"`
+	TPSCustomRegex    string               `json:"tps_custom_regex" gorm:"column:tps_custom_regex"`
+	AdditionalPorts   []*v1.AdditionalPort `json:"additional_ports" gorm:"column:additional_ports;serializer:json"`           // Additional port configurations
+	DockerOverrides   *v1.DockerOverrides  `json:"docker_overrides" gorm:"column:docker_overrides;type:text;serializer:json"` // Docker container overrides
 
 	// Runtime stats (not persisted to DB)
 	MemoryUsage   float64 `json:"memory_usage" gorm:"-"`   // Current memory usage in MB

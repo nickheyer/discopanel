@@ -78,7 +78,7 @@ func (s *MinecraftService) GetModLoaders(ctx context.Context, req *connect.Reque
 	}), nil
 }
 
-// Lists the published discopanel-runtime image variants
+// Lists the published discoruntime image variants
 func (s *MinecraftService) GetDockerImages(ctx context.Context, req *connect.Request[v1.GetDockerImagesRequest]) (*connect.Response[v1.GetDockerImagesResponse], error) {
 	return connect.NewResponse(&v1.GetDockerImagesResponse{
 		Images: docker.RuntimeImages(),

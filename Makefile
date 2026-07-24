@@ -76,15 +76,15 @@ image:
 # Runtime and agent builds live in the private discoruntime checkout
 # Module images build from the discomodule repo now
 images:
-	@if [ -d discoruntime ]; then $(MAKE) -C discoruntime images; \
-	else echo "discoruntime not present, runtime images pull from Docker Hub"; fi
+	@if [ -d subs/discoruntime ]; then $(MAKE) -C subs/discoruntime images; \
+	else echo "discoruntime not present, runtime images pull from GHCR"; fi
 
 runtime:
-	@if [ -d discoruntime ]; then $(MAKE) -C discoruntime runtime; \
-	else echo "discoruntime not present, runtime images pull from Docker Hub"; fi
+	@if [ -d subs/discoruntime ]; then $(MAKE) -C subs/discoruntime runtime; \
+	else echo "discoruntime not present, runtime images pull from GHCR"; fi
 
 agent:
-	@if [ -d discoruntime ]; then $(MAKE) -C discoruntime agent; \
+	@if [ -d subs/discoruntime ]; then $(MAKE) -C subs/discoruntime agent; \
 	else echo "discoruntime not present, agent ships inside runtime images"; fi
 
 # Clean development data
@@ -156,7 +156,7 @@ proto:
 	go tool protogorm -options proto
 	@echo "Generating protocol buffer code (using Docker)..."
 	$(BUF_RUN) generate --exclude-path proto/protogorm
-	@if [ -d discoruntime ]; then $(MAKE) -C discoruntime gen; fi
+	@if [ -d subs/discoruntime ]; then $(MAKE) -C subs/discoruntime gen; fi
 	@echo "Injecting gorm tags and generating db wrappers..."
 	$(BUF_RUN) build -o - | go tool protogorm -support pkg/proto -store internal/db/store.gen.go:db -inject pkg/proto
 	@echo "Proto generation complete!"

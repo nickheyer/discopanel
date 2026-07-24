@@ -9,8 +9,8 @@ import (
 	v1 "github.com/nickheyer/discopanel/pkg/proto/discopanel/v1"
 )
 
-// Default discopanel-runtime repo, overridable via docker.runtime_image
-const DefaultRuntimeImage = "nickheyer/discopanel-runtime"
+// Default discoruntime repo, overridable via docker.runtime_image
+const DefaultRuntimeImage = "ghcr.io/nickheyer/discoruntime"
 
 // Java majors the runtime image publishes
 var SupportedJavaVersions = javaversions.Supported
@@ -112,7 +112,7 @@ func RuntimeImages() []*v1.DockerImage {
 		v := SupportedJavaVersions[i]
 		images = append(images, &v1.DockerImage{
 			Tag:         RuntimeImageTag(v),
-			DisplayName: fmt.Sprintf("Java %d (discopanel-runtime)", v),
+			DisplayName: fmt.Sprintf("Java %d (discoruntime)", v),
 			Description: fmt.Sprintf("Minimal Temurin %d JRE runtime; server files are provisioned by DiscoPanel", v),
 			Recommended: len(images) == 0,
 		})
@@ -121,7 +121,7 @@ func RuntimeImages() []*v1.DockerImage {
 		v := GraalJavaVersions[i]
 		images = append(images, &v1.DockerImage{
 			Tag:         GraalRuntimeImageTag(v),
-			DisplayName: fmt.Sprintf("Java %d GraalVM (discopanel-runtime)", v),
+			DisplayName: fmt.Sprintf("Java %d GraalVM (discoruntime)", v),
 			Description: fmt.Sprintf("Oracle GraalVM %d JIT runtime; often faster ticks on modded servers, worth benchmarking per pack", v),
 		})
 	}

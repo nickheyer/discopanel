@@ -234,7 +234,7 @@ func (s *LogStream) appendLocked(entry *v1.LogEntry) {
 var levelPattern = regexp.MustCompile(`\[(?:[^\]]*[/ ])?(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\]`)
 
 // Matches supervisor tagged warn and error lines
-var runtimeLevelPattern = regexp.MustCompile(`^\[discopanel-runtime\] (WARN|ERROR)`)
+var runtimeLevelPattern = regexp.MustCompile(`^\[discoruntime\] (WARN|ERROR)`)
 
 // Pulls the log level from a console line
 func detectLevel(line string) string {

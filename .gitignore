@@ -447,3 +447,7 @@ web/discopanel/static/schemav1.yaml
 docs/discopanel/public/schemav1.yaml
 
 env/
+
+# Local workspace, needs submodules checked out
+go.work
+go.work.sum

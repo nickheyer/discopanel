@@ -7,7 +7,7 @@ These pages are for people working on DiscoPanel itself. If you just run servers
 
 ## The system at a glance
 
-DiscoPanel is one Go process. It embeds the web UI, keeps its state in SQLite, talks straight to the Docker Engine API (no compose, no swarm), and runs every Minecraft server in a container built from a minimal `discopanel-runtime` image.
+DiscoPanel is one Go process. It embeds the web UI, keeps its state in SQLite, talks straight to the Docker Engine API (no compose, no swarm), and runs every Minecraft server in a container built from a minimal `discoruntime` image.
 
 The design rule that shapes everything: **containers hold nothing but Java and a small supervisor**. Downloading server software, installing packs, writing config files, health checking, autopause - all of it happens in the panel process, where it can be unit tested and reused. The itzg image DiscoPanel historically used did the opposite: install scripts, config generation, healthchecks and autopause all lived inside the container. The migration moved that logic panel-side and shrank the container to a JRE. The runtime image is not supported for standalone use. Without a provisioned data directory it refuses to start.
 
@@ -16,10 +16,10 @@ The design rule that shapes everything: **containers hold nothing but Java and a
 | Binary | Image | Job |
 |---|---|---|
 | `cmd/discopanel` | `nickheyer/discopanel` | The panel itself: API, UI, provisioner, proxy, scheduler - everything below. |
-| `cmd/runtime` | `nickheyer/discopanel-runtime:javaN` | In-container supervisor for Minecraft servers. Reads `launch.json`, builds the java argv, runs java as a child and streams telemetry to the panel. See [Runtime Image](/development/runtime-image/) and [Runtime Agent](/development/agent/). |
-| `cmd/exporter` | `nickheyer/discopanel-exporter` | Standalone Prometheus exporter (SLP-based). Ships as a built-in module template. |
-| `cmd/geyser` | `nickheyer/discopanel-geyser` | Geyser wrapper for the Bedrock crossplay module. |
-| `cmd/status` | `nickheyer/discopanel-status` | Status dashboard module that polls the panel API. |
+| `cmd/runtime` | `ghcr.io/nickheyer/discoruntime:javaN` | In-container supervisor for Minecraft servers. Reads `launch.json`, builds the java argv, runs java as a child and streams telemetry to the panel. See [Runtime Image](/development/runtime-image/) and [Runtime Agent](/development/agent/). |
+| `cmd/exporter` (discomodule) | `ghcr.io/nickheyer/discomodule-exporter` | Standalone Prometheus exporter (SLP-based). Ships as a built-in module template. |
+| `cmd/geyser` (discomodule) | `ghcr.io/nickheyer/discomodule-geyser` | Geyser wrapper for the Bedrock crossplay module. |
+| `cmd/status` (discomodule) | `ghcr.io/nickheyer/discomodule-status` | Status dashboard module that polls the panel API. |
 
 ## Repository layout
 

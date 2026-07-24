@@ -69,7 +69,7 @@ type DockerConfig struct {
 	Host         string            `mapstructure:"host" json:"host"`
 	Version      string            `mapstructure:"version" json:"version"`
 	NetworkName  string            `mapstructure:"network_name" json:"network_name"`
-	RuntimeImage string            `mapstructure:"runtime_image" json:"runtime_image"` // Override for discopanel-runtime repository
+	RuntimeImage string            `mapstructure:"runtime_image" json:"runtime_image"` // Override for discoruntime repository
 	AgentURL     string            `mapstructure:"agent_url" json:"agent_url"`         // Panel URL for runtime containers, auto-detected if empty
 	DNS          string            `mapstructure:"dns" json:"dns"`
 	Labels       map[string]string `mapstructure:"labels" json:"labels"`

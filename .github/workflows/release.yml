@@ -200,7 +200,10 @@ jobs:
   build-docker:
     name: Build and Push Docker Images
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -217,6 +220,13 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Extract metadata (prod)
         id: meta
         if: ${{ !endsWith(github.ref_name, '-dev') }}
@@ -224,6 +234,7 @@ jobs:
         with:
           images: |
             nickheyer/discopanel
+            ghcr.io/nickheyer/discopanel
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
@@ -237,6 +248,7 @@ jobs:
         with:
           images: |
             nickheyer/discopanel
+            ghcr.io/nickheyer/discopanel
           tags: |
             type=ref,event=tag
             type=raw,value=dev

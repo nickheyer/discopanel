@@ -31,7 +31,7 @@ docker:
   host: "unix:///var/run/docker.sock"
   version: ""
   network_name: "discopanel-network"
-  runtime_image: ""  # Override the discopanel-runtime image repository (default: nickheyer/discopanel-runtime)
+  runtime_image: ""  # Override the discoruntime image repository (default: ghcr.io/nickheyer/discoruntime)
   agent_url: ""  # URL server containers use to reach the panel for live telemetry (auto-detected when empty)
   dns: ""  # Custom DNS server for containers (empty = docker default)
   sync_interval: 5  # Seconds between docker state sync

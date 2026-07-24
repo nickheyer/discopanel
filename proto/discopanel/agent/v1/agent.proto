@@ -52,7 +52,7 @@ message Hello {
   string server_id = 1;
   // Source of this hello, runtime supervisor or in-JVM agent
   HelloSource source = 2;
-  // Version string for discopanel-runtime or javaagent
+  // Version string for discoruntime or javaagent
   string version = 3;
   // Mod loader from the launch spec (e.g. "fabric", "paper")
   string loader = 4;

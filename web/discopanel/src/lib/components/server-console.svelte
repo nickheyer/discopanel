@@ -33,12 +33,73 @@
 
 	// Create ansi-to-html converter with proper options
 	const ansiConverter = new AnsiToHtml({
-		fg: '#e8e8e8',
-		bg: '#000000',
-		newline: false,
-		escapeXML: true,
-		stream: true
+	    fg: '#e8e8e8',
+	    bg: '#000000',
+	    newline: false,
+	    escapeXML: true,
+	    stream: true,
+	    colors: {
+
+			// color codes according to https://minecraft.wiki/w/Formatting_codes#Color_codes
+
+	        "30": '#000000', // §0 - black
+	        "34": '#0000AA', // §1 - dark_blue
+	        "32": '#00AA00', // §2 - dark_green
+	        "36": '#00AAAA', // §3 - dark_aqua
+	        "31": '#AA0000', // §4 - dark_red
+	        "35": '#AA00AA', // §5 - dark_purple
+	        "33": '#FFAA00', // §6 - gold
+	        "37": '#AAAAAA', // §7 - gray
+
+
+	        "90": '#555555', // §8 - dark_gray
+	        "94": '#5555FF', // §9 - blue
+	        "92": '#55FF55', // §a - green
+	        "96": '#55FFFF', // §b - aqua
+	        "91": '#FF5555', // §c - red
+	        "95": '#FF55FF', // §d - light_purple
+	        "93": '#FFFF55', // §e - yellow
+	        "97": '#FFFFFF'  // §f - white
+	    }
 	});
+
+	function parseMinecraftColors(text: string): string {
+	    const codes: Record<string, string> = {
+			// color codes according to https://minecraft.wiki/w/Formatting_codes#Color_codes
+
+	        '0': '\x1b[0;30m', 
+			'1': '\x1b[0;34m', 
+			'2': '\x1b[0;32m', 
+			'3': '\x1b[0;36m', 
+			'4': '\x1b[0;31m', 
+			'5': '\x1b[0;35m', 
+			'6': '\x1b[0;33m', 
+			'7': '\x1b[0;37m',
+
+	        '8': '\x1b[0;90m', 
+			'9': '\x1b[0;94m', 
+			'a': '\x1b[0;92m', 
+			'b': '\x1b[0;96m', 
+			'c': '\x1b[0;91m', 
+			'd': '\x1b[0;95m', 
+			'e': '\x1b[0;93m', 
+			'f': '\x1b[0;97m',
+		
+			
+	        // formatting codes according to https://minecraft.wiki/w/Formatting_codes#Formatting_codes
+	        'l': '\x1b[1m',  // bold (\x1b[1m)
+	        'm': '\x1b[9m',  // strikethrough (\x1b[9m)
+	        'n': '\x1b[4m',  // underlined (\x1b[4m)
+	        'o': '\x1b[3m',  // italic (\x1b[3m)
+	        'r': '\x1b[0m'   // reset (\x1b[0m)
+	    };
+
+		// replace minecraft color code with ansi escape sequences 
+	    return text.replace(/§([0-9a-frlmno])/g, (_, code) => {
+	        return codes[code];
+	    }).concat('\x1b[0m'); // reset at the end to prevent bleed
+	}
+
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
@@ -396,7 +457,7 @@
 						{#each logEntries as entry, i (i)}
 							<div class="log-line break-all whitespace-pre-wrap" data-type={entry.level}>
 								<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-								{@html ansiConverter.toHtml(entry.message)}
+								{@html ansiConverter.toHtml(parseMinecraftColors(entry.message))}
 							</div>
 						{/each}
 					{/if}

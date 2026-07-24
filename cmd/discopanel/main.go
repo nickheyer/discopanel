@@ -162,7 +162,7 @@ func main() {
 	defer proxyManager.Stop()
 
 	// Initialize command sender
-	sender := command.NewSender(store, cfg, dockerClient)
+	sender := command.NewSender(store, cfg, dockerClient, log)
 
 	// Initialize the central event bus
 	eventBus := events.NewBus(log)
@@ -371,6 +371,9 @@ func main() {
 
 	log.Info("Shutting down server...")
 	close(stopSessionCleanup)
+
+	// Closing all rcon connections
+	sender.CloseAll()
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

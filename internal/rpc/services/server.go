@@ -947,6 +947,9 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
 		}
 
+		// close rcon connection
+		s.sender.Remove(server.ID)
+
 		// Recreate container
 		result, err := s.docker.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
 		if err != nil {
@@ -986,6 +989,9 @@ func (s *ServerService) DeleteServer(ctx context.Context, req *connect.Request[v
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
+
+	// close rcon connection
+	s.sender.Remove(server.ID)
 
 	// Remove proxy route if configured
 	if s.proxy != nil && server.ProxyHostname != "" {
@@ -1042,6 +1048,9 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
+
+	// close rcon connection
+	s.sender.Remove(server.ID)
 
 	// If container doesn't exist, create it first
 	if server.ContainerID == "" {
@@ -1145,6 +1154,9 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
+	// close rcon connection
+	s.sender.Remove(server.ID)
+
 	if server.ContainerID == "" {
 		// If there's no container, server is already stopped
 		server.Status = storage.StatusStopped
@@ -1206,6 +1218,9 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
+
+	// close rcon connection
+	s.sender.Remove(server.ID)
 
 	// If container doesn't exist, create it and start it
 	if server.ContainerID == "" {
@@ -1307,6 +1322,9 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 		s.log.Error("Failed to get server config: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
 	}
+
+	// close rcon connection
+	s.sender.Remove(server.ID)
 
 	// Recreate container
 	result, err := s.docker.RecreateContainer(ctx, server.ContainerID, server, serverConfig)

@@ -436,9 +436,12 @@ dev/bug-analysis/
 .direnv/
 result
 TODO.md
-agent/.gradle-home/
-agent/.gradle/
-agent/src/generated/
+
+# Private repos nested for the one editor workflow
+/discoruntime/
+/discomodule/
+go.work
+go.work.sum
 
 # Outputs of make gen, never committed
 proto/protogorm/

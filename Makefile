@@ -73,86 +73,19 @@ image:
 	@echo "Building and pushing Docker image..."
 	@bash scripts/build.sh
 
-# Every published java major, graal entries carry a graal- prefix
-RUNTIME_ALL_JAVA := $(shell go run ./cmd/runtime -versions -graal)
-
-# Published Java majors, docker.SupportedJavaVersions is the source
-RUNTIME_JAVA_VERSIONS := $(filter-out graal-%,$(RUNTIME_ALL_JAVA))
-
-# Published Graal majors, docker.GraalJavaVersions is the source
-RUNTIME_GRAAL_VERSIONS := $(patsubst graal-%,%,$(filter graal-%,$(RUNTIME_ALL_JAVA)))
-
-# Git identity stamped into runtime images
-RUNTIME_VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev)
-
-# Pushes happen only in CI, local builds stay local
-STAMP_DIR := build/.stamps
-
-# Everything the runtime image bakes in, generated code excluded
-RUNTIME_SRC := docker/Dockerfile.runtime go.mod go.sum \
-	$(shell find cmd/runtime pkg/runtimespec pkg/protometa proto -type f 2>/dev/null) \
-	$(shell find agent -type f -not -path 'agent/build/*' -not -path 'agent/.gradle-home/*' -not -path 'agent/src/generated/*' 2>/dev/null)
-
-# Image goals refuse to run on an empty version list
-ifneq ($(filter images runtime,$(MAKECMDGOALS)),)
-ifeq ($(strip $(RUNTIME_JAVA_VERSIONS)),)
-$(error go run ./cmd/runtime -versions produced no versions, runtime targets would silently no-op)
-endif
-ifeq ($(strip $(RUNTIME_GRAAL_VERSIONS)),)
-$(error go run ./cmd/runtime -versions -graal produced no graal versions, runtime targets would silently no-op)
-endif
-endif
-
-# Stamps die at parse when their tag is missing or replaced
-ifneq ($(filter images runtime,$(MAKECMDGOALS)),)
-_STAMP_SYNC := $(shell mkdir -p $(STAMP_DIR); \
-	sync() { id=$$(docker image inspect -f '{{.Id}}' "$$1" 2>/dev/null); [ -n "$$id" ] && [ "$$id" = "$$(cat "$$2" 2>/dev/null)" ] || rm -f "$$2"; }; \
-	for v in $(RUNTIME_JAVA_VERSIONS); do sync "nickheyer/discopanel-runtime:java$$v" $(STAMP_DIR)/runtime-java$$v; done; \
-	for v in $(RUNTIME_GRAAL_VERSIONS); do sync "nickheyer/discopanel-runtime:java$$v-graal" $(STAMP_DIR)/runtime-graal-java$$v; done)
-endif
-
-# Rebuilds a local tag and deletes the image it displaced
-# Label marks dev builds the panel must never refresh over
-define build_image
-	@old=$$(docker image inspect -f '{{.Id}}' "$(1)" 2>/dev/null || true); \
-	docker build $(2) --label app.discopanel.build=local -t "$(1)" -f "$(3)" . || exit 1; \
-	new=$$(docker image inspect -f '{{.Id}}' "$(1)"); \
-	if [ -n "$$old" ] && [ "$$old" != "$$new" ]; then \
-		echo "Removing replaced image $${old#sha256:}..."; \
-		docker rmi "$$old" >/dev/null 2>&1 || true; \
-	fi
-endef
-
-# Everything discopanel needs at runtime, built locally when stale
+# Runtime and agent builds live in the private discoruntime checkout
 # Module images build from the discomodule repo now
-images: agent runtime
-	@echo "All local images up to date!"
+images:
+	@if [ -d discoruntime ]; then $(MAKE) -C discoruntime images; \
+	else echo "discoruntime not present, runtime images pull from Docker Hub"; fi
 
-# Builds every runtime image variant locally when inputs changed
-runtime: $(addprefix $(STAMP_DIR)/runtime-java,$(RUNTIME_JAVA_VERSIONS)) \
-	$(addprefix $(STAMP_DIR)/runtime-graal-java,$(RUNTIME_GRAAL_VERSIONS))
-	@echo "Runtime images up to date!"
+runtime:
+	@if [ -d discoruntime ]; then $(MAKE) -C discoruntime runtime; \
+	else echo "discoruntime not present, runtime images pull from Docker Hub"; fi
 
-$(STAMP_DIR)/runtime-java%: $(RUNTIME_SRC)
-	@mkdir -p $(STAMP_DIR)
-	@echo "Building nickheyer/discopanel-runtime:java$*..."
-	$(call build_image,nickheyer/discopanel-runtime:java$*,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_VERSION=$(RUNTIME_VERSION),docker/Dockerfile.runtime)
-	@docker image inspect -f '{{.Id}}' "nickheyer/discopanel-runtime:java$*" > $@
-
-$(STAMP_DIR)/runtime-graal-java%: $(RUNTIME_SRC)
-	@mkdir -p $(STAMP_DIR)
-	@echo "Building nickheyer/discopanel-runtime:java$*-graal..."
-	$(call build_image,nickheyer/discopanel-runtime:java$*-graal,--build-arg JAVA_VERSION=$* --build-arg RUNTIME_FLAVOR=graal --build-arg RUNTIME_VERSION=$(RUNTIME_VERSION),docker/Dockerfile.runtime)
-	@docker image inspect -f '{{.Id}}' "nickheyer/discopanel-runtime:java$*-graal" > $@
-
-# Builds disco-agent jar via containerized Gradle
 agent:
-	docker run --rm \
-		--volume "$(shell pwd)/agent:/agent" \
-		--workdir /agent \
-		--user "$(shell id -u):$(shell id -g)" \
-		--env GRADLE_USER_HOME=/agent/.gradle-home \
-		gradle:9-jdk21 gradle --no-daemon build
+	@if [ -d discoruntime ]; then $(MAKE) -C discoruntime agent; \
+	else echo "discoruntime not present, agent ships inside runtime images"; fi
 
 # Clean development data
 clean:
@@ -214,14 +147,16 @@ lint: proto-lint
 check:
 	@echo "Type checking frontend..."
 	cd $(FRONTEND_DIR) && npm run check
+	@echo "Checking for private repo imports..."
+	@if grep -rn --include="*.go" '"github.com/nickheyer/discoruntime[/"]\|"github.com/nickheyer/discomodule[/"]' cmd internal pkg; then \
+		echo "panel code must never import private repos"; exit 1; fi
 
 proto:
 	@echo "Materializing protogorm annotation schema..."
 	go tool protogorm -options proto
 	@echo "Generating protocol buffer code (using Docker)..."
 	$(BUF_RUN) generate --exclude-path proto/protogorm
-	@echo "Generating disco-agent Java code (using Docker)..."
-	$(BUF_RUN) generate --template buf.gen.agent.yaml --path proto/discopanel/agent
+	@if [ -d discoruntime ]; then $(MAKE) -C discoruntime gen; fi
 	@echo "Injecting gorm tags and generating db wrappers..."
 	$(BUF_RUN) build -o - | go tool protogorm -support pkg/proto -store internal/db/store.gen.go:db -inject pkg/proto
 	@echo "Proto generation complete!"

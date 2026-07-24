@@ -29,7 +29,6 @@ The design rule that shapes everything: **containers hold nothing but Java and a
 | `proto/discopanel/agent/v1` | The machine-facing agent channel between runtime supervisors and the panel. Same source-of-truth rule. |
 | `pkg/proto`, `web/discopanel/src/lib/proto` | Generated Go and TypeScript code. Produced by `make gen`, never edited by hand. |
 | `internal/` | The panel implementation. Package map below. |
-| `agent/` | The disco-agent javaagent: one loader-agnostic telemetry jar, baked into the runtime images. See [Runtime Agent](/development/agent/). |
 | `pkg/` | Reusable helpers: `runtimespec` (the panel-to-container contract), `logger`, `upload`, `download`, `files`, `utils`, `strmatch`. |
 | `web/discopanel` | The SvelteKit frontend, baked into the binary with `go:embed`. |
 | `docker/` | Dockerfiles for every image above. |

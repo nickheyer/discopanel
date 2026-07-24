@@ -59,14 +59,14 @@ New variants are only needed when Mojang bumps the Java requirement.
 
 1. Check that `eclipse-temurin:<N>-jre` exists on Docker Hub.
 2. Add `N` to `pkg/javaversions`.
-3. `make runtime`, then run the e2e test against a Minecraft version that needs it.
+3. `make runtime` in the discoruntime repo, then run the e2e test against a Minecraft version that needs it.
 4. Publish. Existing servers don't change. New and upgraded ones resolve the new tag automatically.
 
 Keep old tags published even after dropping them from the list. Servers may still pin them.
 
 ## Building and publishing
 
-- `make runtime` builds every variant locally when its inputs changed, no push.
+- `make runtime` in the discoruntime repo builds every variant locally when its inputs changed, no push.
 - Pushing a `v*` git tag on discoruntime (or dispatching its release workflow) builds multi-arch (amd64 and arm64) in CI and pushes every variant.
 
 The image contents change so rarely that the Java major is the whole version story. If the entrypoint's behavior ever changes, that ships as new runtime images from discoruntime; the panel-side contract (`pkg/runtimespec` and the agent protos) stays in this repo.

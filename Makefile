@@ -1,4 +1,4 @@
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image images dev-docker dev-auth runtime agent proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth proto proto-clean proto-lint proto-format proto-breaking gen dev-docs
 
 DATA_DIR := ./data
 DOCKER_DATA_DIR := /tmp/discopanel
@@ -72,20 +72,6 @@ build: build-frontend
 image:
 	@echo "Building and pushing Docker image..."
 	@bash scripts/build.sh
-
-# Runtime and agent builds live in the private discoruntime checkout
-# Module images build from the discomodule repo now
-images:
-	@if [ -f subs/discoruntime/Makefile ]; then $(MAKE) -C subs/discoruntime images; \
-	else echo "discoruntime not present, runtime images pull from GHCR"; fi
-
-runtime:
-	@if [ -f subs/discoruntime/Makefile ]; then $(MAKE) -C subs/discoruntime runtime; \
-	else echo "discoruntime not present, runtime images pull from GHCR"; fi
-
-agent:
-	@if [ -f subs/discoruntime/Makefile ]; then $(MAKE) -C subs/discoruntime agent; \
-	else echo "discoruntime not present, agent ships inside runtime images"; fi
 
 # Clean development data
 clean:
@@ -164,7 +150,6 @@ proto-clean:
 	@echo "Cleaning generated proto files..."
 	rm -rf pkg/proto
 	rm -rf web/discopanel/src/lib/proto
-	rm -rf agent/src/generated/java
 	rm -rf proto/protogorm
 	@echo "Proto files cleaned!"
 
@@ -197,8 +182,6 @@ help:
 	@echo "  make image          - Build and push Docker image to :dev tag"
 	@echo "  make dev-docker     - Build and run Docker container locally (no cache)"
 	@echo "  make dev-auth       - Build and run with OIDC provider (Keycloak)"
-	@echo "  make images         - Build agent + runtime images locally when stale"
-	@echo "  make runtime        - Build all runtime image variants locally"
 	@echo "  make clean          - Remove data directory and build artifacts"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"
 	@echo "  make deps           - Install all dependencies"

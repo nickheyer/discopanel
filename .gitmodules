@@ -1,8 +1,0 @@
-[submodule "discoruntime"]
-	path = subs/discoruntime
-	url = https://github.com/nickheyer/discoruntime.git
-	branch = main
-[submodule "discomodule"]
-	path = subs/discomodule
-	url = https://github.com/nickheyer/discomodule.git
-	branch = main

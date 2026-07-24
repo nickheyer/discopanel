@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.Title}}</title>
+    <title>{{.Title}} - Status</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
     <meta http-equiv="refresh" content="10">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -235,9 +236,9 @@
                     </div>
 
                     <!-- Server Favicon -->
-                    {{if .Server.Favicon}}
+                    {{if .FaviconURL}}
                     <div class="shrink-0">
-                        <img src="{{.Server.Favicon}}" alt="Server Icon" class="w-12 h-12 rounded-lg border border-border shadow-sm" style="image-rendering: pixelated;">
+                        <img src="{{.FaviconURL}}" alt="Server Icon" class="w-12 h-12 rounded-lg border border-border shadow-sm" style="image-rendering: pixelated;">
                     </div>
                     {{end}}
                 </div>

@@ -437,11 +437,6 @@ dev/bug-analysis/
 result
 TODO.md
 
-# Private repos nested for the one editor workflow
-/discoruntime/
-/discomodule/
-go.work
-go.work.sum
 
 # Outputs of make gen, never committed
 proto/protogorm/
